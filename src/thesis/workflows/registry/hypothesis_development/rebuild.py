@@ -11,6 +11,8 @@ the phase and carries its completion contract; the fold dispatches on
 - the model-creation→trials contract's ``hypothesis`` payload becomes the draft,
 - the trials→verdict contract's ``trials`` list becomes ``state.trials``,
 - verdict contracts set ``state.verdict``,
+- the optimization→completed/strategy_rca contract's ``optimization`` payload
+  becomes the typed candidate evaluation,
 - the verdict→model-creation circle-back records the verdict and resets to a
   fresh model state per ``reset_premise`` semantics (keeping discovery),
 - the verdict→discovery restart records the verdict and resets everything per
@@ -32,12 +34,18 @@ from dataclasses import replace
 
 from thesis.workflows.core.execution_store import StoreTransition
 
+from .contracts.candidates import CandidateEvaluation
 from .contracts.discovery import DiscoveryDraft
+from .contracts.evidence import ResearchEvidence
+from .contracts.forward import ForwardEvaluation
+from .contracts.nulls import NullTestEvaluation
+from .contracts.rca import RcaDiagnosis
+from .contracts.strategy import StrategyBacktest, program_reference
 from .contracts.trials import FalsificationTrial
+from .contracts.variation import VariationEvaluation
 from .contracts.verdict import FalsificationVerdict
 from .errors import WorkflowError
 from .phases import (
-    _DISCOVERY,
     _FALSIFICATION_TRIALS,
     _MODEL_CREATION,
     _STRATEGY_DESIGN,
@@ -71,34 +79,18 @@ def _required_payload(
     return payload
 
 
-def _verdict_from_contract(payload: Mapping[str, object]) -> FalsificationVerdict:
-    raw = payload.get("trials")
-    trials = (
-        tuple(FalsificationTrial.from_dict(item) for item in raw)
-        if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes))
-        else ()
-    )
-    return FalsificationVerdict(
-        outcome=str(payload.get("outcome", "")),
-        reason=str(payload.get("reason", "")),
-        trials=trials,
-    )
-
-
 def _fold_discovery(
     state: HypothesisDevelopmentState, completion: Mapping[str, object]
 ) -> HypothesisDevelopmentState:
     """Apply the accepted discovery contract, resetting the model artifacts.
 
-    The selected candidate survives the reset because model creation consumes
-    it; the previous attempt's model, plan, trials, and strategy artifacts do
-    not.
+    The selected candidate (or the recorded no-candidate reason) survives the
+    reset because model creation consumes it; the previous attempt's model,
+    plan, trials, and strategy artifacts do not.
     """
-    payload = _required_payload(
-        completion,
-        "discovery",
-        (_DISCOVERY.value, _MODEL_CREATION.value),
-    )
+    payload = completion.get("discovery")
+    if not isinstance(payload, Mapping) or not payload:
+        raise WorkflowError("the discovery completion requires a 'discovery' object")
     return replace(state, discovery=DiscoveryDraft.from_dict(payload))
 
 
@@ -117,12 +109,36 @@ def _fold_draft(
 def _fold_trials(
     state: HypothesisDevelopmentState, completion: Mapping[str, object]
 ) -> HypothesisDevelopmentState:
-    """Apply the trials phase's recorded trials, round-tripped from the store."""
+    """Apply the trials contract and its evidence envelope, round-tripped.
+
+    The envelope is the trials phase's portable output: it restores the plan,
+    the model and fit references, the fitted parameters, the runtime
+    configuration, and the typed evidence record.  Store records written before
+    the envelope carried only ``trials`` and restore exactly that.
+    """
     raw = completion.get("trials")
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
         raise WorkflowError("the trials→verdict completion requires a trials list")
     trials = tuple(FalsificationTrial.from_dict(item) for item in raw)
-    return replace(state, trials=trials)
+    raw_research = completion.get("research")
+    if raw_research is None:
+        return replace(state, trials=trials)
+    if not isinstance(raw_research, Mapping) or not raw_research:
+        raise WorkflowError(
+            "the trials→verdict completion requires a research envelope"
+        )
+    evidence = ResearchEvidence.from_dict(raw_research)
+    return replace(
+        state,
+        trials=trials,
+        research_evidence=evidence,
+        research_model_reference=evidence.model,
+        research_model_artifact=evidence.workspace_artifact,
+        fitted_model_reference=evidence.fit,
+        fitted_parameters=evidence.fitted_parameters,
+        research_model_runtime_configuration=evidence.runtime_configuration,
+        plan=evidence.plan,
+    )
 
 
 def _fold_verdict(
@@ -134,12 +150,92 @@ def _fold_verdict(
         "verdict",
         (_VERDICT.value, _STRATEGY_DESIGN.value),
     )
-    return replace(state, verdict=_verdict_from_contract(payload))
+    return replace(state, verdict=FalsificationVerdict.from_dict(payload))
 
 
-#: The per-transition payload folds.  Unlisted transitions (the strategy
-#: chain's structural moves) carry state unchanged; handlers are additive
-#: follow-ups keyed by their (from_phase, to_phase) pair.
+def _fold_optimization(
+    state: HypothesisDevelopmentState, completion: Mapping[str, object]
+) -> HypothesisDevelopmentState:
+    """Apply the accepted candidate-evaluation contract to the typed state."""
+    payload = completion.get("optimization")
+    if not isinstance(payload, Mapping) or not payload:
+        raise WorkflowError(
+            "the optimization completion requires an 'optimization' object"
+        )
+    return replace(state, candidate_evaluation=CandidateEvaluation.from_dict(payload))
+
+
+def _fold_null_testing(
+    state: HypothesisDevelopmentState, completion: Mapping[str, object]
+) -> HypothesisDevelopmentState:
+    """Apply the accepted null-testing contract to the typed state."""
+    payload = completion.get("nullTesting")
+    if not isinstance(payload, Mapping) or not payload:
+        raise WorkflowError(
+            "the null-testing completion requires a 'nullTesting' object"
+        )
+    return replace(state, null_testing=NullTestEvaluation.from_dict(payload))
+
+
+def _fold_variation(
+    state: HypothesisDevelopmentState, completion: Mapping[str, object]
+) -> HypothesisDevelopmentState:
+    """Apply the accepted variation contract to the typed state."""
+    payload = completion.get("variation")
+    if not isinstance(payload, Mapping) or not payload:
+        raise WorkflowError("the variation completion requires a 'variation' object")
+    return replace(state, variation=VariationEvaluation.from_dict(payload))
+
+
+def _fold_forward_validation(
+    state: HypothesisDevelopmentState, completion: Mapping[str, object]
+) -> HypothesisDevelopmentState:
+    """Apply the accepted forward-validation contract to the typed state."""
+    payload = completion.get("forwardValidation")
+    if not isinstance(payload, Mapping) or not payload:
+        raise WorkflowError(
+            "the forward-validation completion requires a 'forwardValidation' object"
+        )
+    return replace(state, forward_validation=ForwardEvaluation.from_dict(payload))
+
+
+def _fold_strategy_design(
+    state: HypothesisDevelopmentState, completion: Mapping[str, object]
+) -> HypothesisDevelopmentState:
+    """Freeze the accepted strategy reference every later phase must name."""
+    payload = completion.get("strategy")
+    if not isinstance(payload, Mapping) or not payload:
+        raise WorkflowError(
+            "the strategy design completion requires a 'strategy' object"
+        )
+    return replace(state, strategy=program_reference(payload))
+
+
+def _fold_strategy_backtesting(
+    state: HypothesisDevelopmentState, completion: Mapping[str, object]
+) -> HypothesisDevelopmentState:
+    """Apply the accepted strategy backtest handoff."""
+    payload = completion.get("backtest")
+    if not isinstance(payload, Mapping) or not payload:
+        raise WorkflowError(
+            "the strategy backtesting completion requires a 'backtest' object"
+        )
+    return replace(state, strategy_backtest=StrategyBacktest.from_dict(payload))
+
+
+def _fold_strategy_rca(
+    state: HypothesisDevelopmentState, completion: Mapping[str, object]
+) -> HypothesisDevelopmentState:
+    """Append the accepted strategy root-cause diagnosis to the run's history."""
+    payload = completion.get("diagnosis")
+    if not isinstance(payload, Mapping) or not payload:
+        raise WorkflowError("the strategy RCA completion requires a 'diagnosis' object")
+    return replace(state, rca=(*state.rca, RcaDiagnosis.from_dict(payload)))
+
+
+#: The per-transition payload folds are declared on each phase's
+#: ``PhaseDeclaration``.  A phase without a payload fold carries state unchanged
+#: across its transitions; every completion that moves typed data has one.
 def rebuild_state(
     workspace_id: str,
     execution_id: str,

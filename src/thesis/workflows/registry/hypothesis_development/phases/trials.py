@@ -5,13 +5,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import replace
 
-from thesis.experiments.ledger import AttemptKind
+from thesis.chat.contracts import HARNESS_RESEARCH_MODEL_TOOL
+from thesis.experiments.mandate import derive_launch_mandate, rfc3339_ns
 from thesis.research.hypothesis import HypothesisDocument
+from thesis.research.models import ResearchModel
 from thesis.workflows.core.phase import HandoffContext
 from thesis.workflows.research_models import (
     ResearchModelRunResult,
     StudyProgramReference,
     resolve_study_reference,
+    study_window,
 )
 
 from ..artifacts import (
@@ -27,6 +30,11 @@ from ..composers.hypothesis import (
     decode_persisted_model,
 )
 from ..contracts.creation import HypothesisDevelopmentRequest
+from ..contracts.evidence import (
+    AssumptionEvidence,
+    ControlEvidence,
+    ResearchEvidence,
+)
 from ..contracts.hypothesis import HypothesisDraft
 from ..contracts.plan import FalsificationPlan, FalsifierTest
 from ..contracts.trials import FalsificationTrial
@@ -34,8 +42,7 @@ from ..errors import (
     FalsificationComposeError,
     WorkflowError,
 )
-from ..jobs import run_research_model
-from ..ledger import append_attempt
+from ..jobs import research_model_attribution, run_research_model
 from ..primitives import (
     _DEFAULT_HORIZON,
     _DEFAULT_RISK_FACTOR,
@@ -68,7 +75,9 @@ def run_falsification_trials(
     """
     phase = _FALSIFICATION_TRIALS.value
     try:
-        contract, final = _run_falsification_trials(workflow, request, state, context)
+        contract, final, artifact = _run_falsification_trials(
+            workflow, request, state, context
+        )
     except Exception as error:  # noqa: BLE001 - the failure is the datum
         workflow.emit_phase_result(
             request,
@@ -80,7 +89,6 @@ def run_falsification_trials(
             },
         )
         raise
-    artifact = falsification_report_artifact(workflow, final)
     workflow.emit_phase_result(
         request,
         phase,
@@ -95,8 +103,8 @@ def _run_falsification_trials(
     request: HypothesisDevelopmentRequest,
     state: HypothesisDevelopmentState,
     context: HandoffContext,
-) -> tuple[Mapping[str, object], HypothesisDevelopmentState]:
-    """Run the trials computation and return its contract and final state."""
+) -> tuple[Mapping[str, object], HypothesisDevelopmentState, Mapping[str, object]]:
+    """Run the trials computation and return its contract, state, and report."""
     payload = context.completion.get("hypothesis")
     if not isinstance(payload, Mapping):
         raise WorkflowError(
@@ -105,24 +113,107 @@ def _run_falsification_trials(
     # The pure fold owns historical decoding. A newly supplied handoff never
     # enables the retired inline schema just because it reaches an executor.
     draft = state.draft or _draft_from_contract(payload)
+    accepted_study: StudyProgramReference | None = None
+    resolved_study: ResearchModel | None = None
     if isinstance(draft.model, StudyProgramReference):
+        accepted_study = draft.model
         programs = services_of(workflow).programs
         if programs is None:
             raise WorkflowError("workspace programs are not configured")
-        draft = replace(
-            draft,
-            model=resolve_study_reference(programs, request.workspace_id, draft.model),
+        resolved_study = resolve_study_reference(
+            programs, request.workspace_id, draft.model
         )
+        draft = replace(draft, model=resolved_study)
+    if accepted_study is None or resolved_study is None:
+        raise WorkflowError("falsification trials require an accepted study reference")
+    mandate = derive_launch_mandate(
+        getattr(workflow, "execution_store", None),
+        workspace_id=request.workspace_id,
+        execution_id=request.execution_id,
+    )
+    if mandate is not None:
+        study_start, study_end = study_window(resolved_study.harness_configuration)
+        violation = mandate.window_violation(
+            rfc3339_ns(study_start), rfc3339_ns(study_end)
+        )
+        if violation is not None:
+            raise WorkflowError(violation)
     document = build_hypothesis(workflow, request, draft)
     services_of(workflow).store.save(document, workspace_id=request.workspace_id)
     plan = _plan_from_document(document)
     staged = replace(state, draft=draft, hypothesis=document, plan=plan)
     final = run_trials(workflow, request, staged)
+    report = falsification_report_artifact(workflow, final)
+    evidence = _research_evidence(accepted_study, final, report)
     contract: Mapping[str, object] = {
         "trials": [dict(trial.as_dict()) for trial in final.trials],
+        "research": evidence.as_dict(),
         "target": _VERDICT.value,
     }
-    return contract, final
+    return contract, final, report
+
+
+def _research_evidence(
+    study: StudyProgramReference,
+    state: HypothesisDevelopmentState,
+    report: Mapping[str, object],
+) -> ResearchEvidence:
+    """Build the evidence envelope from the run outputs and the accepted plan.
+
+    Every field is taken from the run result, the accepted study reference, the
+    resolved hypothesis and plan, or the canonical report payload; nothing is
+    inferred or fabricated, and the report digest covers exactly the canonical
+    report JSON that the phase emits.
+    """
+    plan = state.plan
+    draft = state.draft
+    if plan is None or draft is None:
+        raise WorkflowError("trials evidence requires the resolved hypothesis plan")
+    falsifiers = {falsifier.falsifier_id: falsifier for falsifier in draft.falsifiers}
+    assumptions: list[AssumptionEvidence] = []
+    for trial in state.trials:
+        falsifier = falsifiers.get(trial.falsifier_id)
+        if falsifier is None:
+            raise WorkflowError(f"trial {trial.test_id!r} names an unknown falsifier")
+        assumptions.append(
+            AssumptionEvidence(
+                falsifier_id=trial.falsifier_id,
+                statement=falsifier.test,
+                role=falsifier.role.value,
+                observable=falsifier.observable,
+                condition=falsifier.condition,
+                threshold=falsifier.threshold,
+                test=trial.test_id,
+                observed=trial.observed,
+                falsified=trial.falsified,
+                run_state=trial.run_state,
+                detail=trial.detail,
+            )
+        )
+    limitations = report.get("limitations")
+    return ResearchEvidence(
+        hypothesis_id=(
+            None if state.hypothesis is None else state.hypothesis.hypothesis_id
+        ),
+        study=study,
+        model=state.research_model_reference,
+        workspace_artifact=state.research_model_artifact,
+        fit=state.fitted_model_reference,
+        fitted_parameters=state.fitted_parameters,
+        runtime_configuration=state.research_model_runtime_configuration,
+        plan=plan,
+        assumptions=tuple(assumptions),
+        controls=tuple(
+            ControlEvidence(
+                control_id=control.control_id,
+                description=control.description,
+                expectation=control.expectation,
+            )
+            for control in plan.controls
+        ),
+        report_digest=_digest(dict(report)),
+        limitations=limitations if isinstance(limitations, str) else None,
+    )
 
 
 def _draft_from_contract(
@@ -208,18 +299,17 @@ def run_trials(
     runtime_configuration = state.research_model_runtime_configuration
     fitted_reference = state.fitted_model_reference
     model_run: ResearchModelRunResult | None = None
-    # Scope the run id to the hypothesis revision so a revised model never
-    # adopts or overwrites the previous revision's run.
-    from thesis.research.models import ResearchModel
-
+    # One execution identity per falsification run: the persisted trial
+    # reference is reused on resume; a fresh job is allocated on first run.
     if not isinstance(state.draft.model, ResearchModel):
         raise WorkflowError("trials require a resolved committed study")
-    model_run_id = (
-        f"falsify-{request.execution_id}-{document.content_sha256[:12]}-"
-        f"{state.draft.model.content_sha256[:12]}-model"
+    persisted_job_id = next(
+        (trial.job_id for trial in state.trials if trial.job_id), None
     )
     pending = [test for test in plan.tests if test.test_id not in retained]
     if pending:
+        if persisted_job_id is None:
+            persisted_job_id = _recover_submission_job_id(workflow, request, state)
         # The study runs to completion — the research runner polls until the
         # harness reports the job terminal — and a harness failure or an
         # unusable study result is the phase's failure: the exception (or the
@@ -231,7 +321,7 @@ def run_trials(
             request,
             state,
             model=state.draft.model,
-            correlation_id=model_run_id,
+            job_id=persisted_job_id,
             label="layer-a-model",
         )
         result = model_run.backtest
@@ -277,7 +367,7 @@ def run_trials(
             FalsificationTrial(
                 test_id=test.test_id,
                 falsifier_id=test.falsifier_id,
-                run_id=result.job_id,
+                job_id=result.job_id,
                 digest=_digest(result.as_dict()),
                 run_state=result.state,
                 observed=observed,
@@ -286,20 +376,6 @@ def run_trials(
                 ),
                 detail=result.error,
             )
-        )
-        append_attempt(
-            workflow,
-            request,
-            state,
-            AttemptKind.METRIC,
-            f"falsification trial {test.test_id} recorded",
-            {
-                "detail": result.error,
-                "falsifierId": test.falsifier_id,
-                "observed": observed,
-                "runId": result.job_id,
-                "runState": result.state,
-            },
         )
     state = replace(
         state,
@@ -311,3 +387,29 @@ def run_trials(
         research_model_runtime_configuration=runtime_configuration,
     )
     return project_hypothesis(workflow, request, state)
+
+
+def _recover_submission_job_id(
+    workflow: DevelopmentEngine,
+    request: HypothesisDevelopmentRequest,
+    state: HypothesisDevelopmentState,
+) -> str | None:
+    """Recover the execution's tracked submission for the current model revision.
+
+    An interrupt after harness acceptance leaves the submission only in the
+    execution's durable job links.  The tracked job whose attribution equals
+    the current model revision is the same execution and is rejoined; a stale
+    job from another revision does not match, so a fresh id is allocated
+    instead of replaying an outdated submission.
+    """
+    chat = workflow.chat
+    model = state.draft.model if state.draft is not None else None
+    if chat is None or not isinstance(model, ResearchModel):
+        return None
+    tracked = chat.find_execution_tool_job(
+        request.workspace_id,
+        request.execution_id,
+        tool_name=HARNESS_RESEARCH_MODEL_TOOL,
+        attribution=research_model_attribution(model),
+    )
+    return None if tracked is None else tracked.job_id

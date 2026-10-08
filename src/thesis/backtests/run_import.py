@@ -1,56 +1,102 @@
-"""Map one completed harness run into a workspace :class:`BacktestRecord`.
+"""Map one completed harness job into a workspace :class:`BacktestRecord`.
 
-The importer reads a run's catalog row (``get_run``) and its
+The importer reads a job's result (``get_job_result``) and its
 ``backtest.json``/``metrics.json`` artifacts (``read_artifact``) through the
-harness MCP tool provider, reconstructs a canonical equity curve and FIFO
-trade log, and projects the metrics into the snake_case/camelCase stat keys the
-workspace detail and the UI backtest report both consume.
+harness MCP tool provider and projects them into the record the workspace
+detail and the UI backtest report consume.  The record is keyed by the same
+``job_id`` the submission allocated.
 
-The equity curve prefers the harness ``artifacts/equity.parquet`` artifact and
-falls back to a step curve derived from ``backtest.json`` fills and portfolio
-cash; an unavailable parquet never fails the import.
+Nothing is recomputed here.  Every statistic, the trade log, and the equity
+curve are read as the harness published them: the canonical ``metrics.json``
+``equity`` and ``trades`` blocks and the ``artifacts/equity.parquet`` series.
+A value the harness did not publish is ``None`` with an explicit reason, never
+a zero and never a figure derived from the fills.  An artifact without the
+canonical ``trades`` rows yields an empty trade log and
+``trades_unavailable_reason``; its trades are not reconstructed.
 """
 
 from __future__ import annotations
 
 import io
 import json
-import math
-import uuid
-from collections import deque
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from thesis.agent.harness_tools import HarnessToolProvider, HarnessToolResult
 from thesis.backtests.artifacts import ArtifactReader, HarnessArtifactReader
 from thesis.http.backtests import BacktestRecord
-from thesis.integrations.mcp import TOOL_GET_JOB_STATUS, TOOL_GET_RUN
+from thesis.integrations.mcp import TOOL_GET_JOB_RESULT, TOOL_GET_JOB_STATUS
 
-_PENDING_STATES = frozenset({"queued", "running", "pending", "submitted", "created"})
-_FAILED_STATES = frozenset({"failed", "cancelled", "canceled", "error", "errored"})
-_COMPLETE_STATES = frozenset({"complete", "completed", "succeeded", "success"})
+_PENDING_STATES = frozenset({"queued", "running"})
+_FAILED_STATES = frozenset({"failed", "cancelled"})
+_COMPLETE_STATES = frozenset({"succeeded"})
 
 _EQUITY_ARTIFACT = "artifacts/equity.parquet"
 _BACKTEST_ARTIFACT = "backtest.json"
 _METRICS_ARTIFACT = "metrics.json"
 _CONFIG_ARTIFACT = "config.yaml"
 
-_ANNUALIZATION = math.sqrt(252.0)
+_CANONICAL_TRADE_FIELDS = (
+    "trade_count",
+    "win_count",
+    "loss_count",
+    "hit_rate",
+    "net_pnl",
+    "gross_profit",
+    "gross_loss",
+    "profit_factor",
+    "average_net_win",
+    "average_net_loss",
+    "largest_net_win",
+    "largest_net_loss",
+)
+
+_TRADE_DECIMAL_FIELDS = (
+    "quantity",
+    "entry_price",
+    "exit_price",
+    "gross_pnl",
+    "fees",
+    "net_pnl",
+)
+
+_NANOSECONDS_PER_MILLISECOND = 1_000_000
 
 
 class BacktestRunError(RuntimeError):
-    """A harness run cannot be imported (missing, failed, or unusable)."""
+    """A harness job cannot be imported (missing, failed, or unusable).
+
+    ``state`` carries the harness-observed terminal state when one was read, so
+    a report consumer can distinguish an observed harness failure from a job
+    the harness could not resolve at all.
+    """
+
+    def __init__(self, message: str, *, state: str | None = None) -> None:
+        super().__init__(message)
+        self.state = state
 
 
 class BacktestRunPending(RuntimeError):
-    """A harness run is still queued or running; the caller may retry."""
+    """A harness job is still queued or running; the caller may retry."""
+
+
+@dataclass(frozen=True, slots=True)
+class _EquityStatistics:
+    """The equity-block statistics exactly as the harness published them."""
+
+    total_return: float | None
+    max_drawdown: float | None
+    cagr: float | None
+    sharpe: float | None
+    sharpe_reason: str | None
 
 
 def import_backtest_run(
     *,
     tools: HarnessToolProvider,
     workspace_id: str,
-    run_id: str,
+    job_id: str,
     chat_id: str | None = None,
     execution_id: str | None = None,
     strategy_id: str | None = None,
@@ -58,73 +104,71 @@ def import_backtest_run(
     artifact_reader: ArtifactReader | None = None,
     http_get: Callable[[str], bytes] | None = None,
     clock: Callable[[], datetime] | None = None,
-    id_factory: Callable[[str], str] | None = None,
 ) -> BacktestRecord:
-    """Import one completed harness run as a workspace backtest record.
+    """Import one completed harness job as a workspace backtest record.
 
-    Raises :class:`BacktestRunPending` when the run is still queued/running and
-    :class:`BacktestRunError` when the run is missing, failed, or has no usable
-    status.  A missing or unreadable equity parquet is tolerated.
+    Raises :class:`BacktestRunPending` when the job is still queued/running and
+    :class:`BacktestRunError` when the job is missing, failed, has no usable
+    status, or carries a malformed canonical trade row.  A missing or unreadable
+    equity parquet yields no equity series and an ``equity_unavailable_reason``.
     """
     reader = artifact_reader or HarnessArtifactReader(tools, http_get=http_get)
-    _require_terminal(tools, run_id)
-    catalog = _get_run(tools, run_id)
+    _require_terminal(tools, job_id)
+    catalog = _get_job_result(tools, job_id)
     status = _status_of(catalog)
     if status is None:
-        raise BacktestRunError(f"harness run {run_id!r} reported no status")
+        raise BacktestRunError(f"harness job {job_id!r} reported no state")
     if status in _PENDING_STATES:
-        raise BacktestRunPending(f"harness run {run_id!r} is still {status}")
+        raise BacktestRunPending(f"harness job {job_id!r} is still {status}")
     if status not in _COMPLETE_STATES:
-        raise BacktestRunError(f"harness run {run_id!r} ended in state {status!r}")
+        raise BacktestRunError(
+            f"harness job {job_id!r} ended in state {status!r}", state=status
+        )
 
-    backtest = _read_json(reader, run_id, _BACKTEST_ARTIFACT)
-    metrics = _read_json(reader, run_id, _METRICS_ARTIFACT)
-    configuration = _read_text(reader, run_id, _CONFIG_ARTIFACT)
+    backtest = _read_json(reader, job_id, _BACKTEST_ARTIFACT)
+    metrics = _read_json(reader, job_id, _METRICS_ARTIFACT)
+    configuration = _read_text(reader, job_id, _CONFIG_ARTIFACT)
     manifest_document = _mapping(backtest.get("manifest"))
     portfolio = _mapping(backtest.get("portfolio"))
-    fills = _sequence(backtest.get("fills"))
 
+    equity_points = _equity_from_parquet(reader, job_id)
+    equity = _equity_statistics(metrics)
+    canonical = _canonical_trade_stats(metrics)
+    trade_log, trades_reason = _trade_log(metrics)
+    stats = _stats_document(
+        equity,
+        canonical,
+        equity_reason=None if equity_points else "artifact_unavailable",
+        trades_reason=trades_reason,
+    )
     initial_capital = _first_number(
         portfolio.get("initial_cash"),
         manifest_document.get("initial_cash"),
     )
-    equity_points = _equity_from_parquet(reader, run_id)
-    if not equity_points:
-        equity_points = _equity_from_fills(fills, manifest_document, initial_capital)
-    equity_values = [float(point["v"]) for point in equity_points]
-
-    trades = _build_trades(fills)
-    final_capital = _final_capital(equity_values, initial_capital, portfolio, metrics)
-    total_pnl = _number(portfolio.get("total_pnl"))
-    if total_pnl is None:
-        total_pnl = final_capital - initial_capital
-    stats = _stats(metrics, equity_values, trades, initial_capital, total_pnl)
+    final_capital = _final_capital(equity_points, portfolio)
 
     resolved_strategy_id = (
         strategy_id
         or _text(catalog.get("strategy_id"))
         or _text(manifest_document.get("strategy_id"))
-        or f"strategy-{run_id}"
+        or f"strategy-{job_id}"
     )
-    resolved_name = name or f"Backtest {run_id}"
+    resolved_name = name or f"Backtest {job_id}"
     period_start = _first_text(
         catalog.get("data_start"), manifest_document.get("start")
     )
     period_end = _first_text(catalog.get("data_end"), manifest_document.get("end"))
     created_at = _iso_z((clock or _utc_now)())
-    resolved_status = _text(backtest.get("status")) or (
-        "completed" if status in _COMPLETE_STATES else status
-    )
 
     manifest_entry: dict[str, object] = {
-        "run_id": run_id,
-        "status": resolved_status,
+        "job_id": job_id,
+        "status": status,
         "run_digest": _text(catalog.get("run_digest")),
         "configuration_digest": _text(catalog.get("configuration_digest")),
         "data_start": _text(catalog.get("data_start")),
         "data_end": _text(catalog.get("data_end")),
-        "artifact_count": _integer(catalog.get("artifact_count"), 0),
-        "total_bytes": _integer(catalog.get("total_bytes"), 0),
+        "artifact_count": _optional_int(catalog.get("artifact_count")),
+        "total_bytes": _optional_int(catalog.get("total_bytes")),
         "metrics": dict(metrics),
         "stats": dict(stats),
         "harness_manifest": dict(manifest_document),
@@ -132,7 +176,7 @@ def import_backtest_run(
     }
 
     return BacktestRecord(
-        id=(id_factory or _new_record_id)("bt"),
+        job_id=job_id,
         workspace_id=workspace_id,
         strategy_id=resolved_strategy_id,
         name=resolved_name,
@@ -141,17 +185,16 @@ def import_backtest_run(
         created_at=created_at,
         initial_capital=initial_capital,
         final_capital=final_capital,
-        total_return=stats["total_return"],
-        sharpe=stats["sharpe"],
-        max_drawdown=stats["max_drawdown"],
-        win_rate=stats["win_rate"],
-        trades=int(stats["trade_count"]),
+        total_return=equity.total_return,
+        sharpe=equity.sharpe,
+        max_drawdown=equity.max_drawdown,
+        win_rate=canonical["hit_rate"],
+        trades=_optional_int(canonical["trade_count"]),
         manifest=manifest_entry,
         equity=tuple(equity_points),
-        trade_log=tuple(trades),
+        trade_log=trade_log,
         stats=stats,
-        status=resolved_status,
-        run_id=run_id,
+        status=status,
         chat_id=chat_id,
         execution_id=execution_id,
         config_path=_CONFIG_ARTIFACT if configuration is not None else None,
@@ -162,47 +205,45 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def _new_record_id(prefix: str) -> str:
-    return f"{prefix}-{uuid.uuid4().hex}"
-
-
-def _get_run(tools: HarnessToolProvider, run_id: str) -> dict[str, object]:
-    result = tools.call_tool(TOOL_GET_RUN, {"run_id": run_id})
+def _get_job_result(tools: HarnessToolProvider, job_id: str) -> dict[str, object]:
+    result = tools.call_tool(TOOL_GET_JOB_RESULT, {"job_id": job_id})
     if not result.ok:
-        raise BacktestRunError(_failure_message(result, run_id))
+        raise BacktestRunError(_failure_message(result, job_id))
     return dict(result.structured)
 
 
-def _failure_message(result: HarnessToolResult, run_id: str) -> str:
+def _failure_message(result: HarnessToolResult, job_id: str) -> str:
     if result.failure is not None and result.failure.message:
         return result.failure.message
-    return f"harness run {run_id!r} could not be read"
+    return f"harness job {job_id!r} could not be read"
 
 
 def _status_of(catalog: Mapping[str, object]) -> str | None:
-    status = _text(catalog.get("status")) or _text(catalog.get("state"))
+    status = _text(catalog.get("state"))
     return status.lower() if status is not None else None
 
 
-def _require_terminal(tools: HarnessToolProvider, run_id: str) -> None:
-    """Fail fast on a pending/failed job before the run catalog row exists.
+def _require_terminal(tools: HarnessToolProvider, job_id: str) -> None:
+    """Fail fast on a pending/failed job before the result record exists.
 
-    The async submitter writes the run catalog row only when the worker
-    finishes, so a still-running run is distinguishable from a missing one only
+    The async submitter writes the result record only when the worker
+    finishes, so a still-running job is distinguishable from a missing one only
     through ``get_job_status``.
     """
-    result = tools.call_tool(TOOL_GET_JOB_STATUS, {"job_id": run_id})
+    result = tools.call_tool(TOOL_GET_JOB_STATUS, {"job_id": job_id})
     if not result.ok:
         return
     state = _status_of(result.structured)
     if state in _PENDING_STATES:
-        raise BacktestRunPending(f"harness run {run_id!r} is still {state}")
+        raise BacktestRunPending(f"harness job {job_id!r} is still {state}")
     if state in _FAILED_STATES:
-        raise BacktestRunError(f"harness run {run_id!r} ended in state {state!r}")
+        raise BacktestRunError(
+            f"harness job {job_id!r} ended in state {state!r}", state=state
+        )
 
 
-def _read_json(reader: ArtifactReader, run_id: str, name: str) -> dict[str, object]:
-    data = reader.read(run_id, name)
+def _read_json(reader: ArtifactReader, job_id: str, name: str) -> dict[str, object]:
+    data = reader.read(job_id, name)
     if data is None:
         return {}
     try:
@@ -212,8 +253,8 @@ def _read_json(reader: ArtifactReader, run_id: str, name: str) -> dict[str, obje
     return dict(document) if isinstance(document, Mapping) else {}
 
 
-def _read_text(reader: ArtifactReader, run_id: str, name: str) -> str | None:
-    data = reader.read(run_id, name)
+def _read_text(reader: ArtifactReader, job_id: str, name: str) -> str | None:
+    data = reader.read(job_id, name)
     if data is None:
         return None
     try:
@@ -223,9 +264,9 @@ def _read_text(reader: ArtifactReader, run_id: str, name: str) -> str | None:
 
 
 def _equity_from_parquet(
-    reader: ArtifactReader, run_id: str
+    reader: ArtifactReader, job_id: str
 ) -> tuple[dict[str, float | int], ...]:
-    data = reader.read(run_id, _EQUITY_ARTIFACT)
+    data = reader.read(job_id, _EQUITY_ARTIFACT)
     if data is None:
         return ()
     try:
@@ -249,196 +290,127 @@ def _equity_from_parquet(
     return tuple(points)
 
 
-def _equity_from_fills(
-    fills: Sequence[object],
-    manifest: Mapping[str, object],
-    initial_capital: float,
-) -> tuple[dict[str, float | int], ...]:
-    cash = initial_capital
-    points: list[dict[str, float | int]] = []
-    start = _epoch_ms(manifest.get("start"))
-    if start is not None:
-        points.append({"t": start, "v": cash})
-    for fill in sorted(fills, key=_fill_order):
-        document = _mapping(fill)
-        millis = _epoch_ms(document.get("timestamp"))
-        quantity = _number(document.get("quantity")) or 0.0
-        price = _number(document.get("price")) or 0.0
-        fee = _number(document.get("fee")) or 0.0
-        side = (_text(document.get("side")) or "").lower()
-        if side == "buy":
-            cash -= quantity * price + fee
-        elif side == "sell":
-            cash += quantity * price - fee
-        if millis is not None:
-            points.append({"t": millis, "v": cash})
-    return tuple(points)
+def _equity_statistics(metrics: Mapping[str, object]) -> _EquityStatistics:
+    equity = _mapping(metrics.get("equity"))
+    return _EquityStatistics(
+        total_return=_number(equity.get("total_return")),
+        max_drawdown=_number(equity.get("max_drawdown")),
+        cagr=_number(equity.get("cagr")),
+        sharpe=_number(equity.get("sharpe")),
+        sharpe_reason=_text(equity.get("sharpe_reason")),
+    )
 
 
-def _fill_order(fill: object) -> tuple[int, int]:
-    document = _mapping(fill)
-    sequence = _integer(document.get("sequence"), 0)
-    millis = _epoch_ms(document.get("timestamp")) or 0
-    return (sequence, millis)
+def _canonical_trade_stats(metrics: Mapping[str, object]) -> dict[str, float | None]:
+    """Read the canonical ``trades`` block without recomputing any field.
+
+    A missing block, a missing field, or a JSON ``null`` becomes ``None``.
+    Profit factor is taken exactly as published (undefined when no trade lost);
+    gross profit is never substituted for it.
+    """
+    block = _mapping(metrics.get("trades"))
+    return {field: _number(block.get(field)) for field in _CANONICAL_TRADE_FIELDS}
 
 
-def _build_trades(fills: Sequence[object]) -> list[dict[str, object]]:
-    lots: dict[str, deque[list[float]]] = {}
-    trades: list[dict[str, object]] = []
-    for fill in sorted(fills, key=_fill_order):
-        document = _mapping(fill)
-        symbol = _text(document.get("symbol")) or "?"
-        side = (_text(document.get("side")) or "").lower()
-        quantity = _number(document.get("quantity")) or 0.0
-        price = _number(document.get("price")) or 0.0
-        millis = _epoch_ms(document.get("timestamp")) or 0
-        signed = quantity if side == "buy" else -quantity
-        if signed == 0:
-            continue
-        queue = lots.setdefault(symbol, deque())
-        remaining = signed
-        while remaining != 0 and queue and (queue[0][0] > 0) != (remaining > 0):
-            lot = queue[0]
-            lot_quantity = lot[0]
-            matched = min(abs(lot_quantity), abs(remaining))
-            entry_price = lot[1]
-            entry_time = int(lot[2])
-            is_long = lot_quantity > 0
-            pnl = (
-                (price - entry_price) * matched
-                if is_long
-                else (entry_price - price) * matched
-            )
-            trades.append(
-                {
-                    "id": f"trade-{len(trades) + 1:04d}",
-                    "symbol": symbol,
-                    "side": "buy" if is_long else "sell",
-                    "qty": matched,
-                    "entryTime": entry_time,
-                    "entryPrice": entry_price,
-                    "exitTime": millis,
-                    "exitPrice": price,
-                    "pnl": pnl,
-                }
-            )
-            if abs(lot_quantity) == matched:
-                queue.popleft()
-            elif is_long:
-                lot[0] = lot_quantity - matched
-            else:
-                lot[0] = lot_quantity + matched
-            remaining += matched if is_long else -matched
-        if remaining != 0:
-            queue.append([remaining, price, float(millis)])
-    return trades
-
-
-def _stats(
+def _trade_log(
     metrics: Mapping[str, object],
-    equity_values: Sequence[float],
-    trades: Sequence[Mapping[str, object]],
-    initial_capital: float,
-    total_pnl: float,
-) -> dict[str, float]:
-    equity_metrics = _mapping(metrics.get("equity"))
-    total_return = _number(equity_metrics.get("total_return"))
-    if total_return is None:
-        total_return = _return_from_equity(equity_values, initial_capital)
-    max_drawdown = _number(equity_metrics.get("max_drawdown"))
-    if max_drawdown is None:
-        max_drawdown = _max_drawdown(equity_values)
-    cagr = _number(equity_metrics.get("cagr"))
-    if cagr is None:
-        cagr = total_return
-    sharpe = _number(equity_metrics.get("sharpe"))
-    if sharpe is None:
-        sharpe = _sharpe(equity_values)
-    trade_count = len(trades)
-    wins = sum(1 for trade in trades if (_number(trade.get("pnl")) or 0.0) > 0)
-    win_rate = wins / trade_count if trade_count else 0.0
-    gross_profit = sum(
-        pnl for trade in trades if (pnl := _number(trade.get("pnl")) or 0.0) > 0
-    )
-    gross_loss = sum(
-        pnl for trade in trades if (pnl := _number(trade.get("pnl")) or 0.0) < 0
-    )
-    profit_factor = (
-        gross_profit / abs(gross_loss)
-        if gross_loss < 0
-        else (gross_profit if gross_profit > 0 else 0.0)
-    )
+) -> tuple[tuple[dict[str, object], ...], str | None]:
+    """Project the canonical trade rows; nothing is rebuilt from fills.
+
+    Returns the trade log and, when it is empty for a reason other than having
+    no trades, the reason it is unavailable.
+    """
+    if not metrics:
+        return (), "metrics_unavailable"
+    rows = _mapping(metrics.get("trades")).get("rows")
+    if not isinstance(rows, list):
+        return (), "legacy_artifact"
+    return tuple(_trade_record(row) for row in rows), None
+
+
+def _trade_record(row: object) -> dict[str, object]:
+    """Map one canonical closed-trade row onto the workspace trade shape.
+
+    ``pnl`` is the net PnL the statistics headline; the gross PnL and the fees
+    are carried alongside it.  A row that breaks the canonical contract fails
+    the import rather than being dropped or defaulted.
+    """
+    document = _mapping(row)
+    decimals = {name: _number(document.get(name)) for name in _TRADE_DECIMAL_FIELDS}
+    entry_ns = _epoch_ns(document.get("entry_timestamp_ns"))
+    exit_ns = _epoch_ns(document.get("exit_timestamp_ns"))
+    trade_id = _text(document.get("trade_id"))
+    symbol = _text(document.get("symbol"))
+    side = _text(document.get("side"))
+    if (
+        trade_id is None
+        or symbol is None
+        or side not in ("long", "short")
+        or entry_ns is None
+        or exit_ns is None
+        or any(value is None for value in decimals.values())
+    ):
+        raise BacktestRunError(
+            f"harness trade row {document.get('trade_id')!r} breaks the canonical contract"
+        )
     return {
-        "total_return": total_return,
-        "max_drawdown": max_drawdown,
-        "cagr": cagr,
-        "sharpe": sharpe,
-        "win_rate": win_rate,
-        "profit_factor": profit_factor,
-        "trade_count": float(trade_count),
-        "total_pnl": total_pnl,
-        "totalReturn": total_return,
-        "maxDrawdown": max_drawdown,
-        "hitRate": win_rate,
-        "profitFactor": profit_factor,
-        "tradeCount": float(trade_count),
-        "totalPnl": total_pnl,
+        "id": trade_id,
+        "symbol": symbol,
+        "side": "buy" if side == "long" else "sell",
+        "qty": decimals["quantity"],
+        "entryTime": entry_ns // _NANOSECONDS_PER_MILLISECOND,
+        "entryPrice": decimals["entry_price"],
+        "exitTime": exit_ns // _NANOSECONDS_PER_MILLISECOND,
+        "exitPrice": decimals["exit_price"],
+        "grossPnl": decimals["gross_pnl"],
+        "fees": decimals["fees"],
+        "pnl": decimals["net_pnl"],
     }
 
 
-def _return_from_equity(values: Sequence[float], initial_capital: float) -> float:
-    if not values or initial_capital <= 0:
-        return 0.0
-    return values[-1] / initial_capital - 1.0
-
-
-def _max_drawdown(values: Sequence[float]) -> float:
-    peak: float | None = None
-    worst = 0.0
-    for value in values:
-        if peak is None or value > peak:
-            peak = value
-        if peak and peak > 0:
-            drawdown = value / peak - 1.0
-            if drawdown < worst:
-                worst = drawdown
-    return worst
-
-
-def _sharpe(values: Sequence[float]) -> float:
-    if len(values) < 3:
-        return 0.0
-    returns: list[float] = []
-    for previous, current in zip(values, values[1:], strict=False):
-        if previous:
-            returns.append(current / previous - 1.0)
-    if len(returns) < 2:
-        return 0.0
-    mean = sum(returns) / len(returns)
-    variance = sum((value - mean) ** 2 for value in returns) / (len(returns) - 1)
-    deviation = math.sqrt(variance)
-    if deviation == 0:
-        return 0.0
-    return mean / deviation * _ANNUALIZATION
+def _stats_document(
+    equity: _EquityStatistics,
+    canonical: Mapping[str, float | None],
+    *,
+    equity_reason: str | None,
+    trades_reason: str | None,
+) -> dict[str, object]:
+    """Project the published statistics under their snake_case and camelCase keys."""
+    return {
+        "total_return": equity.total_return,
+        "max_drawdown": equity.max_drawdown,
+        "cagr": equity.cagr,
+        "sharpe": equity.sharpe,
+        "sharpe_reason": equity.sharpe_reason,
+        "equity_unavailable_reason": equity_reason,
+        "trades_unavailable_reason": trades_reason,
+        **canonical,
+        "win_rate": canonical["hit_rate"],
+        "totalReturn": equity.total_return,
+        "maxDrawdown": equity.max_drawdown,
+        "hitRate": canonical["hit_rate"],
+        "tradeCount": canonical["trade_count"],
+        "totalPnl": canonical["net_pnl"],
+        "winCount": canonical["win_count"],
+        "lossCount": canonical["loss_count"],
+        "grossProfit": canonical["gross_profit"],
+        "grossLoss": canonical["gross_loss"],
+        "profitFactor": canonical["profit_factor"],
+        "averageWin": canonical["average_net_win"],
+        "averageLoss": canonical["average_net_loss"],
+        "largestWin": canonical["largest_net_win"],
+        "largestLoss": canonical["largest_net_loss"],
+    }
 
 
 def _final_capital(
-    values: Sequence[float],
-    initial_capital: float,
+    equity_points: tuple[dict[str, float | int], ...],
     portfolio: Mapping[str, object],
-    metrics: Mapping[str, object],
-) -> float:
-    if values:
-        return values[-1]
-    equity = _number(_mapping(portfolio.get("equity")))
-    if equity is not None:
-        return equity
-    equity_metrics = _mapping(metrics.get("equity"))
-    total_return = _number(equity_metrics.get("total_return"))
-    if total_return is not None:
-        return initial_capital * (1.0 + total_return)
-    total_pnl = _number(portfolio.get("total_pnl")) or 0.0
-    return initial_capital + total_pnl
+) -> float | None:
+    """The harness's final equity: its last series point, else its portfolio."""
+    if equity_points:
+        return float(equity_points[-1]["v"])
+    return _number(portfolio.get("equity"))
 
 
 def _iso_z(moment: datetime) -> str:
@@ -449,12 +421,6 @@ def _mapping(value: object) -> dict[str, object]:
     if isinstance(value, Mapping):
         return {str(key): item for key, item in value.items()}
     return {}
-
-
-def _sequence(value: object) -> list[object]:
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        return list(value)
-    return []
 
 
 def _text(value: object) -> str | None:
@@ -471,12 +437,12 @@ def _first_text(*values: object) -> str:
     return ""
 
 
-def _first_number(*values: object) -> float:
+def _first_number(*values: object) -> float | None:
     for value in values:
         number = _number(value)
         if number is not None:
             return number
-    return 0.0
+    return None
 
 
 def _number(value: object) -> float | None:
@@ -492,9 +458,23 @@ def _number(value: object) -> float | None:
     return None
 
 
-def _integer(value: object, default: int) -> int:
+def _optional_int(value: object) -> int | None:
     number = _number(value)
-    return default if number is None else int(number)
+    return None if number is None else int(number)
+
+
+def _epoch_ns(value: object) -> int | None:
+    """Epoch nanoseconds kept exact: JSON integers are never routed through float."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    return None
 
 
 def _epoch_ms(value: object) -> int | None:

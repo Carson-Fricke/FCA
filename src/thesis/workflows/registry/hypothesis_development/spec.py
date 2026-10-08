@@ -25,7 +25,11 @@ from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.schema import render_violations, validate_arguments
 from thesis.agent.subagents import SubagentContextFactory
 from thesis.chat.service import ChatService
-from thesis.experiments.ledger import AttemptLedger
+from thesis.experiments.mandate import (
+    ResearchMandate,
+    derive_launch_mandate,
+    mandate_section,
+)
 from thesis.persistence.journal import CommandJournal
 from thesis.research.hypothesis import HypothesisStore, InMemoryHypothesisStore
 from thesis.strategies.validation import StrategySandboxValidator
@@ -48,15 +52,44 @@ from thesis.workflows.research_models import (
     ResearchModelRunner,
 )
 
+from .contracts.candidates import (
+    CANDIDATE_EVALUATION_PAYLOAD_SCHEMA,
+    CandidateEvaluation,
+    candidate_evaluation_payload_errors,
+)
 from .contracts.creation import HypothesisDevelopmentRequest
 from .contracts.discovery import DiscoveryDraft
+from .contracts.evidence import ResearchEvidence
+from .contracts.forward import (
+    FORWARD_PAYLOAD_SCHEMA,
+    ForwardEvaluation,
+    forward_payload_errors,
+)
+from .contracts.nulls import (
+    NULL_TEST_EVALUATION_PAYLOAD_SCHEMA,
+    NullTestEvaluation,
+    null_test_evaluation_payload_errors,
+)
+from .contracts.rca import RcaDiagnosis
+from .contracts.strategy import (
+    StrategyBacktest,
+    strategy_backtest_payload_errors,
+)
 from .contracts.validation import (
     DISCOVERY_COMPLETION_SCHEMA,
     HYPOTHESIS_COMPLETION_SCHEMA,
+    VERDICT_PAYLOAD_SCHEMA,
     discovery_payload_errors,
     format_contract_errors,
     hypothesis_payload_errors,
+    verdict_payload_errors,
 )
+from .contracts.variation import (
+    VARIATION_PAYLOAD_SCHEMA,
+    VariationEvaluation,
+    variation_payload_errors,
+)
+from .contracts.verdict import FalsificationVerdict
 from .errors import FalsificationComposeError, WorkflowError
 from .phases import (
     _FAILED,
@@ -79,7 +112,14 @@ from .rebuild import (
     PayloadFold,
     _fold_discovery,
     _fold_draft,
+    _fold_forward_validation,
+    _fold_null_testing,
+    _fold_optimization,
+    _fold_strategy_backtesting,
+    _fold_strategy_design,
+    _fold_strategy_rca,
     _fold_trials,
+    _fold_variation,
     _fold_verdict,
 )
 from .services import (
@@ -111,6 +151,18 @@ def _start_handoff(
     return _discovery_prompt(workflow, request)
 
 
+def _mandate(
+    workflow: Workflow[Any, Any, Any],
+    request: HypothesisDevelopmentRequest,
+) -> ResearchMandate | None:
+    """Derive the execution's research mandate from its durable launch request."""
+    return derive_launch_mandate(
+        getattr(workflow, "execution_store", None),
+        workspace_id=request.workspace_id,
+        execution_id=request.execution_id,
+    )
+
+
 def _discovery_prompt(
     workflow: Workflow[Any, Any, Any],
     request: HypothesisDevelopmentRequest,
@@ -119,7 +171,10 @@ def _discovery_prompt(
     from .phases.creation import trigger_text
     from .prompts.discovery import _discovery_turn_prompt
 
-    return _discovery_turn_prompt([("user", trigger_text(workflow, request))])
+    return _discovery_turn_prompt(
+        [("user", trigger_text(workflow, request))],
+        mandate=_mandate(workflow, request),
+    )
 
 
 def _discovery_seed(
@@ -149,12 +204,12 @@ def _discovery_handoff(
     draft: DiscoveryDraft | None,
 ) -> dict[str, object] | None:
     """Render the accepted candidate compactly for the model-creation seed."""
-    if draft is None:
+    if draft is None or draft.candidate is None:
         return None
     return {
         "candidate": draft.candidate.as_dict(),
         "attempts": [
-            f"{attempt.study_id}: {attempt.result}" for attempt in draft.attempts
+            f"{attempt.purpose}: {attempt.result}" for attempt in draft.attempts
         ],
         "untouchedData": draft.untouched_data,
         "limitations": draft.limitations,
@@ -224,6 +279,9 @@ def _model_creation_seed(
                     default=str,
                 ),
             ]
+    mandate = _mandate(workflow, request)
+    if mandate is not None:
+        parts += ["", mandate_section(mandate)]
     handoff = _discovery_handoff(_accepted_discovery(state, context))
     if handoff is not None:
         parts += [
@@ -283,6 +341,28 @@ def _strategy_design_seed(
             "Surviving hypothesis:",
             json.dumps(hypothesis, ensure_ascii=True, indent=2, default=str),
         ]
+    if state.research_evidence is not None:
+        parts += [
+            "",
+            "Research evidence:",
+            json.dumps(
+                state.research_evidence.as_dict(),
+                ensure_ascii=True,
+                indent=2,
+                default=str,
+            ),
+        ]
+    if state.discovery is not None:
+        parts += [
+            "",
+            "Discovery:",
+            json.dumps(
+                state.discovery.as_dict(),
+                ensure_ascii=True,
+                indent=2,
+                default=str,
+            ),
+        ]
     if context is not None and context.completion:
         parts += [
             "",
@@ -318,6 +398,153 @@ def _surviving_hypothesis(
             for falsifier in draft.falsifiers
         ],
     }
+
+
+def _optimization_seed(
+    workflow: Workflow[Any, Any, Any],
+    request: HypothesisDevelopmentRequest,
+    state: HypothesisDevelopmentState,
+    context: HandoffContext,
+) -> str:
+    """Seed the evaluation agent with its instructions and the accepted handoff.
+
+    The strategy receipt and the backtest evidence arrive in the accepted
+    completion from the preceding phase, so the seed carries the candidate
+    evaluation instructions plus that handoff verbatim.
+    """
+    del workflow, request, state
+    from .prompts.candidates import _candidates_instructions
+
+    parts = [_candidates_instructions()]
+    if context is not None and context.completion:
+        parts += [
+            "",
+            f"Accepted completion from the {context.source} phase:",
+            json.dumps(
+                dict(context.completion), ensure_ascii=True, indent=2, default=str
+            ),
+        ]
+    return "\n".join(parts)
+
+
+def _null_testing_seed(
+    workflow: Workflow[Any, Any, Any],
+    request: HypothesisDevelopmentRequest,
+    state: HypothesisDevelopmentState,
+    context: HandoffContext,
+) -> str:
+    """Seed the null-testing agent with its instructions and the evaluation.
+
+    The candidate evaluation arrives as the accepted completion from the
+    optimization phase; the seed carries the null-testing instructions plus
+    that handoff verbatim so the agent can reuse the shortlisted candidate's
+    parameters and observed metrics.
+    """
+    del workflow, request, state
+    from .prompts.nulls import _nulls_instructions
+
+    parts = [_nulls_instructions()]
+    if context is not None and context.completion:
+        parts += [
+            "",
+            f"Accepted completion from the {context.source} phase:",
+            json.dumps(
+                dict(context.completion), ensure_ascii=True, indent=2, default=str
+            ),
+        ]
+    return "\n".join(parts)
+
+
+def _variation_seed(
+    workflow: Workflow[Any, Any, Any],
+    request: HypothesisDevelopmentRequest,
+    state: HypothesisDevelopmentState,
+    context: HandoffContext,
+) -> str:
+    """Seed the variation agent with its instructions and the evaluation.
+
+    The null-test acceptance arrives as the accepted completion from the
+    null-testing phase; the still-recorded candidate evaluation supplies the
+    shortlist the center is chosen from, so the seed carries both plus the
+    variation instructions.
+    """
+    del workflow, request
+    from .prompts.variation import _variation_instructions
+
+    parts = [_variation_instructions()]
+    evaluation = getattr(state, "candidate_evaluation", None)
+    if evaluation is not None:
+        parts += [
+            "",
+            "Recorded candidate evaluation:",
+            json.dumps(
+                evaluation.as_dict(),
+                ensure_ascii=True,
+                indent=2,
+                default=str,
+            ),
+        ]
+    if context is not None and context.completion:
+        parts += [
+            "",
+            f"Accepted completion from the {context.source} phase:",
+            json.dumps(
+                dict(context.completion), ensure_ascii=True, indent=2, default=str
+            ),
+        ]
+    return "\n".join(parts)
+
+
+def _forward_validation_seed(
+    workflow: Workflow[Any, Any, Any],
+    request: HypothesisDevelopmentRequest,
+    state: HypothesisDevelopmentState,
+    context: HandoffContext,
+) -> str:
+    """Seed the forward-validation agent with both frozen designs.
+
+    The variation acceptance arrives as the accepted completion from the
+    variation phase and the null-test acceptance remains in the typed state, so
+    the seed carries the forward instructions plus the recorded null test and
+    variation the agent must re-run unchanged on the protected forward window.
+    """
+    del workflow, request
+    from .prompts.forward import _forward_instructions
+
+    parts = [_forward_instructions()]
+    null_testing = getattr(state, "null_testing", None)
+    if null_testing is not None:
+        parts += [
+            "",
+            "Recorded null test:",
+            json.dumps(
+                null_testing.as_dict(),
+                ensure_ascii=True,
+                indent=2,
+                default=str,
+            ),
+        ]
+    variation = getattr(state, "variation", None)
+    if variation is not None:
+        parts += [
+            "",
+            "Recorded variation:",
+            json.dumps(
+                variation.as_dict(),
+                ensure_ascii=True,
+                indent=2,
+                default=str,
+            ),
+        ]
+    if context is not None and context.completion:
+        parts += [
+            "",
+            f"Accepted completion from the {context.source} phase:",
+            json.dumps(
+                dict(context.completion), ensure_ascii=True, indent=2, default=str
+            ),
+        ]
+    return "\n".join(parts)
 
 
 def _verdict_seed(
@@ -374,34 +601,6 @@ def _contract_seed(task: str, *, schema: str | None = None) -> Callable[..., str
     return seed
 
 
-def _mapping_field(name: str) -> Callable[[Mapping[str, object]], str | None]:
-    """Reject a completion whose ``name`` field is not a non-empty object."""
-
-    def validate(completion: Mapping[str, object]) -> str | None:
-        value = completion.get(name)
-        if not isinstance(value, Mapping) or not value:
-            return f"completion field {name!r} must be a non-empty object"
-        return None
-
-    return validate
-
-
-def _list_field(name: str) -> Callable[[Mapping[str, object]], str | None]:
-    """Reject a completion whose ``name`` field is not a non-empty list."""
-
-    def validate(completion: Mapping[str, object]) -> str | None:
-        value = completion.get(name)
-        if (
-            not isinstance(value, Sequence)
-            or isinstance(value, (str, bytes))
-            or not value
-        ):
-            return f"completion field {name!r} must be a non-empty list"
-        return None
-
-    return validate
-
-
 def _discovery_validator(completion: Mapping[str, object]) -> str | None:
     """Deeply validate the discovery contract before any transition commits.
 
@@ -409,7 +608,8 @@ def _discovery_validator(completion: Mapping[str, object]) -> str | None:
     once, so the agent repairs the whole contract in one turn, and the typed
     :class:`DiscoveryDraft` decoder re-runs as a drift guard: anything the
     collector missed still rejects the contract here rather than later in the
-    rebuild fold.
+    rebuild fold.  The target must match the branch: a selected candidate
+    advances model creation, a recorded no-candidate reason finishes the run.
     """
     payload = completion.get("discovery")
     if not isinstance(payload, Mapping) or not payload:
@@ -418,6 +618,150 @@ def _discovery_validator(completion: Mapping[str, object]) -> str | None:
     if not errors:
         try:
             DiscoveryDraft.from_dict(payload)
+        except WorkflowError as error:
+            errors = [str(error)]
+    target = completion.get("target")
+    has_candidate = payload.get("candidate") is not None
+    expected = "model_creation" if has_candidate else "completed"
+    if isinstance(target, str) and target not in {expected, _FAILED.value}:
+        errors.append(
+            "discovery with "
+            f"{'a candidate must target model_creation' if has_candidate else 'no candidate must target completed'}"
+            f", got {target!r}"
+        )
+    if errors:
+        return format_contract_errors(errors)
+    return None
+
+
+def _trials_validator(completion: Mapping[str, object]) -> str | None:
+    """Validate the deterministic trials contract and its evidence envelope."""
+    raw = completion.get("trials")
+    if isinstance(raw, str) or not isinstance(raw, Sequence) or not raw:
+        return "completion field 'trials' must be a non-empty list"
+    research = completion.get("research")
+    if not isinstance(research, Mapping) or not research:
+        return "completion field 'research' must be a non-empty object"
+    try:
+        ResearchEvidence.from_dict(research)
+    except WorkflowError as error:
+        return f"completion field 'research' is invalid: {error}"
+    return None
+
+
+def _verdict_validator(completion: Mapping[str, object]) -> str | None:
+    """Deeply validate the verdict contract before any transition commits.
+
+    The advertised verdict schema is collected in full and the typed
+    :class:`FalsificationVerdict` decoder re-runs as a drift guard: a malformed
+    outcome, reason, or trial list rejects the contract here instead of
+    poisoning the rebuild fold.  The engine validates the declared edge only;
+    outcome-to-target consistency stays the agent's proposal.
+    """
+    payload = completion.get("verdict")
+    if not isinstance(payload, Mapping) or not payload:
+        return "completion field 'verdict' must be a non-empty object"
+    errors = verdict_payload_errors(payload)
+    if not errors:
+        try:
+            FalsificationVerdict.from_dict(payload)
+        except WorkflowError as error:
+            errors = [str(error)]
+    if errors:
+        return format_contract_errors(errors)
+    return None
+
+
+def _optimization_validator(completion: Mapping[str, object]) -> str | None:
+    """Deeply validate the candidate-evaluation contract before any transition.
+
+    The advertised candidate payload is collected in full and the typed
+    :class:`CandidateEvaluation` decoder re-runs as a drift guard: a malformed
+    assignment, a shortlist vector absent from the submissions, or a
+    non-finite metric rejects the contract here instead of poisoning the
+    rebuild fold.
+    """
+    payload = completion.get("optimization")
+    if not isinstance(payload, Mapping) or not payload:
+        return "completion field 'optimization' must be a non-empty object"
+    errors = candidate_evaluation_payload_errors(payload)
+    if not errors:
+        try:
+            CandidateEvaluation.from_dict(payload)
+        except WorkflowError as error:
+            errors = [str(error)]
+    if errors:
+        return format_contract_errors(errors)
+    return None
+
+
+def _null_testing_validator(completion: Mapping[str, object]) -> str | None:
+    """Deeply validate the null-testing contract before any transition.
+
+    The advertised null-test payload is collected in full and the typed
+    :class:`NullTestEvaluation` decoder re-runs as a drift guard: an absent
+    statistic, a mismatched observed value, an exceedance count or p-value
+    that disagrees with the returned replicate metrics, a duplicate seed, or
+    no succeeded replicate rejects the contract here instead of poisoning the
+    rebuild fold.
+    """
+    payload = completion.get("nullTesting")
+    if not isinstance(payload, Mapping) or not payload:
+        return "completion field 'nullTesting' must be a non-empty object"
+    errors = null_test_evaluation_payload_errors(payload)
+    if not errors:
+        try:
+            NullTestEvaluation.from_dict(payload)
+        except WorkflowError as error:
+            errors = [str(error)]
+    if errors:
+        return format_contract_errors(errors)
+    return None
+
+
+def _variation_validator(completion: Mapping[str, object]) -> str | None:
+    """Deeply validate the variation contract before any transition.
+
+    The advertised variation payload is collected in full and the typed
+    :class:`VariationEvaluation` decoder re-runs as a drift guard: a point that
+    differs from the center in more than one parameter, an uncovered declared
+    parameter, a repeated center or duplicate point vector, absent succeeded
+    metrics, or a non-finite metric or parameter value rejects the contract
+    here instead of poisoning the rebuild fold.
+    """
+    payload = completion.get("variation")
+    if not isinstance(payload, Mapping) or not payload:
+        return "completion field 'variation' must be a non-empty object"
+    errors = variation_payload_errors(payload)
+    if not errors:
+        try:
+            VariationEvaluation.from_dict(payload)
+        except WorkflowError as error:
+            errors = [str(error)]
+    if errors:
+        return format_contract_errors(errors)
+    return None
+
+
+def _forward_validator(completion: Mapping[str, object]) -> str | None:
+    """Deeply validate the forward-validation contract before any transition.
+
+    The advertised forward payload is collected in full and the typed
+    :class:`ForwardEvaluation` decoder re-runs as a drift guard.  The nested
+    null and variation evidence is checked through the null-testing and
+    variation contracts' own cross-checks: an observed value that disagrees
+    with its metrics, a missing succeeded replicate, a mismatched exceedance
+    count or p-value, a point that differs in two parameters, an uncovered
+    declared parameter, or an unparseable forward window rejects the contract
+    here instead of poisoning the rebuild fold.
+    """
+    payload = completion.get("forwardValidation")
+    if not isinstance(payload, Mapping) or not payload:
+        return "completion field 'forwardValidation' must be a non-empty object"
+    errors = forward_payload_errors(payload)
+    if not errors:
+        try:
+            ForwardEvaluation.from_dict(payload)
         except WorkflowError as error:
             errors = [str(error)]
     if errors:
@@ -466,6 +810,52 @@ def _strategy_receipt_validator(completion: Mapping[str, object]) -> str | None:
     return None
 
 
+def _strategy_backtest_validator(completion: Mapping[str, object]) -> str | None:
+    """Validate the strategy backtest handoff before any transition commits.
+
+    The typed :class:`StrategyBacktest` decoder re-runs as a drift guard.  Job
+    provenance (the job must be this phase's retained run of the frozen
+    strategy) is checked by the session services, which hold the job records.
+    """
+    payload = completion.get("backtest")
+    if not isinstance(payload, Mapping) or not payload:
+        return "completion field 'backtest' must be a non-empty object"
+    errors = strategy_backtest_payload_errors(payload)
+    if not errors:
+        try:
+            StrategyBacktest.from_dict(payload)
+        except WorkflowError as error:
+            errors = [str(error)]
+    if errors:
+        return format_contract_errors(errors)
+    return None
+
+
+_RCA_FAILURE_CLASSES = frozenset(
+    ("harness", "data", "implementation", "strategy", "market_regime")
+)
+
+
+def _rca_validator(completion: Mapping[str, object]) -> str | None:
+    """Validate one strategy root-cause diagnosis before any transition commits."""
+    payload = completion.get("diagnosis")
+    if not isinstance(payload, Mapping) or not payload:
+        return "completion field 'diagnosis' must be a non-empty object"
+    errors: list[str] = []
+    if payload.get("failureClass") not in _RCA_FAILURE_CLASSES:
+        errors.append(
+            "diagnosis.failureClass must be harness, data, implementation, "
+            "strategy, or market_regime"
+        )
+    try:
+        RcaDiagnosis.from_dict(payload)
+    except WorkflowError as error:
+        errors.append(str(error))
+    if errors:
+        return format_contract_errors(errors)
+    return None
+
+
 def _phase_completion_schema(
     phase: HypothesisDevelopmentPhase,
     required: tuple[str, ...],
@@ -482,6 +872,18 @@ def _phase_completion_schema(
         return DISCOVERY_COMPLETION_SCHEMA
     if phase is HypothesisDevelopmentPhase.MODEL_CREATION:
         return HYPOTHESIS_COMPLETION_SCHEMA
+    if phase is HypothesisDevelopmentPhase.VERDICT:
+        advertised_targets = tuple(
+            target for target in targets if target != _FAILED.value
+        )
+        return {
+            "type": "object",
+            "required": ["verdict"],
+            "properties": {
+                "target": {"type": "string", "enum": list(advertised_targets)},
+                "verdict": VERDICT_PAYLOAD_SCHEMA,
+            },
+        }
     if phase is HypothesisDevelopmentPhase.STRATEGY_DESIGN:
         return {
             "type": "object",
@@ -498,6 +900,58 @@ def _phase_completion_schema(
                         "kind": {"type": "string", "enum": ["strategy"]},
                     },
                 },
+            },
+        }
+    if phase is HypothesisDevelopmentPhase.OPTIMIZATION:
+        advertised_targets = tuple(
+            target for target in targets if target != _FAILED.value
+        )
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["optimization"],
+            "properties": {
+                "target": {"type": "string", "enum": list(advertised_targets)},
+                "optimization": CANDIDATE_EVALUATION_PAYLOAD_SCHEMA,
+            },
+        }
+    if phase is HypothesisDevelopmentPhase.NULL_TESTING:
+        advertised_targets = tuple(
+            target for target in targets if target != _FAILED.value
+        )
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["nullTesting"],
+            "properties": {
+                "target": {"type": "string", "enum": list(advertised_targets)},
+                "nullTesting": NULL_TEST_EVALUATION_PAYLOAD_SCHEMA,
+            },
+        }
+    if phase is HypothesisDevelopmentPhase.VARIATION:
+        advertised_targets = tuple(
+            target for target in targets if target != _FAILED.value
+        )
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["variation"],
+            "properties": {
+                "target": {"type": "string", "enum": list(advertised_targets)},
+                "variation": VARIATION_PAYLOAD_SCHEMA,
+            },
+        }
+    if phase is HypothesisDevelopmentPhase.FORWARD_VALIDATION:
+        advertised_targets = tuple(
+            target for target in targets if target != _FAILED.value
+        )
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["forwardValidation"],
+            "properties": {
+                "target": {"type": "string", "enum": list(advertised_targets)},
+                "forwardValidation": FORWARD_PAYLOAD_SCHEMA,
             },
         }
     # The advertised target enum names only real successors: the engine still
@@ -557,9 +1011,13 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
         "run_backtest",
         "read_sdk_reference",
     )
+    candidate_tools = (*backtest_tools, "run_backtest_batch")
+    null_testing_tools = (*backtest_tools, "run_null_batch")
+    variation_tools = (*backtest_tools, "run_backtest_batch")
+    forward_tools = (*backtest_tools, "run_backtest_batch", "run_null_batch")
     run_evidence_tools = (
         "get_job_status",
-        "get_run",
+        "get_job_result",
         "list_artifacts",
         "read_artifact",
     )
@@ -571,13 +1029,14 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
         "rejected, report the blocker rather than supplying inline source or "
         "bypassing validation. Launch acceptance is not a successful completed run: "
         "never assume launch success means results are available. Retain the returned "
-        "job_id/run_id and inspect get_job_status {job_id: ...} while queued or "
-        "running. After terminal status, call get_run {run_id: ...}, list_artifacts "
-        "{run_id: ...} and read_artifact {run_id: ..., name: ...} to inspect actual "
+        "job_id and inspect get_job_status {job_id: ...} while queued or "
+        "running. After terminal status, call get_job_result {job_id: ...}, "
+        "list_artifacts {job_id: ...} and read_artifact {job_id: ..., name: ...} to "
+        "inspect actual "
         "metrics and evidence. Record terminal failures honestly; do not fabricate "
         "metrics or artifacts. Include strategy.programId and the actual executed "
         "version/gitCommit from the launch receipt in the completion handoff so the "
-        "next phase can identify the latest-ID run. Request phase completion yourself "
+        "next phase can identify the latest job. Request phase completion yourself "
         "only after inspecting the terminal outcome. These are agent instructions, "
         "not runtime polling or repair caps."
     )
@@ -623,6 +1082,7 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
             ConversationPhase,
             {
                 phase.MODEL_CREATION.value: reset_premise,
+                phase.COMPLETED.value: identity_pipe,
                 phase.FAILED.value: identity_pipe,
             },
             "research",
@@ -635,7 +1095,7 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
             _fold_discovery,
             (
                 "get_job_status",
-                "get_run",
+                "get_job_result",
                 "list_artifacts",
                 "read_artifact",
             ),
@@ -664,8 +1124,8 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
             spec=DeterministicPhase(
                 phase=phase.FALSIFICATION_TRIALS.value,
                 contract=run_falsification_trials,
-                validate=_list_field("trials"),
-                required=("trials",),
+                validate=_trials_validator,
+                required=("trials", "research"),
                 on_complete=phase.VERDICT.value,
             ),
             edges={
@@ -694,7 +1154,7 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
             "Record the falsification verdict from the trial results.",
             "Recording the falsification verdict.",
             "verdict",
-            _mapping_field("verdict"),
+            _verdict_validator,
             _verdict_seed,
             _fold_verdict,
         ),
@@ -712,7 +1172,7 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
             "strategy",
             _strategy_receipt_validator,
             _strategy_design_seed,
-            None,
+            _fold_strategy_design,
             tools=(*knowledge_tools, *program_tools),
         ),
         agent(
@@ -728,12 +1188,14 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
             "Run the designed strategy through the harness and record its test result.",
             "Testing the designed strategy through the harness.",
             "backtest",
-            _mapping_field("backtest"),
+            _strategy_backtest_validator,
             _contract_seed(
                 "Run the designed strategy through the harness and record its test result. "
                 + backtest_execution_guidance
+                + " Complete with target optimization when the backtest succeeded, "
+                "or target strategy_rca when the evidence shows the design is broken."
             ),
-            None,
+            _fold_strategy_backtesting,
             mcp_tools=run_evidence_tools,
             tools=backtest_tools,
         ),
@@ -749,15 +1211,73 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
             "Diagnose the failed strategy backtest and prescribe a concrete revision.",
             "Diagnosing the failed strategy backtest.",
             "diagnosis",
-            _mapping_field("diagnosis"),
+            _rca_validator,
             _contract_seed(
-                "Diagnose the failed strategy backtest and prescribe a concrete revision.",
+                "Diagnose the failed strategy backtest and prescribe a concrete revision. "
+                "Complete with target strategy_design once the revision is recorded.",
                 schema=_RCA_SCHEMA,
             ),
-            None,
+            _fold_strategy_rca,
         ),
         agent(
             phase.OPTIMIZATION,
+            OneShotPhase,
+            {
+                phase.NULL_TESTING.value: identity_pipe,
+                phase.STRATEGY_RCA.value: identity_pipe,
+                phase.FAILED.value: identity_pipe,
+            },
+            "coding",
+            "Thesis coding optimization orchestrator",
+            "Evaluate a bounded set of parameter candidates for the designed strategy and select a shortlist.",
+            "Preparing the bounded candidate evaluation batch.",
+            "optimization",
+            _optimization_validator,
+            _optimization_seed,
+            _fold_optimization,
+            mcp_tools=run_evidence_tools,
+            tools=candidate_tools,
+        ),
+        agent(
+            phase.NULL_TESTING,
+            OneShotPhase,
+            {
+                phase.VARIATION.value: identity_pipe,
+                phase.STRATEGY_RCA.value: identity_pipe,
+                phase.FAILED.value: identity_pipe,
+            },
+            "coding",
+            "Thesis null-testing orchestrator",
+            "Submit one block-permutation null run per seed for the selected candidate and record the observed statistic, exceedance count, and p-value honestly.",
+            "Running the block-permutation null batch.",
+            "nullTesting",
+            _null_testing_validator,
+            _null_testing_seed,
+            _fold_null_testing,
+            mcp_tools=run_evidence_tools,
+            tools=null_testing_tools,
+        ),
+        agent(
+            phase.VARIATION,
+            OneShotPhase,
+            {
+                phase.FORWARD_VALIDATION.value: identity_pipe,
+                phase.STRATEGY_RCA.value: identity_pipe,
+                phase.FAILED.value: identity_pipe,
+            },
+            "coding",
+            "Thesis variation orchestrator",
+            "Measure a deterministic one-at-a-time parameter neighborhood around the shortlisted candidate and assess whether the edge sits on a stable plateau.",
+            "Running the deterministic one-at-a-time parameter neighborhood.",
+            "variation",
+            _variation_validator,
+            _variation_seed,
+            _fold_variation,
+            mcp_tools=run_evidence_tools,
+            tools=variation_tools,
+        ),
+        agent(
+            phase.FORWARD_VALIDATION,
             OneShotPhase,
             {
                 phase.COMPLETED.value: identity_pipe,
@@ -765,18 +1285,15 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
                 phase.FAILED.value: identity_pipe,
             },
             "coding",
-            "Thesis coding optimization orchestrator",
-            "Run the optimization backtest for the designed strategy.",
-            "Preparing the bounded strategy optimization run.",
-            "optimization",
-            _mapping_field("optimization"),
-            _contract_seed(
-                "Run the optimization backtest for the designed strategy. "
-                + backtest_execution_guidance
-            ),
-            None,
+            "Thesis forward-validation orchestrator",
+            "Re-run the frozen center, null design, and variation points on the protected forward window and record the honest development-versus-forward comparison.",
+            "Running the protected forward out-of-sample validation.",
+            "forwardValidation",
+            _forward_validator,
+            _forward_validation_seed,
+            _fold_forward_validation,
             mcp_tools=run_evidence_tools,
-            tools=backtest_tools,
+            tools=forward_tools,
         ),
         PhaseDeclaration(
             TerminalPhase(phase=phase.COMPLETED.value),
@@ -838,7 +1355,6 @@ def build_hypothesis_development_workflow(
     programs: ProgramSnapshots | None = None,
     validator: StrategySandboxValidator | None = None,
     hypothesis_store: HypothesisStore | None = None,
-    ledger: AttemptLedger | None = None,
     subagent_factory: SubagentContextFactory | None = None,
     journal: CommandJournal | None = None,
     clock: Callable[[], datetime] = _utc_now,
@@ -887,7 +1403,6 @@ def build_hypothesis_development_workflow(
         research_runner=resolved_research_runner,
         programs=programs,
         validator=validator,
-        ledger=ledger,
         journal=journal,
         research_role=research_role,
         experiment_id=experiment_id,

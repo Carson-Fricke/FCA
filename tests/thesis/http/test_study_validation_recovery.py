@@ -9,8 +9,9 @@ import pytest
 from tests.thesis.workflows.registry.hypothesis_development._support import (
     _discovery_envelope,
     _hypothesis_envelope,
-    _legacy_model,
+    _inline_model,
 )
+from tests.thesis.workspaces._support import MemoryGitFactory, Repositories
 
 from thesis.agent.harness_tools import (
     HarnessToolFailure,
@@ -23,12 +24,18 @@ from thesis.agent.runtime.context import ToolContext
 from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.store import PersistenceSubAgentStore
 from thesis.chat import ChatService
+from thesis.chat.contracts import ToolJobState
+from thesis.experiments.mandate import (
+    derive_mandate,
+    rfc3339,
+)
 from thesis.http import serving
-from thesis.persistence.git import GitCoordinator
 from thesis.providers.openrouter import OpenRouterProvider
+from thesis.research.hypothesis import InMemoryHypothesisStore
+from thesis.research.models import InMemoryResearchModelStore
 from thesis.workflows.core.execution_store import InMemoryExecutionStore
-from thesis.workspaces.local import LocalWorkspaceProvider
 from thesis.workspaces.manifest import load_workspace_manifest
+from thesis.workspaces.programs import WorkspacePrograms
 
 
 class Harness(HarnessToolProvider):
@@ -55,17 +62,18 @@ class Harness(HarnessToolProvider):
         self.reject = False
         self.compiler_identity = "test-harness-v1"
         self.pending_backtest = False
+        self.refuse_backtest = False
 
     def list_tools(self):
         return tuple(
             HarnessToolSpec(
                 name=name,
-                description="Inspect run evidence",
+                description="Inspect job evidence",
                 input_schema={"type": "object"},
             )
             for name in (
                 "get_job_status",
-                "get_run",
+                "get_job_result",
                 "list_artifacts",
                 "read_artifact",
             )
@@ -97,7 +105,7 @@ class Harness(HarnessToolProvider):
                 return HarnessToolResult(
                     tool=name,
                     ok=True,
-                    structured={"job_id": arguments["job_id"], "state": "complete"},
+                    structured={"job_id": arguments["job_id"], "state": "succeeded"},
                 )
             return HarnessToolResult(
                 tool=name,
@@ -107,26 +115,52 @@ class Harness(HarnessToolProvider):
                     message=f"job '{arguments['job_id']}' does not exist",
                 ),
             )
+        if name == "run_backtest" and self.refuse_backtest:
+            return HarnessToolResult(
+                tool=name,
+                ok=False,
+                failure=HarnessToolFailure(
+                    kind="harness",
+                    message="refused before admission",
+                    execution_certainty="not_started",
+                ),
+            )
         if name == "run_backtest" and self.pending_backtest:
             return HarnessToolResult(
                 tool=name,
                 ok=True,
-                structured={"job_id": "study-run", "state": "running"},
+                structured={
+                    "job_id": self._submitted_job_id(arguments),
+                    "state": "running",
+                },
             )
         return HarnessToolResult(
             tool=name,
             ok=True,
             structured={
-                "job_id": "study-run",
-                "state": "complete",
+                "job_id": self._submitted_job_id(arguments),
+                "state": "succeeded",
                 "metrics": {"sharpe": 1.0, "fit.baseline": 0.5},
                 "artifacts": [],
             },
         )
 
+    @staticmethod
+    def _submitted_job_id(arguments):
+        config = arguments.get("config")
+        if isinstance(config, Mapping):
+            candidate = config.get("job_id")
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        candidate = arguments.get("job_id")
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+        return "job-study-run"
+
 
 def setup_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    repositories = LocalWorkspaceProvider(tmp_path / "workspaces")
+    factory = MemoryGitFactory()
+    repositories = Repositories(tmp_path / "workspaces", factory)
     manifest = load_workspace_manifest("config/thesis/workspace.yaml")
     repositories.create(manifest)
     chat = ChatService()
@@ -142,7 +176,25 @@ def setup_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         callbacks["apply"] = kwargs["phase_completions"]
         return serving.ControlToolService(**kwargs)
 
+    class MemoryPrograms(WorkspacePrograms):
+        def __init__(self, repository_provider, harness_tools=None, **kwargs):
+            super().__init__(
+                repository_provider,
+                harness_tools,
+                git_factory=factory,
+                **kwargs,
+            )
+
     monkeypatch.setattr(serving, "Conversations", conversations)
+    monkeypatch.setattr(serving, "WorkspacePrograms", MemoryPrograms)
+    monkeypatch.setattr(
+        serving,
+        "_workspace_stores",
+        lambda workspace_root, workspace_repositories=None: (
+            InMemoryResearchModelStore(),
+            InMemoryHypothesisStore(),
+        ),
+    )
     work = []
     stack = serving.build_serving_stack(
         chat_service=chat,
@@ -187,7 +239,7 @@ def setup_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         allowed_tools=record.allowed_tools,
     )
     registry = callbacks["registry"](context)
-    legacy = _legacy_model()
+    legacy = _inline_model()
     configuration = {
         **cast(dict, legacy["harnessConfiguration"]),
         "subscriptions": [
@@ -221,7 +273,7 @@ def completion_from(receipt: Mapping[str, object]) -> dict[str, object]:
         key: receipt[key]
         for key in ("workspaceId", "kind", "programId", "gitCommit", "version")
     }
-    model = _legacy_model()
+    model = _inline_model()
     return {
         "intentEpoch": 0,
         "target": "falsification_trials",
@@ -256,7 +308,7 @@ def test_author_validate_complete_then_trials_use_pinned_commit(tmp_path, monkey
     assert callbacks["validate"](request.workspace_id, record, completion) is None
     assert len(harness.calls) == validate_count  # Completion never recompiles.
     callbacks["apply"](request.workspace_id, record, completion)
-    original = str(_legacy_model()["source"])
+    original = str(_inline_model()["source"])
     updated = registry.dispatch(
         "update_study",
         {
@@ -288,8 +340,7 @@ def test_author_validate_complete_then_trials_use_pinned_commit(tmp_path, monkey
     )
     assert validation.is_file()
     assert (
-        GitCoordinator(repositories.open(request.workspace_id).root).head()
-        != checked.structured["gitCommit"]
+        repositories.store(request.workspace_id).head != checked.structured["gitCommit"]
     )
 
 
@@ -355,8 +406,8 @@ def test_failed_validation_requires_patch_and_revalidate_id(tmp_path, monkeypatc
     finished = [
         message
         for message in messages
-        if (message.data or {}).get("tool") == "verify_program_reference"
-        and message.tool_result
+        if message.tool_result
+        and message.tool_result.get("tool") == "verify_program_reference"
     ]
     assert len(finished) == 2
     for message in finished:
@@ -398,7 +449,7 @@ def test_inline_validation_and_foreign_or_stale_completion_are_rejected(
     _, _, _, request, record, registry, _, callbacks, _ = setup_workflow(
         tmp_path, monkeypatch
     )
-    assert not registry.dispatch("validate_study", {"model": _legacy_model()}).ok
+    assert not registry.dispatch("validate_study", {"model": _inline_model()}).ok
     checked = registry.dispatch("validate_study", {"program_id": "momentum"})
     completion = completion_from(checked.structured)
     helper = replace(record, phase_executor=False)
@@ -476,7 +527,19 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
     }
     assert registry.dispatch(
         "author_strategy",
-        {"program_id": "alpha", "source": STRATEGY_TEMPLATE, "configuration": config},
+        {
+            "program_id": "alpha",
+            "source": STRATEGY_TEMPLATE,
+            "configuration": config,
+            "parameter_declaration": {
+                "fast": {
+                    "type": "integer",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 20,
+                }
+            },
+        },
     ).ok
     checked = registry.dispatch("validate_strategy", {"program_id": "alpha"})
     assert checked.ok
@@ -527,8 +590,27 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
     harness.pending_backtest = True
     result = backtest_registry.dispatch("run_backtest", {"program_id": "alpha"})
     assert result.ok
+    executed_job_id = cast(str, result.structured["job_id"])
+    retained = stack.chat_service.find_tool_job(request.workspace_id, executed_job_id)
+    assert retained is not None
+    assert retained.attribution["programId"] == "alpha"
+    assert retained.attribution["kind"] == "strategy"
+    assert retained.state is ToolJobState.RUNNING
+    assert retained.submission_certainty == "unknown_outcome"
     assert result.structured["result"]["state"] == "running"
     assert "metrics" not in result.structured["result"]
+    harness.refuse_backtest = True
+    refused = backtest_registry.dispatch("run_backtest", {"program_id": "alpha"})
+    harness.refuse_backtest = False
+    assert not refused.ok
+    refused_launch = [
+        arguments for name, arguments in harness.calls if name == "run_backtest"
+    ][-1]
+    refused_job_id = str(cast(Mapping[str, object], refused_launch["config"])["job_id"])
+    refused_job = stack.chat_service.find_tool_job(request.workspace_id, refused_job_id)
+    assert refused_job is not None
+    assert refused_job.state is ToolJobState.FAILED
+    assert refused_job.submission_certainty == "not_started"
     launch = next(
         arguments for name, arguments in harness.calls if name == "run_backtest"
     )
@@ -548,10 +630,10 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         == "strategy_backtesting"
     )
     for tool, arguments in (
-        ("get_job_status", {"job_id": "study-run"}),
-        ("get_run", {"run_id": "study-run"}),
-        ("list_artifacts", {"run_id": "study-run"}),
-        ("read_artifact", {"run_id": "study-run", "name": "metrics.json"}),
+        ("get_job_status", {"job_id": "job-study-run"}),
+        ("get_job_result", {"job_id": "job-study-run"}),
+        ("list_artifacts", {"job_id": "job-study-run"}),
+        ("read_artifact", {"job_id": "job-study-run", "name": "metrics.json"}),
         ("read_sdk_reference", {"topic": "strategy"}),
     ):
         assert backtest_registry.dispatch(tool, arguments).ok
@@ -564,8 +646,11 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         backtest_node,
         {
             "target": "optimization",
-            "backtest": dict(result.structured),
-            "strategy": executed_reference,
+            "backtest": {
+                "jobId": executed_job_id,
+                "state": "succeeded",
+                "strategy": executed_reference,
+            },
         },
     )
     work.pop(0)()
@@ -594,10 +679,10 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
     ).ok
     assert optimization_registry.dispatch("run_backtest", {"program_id": "alpha"}).ok
     for tool, arguments in (
-        ("get_job_status", {"job_id": "study-run"}),
-        ("get_run", {"run_id": "study-run"}),
-        ("list_artifacts", {"run_id": "study-run"}),
-        ("read_artifact", {"run_id": "study-run", "name": "metrics.json"}),
+        ("get_job_status", {"job_id": "job-study-run"}),
+        ("get_job_result", {"job_id": "job-study-run"}),
+        ("list_artifacts", {"job_id": "job-study-run"}),
+        ("read_artifact", {"job_id": "job-study-run", "name": "metrics.json"}),
     ):
         assert optimization_registry.dispatch(tool, arguments).ok
     assert (
@@ -606,10 +691,386 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         ).phase
         == "optimization"
     )
+    batch = optimization_registry.dispatch(
+        "run_backtest_batch",
+        {
+            "program_id": "alpha",
+            "assignments": [{"fast": 5}, {"fast": 10}, {"fast": 20}],
+        },
+    )
+    assert batch.ok
+    batch_id = cast(str, batch.structured["batchId"])
+    points = cast(list[dict[str, object]], batch.structured["points"])
+    assert [point["state"] for point in points] == ["running", "running", "running"]
+    for point in points:
+        job_id = cast(str, point["jobId"])
+        assert optimization_registry.dispatch("get_job_status", {"job_id": job_id}).ok
+        assert optimization_registry.dispatch("get_job_result", {"job_id": job_id}).ok
+    evaluation = {
+        "strategy": executed_reference,
+        "batchId": batch_id,
+        "assignments": [
+            {
+                "parameters": point["parameters"],
+                "jobId": point["jobId"],
+                "state": "succeeded",
+                "metrics": {"sharpe": 1.0, "fit.baseline": 0.5},
+                "error": None,
+            }
+            for point in points
+        ],
+        "shortlist": [
+            {
+                "parameters": points[0]["parameters"],
+                "jobId": points[0]["jobId"],
+                "rationale": (
+                    "Best cost-adjusted return with the steadiest neighborhood."
+                ),
+            }
+        ],
+        "selectionRule": (
+            "Net total return and profit factor after costs, with drawdown and "
+            "turnover penalties and parameter diversity."
+        ),
+        "limitations": "One symbol and one in-sample window.",
+    }
+    workflow.apply_phase_completion(
+        request,
+        optimization_node,
+        {"target": "null_testing", "optimization": evaluation},
+    )
+    work.pop(0)()
     assert (
-        WorkspacePrograms(repositories).load(request.workspace_id, "strategy", "alpha")[
-            "version"
-        ]
+        stack.chat_service.get_execution(
+            request.workspace_id, request.execution_id
+        ).phase
+        == "null_testing"
+    )
+    null_node = workflow.active_orchestrators[request.execution_id].sub_agent_id
+    null_testing = PersistenceSubAgentStore(
+        stack.chat_service.persistence
+    ).get_sub_agent(request.workspace_id, null_node)
+    assert null_testing is not None
+    null_registry = callbacks["registry"](
+        replace(
+            context,
+            conversation_id=null_node,
+            sub_agent_id=null_node,
+            allowed_tools=null_testing.allowed_tools,
+        )
+    )
+    assert null_registry.dispatch("run_backtest", {"program_id": "alpha"}).ok
+    null_batch = null_registry.dispatch(
+        "run_null_batch",
+        {
+            "program_id": "alpha",
+            "parameters": {"fast": 5},
+            "block_size": 5,
+            "seeds": [1, 2],
+        },
+    )
+    assert null_batch.ok
+    null_points = cast(list[dict[str, object]], null_batch.structured["points"])
+    assert [point["seed"] for point in null_points] == [1, 2]
+    assert all(isinstance(point["jobId"], str) for point in null_points)
+    observed_run = cast(list[dict[str, object]], batch.structured["points"])[0]["jobId"]
+    null_evaluation = {
+        "strategy": executed_reference,
+        "batchId": null_batch.structured["batchId"],
+        "mode": "block_permutation",
+        "blockSize": 5,
+        "statistic": "sharpe",
+        "direction": "upper",
+        "observed": {
+            "jobId": observed_run,
+            "metrics": {"sharpe": 1.0, "fit.baseline": 0.5},
+            "value": 1.0,
+        },
+        "replicates": [
+            {
+                "seed": point["seed"],
+                "jobId": point["jobId"],
+                "state": "succeeded",
+                "metrics": {"sharpe": 1.0, "fit.baseline": 0.5},
+                "error": None,
+            }
+            for point in null_points
+        ],
+        "exceedanceCount": 2,
+        "pValue": 1.0,
+        "limitations": "Two seeds and one block size on one symbol.",
+    }
+    workflow.apply_phase_completion(
+        request,
+        null_node,
+        {"target": "variation", "nullTesting": null_evaluation},
+    )
+    work.pop(0)()
+    assert (
+        stack.chat_service.get_execution(
+            request.workspace_id, request.execution_id
+        ).phase
+        == "variation"
+    )
+    variation_node = workflow.active_orchestrators[request.execution_id].sub_agent_id
+    variation_agent = PersistenceSubAgentStore(
+        stack.chat_service.persistence
+    ).get_sub_agent(request.workspace_id, variation_node)
+    assert variation_agent is not None
+    variation_registry = callbacks["registry"](
+        replace(
+            context,
+            conversation_id=variation_node,
+            sub_agent_id=variation_node,
+            allowed_tools=variation_agent.allowed_tools,
+        )
+    )
+    declaration = variation_registry.dispatch("read_strategy", {"program_id": "alpha"})
+    assert declaration.ok
+    assert declaration.structured["parameters"] == {
+        "fast": {
+            "type": "integer",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 20,
+        }
+    }
+    variation_batch = variation_registry.dispatch(
+        "run_backtest_batch",
+        {
+            "program_id": "alpha",
+            "assignments": [{"fast": 4}, {"fast": 6}],
+        },
+    )
+    assert variation_batch.ok
+    variation_points = cast(
+        list[dict[str, object]], variation_batch.structured["points"]
+    )
+    assert [point["parameters"] for point in variation_points] == [
+        {"fast": 4},
+        {"fast": 6},
+    ]
+    assert all(isinstance(point["jobId"], str) for point in variation_points)
+    for point in variation_points:
+        job_id = cast(str, point["jobId"])
+        assert variation_registry.dispatch("get_job_status", {"job_id": job_id}).ok
+        assert variation_registry.dispatch("get_job_result", {"job_id": job_id}).ok
+    variation = {
+        "strategy": executed_reference,
+        "batchId": variation_batch.structured["batchId"],
+        "center": {
+            "parameters": {"fast": 5},
+            "jobId": observed_run,
+            "state": "succeeded",
+            "metrics": {"sharpe": 1.0, "fit.baseline": 0.5},
+            "error": None,
+        },
+        "points": [
+            {
+                "parameters": point["parameters"],
+                "jobId": point["jobId"],
+                "state": "succeeded",
+                "metrics": {"sharpe": 1.0, "fit.baseline": 0.5},
+                "error": None,
+            }
+            for point in variation_points
+        ],
+        "parameters": ["fast"],
+        "stability": "Fast lookback is a plateau across the tested neighborhood.",
+        "limitations": "One parameter at a time on one symbol and one window.",
+    }
+    workflow.apply_phase_completion(
+        request,
+        variation_node,
+        {"target": "forward_validation", "variation": variation},
+    )
+    work.pop(0)()
+    forward_execution = stack.chat_service.get_execution(
+        request.workspace_id, request.execution_id
+    )
+    assert forward_execution.phase == "forward_validation"
+    forward_node = workflow.active_orchestrators[request.execution_id].sub_agent_id
+    forward_agent = PersistenceSubAgentStore(
+        stack.chat_service.persistence
+    ).get_sub_agent(request.workspace_id, forward_node)
+    assert forward_agent is not None
+    forward_registry = callbacks["registry"](
+        replace(
+            context,
+            conversation_id=forward_node,
+            sub_agent_id=forward_node,
+            allowed_tools=forward_agent.allowed_tools,
+        )
+    )
+    forward_start = len(harness.calls)
+    center_run = forward_registry.dispatch(
+        "run_backtest", {"program_id": "alpha", "parameters": {"fast": 5}}
+    )
+    assert center_run.ok
+    forward_observed_run = cast(str, center_run.structured["job_id"])
+    forward_null_batch = forward_registry.dispatch(
+        "run_null_batch",
+        {
+            "program_id": "alpha",
+            "parameters": {"fast": 5},
+            "block_size": 5,
+            "seeds": [1, 2],
+        },
+    )
+    assert forward_null_batch.ok
+    forward_null_points = cast(
+        list[dict[str, object]], forward_null_batch.structured["points"]
+    )
+    assert all(isinstance(point["jobId"], str) for point in forward_null_points)
+    forward_variation_batch = forward_registry.dispatch(
+        "run_backtest_batch",
+        {
+            "program_id": "alpha",
+            "assignments": [{"fast": 4}, {"fast": 6}],
+        },
+    )
+    assert forward_variation_batch.ok
+    forward_points = cast(
+        list[dict[str, object]], forward_variation_batch.structured["points"]
+    )
+    assert [point["parameters"] for point in forward_points] == [
+        {"fast": 4},
+        {"fast": 6},
+    ]
+    for tool, arguments in (
+        ("get_job_status", {"job_id": forward_observed_run}),
+        ("get_job_result", {"job_id": forward_observed_run}),
+    ):
+        assert forward_registry.dispatch(tool, arguments).ok
+    for point in forward_null_points:
+        job_id = cast(str, point["jobId"])
+        assert forward_registry.dispatch("get_job_status", {"job_id": job_id}).ok
+        assert forward_registry.dispatch("get_job_result", {"job_id": job_id}).ok
+    for point in forward_points:
+        job_id = cast(str, point["jobId"])
+        assert forward_registry.dispatch("get_job_status", {"job_id": job_id}).ok
+        assert forward_registry.dispatch("get_job_result", {"job_id": job_id}).ok
+
+    document = workflow.execution_store.get(request.execution_id)
+    mandate = derive_mandate(
+        request.workspace_id,
+        request.execution_id,
+        document.launch_request,
+    )
+    assert mandate is not None
+    forward_window = {
+        "start": rfc3339(mandate.forward_window.start_ns),
+        "end": rfc3339(mandate.forward_window.end_ns),
+    }
+    forward_metrics = {"sharpe": 1.0, "fit.baseline": 0.5}
+    forward_evaluation = {
+        "strategy": executed_reference,
+        "window": forward_window,
+        "statistic": "sharpe",
+        "direction": "upper",
+        "observed": {
+            "jobId": forward_observed_run,
+            "metrics": forward_metrics,
+            "value": 1.0,
+        },
+        "null": {
+            "batchId": forward_null_batch.structured["batchId"],
+            "blockSize": 5,
+            "replicates": [
+                {
+                    "seed": point["seed"],
+                    "jobId": point["jobId"],
+                    "state": "succeeded",
+                    "metrics": forward_metrics,
+                    "error": None,
+                }
+                for point in forward_null_points
+            ],
+            "exceedanceCount": 2,
+            "pValue": 1.0,
+        },
+        "variation": {
+            "batchId": forward_variation_batch.structured["batchId"],
+            "center": {
+                "parameters": {"fast": 5},
+                "jobId": forward_observed_run,
+                "state": "succeeded",
+                "metrics": forward_metrics,
+                "error": None,
+            },
+            "points": [
+                {
+                    "parameters": point["parameters"],
+                    "jobId": point["jobId"],
+                    "state": "succeeded",
+                    "metrics": forward_metrics,
+                    "error": None,
+                }
+                for point in forward_points
+            ],
+            "parameters": ["fast"],
+            "stability": (
+                "Fast lookback holds on the forward window across the tested "
+                "neighborhood."
+            ),
+        },
+        "comparison": (
+            "Development and forward both measured Sharpe 1.0 with no "
+            "exceedance; the neighborhood stability held on the protected "
+            "window."
+        ),
+        "limitations": "One protected window, two seeds, one parameter.",
+    }
+    workflow.apply_phase_completion(
+        request,
+        forward_node,
+        {"target": "completed", "forwardValidation": forward_evaluation},
+    )
+    execution = stack.chat_service.get_execution(
+        request.workspace_id, request.execution_id
+    )
+    assert execution.phase == "completed"
+    assert execution.state.value == "completed"
+    transitions = workflow.execution_store.get(request.execution_id).transitions
+    assert transitions[-2].completion["variation"]["stability"] == (
+        "Fast lookback is a plateau across the tested neighborhood."
+    )
+    assert transitions[-2].completion["variation"]["parameters"] == ["fast"]
+    stored = transitions[-1]
+    assert stored.completion["forwardValidation"]["window"] == forward_window
+    assert stored.completion["forwardValidation"]["statistic"] == "sharpe"
+    outputs = [
+        event
+        for event in workflow.observe(request.workspace_id, request.execution_id).events
+        if event.type.value == "sub_agent.output"
+        and event.payload.get("phase") == "variation"
+    ]
+    assert outputs
+    artifact = outputs[-1].payload.get("artifact")
+    assert isinstance(artifact, Mapping)
+    assert artifact["type"] == "variation"
+    assert artifact["parameters"] == ["fast"]
+    assert artifact["stability"] == (
+        "Fast lookback is a plateau across the tested neighborhood."
+    )
+    artifact_center = artifact["center"]
+    assert isinstance(artifact_center, Mapping)
+    assert artifact_center["state"] == "succeeded"
+    # The forward phase policy rewrote the protected window on every submitted
+    # forward run: the center, both null replicates, and both variation points.
+    submitted = [
+        cast(dict[str, object], arguments["config"])
+        for name, arguments in harness.calls[forward_start:]
+        if name == "run_backtest"
+    ]
+    assert len(submitted) == 5
+    for run_document in submitted:
+        assert run_document["start"] == forward_window["start"]
+        assert run_document["end"] == forward_window["end"]
+    assert (
+        WorkspacePrograms(repositories, git_factory=repositories.git_factory).load(
+            request.workspace_id, "strategy", "alpha"
+        )["version"]
         != reference["version"]
     )
 
@@ -627,8 +1088,18 @@ def test_completion_receipt_writer_failure_propagates(
     create = stack.chat_service.create_message
 
     def fail_write(*args, **kwargs):
-        if kwargs.get("data", {}).get("toolActivity") == failed_activity:
+        data = kwargs.get("data") or {}
+        if data.get("toolActivity") == failed_activity:
             raise OSError("receipt writer unavailable")
+        session = data.get("sessionMessage")
+        result = (
+            session.get("content", {}).get("result")
+            if isinstance(session, dict) and isinstance(session.get("content"), dict)
+            else None
+        )
+        if failed_activity == "finished" and isinstance(result, dict):
+            if "toolCallId" in result:
+                raise OSError("receipt writer unavailable")
         return create(*args, **kwargs)
 
     monkeypatch.setattr(stack.chat_service, "create_message", fail_write)
@@ -644,7 +1115,9 @@ def test_trials_pin_indicator_dependencies_and_configuration(tmp_path, monkeypat
     repositories, _, _, request, record, registry, harness, callbacks, work = (
         setup_workflow(tmp_path, monkeypatch)
     )
-    programs = WorkspacePrograms(repositories, harness)
+    programs = WorkspacePrograms(
+        repositories, harness, git_factory=repositories.git_factory
+    )
     snapshot = programs.load(request.workspace_id, "study", "momentum")
     configuration = snapshot["configuration"]
     assert registry.dispatch(

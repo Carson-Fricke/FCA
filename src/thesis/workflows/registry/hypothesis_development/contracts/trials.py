@@ -21,7 +21,7 @@ class FalsificationTrial:
 
     test_id: str
     falsifier_id: str
-    run_id: str
+    job_id: str
     digest: str
     run_state: str
     observed: float | None
@@ -31,7 +31,7 @@ class FalsificationTrial:
     def __post_init__(self) -> None:
         _identifier(self.test_id, "test_id")
         _identifier(self.falsifier_id, "falsifier_id")
-        _text(self.run_id, "run_id", max_length=256)
+        _text(self.job_id, "job_id", max_length=256)
         if not isinstance(self.digest, str) or _DIGEST.fullmatch(self.digest) is None:
             raise WorkflowError("trial digest must be a lowercase SHA-256 digest")
         _text(self.run_state, "run_state", max_length=64)
@@ -50,8 +50,8 @@ class FalsificationTrial:
             "digest": self.digest,
             "falsified": self.falsified,
             "falsifierId": self.falsifier_id,
+            "jobId": self.job_id,
             "observed": self.observed,
-            "runId": self.run_id,
             "runState": self.run_state,
             "testId": self.test_id,
         }
@@ -64,7 +64,7 @@ class FalsificationTrial:
         return cls(
             test_id=str(payload.get("testId", "")),
             falsifier_id=str(payload.get("falsifierId", "")),
-            run_id=str(payload.get("runId", "")),
+            job_id=str(payload.get("jobId", "")),
             digest=str(payload.get("digest", "")),
             run_state=str(payload.get("runState", "")),
             observed=(

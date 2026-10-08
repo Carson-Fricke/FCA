@@ -167,14 +167,10 @@ Notes on the composition:
 - `THESIS_WORKSPACE_ROOT` overrides the persisted workspace root; omit it for
   the default local app-data location. Workspaces themselves are created through
   the API (see section 4).
-- Conversations are durable and use the same store in local and workspace
-  runs. When `THESIS_STORAGE_ACCOUNT_NAME` is configured (the deployed
-  Container App always sets it), chat records are written to each workspace's
-  provisioned blob container under `repository/chats/` using the runtime
-  managed identity. Otherwise they persist as JSON documents under
-  `<THESIS_WORKSPACE_ROOT>/chat` (default: the local app-data location), so
-  they survive a restart of the Thesis API process.
-- Workspaces use the same store selection. With `THESIS_STORAGE_ACCOUNT_NAME`
+- Conversations are durable in the Cosmos DB `catalog` container, partitioned by
+  workspace, in local and workspace runs alike. Local runs use the Cosmos DB
+  emulator described above, and chats survive a restart of the Thesis API process.
+- The workspace catalog is selected separately from chat. With `THESIS_STORAGE_ACCOUNT_NAME`
   set, the catalog lists the blob containers under
   `THESIS_WORKSPACE_CONTAINER_PREFIX` (`thesis-ws-` by default) and each
   workspace's manifest lives at `repository/.thesis/workspace.yaml`; creating a

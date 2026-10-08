@@ -1,8 +1,7 @@
 //! Minimal SHA-256 implementation for deterministic identifier derivation.
 //!
-//! Mirrors `std.crypto.hash.sha2.Sha256` used by `types.zig`; the crate stays
-//! dependency-free so the native core builds offline on every platform. All
-//! state is stack-resident.
+//! The crate stays dependency-free so the native core builds offline on every
+//! platform. All state is stack-resident.
 
 /// Incremental SHA-256 hasher.
 #[derive(Clone)]

@@ -33,7 +33,6 @@ from thesis.chat.contracts import (
 )
 from thesis.chat.service import ChatService
 from thesis.execution.events import ExecutionEventType
-from thesis.experiments.ledger import AttemptLedger
 from thesis.persistence import CommandJournal
 from thesis.providers.invocations import ChatMessage as ProviderChatMessage
 from thesis.providers.invocations import ModelCompletion
@@ -58,7 +57,7 @@ from thesis.workflows.registry.hypothesis_development import (
     HypothesisDevelopmentState,
     build_hypothesis_development_workflow,
 )
-from thesis.workflows.research_models import ResearchModelRunner
+from thesis.workflows.research_models import ProgramSnapshots, ResearchModelRunner
 
 WORKSPACE = "workspace-demo"
 
@@ -86,7 +85,7 @@ def _id_factory() -> Callable[[str], str]:
     return lambda prefix: f"{prefix}-{next(counter)}"
 
 
-def _legacy_model() -> dict[str, object]:
+def _inline_model() -> dict[str, object]:
     return {
         "modelId": "momentum-model",
         "version": "1.0.0",
@@ -129,38 +128,49 @@ def _legacy_model() -> dict[str, object]:
             "symbols": ["SPY"],
             "start": "2024-01-01T00:00:00Z",
             "end": "2024-03-01T00:00:00Z",
-            "interval": "1min",
+            "subscriptions": [
+                {"data_type": "bars", "symbols": ["SPY"], "interval": "1min"}
+            ],
         },
     }
 
 
 def _model() -> dict[str, object]:
-    legacy = _legacy_model()
+    inline = _inline_model()
     return {
         "workspaceId": WORKSPACE,
         "kind": "study",
         "programId": "momentum-model",
         "gitCommit": "a" * 40,
         "version": "b" * 64,
-        "description": legacy["description"],
-        "outputs": legacy["outputs"],
-        "tests": legacy["tests"],
+        "description": inline["description"],
+        "outputs": inline["outputs"],
+        "tests": inline["tests"],
     }
 
 
 class FakePrograms:
     """Committed snapshot fixture for reference-based workflow tests."""
 
+    def __init__(self) -> None:
+        self.results: dict[str, Mapping[str, object]] = {}
+
+    def job_result(self, job_id: str) -> Mapping[str, object]:
+        """Return the configured harness result, defaulting to a succeeded run."""
+        return self.results.get(
+            job_id, {"job_id": job_id, "state": "succeeded", "metrics": {}}
+        )
+
     def load(self, workspace_id, kind, program_id, commit=None):
-        legacy = _legacy_model()
+        inline = _inline_model()
         return {
             "workspaceId": workspace_id,
             "kind": kind,
             "programId": program_id,
             "gitCommit": commit or "c" * 40,
             "version": "b" * 64,
-            "source": legacy["source"],
-            "configuration": legacy["harnessConfiguration"],
+            "source": inline["source"],
+            "configuration": inline["harnessConfiguration"],
             "sourceSha256": "d" * 64,
             "bundleSha256": "b" * 64,
             "files": {"program.rs": "d" * 64},
@@ -230,20 +240,340 @@ def _discovery_envelope() -> dict[str, object]:
                 "Time-series momentum proxies a slow macro drift."
             ),
             "evidence": "Small studies showed continuation after five-day gains.",
+            "entryIdea": "Enter when the five-day return is positive at the close.",
+            "exitIdea": "Exit after five trading days or when the sign flips.",
+            "assumptions": ["Daily bars are clean enough to measure five-day returns."],
+            "buildingBlocks": ["daily bars", "five-day return"],
+            "validationQuestions": ["Does the effect survive on untouched quote data?"],
+            "exploratoryEvidence": (
+                "Small studies showed continuation after five-day gains."
+            ),
         },
         "attempts": [
             {
                 "purpose": "Check momentum continuation on SPY daily bars.",
-                "studyId": "study-momentum",
                 "dataTypes": ["bars"],
                 "window": "2024-01-01T00:00:00Z to 2024-03-01T00:00:00Z",
                 "result": "Positive continuation, weak but consistent.",
                 "changed": True,
-                "runId": "run-momentum",
+                "jobId": "job-momentum",
             }
         ],
         "untouchedData": "Quote and trade data were left untouched for validation.",
         "limitations": "One market and one regime; the effect is weak.",
+    }
+
+
+def _candidate_evaluation_envelope() -> dict[str, object]:
+    return {
+        "strategy": {
+            "workspaceId": WORKSPACE,
+            "kind": "strategy",
+            "programId": "momentum",
+            "gitCommit": "a" * 40,
+            "version": "b" * 64,
+        },
+        "batchId": "batch-momentum-0123456789ab",
+        "assignments": [
+            {
+                "parameters": {"fast": 5},
+                "jobId": "strategy-momentum-scope-run-1",
+                "state": "succeeded",
+                "metrics": {"netTotalReturn": 0.12, "profitFactor": 1.6},
+                "error": None,
+            },
+            {
+                "parameters": {"fast": 10},
+                "jobId": "strategy-momentum-scope-run-2",
+                "state": "failed",
+                "metrics": None,
+                "error": "run terminated before completing",
+            },
+        ],
+        "shortlist": [
+            {
+                "parameters": {"fast": 5},
+                "jobId": "strategy-momentum-scope-run-1",
+                "rationale": (
+                    "Best cost-adjusted return with the steadiest neighborhood."
+                ),
+            }
+        ],
+        "selectionRule": (
+            "Net total return and profit factor after costs, with drawdown and "
+            "turnover penalties and parameter diversity."
+        ),
+        "limitations": "One symbol and one in-sample window.",
+    }
+
+
+def _null_test_envelope() -> dict[str, object]:
+    return {
+        "strategy": {
+            "workspaceId": WORKSPACE,
+            "kind": "strategy",
+            "programId": "momentum",
+            "gitCommit": "a" * 40,
+            "version": "b" * 64,
+        },
+        "batchId": "null-momentum-0123456789ab",
+        "mode": "block_permutation",
+        "blockSize": 7,
+        "statistic": "sharpe",
+        "direction": "upper",
+        "observed": {
+            "jobId": "strategy-momentum-scope-run-1",
+            "metrics": {"netTotalReturn": 0.12, "sharpe": 1.0},
+            "value": 1.0,
+        },
+        "replicates": [
+            {
+                "seed": 1,
+                "jobId": "strategy-momentum-scope-null-1",
+                "state": "succeeded",
+                "metrics": {"netTotalReturn": 0.14, "sharpe": 1.2},
+                "error": None,
+            },
+            {
+                "seed": 2,
+                "jobId": "strategy-momentum-scope-null-2",
+                "state": "succeeded",
+                "metrics": {"netTotalReturn": 0.08, "sharpe": 0.5},
+                "error": None,
+            },
+            {
+                "seed": 3,
+                "jobId": "strategy-momentum-scope-null-3",
+                "state": "failed",
+                "metrics": None,
+                "error": "run terminated before completing",
+            },
+        ],
+        "exceedanceCount": 1,
+        "pValue": 2 / 3,
+        "limitations": "Three seeds and one block size on one symbol.",
+    }
+
+
+def _variation_envelope() -> dict[str, object]:
+    return {
+        "strategy": {
+            "workspaceId": WORKSPACE,
+            "kind": "strategy",
+            "programId": "momentum",
+            "gitCommit": "a" * 40,
+            "version": "b" * 64,
+        },
+        "batchId": "batch-momentum-0123456789ab",
+        "center": {
+            "parameters": {"fast": 5, "slow": 20},
+            "jobId": "strategy-momentum-scope-run-1",
+            "state": "succeeded",
+            "metrics": {"netTotalReturn": 0.12, "profitFactor": 1.6},
+            "error": None,
+        },
+        "points": [
+            {
+                "parameters": {"fast": 4, "slow": 20},
+                "jobId": "strategy-momentum-scope-var-1",
+                "state": "succeeded",
+                "metrics": {"netTotalReturn": 0.10, "profitFactor": 1.4},
+                "error": None,
+            },
+            {
+                "parameters": {"fast": 6, "slow": 20},
+                "jobId": "strategy-momentum-scope-var-2",
+                "state": "succeeded",
+                "metrics": {"netTotalReturn": 0.13, "profitFactor": 1.7},
+                "error": None,
+            },
+            {
+                "parameters": {"fast": 5, "slow": 19},
+                "jobId": "strategy-momentum-scope-var-3",
+                "state": "failed",
+                "metrics": None,
+                "error": "run terminated before completing",
+            },
+            {
+                "parameters": {"fast": 5, "slow": 21},
+                "jobId": "strategy-momentum-scope-var-4",
+                "state": "running",
+                "metrics": None,
+                "error": None,
+            },
+        ],
+        "parameters": ["fast", "slow"],
+        "stability": (
+            "Fast lookback is a plateau: 4, 5 and 6 all keep the edge. Slow "
+            "lookback is thinner and the cost drag grows at 19."
+        ),
+        "limitations": "One-at-a-time variation on one symbol and one window.",
+    }
+
+
+def _forward_envelope() -> dict[str, object]:
+    return {
+        "strategy": {
+            "workspaceId": WORKSPACE,
+            "kind": "strategy",
+            "programId": "momentum",
+            "gitCommit": "a" * 40,
+            "version": "b" * 64,
+        },
+        "window": {
+            "start": "2026-06-06T12:00:00Z",
+            "end": "2026-09-04T12:00:00Z",
+        },
+        "statistic": "sharpe",
+        "direction": "upper",
+        "observed": {
+            "jobId": "strategy-momentum-forward-run-1",
+            "metrics": {"netTotalReturn": 0.05, "sharpe": 0.4},
+            "value": 0.4,
+        },
+        "null": {
+            "batchId": "null-momentum-forward-0123456789ab",
+            "blockSize": 7,
+            "replicates": [
+                {
+                    "seed": 1,
+                    "jobId": "strategy-momentum-forward-null-1",
+                    "state": "succeeded",
+                    "metrics": {"sharpe": 0.5},
+                    "error": None,
+                },
+                {
+                    "seed": 2,
+                    "jobId": "strategy-momentum-forward-null-2",
+                    "state": "succeeded",
+                    "metrics": {"sharpe": 0.1},
+                    "error": None,
+                },
+                {
+                    "seed": 3,
+                    "jobId": "strategy-momentum-forward-null-3",
+                    "state": "failed",
+                    "metrics": None,
+                    "error": "run terminated before completing",
+                },
+            ],
+            "exceedanceCount": 1,
+            "pValue": 2 / 3,
+        },
+        "variation": {
+            "batchId": "batch-momentum-forward-0123456789ab",
+            "center": {
+                "parameters": {"fast": 5, "slow": 20},
+                "jobId": "strategy-momentum-forward-run-1",
+                "state": "succeeded",
+                "metrics": {"sharpe": 0.4},
+                "error": None,
+            },
+            "points": [
+                {
+                    "parameters": {"fast": 4, "slow": 20},
+                    "jobId": "strategy-momentum-forward-var-1",
+                    "state": "succeeded",
+                    "metrics": {"sharpe": 0.35},
+                    "error": None,
+                },
+                {
+                    "parameters": {"fast": 6, "slow": 20},
+                    "jobId": "strategy-momentum-forward-var-2",
+                    "state": "succeeded",
+                    "metrics": {"sharpe": 0.45},
+                    "error": None,
+                },
+                {
+                    "parameters": {"fast": 5, "slow": 19},
+                    "jobId": "strategy-momentum-forward-var-3",
+                    "state": "failed",
+                    "metrics": None,
+                    "error": "run terminated before completing",
+                },
+            ],
+            "parameters": ["fast", "slow"],
+            "stability": (
+                "Fast lookback thins on the forward window: 4 and 6 hold a "
+                "weaker edge and the failed slow point leaves it untested."
+            ),
+        },
+        "comparison": (
+            "Development Sharpe was 1.0; the forward Sharpe is 0.4 with "
+            "p=0.667 and thinner neighborhood stability. The edge degraded but "
+            "did not invert, so the design is reportable rather than refuted."
+        ),
+        "limitations": "One protected window and three seeds.",
+    }
+
+
+def _no_candidate_discovery_envelope() -> dict[str, object]:
+    return {
+        "noCandidateReason": ("Every attempted signal decayed to nothing after costs."),
+        "attempts": [
+            {
+                "purpose": "Check momentum continuation on SPY daily bars.",
+                "dataTypes": ["bars"],
+                "window": "2024-01-01T00:00:00Z to 2024-03-01T00:00:00Z",
+                "result": "No continuation survived the cost hurdle.",
+                "changed": False,
+                "jobId": "run-momentum",
+            }
+        ],
+        "untouchedData": "Quote and trade data were left untouched for validation.",
+        "limitations": "One market and one regime; nothing to pursue.",
+    }
+
+
+def _research_envelope() -> dict[str, object]:
+    return {
+        "hypothesisId": "momentum-breakout",
+        "study": _model(),
+        "model": {
+            "workspaceId": WORKSPACE,
+            "modelId": "momentum-model",
+            "contentSha256": "a" * 64,
+        },
+        "workspaceArtifact": "workspace-model:momentum-model",
+        "fit": {
+            "workspaceId": WORKSPACE,
+            "modelId": "momentum-model",
+            "modelContentSha256": "a" * 64,
+            "fitSha256": "b" * 64,
+        },
+        "fittedParameters": {"baseline": 0.5},
+        "runtimeConfiguration": {"sourceSha256": "c" * 64},
+        "plan": {
+            "tests": [
+                {
+                    "testId": "T01",
+                    "falsifierId": "f1",
+                    "observable": "sharpe",
+                    "condition": "lt",
+                    "threshold": 0.0,
+                    "description": "Run the momentum probe and require a negative Sharpe.",
+                }
+            ],
+            "controls": [],
+        },
+        "assumptions": [
+            {
+                "falsifierId": "f1",
+                "statement": ("Run the momentum probe and require a negative Sharpe."),
+                "role": "claim",
+                "observable": "sharpe",
+                "condition": "lt",
+                "threshold": 0.0,
+                "test": "T01",
+                "observed": 1.0,
+                "falsified": False,
+                "runState": "succeeded",
+                "detail": None,
+            }
+        ],
+        "controls": [],
+        "reportDigest": "d" * 64,
+        "limitations": None,
     }
 
 
@@ -278,7 +608,11 @@ def _design_envelope(
         "version": "1.0.0",
         "files": {"strategy.py": "from harness.strategy import Strategy\n"},
         "tests": {"test_strategy.py": "def test_strategy():\n    assert True\n"},
-        "harnessConfiguration": {"seed": 7, "symbols": ["SPY"]},
+        "harnessConfiguration": {
+            "seed": 7,
+            "symbols": ["SPY"],
+            "subscriptions": [{"data_type": "quote", "symbols": ["SPY"]}],
+        },
         "exitCriteria": [
             {
                 "falsifierId": "f1",
@@ -405,7 +739,6 @@ class _Kit:
         native_provider: FakeNativeFixture,
         runner: FakeRunner,
         store: InMemoryHypothesisStore,
-        ledger: AttemptLedger,
         factory: RecordingSubagentFactory,
         journal: CommandJournal,
         conversations: Conversations,
@@ -418,7 +751,6 @@ class _Kit:
         self.native_provider = native_provider
         self.runner = runner
         self.store = store
-        self.ledger = ledger
         self.factory = factory
         self.journal = journal
         self.conversations = conversations
@@ -438,6 +770,7 @@ def _kit(
     max_depth: int = DEFAULT_MAX_DEPTH,
     max_children: int = DEFAULT_MAX_CHILDREN,
     detach: Detach | None = None,
+    programs: ProgramSnapshots | None = None,
 ) -> _Kit:
     clock = _clock()
     id_factory = _id_factory()
@@ -497,12 +830,11 @@ def _kit(
         id_factory=lambda: id_factory("invocation"),
     )
     store = InMemoryHypothesisStore()
-    ledger = AttemptLedger()
     factory = RecordingSubagentFactory()
     journal = CommandJournal(tmp_path / "journal.sqlite3")
     runner_results = list(results)
     if insert_strategy_success and len(runner_results) >= 2:
-        runner_results.insert(1, ("completed", {"sharpe": 1.0}))
+        runner_results.insert(1, ("succeeded", {"sharpe": 1.0}))
     runner = FakeRunner(runner_results)
     sub_agent_store = PersistenceSubAgentStore(chat.persistence)
     lifecycle = SubAgentLifecycle(
@@ -529,7 +861,6 @@ def _kit(
         runner=runner,
         validator=FakeValidator(),
         hypothesis_store=store,
-        ledger=ledger,
         subagent_factory=cast("SubagentContextFactory", factory),
         journal=journal,
         clock=clock,
@@ -540,7 +871,7 @@ def _kit(
             if research_runner is not None
             else None
         ),
-        programs=FakePrograms(),
+        programs=FakePrograms() if programs is None else programs,
         conversations=conversations,
         execution_store=execution_store,
         detach=detach,
@@ -552,7 +883,6 @@ def _kit(
         native_provider=native_provider,
         runner=runner,
         store=store,
-        ledger=ledger,
         factory=factory,
         journal=journal,
         conversations=conversations,

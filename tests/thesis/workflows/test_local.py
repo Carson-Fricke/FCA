@@ -43,7 +43,7 @@ def _absent() -> HarnessToolResult:
         ok=False,
         failure=HarnessToolFailure(
             kind="tool",
-            message="job 'run-1' does not exist",
+            message="job 'job-1' does not exist",
             execution_certainty="observed_failure",
         ),
     )
@@ -55,12 +55,10 @@ def _request(configuration: object = None) -> BacktestRunRequest:
         version="1.0.0",
         source=(StrategyFile("src/lib.rs", b"source"),),
         tests=(StrategyFile("tests/test.rs", b"test"),),
-        harness_configuration={"run_id": "run-1", "symbols": ["SPY"]}
-        if configuration is None
-        else configuration,
+        harness_configuration={"seed": 7} if configuration is None else configuration,
     )
     return BacktestRunRequest(
-        run_id="run-1",
+        job_id="job-1",
         workspace_id="workspace-demo",
         bundle=bundle,
         workflow_execution_id="execution-1",
@@ -69,40 +67,50 @@ def _request(configuration: object = None) -> BacktestRunRequest:
 
 
 @pytest.mark.parametrize("runner_type", [McpBacktestRunner, McpStudyRunner])
-def test_configuration_mapping_is_sent_inline(runner_type) -> None:
-    tools = _Tools(_absent(), _ok(state="complete", metrics={"edge": 1}, artifacts=[]))
+def test_configuration_mapping_is_sent_inline_with_the_submitted_job(
+    runner_type,
+) -> None:
+    tools = _Tools(
+        _absent(),
+        _ok(job_id="job-1", state="succeeded", metrics={"edge": 1}, artifacts=[]),
+    )
     result = runner_type(cast(HarnessToolProvider, tools)).run(_request())
     assert result.succeeded
+    assert result.job_id == "job-1"
+    assert tools.calls[0] == ("get_job_status", {"job_id": "job-1"})
     assert tools.calls[1] == (
         runner_type._launch_tool,
-        {"config": {"run_id": "run-1", "symbols": ["SPY"]}},
+        {"config": {"seed": 7, "job_id": "job-1"}},
     )
-
-
-def test_local_runtime_forwards_program_snapshot_port() -> None:
-    from tests.thesis.workflows.registry.hypothesis_development._support import (
-        FakePrograms,
-    )
-
-    from thesis.agent.router import ModelProvider
-    from thesis.workflows.local import build_local_workflow_runtime
-
-    programs = FakePrograms()
-    runtime = build_local_workflow_runtime(
-        model_provider=cast(ModelProvider, object()),
-        model="test/model",
-        runner=McpBacktestRunner(cast(HarnessToolProvider, _Tools())),
-        programs=programs,
-    )
-    assert runtime._programs is programs
 
 
 def test_explicit_harness_host_path_is_preserved() -> None:
-    tools = _Tools(_absent(), _ok(state="complete", metrics={}, artifacts=[]))
+    tools = _Tools(
+        _absent(),
+        _ok(job_id="job-1", state="succeeded", metrics={}, artifacts=[]),
+    )
     McpBacktestRunner(cast(HarnessToolProvider, tools)).run(
         _request("/harness/config.json")
     )
     assert tools.calls[1][1] == {"config_path": "/harness/config.json"}
+
+
+def test_launch_acknowledgement_mismatch_fails_closed() -> None:
+    tools = _Tools(
+        _absent(),
+        _ok(job_id="job-other", state="succeeded", metrics={}, artifacts=[]),
+    )
+    with pytest.raises(BacktestRunError, match="job-other"):
+        McpBacktestRunner(cast(HarnessToolProvider, tools)).run(_request())
+
+
+def test_poll_acknowledgement_mismatch_fails_closed() -> None:
+    tools = _Tools(
+        _ok(job_id="job-1", state="running"),
+        _ok(job_id="job-other", state="succeeded"),
+    )
+    with pytest.raises(BacktestRunError, match="job-other"):
+        McpBacktestRunner(cast(HarnessToolProvider, tools)).run(_request())
 
 
 @pytest.mark.parametrize("kind", ["transport", "auth", "protocol", "tool", "harness"])
@@ -138,17 +146,43 @@ def test_unknown_lookup_state_never_launches(state) -> None:
     assert len(tools.calls) == 1
 
 
-def test_pending_job_is_joined_and_terminal_state_overrides_stale_status() -> None:
+def test_pending_job_is_joined_and_polled_then_its_result_is_fetched() -> None:
     tools = _Tools(
-        _ok(job_id="run-1", status="running"),
-        _ok(job_id="run-1", state="complete"),
-        _ok(status="complete", metrics={"edge": 1}),
+        _ok(job_id="job-1", state="running"),
+        _ok(job_id="job-1", state="succeeded"),
+        _ok(job_id="job-1", state="succeeded", metrics={"edge": 1}),
         _ok(artifacts=[]),
     )
     result = McpBacktestRunner(cast(HarnessToolProvider, tools)).run(_request())
-    assert result.state == "complete"
+    assert result.state == "succeeded"
     assert result.succeeded
-    assert not any(name.startswith("run_") for name, _ in tools.calls)
+    assert tools.calls == [
+        ("get_job_status", {"job_id": "job-1"}),
+        ("get_job_status", {"job_id": "job-1"}),
+        ("get_job_result", {"job_id": "job-1"}),
+        ("list_artifacts", {"job_id": "job-1"}),
+    ]
+
+
+def test_terminal_success_job_is_joined_and_never_relaunched() -> None:
+    tools = _Tools(
+        _ok(
+            job_id="job-1",
+            state="succeeded",
+            metrics={"edge": 1},
+            result_artifacts=[],
+        )
+    )
+    result = McpBacktestRunner(cast(HarnessToolProvider, tools)).run(_request())
+    assert result.succeeded
+    assert [name for name, _ in tools.calls] == ["get_job_status"]
+
+
+@pytest.mark.parametrize("state", ["succeeded", "failed", "cancelled"])
+def test_terminal_job_is_never_relaunched(state) -> None:
+    tools = _Tools(_ok(job_id="job-1", state=state, metrics={}, result_artifacts=[]))
+    McpBacktestRunner(cast(HarnessToolProvider, tools)).run(_request())
+    assert all(name != "run_backtest" for name, _ in tools.calls)
 
 
 @pytest.mark.parametrize("state", ["failed", "cancelled"])
@@ -156,20 +190,12 @@ def test_terminal_failure_keeps_diagnostic_without_querying_missing_results(
     state,
 ) -> None:
     tools = _Tools(
-        _ok(state="running"),
-        _ok(state=state, error_message="study failed"),
+        _ok(job_id="job-1", state=state, error_message="study failed"),
     )
     result = McpStudyRunner(cast(HarnessToolProvider, tools)).run(_request())
     assert result.state == state
     assert result.error == "study failed"
-    assert len(tools.calls) == 2
-
-
-@pytest.mark.parametrize("state", ["complete", "succeeded", "failed", "cancelled"])
-def test_confirmed_terminal_job_still_allows_revision_launch(state) -> None:
-    tools = _Tools(_ok(state=state), _ok(state="complete", metrics={}, artifacts=[]))
-    McpBacktestRunner(cast(HarnessToolProvider, tools)).run(_request())
-    assert tools.calls[1][0] == "run_backtest"
+    assert len(tools.calls) == 1
 
 
 def test_launch_unknown_outcome_is_not_retried() -> None:
@@ -196,7 +222,10 @@ def test_polling_obeys_overall_deadline() -> None:
     def sleep(seconds: float) -> None:
         elapsed[0] += seconds
 
-    tools = _Tools(_ok(state="running"), *[_ok(state="running") for _ in range(5)])
+    tools = _Tools(
+        _ok(job_id="job-1", state="running"),
+        *[_ok(job_id="job-1", state="running") for _ in range(5)],
+    )
     runner = McpStudyRunner(
         cast(HarnessToolProvider, tools),
         poll_timeout_seconds=1,
@@ -212,7 +241,10 @@ def test_polling_obeys_overall_deadline() -> None:
 
 
 def test_polling_can_be_cancelled_without_launch_or_result_fetch() -> None:
-    tools = _Tools(_ok(state="running"), _ok(state="running"))
+    tools = _Tools(
+        _ok(job_id="job-1", state="running"),
+        _ok(job_id="job-1", state="running"),
+    )
     runner = McpStudyRunner(
         cast(HarnessToolProvider, tools),
         cancelled=lambda request: len(tools.calls) == 2,
@@ -223,17 +255,35 @@ def test_polling_can_be_cancelled_without_launch_or_result_fetch() -> None:
 
 
 @pytest.mark.parametrize(
-    "failure", [OSError("status unavailable"), _ok(state="unknown")]
+    "failure", [OSError("status unavailable"), _ok(job_id="job-1", state="unknown")]
 )
 def test_poll_failure_does_not_retry_launch(failure) -> None:
-    tools = _Tools(_absent(), _ok(state="queued"), failure)
+    tools = _Tools(_absent(), _ok(job_id="job-1", state="queued"), failure)
     with pytest.raises(BacktestRunError, match="status unavailable|unknown state"):
         McpStudyRunner(cast(HarnessToolProvider, tools)).run(_request())
     assert [name for name, _ in tools.calls].count("run_study") == 1
 
 
+def test_launch_without_acknowledged_job_id_fails_closed() -> None:
+    tools = _Tools(
+        _absent(),
+        _ok(state="succeeded", metrics={}, artifacts=[]),
+    )
+    with pytest.raises(BacktestRunError, match="did not acknowledge"):
+        McpBacktestRunner(cast(HarnessToolProvider, tools)).run(_request())
+
+
+def test_poll_without_acknowledged_job_id_fails_closed() -> None:
+    tools = _Tools(
+        _ok(job_id="job-1", state="running"),
+        _ok(state="succeeded"),
+    )
+    with pytest.raises(BacktestRunError, match="did not acknowledge"):
+        McpBacktestRunner(cast(HarnessToolProvider, tools)).run(_request())
+
+
 def test_launch_without_state_is_unknown_not_a_domain_failure() -> None:
-    tools = _Tools(_absent(), _ok(job_id="run-1"))
+    tools = _Tools(_absent(), _ok(job_id="job-1"))
     with pytest.raises(BacktestRunError, match="unknown state"):
         McpStudyRunner(cast(HarnessToolProvider, tools)).run(_request())
     assert len(tools.calls) == 2

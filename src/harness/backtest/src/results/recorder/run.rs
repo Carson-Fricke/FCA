@@ -737,7 +737,7 @@ impl RunRecorder {
         }
         let run_digest = run_fingerprint(&row_counts, &digests);
         let rows = manifest_rows(&ManifestRowsInput {
-            run_id: &self.config.run_id,
+            job_id: &self.config.job_id,
             seed: &self.config.seed.as_text(),
             batch_size: self.config.batch_size,
             compression: &self.config.compression,
@@ -769,7 +769,7 @@ impl RunRecorder {
         writer.close()?;
         self.closed = true;
         let manifest = RunManifest {
-            run_id: self.config.run_id.clone(),
+            job_id: self.config.job_id.clone(),
             directory: PathBuf::from(&self.config.directory),
             row_counts: row_counts.clone(),
             digests,

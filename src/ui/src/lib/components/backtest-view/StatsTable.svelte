@@ -35,7 +35,7 @@
 	const GROUP_ORDER = ['Returns', 'Trades', 'Execution', 'Other'];
 
 	function fmtValue(value, format) {
-		if (value == null || !Number.isFinite(value)) return 'â€”';
+		if (value == null || !Number.isFinite(value)) return '—';
 		switch (format) {
 			case 'pct':
 				return `${(value * 100).toFixed(1)}%`;

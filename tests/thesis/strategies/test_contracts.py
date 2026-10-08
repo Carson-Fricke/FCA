@@ -21,7 +21,9 @@ def _design(**overrides: object) -> dict[str, object]:
             "src/lib.rs": "// harness_strategy_sdk StrategyProgram export_strategy_program!"
         },
         "tests": {"tests/program.rs": "#[test] fn example() { assert!(true); }"},
-        "harnessConfiguration": {},
+        "harnessConfiguration": {
+            "subscriptions": [{"data_type": "quote", "symbols": ["SPY"]}]
+        },
         "exitCriteria": [
             {
                 "falsifierId": "f1",

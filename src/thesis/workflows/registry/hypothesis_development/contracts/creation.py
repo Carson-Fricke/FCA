@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 from thesis.chat.contracts import WorkflowExecution
 from thesis.chat.service import ChatService
+from thesis.experiments.mandate import default_launch_partition
 
 from ..errors import (
     HypothesisDevelopmentIntakeError,
@@ -53,13 +54,21 @@ class HypothesisDevelopmentRequest:
             object.__setattr__(self, "created_at", self.created_at.astimezone(UTC))
 
     def as_dict(self) -> dict[str, object]:
-        """Return the detached request representation for transport."""
+        """Return the detached request representation for transport.
+
+        The launch request is persisted from this document when the execution
+        is created (``Workflow._record_launch``), so ``partition`` is the data
+        partition the execution is bound to for its whole life. It is built
+        here, from the launch defaults, and never rebuilt for a later execution:
+        derivation reads the persisted partition.
+        """
         return {
             "chatId": self.chat_id,
             "createdAt": None if self.created_at is None else _iso(self.created_at),
             "executionId": self.execution_id,
             "ideas": self.ideas,
             "intentEpoch": self.intent_epoch,
+            "partition": default_launch_partition().as_dict(),
             "requestedBy": self.requested_by,
             "triggerMessageId": self.trigger_message_id,
             "workspaceId": self.workspace_id,

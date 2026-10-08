@@ -24,6 +24,22 @@ fn stamp(text: &str) -> i64 {
     parse_timestamp_ns(text).unwrap()
 }
 
+fn bars_subscription(symbols: &[String], interval: &str) -> MarketSubscription {
+    MarketSubscription {
+        data_type: "bars".to_string(),
+        symbols: symbols.to_vec(),
+        interval: Some(interval.to_string()),
+    }
+}
+
+fn sync_study_subscriptions(config: &mut BacktestConfig) {
+    config.data_subscriptions = vec![bars_subscription(
+        &config.symbols,
+        &config.data_bar_interval,
+    )];
+    config.data_subscriptions_declared = true;
+}
+
 fn config(interval: &str) -> BacktestConfig {
     let mut config = BacktestConfig::new(
         "frames",
@@ -35,6 +51,7 @@ fn config(interval: &str) -> BacktestConfig {
     config.shell = "study".to_string();
     config.data_bar_interval = interval.to_string();
     config.symbols = vec!["SPY".to_string(), "AAPL".to_string(), "ABSENT".to_string()];
+    sync_study_subscriptions(&mut config);
     config
 }
 
@@ -71,9 +88,13 @@ fn fixture(config: &BacktestConfig, events: Vec<MarketEvent>) -> ReplayFixture {
 struct Observer {
     frames: Arc<Mutex<Vec<EngineBarFrame>>>,
     ticks: Arc<Mutex<u64>>,
+    subscriptions: Vec<MarketSubscription>,
 }
 
 impl StrategyRuntime for Observer {
+    fn subscriptions(&self) -> Option<Vec<MarketSubscription>> {
+        Some(self.subscriptions.clone())
+    }
     fn on_start(&mut self, _: &StrategyStart) -> Result<(), BacktestError> {
         Ok(())
     }
@@ -90,7 +111,14 @@ impl StrategyRuntime for Observer {
     }
 }
 
-fn run(config: &BacktestConfig, fixture: &ReplayFixture, observer: Observer) -> BacktestOutcome {
+fn run(
+    config: &BacktestConfig,
+    fixture: &ReplayFixture,
+    mut observer: Observer,
+) -> BacktestOutcome {
+    if observer.subscriptions.is_empty() {
+        observer.subscriptions = config.data_subscriptions.clone();
+    }
     let preflight = preflight_data(config, fixture).unwrap();
     let manifest = build_default_manifest(config, fixture, &preflight).unwrap();
     run_native_engine(
@@ -141,6 +169,8 @@ fn groups_timestamp_union_in_symbol_order_without_carry_or_all_missing_frames() 
 #[test]
 fn dispatches_once_at_availability_with_raw_counts_and_order_independent_hash() {
     let mut config = config("1min");
+    config.symbols = vec!["SPY".to_string(), "AAPL".to_string()];
+    sync_study_subscriptions(&mut config);
     config.end_ns = config.start_ns + 2 * MINUTE + MINUTE / 2;
     let events = vec![
         bar("SPY", config.start_ns),
@@ -169,10 +199,16 @@ fn dispatches_once_at_availability_with_raw_counts_and_order_independent_hash() 
         Observer::default(),
     );
     assert_eq!(first.dispatch_hash, second.dispatch_hash);
-    config.end_ns = config.start_ns + 2 * MINUTE;
+    let mut boundary_config = config.clone();
+    boundary_config.symbols = vec!["SPY".to_string()];
+    sync_study_subscriptions(&mut boundary_config);
+    boundary_config.end_ns = boundary_config.start_ns + 2 * MINUTE;
     let boundary = run(
-        &config,
-        &fixture(&config, vec![bar("SPY", config.start_ns + MINUTE)]),
+        &boundary_config,
+        &fixture(
+            &boundary_config,
+            vec![bar("SPY", boundary_config.start_ns + MINUTE)],
+        ),
         Observer::default(),
     );
     assert_eq!(
@@ -228,6 +264,7 @@ fn daily_uses_real_session_close_dst_and_early_close_not_window_clipping() {
         );
         config.end_ns = stamp(close);
         config.data_bar_interval = "1min".to_string();
+        sync_study_subscriptions(&mut config);
         let last = fixture_with_last_minute(&config);
         assert_eq!(
             assemble_study_frames(&config, &last, &SyntheticDataOptions::default()).unwrap()[0]
@@ -247,6 +284,7 @@ fn crypto_daily_is_utc_and_mixed_daily_is_explicitly_rejected() {
     config.start_ns = stamp("2024-07-06T00:00:00Z");
     config.end_ns = stamp("2024-07-07T00:00:00Z");
     config.symbols = vec!["BTC-USD".to_string(), "ETH-USD".to_string()];
+    sync_study_subscriptions(&mut config);
     let fixture = fixture(&config, vec![bar("BTC-USD", config.start_ns)]);
     let frames =
         assemble_study_frames(&config, &fixture, &SyntheticDataOptions::default()).unwrap();
@@ -263,6 +301,10 @@ fn tick_callbacks_counts_and_repeatability_are_unchanged() {
     let mut config = config("1min");
     config.shell = "backtest".to_string();
     config.symbols = vec!["SPY".to_string()];
+    config.data_subscriptions = vec![
+        subscription("quote", &["SPY"], None),
+        subscription("trade", &["SPY"], None),
+    ];
     let fixture = synthetic_fixture(&config, &SyntheticDataOptions::default()).unwrap();
     let observer = Observer::default();
     let seen = observer.frames.clone();
@@ -279,7 +321,7 @@ fn tick_callbacks_counts_and_repeatability_are_unchanged() {
 }
 
 #[test]
-fn study_document_and_file_require_explicit_canonical_interval() {
+fn study_documents_require_explicit_subscriptions() {
     let path = std::env::temp_dir().join(format!(
         "backtest-study-interval-{}.json",
         std::process::id()
@@ -292,15 +334,21 @@ fn study_document_and_file_require_explicit_canonical_interval() {
         serde_json::json!("1min"),
         serde_json::json!("1d"),
     ] {
-        let mut document = serde_json::json!({"shell": "study", "run_id": "test", "data": {}});
+        let mut document =
+            serde_json::json!({"shell": "study", "job_id": "test", "data": {"symbols": ["SPY"]}});
         if !interval.is_null() {
             document["data"]["bar_interval"] = interval.clone();
         }
-        let expected = interval == "1min" || interval == "1d";
-        assert_eq!(parse_study_document(&document).is_ok(), expected);
+        assert!(parse_study_document(&document).is_err());
         std::fs::write(&path, document.to_string()).unwrap();
-        assert_eq!(load_study_config(&path).is_ok(), expected);
+        assert!(load_study_config(&path).is_err());
     }
+    let valid = serde_json::json!({"shell": "study", "job_id": "test",
+        "data": {"symbols": ["SPY"],
+            "subscriptions": [{"data_type": "bars", "symbols": ["SPY"], "interval": "1min"}]}});
+    assert!(parse_study_document(&valid).is_ok());
+    std::fs::write(&path, valid.to_string()).unwrap();
+    assert!(load_study_config(&path).is_ok());
     std::fs::remove_file(path).unwrap();
 }
 
@@ -308,6 +356,9 @@ fn study_document_and_file_require_explicit_canonical_interval() {
 fn non_study_runtime_rejects_frames_and_replay_verification_stays_raw() {
     struct TickOnly;
     impl StrategyRuntime for TickOnly {
+        fn subscriptions(&self) -> Option<Vec<MarketSubscription>> {
+            Some(vec![subscription("bars", &["SPY"], Some("1min"))])
+        }
         fn on_start(&mut self, _: &StrategyStart) -> Result<(), BacktestError> {
             Ok(())
         }
@@ -315,7 +366,9 @@ fn non_study_runtime_rejects_frames_and_replay_verification_stays_raw() {
             panic!("study must not call the tick callback")
         }
     }
-    let config = config("1min");
+    let mut config = config("1min");
+    config.symbols = vec!["SPY".to_string()];
+    sync_study_subscriptions(&mut config);
     let fixture = fixture(&config, vec![bar("SPY", config.start_ns)]);
     let mut preflight = preflight_data(&config, &fixture).unwrap();
     let manifest = build_default_manifest(&config, &fixture, &preflight).unwrap();
@@ -333,6 +386,8 @@ fn non_study_runtime_rejects_frames_and_replay_verification_stays_raw() {
     );
     assert!(matches!(rejected, Err(BacktestError::StrategyExecution(_))));
     preflight.event_count += 1;
+    config.data_subscriptions.clear();
+    config.data_subscriptions_declared = false;
     let mismatch = run_native_engine(
         &config,
         &fixture,
@@ -346,8 +401,10 @@ fn non_study_runtime_rejects_frames_and_replay_verification_stays_raw() {
 }
 
 #[test]
-fn dispatch_hash_covers_missing_symbols_bounds_and_bar_values() {
-    let config = config("1min");
+fn dispatch_hash_covers_bounds_and_bar_values() {
+    let mut config = config("1min");
+    config.symbols = vec!["SPY".to_string()];
+    sync_study_subscriptions(&mut config);
     let first = run(
         &config,
         &fixture(&config, vec![bar("SPY", config.start_ns)]),
@@ -363,11 +420,15 @@ fn dispatch_hash_covers_missing_symbols_bounds_and_bar_values() {
         Observer::default(),
     );
     assert_ne!(first.dispatch_hash, second.dispatch_hash);
-    let mut smaller = config.clone();
-    smaller.symbols.retain(|symbol| symbol != "ABSENT");
     let third = run(
-        &smaller,
-        &fixture(&smaller, vec![bar("SPY", smaller.start_ns)]),
+        &config,
+        &fixture(
+            &config,
+            vec![
+                bar("SPY", config.start_ns),
+                bar("SPY", config.start_ns + MINUTE),
+            ],
+        ),
         Observer::default(),
     );
     assert_ne!(first.dispatch_hash, third.dispatch_hash);
@@ -516,7 +577,7 @@ fn mixed_replay_routes_each_consumer_and_never_dispatches_future_frames_ahead_of
 
 #[test]
 fn tick_only_study_parses_without_bar_interval_and_rejects_invalid_echoes() {
-    let document = serde_json::json!({"shell":"study", "run_id":"ticks", "data":{"subscriptions":[{"data_type":"trade", "symbols":["SPY"]}]}});
+    let document = serde_json::json!({"shell":"study", "job_id":"ticks", "data":{"symbols":["SPY"],"subscriptions":[{"data_type":"trade", "symbols":["SPY"]}]}});
     let parsed = parse_study_document(&document).unwrap();
     assert_eq!(
         parsed.data_subscriptions,
@@ -608,6 +669,7 @@ fn frame_orders_execute_only_in_backtests_and_never_fill_from_bars() {
         let mut config = config("1min");
         config.shell = shell.into();
         config.symbols = vec!["SPY".into()];
+        sync_study_subscriptions(&mut config);
         let mut events = vec![bar("SPY", config.start_ns)];
         if ticks {
             events.push(quote("SPY", config.start_ns + MINUTE + 1));
@@ -714,6 +776,10 @@ fn same_time_ticks_precede_frames_and_generated_fills_use_current_quotes() {
     let mut config = config("1min");
     config.shell = "backtest".into();
     config.symbols = vec!["SPY".into()];
+    config.data_subscriptions = vec![
+        subscription("quote", &["SPY"], None),
+        subscription("bars", &["SPY"], Some("1min")),
+    ];
     let availability = config.start_ns + MINUTE;
     let mut first = quote("SPY", availability);
     let mut last = quote("SPY", availability);
@@ -874,6 +940,7 @@ fn stop_rejection_and_duplicate_metrics_fail_after_all_runtimes_stop() {
 fn explicit_bars_need_completed_frames_for_each_symbol_before_start() {
     let mut config = config("1min");
     config.symbols = vec!["SPY".into(), "AAPL".into()];
+    sync_study_subscriptions(&mut config);
     config.end_ns = config.start_ns + MINUTE + MINUTE / 2;
     let fixture = fixture(
         &config,
@@ -920,7 +987,7 @@ fn rfc3339_bounds_preserve_nanoseconds_offsets_and_reject_provided_invalid_value
         parse_timestamp_ns("1969-12-31T23:59:59.999999999Z"),
         Some(-1)
     );
-    let document = serde_json::json!({"shell":"study", "run_id":"bounds", "start":"2024-01-02T16:30:00.123456789+02:00", "end":"2024-01-02T14:30:00.123456790Z", "data":{"subscriptions":[{"data_type":"quote","symbols":["SPY"]}]}});
+    let document = serde_json::json!({"shell":"study", "job_id":"bounds", "start":"2024-01-02T16:30:00.123456789+02:00", "end":"2024-01-02T14:30:00.123456790Z", "data":{"symbols":["SPY"],"subscriptions":[{"data_type":"quote","symbols":["SPY"]}]}});
     let parsed = parse_study_document(&document).unwrap();
     assert_eq!(
         (parsed.start_ns, parsed.end_ns),
@@ -957,35 +1024,57 @@ fn rfc3339_bounds_preserve_nanoseconds_offsets_and_reject_provided_invalid_value
             assert!(parse_study_document(&bad).is_err());
         }
     }
-    assert!(BacktestConfig::from_yaml("shell: backtest\nrun_id: defaults\n").is_ok());
+    assert!(BacktestConfig::from_yaml("shell: backtest\njob_id: defaults\n").is_err());
 }
 
 #[test]
-fn authored_legacy_studies_must_match_global_bar_requirements_unless_echo_is_present() {
+fn runtime_requirements_must_match_declared_subscriptions() {
+    struct Undeclared;
+    impl StrategyRuntime for Undeclared {
+        fn on_start(&mut self, _: &StrategyStart) -> Result<(), BacktestError> {
+            Ok(())
+        }
+        fn on_market(&mut self, _: &EngineMarket) -> Result<Vec<EngineOrder>, BacktestError> {
+            Ok(Vec::new())
+        }
+        fn on_bar_frame(&mut self, _: &EngineBarFrame) -> Result<(), BacktestError> {
+            Ok(())
+        }
+        fn published_metrics(&self) -> BTreeMap<String, String> {
+            BTreeMap::new()
+        }
+    }
     let mut config = config("1min");
     config.symbols = vec!["SPY".into()];
+    sync_study_subscriptions(&mut config);
+    let declared = config.data_subscriptions.clone();
+    let undeclared = vec![StrategyInstance {
+        instance_id: "undeclared".into(),
+        runtime: Box::new(Undeclared),
+    }];
+    assert!(backtest::backtest::engine_core::runtime_subscriptions(&config, &undeclared).is_err());
+    let matching = vec![StrategyInstance {
+        instance_id: "study".into(),
+        runtime: Box::new(RoutedObserver {
+            inputs: declared.clone(),
+            seen: Arc::default(),
+        }),
+    }];
+    assert!(backtest::backtest::engine_core::runtime_subscriptions(&config, &matching).is_ok());
     for inputs in [
-        vec![subscription("bars", &["SPY"], Some("1min"))],
         vec![subscription("bars", &["AAPL"], Some("1min"))],
         vec![subscription("bars", &["SPY"], Some("1d"))],
         vec![subscription("quote", &["SPY"], None)],
     ] {
-        config.data_subscriptions.clear();
         let strategies = vec![StrategyInstance {
             instance_id: "study".into(),
             runtime: Box::new(RoutedObserver {
-                inputs: inputs.clone(),
+                inputs,
                 seen: Arc::default(),
             }),
         }];
-        let expected = inputs == vec![subscription("bars", &["SPY"], Some("1min"))];
-        assert_eq!(
-            backtest::backtest::engine_core::runtime_subscriptions(&config, &strategies).is_ok(),
-            expected
-        );
-        config.data_subscriptions = inputs;
         assert!(
-            backtest::backtest::engine_core::runtime_subscriptions(&config, &strategies).is_ok()
+            backtest::backtest::engine_core::runtime_subscriptions(&config, &strategies).is_err()
         );
     }
 }

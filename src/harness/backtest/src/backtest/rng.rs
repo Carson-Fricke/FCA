@@ -40,6 +40,30 @@ impl PythonRandom {
         generator
     }
 
+    /// Seed the generator from raw bytes, like `random.Random(b"...")`.
+    ///
+    /// The bytes are read as little-endian 32-bit key words; a trailing partial
+    /// word is zero-padded. This is the seeding bridge the null block
+    /// permutation uses for its domain-separated SHA-256 digest.
+    #[must_use]
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        let mut key: Vec<u32> = Vec::with_capacity(bytes.len() / 4 + 1);
+        for chunk in bytes.chunks(4) {
+            let mut word = [0u8; 4];
+            word[..chunk.len()].copy_from_slice(chunk);
+            key.push(u32::from_le_bytes(word));
+        }
+        if key.is_empty() {
+            key.push(0);
+        }
+        let mut generator = Self {
+            state: [0; N],
+            index: N,
+        };
+        generator.init_by_array(&key);
+        generator
+    }
+
     fn init_genrand(&mut self, seed: u32) {
         self.state[0] = seed;
         for index in 1..N {

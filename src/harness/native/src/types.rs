@@ -1,9 +1,9 @@
 //! Core domain types for the native harness core.
 //!
-//! Ports the deterministic core from `types.zig`: canonical market symbols,
-//! seeded deterministic identifiers, canonical (byte-identical) decimal text
-//! shared with the Python codecs, UTC ISO-8601 timestamps, and canonical trade
-//! row serialization.
+//! Deterministic core primitives: canonical market symbols, seeded
+//! deterministic identifiers, canonical (byte-identical) decimal text shared
+//! with the Python codecs, UTC ISO-8601 timestamps, and canonical trade row
+//! serialization.
 //!
 //! Determinism rules: no wall-clock, no unseeded random, no network. Every
 //! routine is a pure function of its inputs. Errors are returned, never

@@ -127,6 +127,9 @@ _ACTIVE_DEVELOPMENT_PHASES = frozenset(
         "verdict",
         "strategy_design",
         "optimization",
+        "null_testing",
+        "variation",
+        "forward_validation",
     }
 )
 

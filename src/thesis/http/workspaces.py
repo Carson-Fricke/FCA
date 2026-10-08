@@ -62,6 +62,7 @@ if TYPE_CHECKING:
     from azure.storage.blob import BlobServiceClient
 
     from thesis.screening.runs import ScreeningToolProvider
+    from thesis.workspaces.programs import WorkspacePrograms
     from thesis.workspaces.repository import WorkspaceRepositoryProvider
 
 
@@ -514,6 +515,7 @@ class WorkspaceDataBundle:
     harness: HarnessBoundary | None = None
     screeners: ScreenerService | None = None
     strategy_artifacts: WorkspaceStrategyArtifacts | None = None
+    programs: WorkspacePrograms | None = None
 
 
 def _workspace_template_path(
@@ -635,6 +637,11 @@ def build_local_workspace_data(
     strategy_artifacts = (
         WorkspaceStrategyArtifacts(repositories) if repositories is not None else None
     )
+    programs: WorkspacePrograms | None = None
+    if repositories is not None:
+        from thesis.workspaces.programs import WorkspacePrograms
+
+        programs = WorkspacePrograms(repositories)
     strategies = StrategyDataService(
         clock=resolved_clock, id_factory=ids, artifacts=strategy_artifacts
     )
@@ -651,7 +658,6 @@ def build_local_workspace_data(
         harness=harness,
         importer=artifact_importer,
         clock=resolved_clock,
-        id_factory=ids,
     )
     deployments = DeploymentDataService(status_client=status_client)
     dashboards = DashboardDataService(
@@ -704,6 +710,7 @@ def build_local_workspace_data(
         harness=harness,
         screeners=screeners,
         strategy_artifacts=strategy_artifacts,
+        programs=programs,
     )
 
 

@@ -373,8 +373,7 @@ impl<'a> EventBus<'a> {
     /// # Safety
     ///
     /// `context` is passed verbatim to `handler`. The caller must ensure the
-    /// pointed-to value outlives the subscription, exactly like the Zig bus's
-    /// `?*anyopaque` handler context.
+    /// pointed-to value outlives the subscription.
     pub fn subscribe(
         &mut self,
         selector: Selector<'a>,
@@ -418,7 +417,7 @@ impl<'a> EventBus<'a> {
             let subscription = self.subscriptions[index];
             if subscription.selector.matches(&event) {
                 // SAFETY: the handler and context were vetted by the caller at
-                // subscription time, mirroring the Zig bus.
+                // subscription time.
                 unsafe { (subscription.handler)(subscription.context, &event) };
             }
         }

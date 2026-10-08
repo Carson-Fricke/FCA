@@ -61,6 +61,7 @@ class PartitionRole(StrEnum):
     TRAIN = "train"
     VALIDATION = "validation"
     HOLDOUT = "holdout"
+    DEVELOPMENT = "development"
 
 
 class DeviationKind(StrEnum):

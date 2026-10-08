@@ -182,7 +182,7 @@ class RepositorySizePort(Protocol):
 
 
 #: Workspace subtrees counted against the artifact byte budget.
-ARTIFACT_ROOTS: tuple[str, ...] = ("backtests", "uploads", "activations")
+ARTIFACT_ROOTS: tuple[str, ...] = ("jobs", "uploads", "activations")
 
 
 class FilesystemRepositorySize:

@@ -29,6 +29,10 @@ links:
   - overfitting-and-selection-discipline
   - point-in-time-data-validity
   - variance-risk-premium-and-options-measures
+  - directional-change-events
+  - perceptually-important-points
+  - time-to-crossover-statistics
+  - autoencoder-anomaly-detection
 relationships:
   - type: relates
     target: predictive-regression-and-lead-lag
@@ -58,6 +62,14 @@ relationships:
     target: point-in-time-data-validity
   - type: relates
     target: variance-risk-premium-and-options-measures
+  - type: relates
+    target: directional-change-events
+  - type: relates
+    target: perceptually-important-points
+  - type: relates
+    target: time-to-crossover-statistics
+  - type: relates
+    target: autoencoder-anomaly-detection
 trust:
   tier: curated
   state: published
@@ -84,6 +96,10 @@ Whether a falsifier can see the claimed regularity at all. A trend claim tested 
 | Two series held by an equilibrium | [Cointegration and spread stationarity](cointegration-and-spread-stationarity) | Synchronized prices or quotes for every leg; action adjusted |
 | A shock that fades at a measurable speed | [Mean-reversion half-life](mean-reversion-half-life) | One clean contiguous price series, no overnight pooling |
 | A persistent drift in one series | [Time-series momentum and trend](time-series-momentum-and-trend) | A long clean price history for the traded series |
+| A move is defined by a threshold off the last extremum | [Directional change events](directional-change-events) | One series at a declared interval; threshold rule and confirmation timestamps |
+| The path's shape, not its endpoints, is the claim | [Perceptually important points](perceptually-important-points) | One series with a declared window; PIP count or tolerance rule |
+| The waiting time to a named event is the claim | [Time-to-crossover statistics](time-to-crossover-statistics) | One series at a declared interval; MA or level rule and a censoring window |
+| A learned representation flags unusual windows | [Autoencoder anomaly detection](autoencoder-anomaly-detection) | One series with clean windows; train, calibration, and holdout partitions |
 | Winners keep beating losers across names | [Cross-sectional momentum and rank IC](cross-sectional-momentum-and-rank-ic) | A point-in-time panel of many securities |
 | Volatility clusters or is forecastable | [Realized volatility and vol forecasting](realized-volatility-and-vol-forecasting) | Intraday or daily bars; ranges or realized variance |
 | A move repeats at the same time each day | [Intraday seasonality](intraday-seasonality) | Intraday bars with clean sessions and correct timezone |
@@ -124,4 +140,29 @@ Every card ends with costs, an execution delay, break-even, and turnover. If the
 
 ## Limitations
 
-The map is a starting point, not proof, and shapes overlap: reversion and trend can both live in one series at different horizons. New shapes without a matching card need method research before a falsifier is written.
+The map is a starting point, not proof, and shapes overlap: reversion and
+trend can both live in one series at different horizons. A new shape without
+a matching card can often start from the building blocks — event-time
+segmentation, path shape, waiting time, and learned representations — before
+method research writes a dedicated falsifier.
+
+## Related
+
+- [Predictive regression and lead-lag](predictive-regression-and-lead-lag)
+- [Cointegration and spread stationarity](cointegration-and-spread-stationarity)
+- [Mean-reversion half-life](mean-reversion-half-life)
+- [Time-series momentum and trend](time-series-momentum-and-trend)
+- [Cross-sectional momentum and rank IC](cross-sectional-momentum-and-rank-ic)
+- [Realized volatility and vol forecasting](realized-volatility-and-vol-forecasting)
+- [Intraday seasonality](intraday-seasonality)
+- [Order-flow imbalance and price impact](order-flow-imbalance-and-price-impact)
+- [Spread and execution cost estimation](spread-and-execution-cost-estimation)
+- [Event studies](event-studies)
+- [Structural breaks and regime tests](structural-breaks-and-regime-tests)
+- [Overfitting and selection discipline](overfitting-and-selection-discipline)
+- [Point-in-time data validity](point-in-time-data-validity)
+- [Variance risk premium and options measures](variance-risk-premium-and-options-measures)
+- [Directional change events](directional-change-events)
+- [Perceptually important points](perceptually-important-points)
+- [Time-to-crossover statistics](time-to-crossover-statistics)
+- [Autoencoder anomaly detection](autoencoder-anomaly-detection)

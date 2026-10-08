@@ -20,7 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -53,6 +53,8 @@ class AttemptKind(StrEnum):
     ABORTED_JOB = "aborted_job"
     VARIANT = "variant"
     PARAMETER = "parameter"
+    NULL_TEST = "null_test"
+    VARIATION = "variation"
     METRIC = "metric"
     MARKET_HORIZON_CHOICE = "market_horizon_choice"
     HOLDOUT_LOOK = "holdout_look"
@@ -110,6 +112,13 @@ def _timestamp(value: str, label: str) -> str:
     return (
         parsed.astimezone(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
     )
+
+
+def _document_text(payload: Mapping[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str):
+        raise LedgerError(f"attempt record {key} must be a string")
+    return value
 
 
 def _freeze_mapping(value: Mapping[str, object], label: str) -> Mapping[str, object]:
@@ -193,6 +202,46 @@ class AttemptRecord:
         return hashlib.sha256(
             _canonical_json(self.canonical_document).encode("utf-8")
         ).hexdigest()
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, object]) -> AttemptRecord:
+        """Rebuild one attempt from its canonical JSON document.
+
+        The kind is coerced through :class:`AttemptKind`, the payload must be
+        a JSON-shaped mapping, and the rebuilt record must reproduce the
+        canonical document exactly: a malformed, non-canonical, or extended
+        document is rejected rather than silently repaired.
+        """
+        if not isinstance(payload, Mapping):
+            raise LedgerError("attempt record must be a mapping")
+        if payload.get("schema") != "fca-thesis-attempt-record-v1":
+            raise LedgerError("attempt record schema is not supported")
+        raw_kind = payload.get("kind")
+        if not isinstance(raw_kind, str):
+            raise LedgerError("attempt record kind must be a string")
+        try:
+            kind = AttemptKind(raw_kind)
+        except ValueError as error:
+            raise LedgerError(
+                f"attempt record kind is not supported: {raw_kind!r}"
+            ) from error
+        raw_payload = payload.get("payload")
+        if not isinstance(raw_payload, Mapping):
+            raise LedgerError("attempt record payload must be a mapping")
+        record = cls(
+            attempt_id=_document_text(payload, "attemptId"),
+            contract_sha256=_document_text(payload, "contractSha256"),
+            kind=kind,
+            description=_document_text(payload, "description"),
+            actor=_document_text(payload, "actor"),
+            observed_at=_document_text(payload, "observedAt"),
+            payload=raw_payload,
+        )
+        if _canonical_json(_jsonable(record.canonical_document)) != _canonical_json(
+            _jsonable(dict(payload))
+        ):
+            raise LedgerError("attempt record document is not canonical")
+        return record
 
 
 @dataclass(frozen=True, slots=True)
@@ -375,6 +424,24 @@ class AttemptLedger:
         self._entries.append(entry)
         self._index[record.attempt_id] = entry
         return entry
+
+    @classmethod
+    def load(
+        cls, records: Iterable[AttemptRecord | Mapping[str, object]]
+    ) -> AttemptLedger:
+        """Rebuild one attempt ledger by replaying ordered records through append.
+
+        Records may be typed attempts or their canonical documents.  Replay
+        derives the identical hash chain, and re-appended identical content is
+        idempotent exactly as in :meth:`append`.
+        """
+        ledger = cls()
+        for record in records:
+            if isinstance(record, AttemptRecord):
+                ledger.append(record)
+            else:
+                ledger.append(AttemptRecord.from_dict(record))
+        return ledger
 
     def entries(self) -> tuple[LedgerEntry, ...]:
         """Return all entries in hash-chain order."""

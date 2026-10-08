@@ -1,26 +1,28 @@
-//! Backtest job launching for the harness HTTP boundary.
+//! Backtest and study job launching for the harness HTTP boundary.
 //!
-//! Mirrors `harness.http.launcher`: the launch route validates one submitted
-//! configuration, records a queued job, and hands the work to an injected
+//! The submission routes validate one submitted configuration, atomically admit
+//! a job on `(job_id, input_digest)`, and hand the work to an injected
 //! [`BacktestLauncher`]. The default [`InProcessLauncher`] runs the injected
-//! [`BacktestRunner`] inside the API process and records the completed run so
-//! a local launch is immediately queryable.
+//! [`BacktestRunner`] inside the API process and publishes the terminal result
+//! so a local launch is immediately queryable.
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use super::clock::Clock;
-use super::configuration::ValidatedConfiguration;
 use serde_json::Value;
 
-use super::store::{JobRecord, JobRepository, RunCatalogRecord, RunStatus, RunStore, StoreError};
+use super::clock::Clock;
+use super::configuration::ValidatedConfiguration;
+use super::store::{JobKind, JobRecord, JobState, JobStore, StoreError};
 
 /// Work description passed to an injected backtest launcher.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LaunchJob {
-    /// Job identifier (equal to the configuration's run ID).
+    /// Job identifier (equal to the configuration's job ID).
     pub job_id: String,
+    /// Execution kind (`backtest` or `study`).
+    pub kind: JobKind,
     /// Validated submitted configuration.
     pub configuration: ValidatedConfiguration,
 }
@@ -30,7 +32,7 @@ pub struct LaunchJob {
 pub struct RunOutcome {
     /// Whether the run completed successfully.
     pub completed: bool,
-    /// Complete immutable result set keyed by run-relative artifact name.
+    /// Complete immutable result set keyed by job-relative artifact name.
     pub artifacts: BTreeMap<String, Vec<u8>>,
 }
 
@@ -93,28 +95,6 @@ pub trait BacktestLauncher: Send + Sync {
     fn launch(&self, job: &LaunchJob) -> Result<(), LaunchError>;
 }
 
-/// Map one completed runner result onto a results-store catalog row.
-#[must_use]
-pub fn launch_record(
-    configuration: &ValidatedConfiguration,
-    outcome: &RunOutcome,
-) -> RunCatalogRecord {
-    let mut record = RunCatalogRecord::new(
-        configuration.run_id.clone(),
-        if outcome.completed {
-            RunStatus::Complete
-        } else {
-            RunStatus::Failed
-        },
-        configuration.strategy_ids.join(","),
-    );
-    record.data_start = configuration.data_start;
-    record.data_end = configuration.data_end;
-    record.configuration_digest = Some(configuration.configuration_digest.clone());
-    record.metrics = artifact_metrics(&outcome.artifacts);
-    record
-}
-
 /// Extract built-in and custom scalar values from a run's `metrics.json`.
 #[must_use]
 pub fn artifact_metrics(artifacts: &BTreeMap<String, Vec<u8>>) -> BTreeMap<String, String> {
@@ -127,12 +107,16 @@ pub fn artifact_metrics(artifacts: &BTreeMap<String, Vec<u8>>) -> BTreeMap<Strin
     let mut metrics = BTreeMap::new();
     let equity = document.get("equity");
     let execution = document.get("execution");
+    let trades = document.get("trades");
     for (key, section) in [
         ("total_return", equity),
         ("max_drawdown", equity),
         ("cagr", equity),
         ("fill_count", execution),
         ("fees_total", execution),
+        ("profit_factor", trades),
+        ("trade_count", trades),
+        ("net_pnl", trades),
     ] {
         if let Some(value) = section.and_then(|section| section.get(key)) {
             if let Some(text) = scalar_string(value) {
@@ -160,25 +144,43 @@ fn scalar_string(value: &Value) -> Option<String> {
 }
 
 /// Persist one failed launch while preserving the original creation time.
-pub fn mark_failed(jobs: &dyn JobRepository, job_id: &str, clock: &dyn Clock, error: &LaunchError) {
+///
+/// # Errors
+///
+/// Returns the store failure when the failed record cannot be published.
+pub fn mark_failed(
+    jobs: &dyn JobStore,
+    job_id: &str,
+    clock: &dyn Clock,
+    error: &LaunchError,
+) -> Result<(), StoreError> {
     let existing = jobs.get(job_id);
     let created_at = existing
         .as_ref()
         .map_or_else(|| clock.now(), |record| record.created_at);
-    let mut record = JobRecord::new(
-        job_id,
-        super::store::JobState::Failed,
-        created_at,
-        clock.now(),
-    );
+    let kind = existing
+        .as_ref()
+        .map_or(JobKind::Backtest, |record| record.kind);
+    let input_digest = existing
+        .as_ref()
+        .map_or_else(String::new, |record| record.input_digest.clone());
+    let mut record = JobRecord::new(job_id, kind, input_digest, created_at);
+    record.state = JobState::Failed;
+    record.updated_at = clock.now();
     record.error_message = Some(error.to_string());
-    jobs.upsert(record);
+    if let Some(existing) = existing {
+        record.strategy_id = existing.strategy_id;
+        record.data_start = existing.data_start;
+        record.data_end = existing.data_end;
+        record.configuration_digest = existing.configuration_digest;
+    }
+    jobs.put_result(record, BTreeMap::new())?;
+    Ok(())
 }
 
 /// Launcher that runs one deterministic backtest inside this process.
 pub struct InProcessLauncher {
-    run_store: Arc<dyn RunStore>,
-    jobs: Arc<dyn JobRepository>,
+    jobs: Arc<dyn JobStore>,
     runner: Arc<dyn BacktestRunner>,
     clock: Arc<dyn Clock>,
 }
@@ -187,39 +189,43 @@ impl InProcessLauncher {
     /// Compose an in-process launcher over the injected boundaries.
     #[must_use]
     pub fn new(
-        run_store: Arc<dyn RunStore>,
-        jobs: Arc<dyn JobRepository>,
+        jobs: Arc<dyn JobStore>,
         runner: Arc<dyn BacktestRunner>,
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
-            run_store,
             jobs,
             runner,
             clock,
         }
     }
-
-    fn update_job(&self, job_id: &str, state: super::store::JobState) {
-        let existing = self.jobs.get(job_id);
-        let created_at = existing
-            .as_ref()
-            .map_or_else(|| self.clock.now(), |record| record.created_at);
-        self.jobs
-            .upsert(JobRecord::new(job_id, state, created_at, self.clock.now()));
-    }
 }
 
 impl BacktestLauncher for InProcessLauncher {
     fn launch(&self, job: &LaunchJob) -> Result<(), LaunchError> {
-        self.update_job(&job.job_id, super::store::JobState::Running);
         let outcome = self
             .runner
             .run(&job.configuration)
             .map_err(LaunchError::Engine)?;
-        let record = launch_record(&job.configuration, &outcome);
-        self.run_store.put(record, outcome.artifacts.clone())?;
-        self.update_job(&job.job_id, super::store::JobState::Succeeded);
+        let artifacts = outcome.artifacts;
+        let mut record = self
+            .jobs
+            .get(&job.job_id)
+            .ok_or_else(|| LaunchError::Store(format!("job not found: {}", job.job_id)))?;
+        record.state = if outcome.completed {
+            JobState::Succeeded
+        } else {
+            JobState::Failed
+        };
+        record.updated_at = self.clock.now();
+        if !job.configuration.strategy_ids.is_empty() {
+            record.strategy_id = job.configuration.strategy_ids.join(",");
+        }
+        record.data_start = job.configuration.data_start;
+        record.data_end = job.configuration.data_end;
+        record.configuration_digest = Some(job.configuration.configuration_digest.clone());
+        record.metrics = artifact_metrics(&artifacts);
+        self.jobs.put_result(record, artifacts)?;
         Ok(())
     }
 }

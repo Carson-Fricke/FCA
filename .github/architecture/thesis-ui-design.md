@@ -175,7 +175,9 @@ Both `/v1` and `/api/v1` register on the same backend app and resolve the same
 app-state services and authentication. Missing production services return 503,
 not request-local defaults. Process-local scheduling/brokers require one serving
 worker (`WEB_CONCURRENCY=1`). The current hypothesis-development graph is version
-`2.0.0`, with deterministic falsification trials and executor-free terminal nodes.
+`2.3.0`, with deterministic falsification trials, a typed variation report path
+that renders per-parameter value versus total-return/profit-factor charts, and
+executor-free terminal nodes.
 
 <!-- markdownlint-disable MD013 -->
 
@@ -272,15 +274,15 @@ worker (`WEB_CONCURRENCY=1`). The current hypothesis-development graph is versio
 | **Deployments** | Paper/live monitoring | Running/paused cards with health, allocated capital, P&L; orders and fills table with mode badges (paper/live); risk panel. |
 | **Dashboards** | Custom widgets | Widget grid, pin/unpin to sidebar, create/remove widgets, widget cards for equity, P&L, allocation, win rate, orders. |
 | **Screener** | Symbol screening | Volume/liquidity filters plus custom screeners authored as Rust programs (the filter builder generates SDK source and compiler errors render inline); definitions saved as content-addressed workspace artifacts; imported results carry bundle-hash provenance. |
-| **Workspace state** | Workspace records | Evidence index, strategy lineage graph, and consent/audit trail. |
+| **Workspace artifacts** | Durable workspace records | Gallery and explorer over committed strategies, studies, and indicators: file tree with a bounded UTF-8 viewer, declared ingestion, version/revision history, and type-specific previews (strategy ingestion + exit criteria, study window/indicators/metrics, indicator consumers). Volatile stores are excluded. |
 
 ### Requirement mapping
 
 - **R1 (workspace selection):** workspace switcher + create-workspace dialog;
   selection persists client-side and re-scopes every view. Authorization is
   the backend's: the UI renders only what the API returns for the caller.
-- **R2 (workspace as home):** the sidebar navigation set plus Workspace state
-  page; every page is workspace-scoped by the route
+- **R2 (workspace as home):** the sidebar navigation set plus the Workspace
+  artifacts page; every page is workspace-scoped by the route
   (`/w/{workspace}/…`).
 - **R3 (workspace chat):** full-page chats view + side copilot; message
   composer with strategy-context attachment; chat drives operations and
@@ -324,7 +326,7 @@ worker (`WEB_CONCURRENCY=1`). The current hypothesis-development graph is versio
   ack) inline in the transcript.
 - **Evidence:** claims and results in the transcript link to their evidence
   (backtest run, artifact digest, knowledge page citation with Git revision);
-  evidence badges deep-link into Backtests/Dashboards/Workspace state.
+  evidence badges deep-link into Backtests/Dashboards.
 - **Knowledge search:** the copilot composer supports a knowledge-search
   affordance (global Markdown corpus with trust tiers, path/revision
   citations); results are quoted with provenance and injected as context

@@ -19,7 +19,7 @@ registry has not migrated; this shared interface applies to SDK-authored
 consumers and their program-owned indicator dependencies.
 
 This document records the current implemented runtime and the accepted design
-baseline. The registered hypothesis-development topology is version `2.0.0`;
+baseline. The registered hypothesis-development topology is version `2.3.0`;
 remaining normative recovery and repair-budget requirements below are not a
 claim that all of them are implemented.
 
@@ -210,7 +210,7 @@ before authoring or repairing, apply targeted patches, and ask through
 `request_workflow_input` after three unsuccessful repairs. That compiler-repair
 limit is prompt guidance, not a runtime-enforced repair cap or workflow gate.
 
-The changed hypothesis-development topology is version `2.0.0`. Definition
+The changed hypothesis-development topology is version `2.3.0`. Definition
 requests can name a version; unsupported historical versions return an explicit
 diagnostic rather than substituting today's legal edges. Persisted retired phase
 values remain readable independently of topology availability.
@@ -233,8 +233,9 @@ operation once on the lexical fallback, never mixing vector spaces.
 The durable sub-agent runtime is implemented in `thesis.agent.runtime`:
 
 - `SubAgentRecord` and `AgentInvocation` are durable `WorkspaceRecord` types,
-  persisted through the shared chat persistence port, so the in-memory,
-  filesystem (local), Cosmos, and Azure blob backends all carry them;
+  persisted through the shared chat persistence port: the Cosmos `catalog`
+  container is the production backend, and the in-memory and filesystem adapters
+  serve tests;
 - `SubAgentSpec`/`SubAgentBudget` fix the phase kind, default-deny tool surface,
   completion contract, and delegated budget;
 - `SubAgentLifecycle` enforces chat/workspace scope, maximum depth, maximum
@@ -480,7 +481,8 @@ harness-hosted MCP endpoint:
 
 The `strategy_design` phase is conversational and prose-first
 (`prompts/strategy_design.py`): it posts the strategy proposal under
-`### Strategy`, `### Entries & Exits`, and `### Falsifier Re-checks`, asks
+`### Strategy`, `### Entries & Exits`, and `### Assumption Monitors` — separating
+trading exits from monitors that re-check the entry's premises — asks
 through `request_workflow_input`, and finalizes only after the operator
 confirms. Strategies are pure Rust authored against `harness-strategy-sdk`
 and are committed workspace programs under `strategies/<program_id>/`, never a
@@ -976,11 +978,17 @@ agent's tool error or an interrupted model turn.
 
 `McpBacktestRunner` and `McpStudyRunner` send configuration mappings inline;
 explicit path strings refer to the harness host. They join only confirmed
-in-flight jobs. The exact domain not-found response permits a launch; an
-unavailable transport, authentication/protocol error, or unknown state is not
-evidence of absence and fails the deterministic call. Terminal jobs may be
-relaunched for revised artifacts. Polling has a monotonic deadline, bounded
-backoff, and cancellation checks before launch and around status queries.
+in-flight jobs and return a terminal job's stored result instead of relaunching
+it under the same `job_id`; an explicit rerun allocates a fresh job. A submitter
+allocates one `job_id` and durably registers the submission with immutable
+program/model attribution before dispatch, so an interruption after harness
+acceptance is reconciled by that retained reference even before trial or report
+evidence exists, and a stale revision's reference is never reused. The exact
+domain not-found response permits a launch; an unavailable transport,
+authentication/protocol error, or unknown state is not evidence of absence and
+fails the deterministic call. Polling has a monotonic deadline, bounded backoff,
+and cancellation checks before launch and around status queries. See the
+"Execution Job Contract" in `.github/instructions/copilot-instructions.md`.
 
 Workflow failure outcomes are delivered to the launching anchor and wake that
 conversation so its agent can surface the failure to the operator. Whether a
@@ -1084,9 +1092,9 @@ The tool spans the harness Rust workspace and the harness-hosted MCP endpoint:
    constructs, returns effective `subscriptions`, and rejects an unequal echo
    without fetching data. Only one distinct bars interval is supported across
    a run, including dependencies and instances; conflicts fail before any lake
-   ensure/read. Tick-only studies need no global interval. Legacy interval-only
-   documents remain readable, but old authored source MUST migrate to the
-   current SDK API and compiled artifacts MUST rebuild for ABI v4.
+   ensure/read. Tick-only studies need no interval. Interval-only documents are
+   rejected; authored source MUST use the current SDK API and compiled artifacts
+   MUST rebuild for ABI v4.
 5. Thesis calls `run_study` through `McpStudyRunner` over the hosted MCP
    endpoint and binds phase completion to the returned study's metric
    references; the `fit.<parameter>` metrics freeze as the content-addressed
@@ -1103,7 +1111,7 @@ the SHA-256 of that source:
 
 ```yaml
 shell: study
-run_id: study-...
+job_id: job-...
 start: "2020-01-01T00:00:00Z"
 end: "2025-12-31T00:00:00Z"
 data:
@@ -1215,7 +1223,7 @@ metrics.
 The result names the study run, its state, and the recorded metric references.
 A large parameter or sample value MAY be omitted in favor of an immutable
 reference. The completion gate MUST resolve refs and metrics from the durable
-run store; it MUST NOT trust copied values in model prose or completion JSON.
+job store; it MUST NOT trust copied values in model prose or completion JSON.
 The workflow's falsification trials bind every falsifier and control to a
 recorded metric reference from a successful or explicitly failed study, never
 to a backtest run.
@@ -1227,14 +1235,17 @@ verdict -> the strategy chain. Phase wiring is as follows.
 
 | Phase | Kind | Agent behavior | Completion contract and deterministic action |
 | --- | --- | --- | --- |
-| `discovery` | conversation | Run small targeted studies (`validate_study`, `run_study`, `get_run`, `list_artifacts`, `read_artifact`) on the starting premise, record every attempt including negative results, and identify ONE candidate opportunity with its signal, information timing, direction, holding period, profit source, expected effect, and main competing explanation. Stop when nothing is worth pursuing. | Construct the discovery completion (`candidate`, `attempts`, `untouchedData`, `limitations`); advance to model creation. A verdict restart re-enters the same durable conversation with only the superseding verdict brief. |
-| `model_creation` | conversation | Turn the accepted discovery candidate into ONE statistical model, pre-register the falsifier tests and controls from the knowledge cards, author the research model, and call `validate_study` to compile-check it. Yield so the operator can confirm or revise. After clear confirmation, call `request_phase_completion`. | Construct the model-creation completion; apply falsifiability, model-output, and plan gates; advance to trials or remain. |
-| `falsification_trials` | deterministic | `run_falsification_trials` executes the accepted model through the study runner, binds recorded evidence, and returns the trials contract; no phase agent or model turn. | Validate the trials contract and advance to verdict; executor faults or invalid contracts fail the workflow durably. |
-| `verdict` | conversation | Present the recorded deterministic verdict and ask whether to continue or loop back. After the operator replies, submit interpreted intent. | Construct `VerdictCompletion`; verify it refers to the latest operator message and verdict; map `continue` to strategy design and `loop_back` to model creation (same premise, revise the model) or discovery (premise not worth pursuing) through the transition table. |
+| `discovery` | conversation | Run targeted studies (`validate_study`, `run_study`, `get_job_status`, `get_job_result`, `list_artifacts`, `read_artifact`) on the starting premise, record every attempt including negative results, and identify ONE candidate thesis: signal, information timing, direction, holding period, profit source, expected effect, main competing explanation, entry and exit ideas, necessary assumptions, named building blocks, validation questions, and exploratory evidence. An honest no-candidate conclusion is a valid result. | Construct the discovery completion (`candidate`, `attempts`, `untouchedData`, `limitations`) or the no-candidate completion (`noCandidateReason`, `attempts`, `untouchedData`, `limitations`); advance to model creation with a candidate, or to `completed` when nothing is worth pursuing. A verdict restart re-enters the same durable conversation with only the superseding verdict brief. |
+| `model_creation` | conversation | Turn the accepted discovery candidate into ONE statistical model, pre-register the falsifier tests and controls from the knowledge cards — each falsifier carrying a role of claim, assumption, or control — author the research model, and call `validate_study` to compile-check it. Yield so the operator can confirm or revise. After clear confirmation, call `request_phase_completion`. | Construct the model-creation completion; apply falsifiability, model-output, and plan gates; advance to trials or remain. |
+| `falsification_trials` | deterministic | `run_falsification_trials` executes the accepted model through the study runner, binds recorded evidence, and returns the trials contract plus the accepted research evidence envelope (per-role assumptions with observations, controls, plan, model and fitted references, report digest); no phase agent or model turn. | Validate the trials and evidence contract and advance to verdict; executor faults or invalid contracts fail the workflow durably. |
+| `verdict` | conversation | Interpret the accepted research evidence envelope (per-role assumptions, controls, run states, plan), propose `supported`, `refuted`, or `inconclusive` citing recorded evidence, ask the operator through `request_workflow_input`, and select a target. | Validate the typed verdict contract and the declared transition target; map strategy design to continue, model creation (same premise, revised model) or discovery (premise not worth pursuing) through the transition table. |
 | `strategy_design` | conversation | Explain the strategy in prose, ask the operator to confirm or revise, author or patch a committed program, and call `validate_strategy` on its latest ID. | Submit the successful validation's compact program reference; verify committed content and current stored validation, then advance to strategy backtesting. No completion-time compilation or repair. |
 | `strategy_backtesting` | one-shot | The owning agent reads the handed-off strategy ID and calls `run_backtest {program_id: ...}` against latest committed content with current accepted validation, then requests phase completion. | Return the actual recorded backtest receipt; advance to optimization on success or loop to strategy RCA on failure. Stale/rejected validation is reported, not bypassed with inline source. |
 | `strategy_rca` | one-shot | Inspect the failed run, spawn critics if useful, author a diagnosis and revision guidance, then request completion. | Validate diagnosis and revision refs; loop to strategy design or remain. |
-| `optimization` | one-shot | Prepare the bounded optimization backtest and request completion through its declared contract. No retired `run_sweep` MCP surface is implied. | Resolve the recorded optimization result; complete on success or loop to strategy RCA on failure. |
+| `optimization` | one-shot | Read the designed strategy's committed parameter declaration, compose a bounded set of parameter assignments (maximum 16), submit them in one `run_backtest_batch` call, follow each run to a terminal state, and select a shortlist on net total return, profit factor, drawdown, trade count, turnover/cost sensitivity, and diversity. | Validate the typed candidate-evaluation contract — honest run states and observed metrics only, shortlist vectors canonically matching submitted assignments, a declared selection rule — and fold it into state; advance to null testing, or loop to strategy RCA when the evidence shows a broken design. No retired `run_sweep` MCP surface is implied. |
+| `null_testing` | one-shot | Fix the observed run and statistic, choose a block size and up to sixteen seeds, submit the null replicates in one `run_null_batch` call, follow each run to a terminal state, and compute the empirical `(1+k)/(1+n)` p-value honestly. | Validate the typed null-test evaluation (observed value matches metrics, every succeeded replicate carries the statistic, exceedance and p-value consistent, unique seeds) and fold it into state; complete, or loop to strategy RCA when the signal does not survive its null. |
+| `variation` | one-shot | Compose a deterministic one-at-a-time neighborhood around the selected candidate within its declared bounds (at most sixteen points), submit it in one `run_backtest_batch` call, follow each run to a terminal state, and assess stability from the recorded metrics. | Validate the typed variation evaluation (one differing key per point, every declared parameter covered, unique vectors, honest metrics) and fold it into state; advance to forward validation, or loop to strategy RCA when the neighborhood is unstable. |
+| `forward_validation` | one-shot | Repeat the frozen observed run, null design, and variation points on the protected forward partition (the phase policy rewrites the committed window; tools cannot supply windows) and compare development and forward evidence without retuning. | Validate the typed forward evaluation (nested null and variation evidence with the same cross-checks, forward window recorded) and fold it into state, recording a holdout-look attempt; complete, or loop to strategy RCA when forward evidence contradicts development. |
 | `completed` | terminal | None | Terminal outcome with no executor or completion contract. |
 | `failed` | terminal | None | Terminal failure with recorded reason and partial evidence. |
 
@@ -1242,8 +1253,20 @@ Phase agents receive only their phase's permitted tool policy: discovery holds
 study execution and inspection tools. Discovery, model creation, and strategy
 design share author/update/read/validate/list tools for studies, strategies, and
 indicators, plus `read_sdk_reference`; only discovery adds `run_study`.
+Discovery is never granted backtest tools: `run_backtest` and
+`backtest_config_template` are absent from its policy and its prompt forbids
+backtests. The shared SDK authoring guidance is a version-matched authoring
+reference for every authoring phase; execution access remains trusted runtime
+policy, not something the guidance text grants.
 Strategy backtesting is a `OneShotPhase` agent with `read_strategy`, `run_backtest`,
 knowledge retrieval, and its phase control tools; it owns its completion request.
+`run_backtest` accepts an optional `parameters` assignment validated against the
+strategy's committed parameter declaration (omitted names receive declared
+defaults; reserved names are rejected); the optimization and variation phases
+additionally hold `run_backtest_batch`, and the null-testing and
+forward-validation phases hold `run_null_batch` (the same strategy under
+seeded signal-destruction transforms); both batch tools validate every point
+before any submission and return per-point run ids and states without waiting.
 Conversational phases hold
 `search_knowledge`/`read_knowledge`. Knowledge retrieval is collection-scoped per phase:
 discovery may retrieve `discovery`, `data-quality`, `trading-costs`, and
@@ -1255,19 +1278,40 @@ filtered before each source's index is built so lexical, semantic, and
 hyperlink-graph expansion cannot reach excluded pages, and re-checked on every
 read.
 
+Workflow-scoped data windows come from the research mandate derived from the
+durable launch request: the days before the execution cutoff form the
+protected forward partition, and every program run is checked against the
+development policy at the run boundary (a committed configuration width may
+not cross it; model creation and strategy design are also checked at
+completion; the trials executor fails before a violating study runs). The
+forward-validation phase receives a trusted override policy that rewrites the
+committed window to the holdout bounds; agent tools can never supply windows.
+Job-backed attempts are recorded at the submission boundary, before dispatch, in the
+durable `experiment_ledger` execution phase result: candidate, parameter, variant,
+metric, null-test, variation, and holdout-look kinds, one per submitted job. Accepted
+completions reference those records and never create them; only the non-job
+hypothesis record is still derived from a completion. Acceptance verifies every
+reported job against its retained tool job and its submission record, rebuilt and
+verified through `AttemptLedger.load`.
+
 ### Discovery Completion
 
 The contract hands model creation exactly one candidate and the honest record
 of how it was found. It MUST include:
 
 - one candidate with opportunity, signal, information time, direction, holding
-  period, profit source, effect, competing explanation, and evidence;
+  period, profit source, effect, competing explanation, evidence, entry idea,
+  exit idea, necessary assumptions, building blocks, validation questions, and
+  exploratory evidence; or
+- a no-candidate conclusion with an explicit reason when the attempts show
+  nothing worth pursuing;
 - at least one attempt with purpose, study id, data types, window, and result,
   including attempts that changed nothing; and
 - the data deliberately left untouched and the phase's limitations.
 
-The advertised target enum names only `model_creation`: discovery never ends
-the whole run itself.
+A candidate completion advances to `model_creation`; a no-candidate completion
+is terminal (`completed`). Discovery never manufactures a candidate to advance
+and never treats an honest negative result as a failure.
 
 ### Model Creation Completion
 
@@ -1275,7 +1319,8 @@ The contract MUST preserve the current structured hypothesis, research model,
 and falsification-plan fields. It MUST include:
 
 - claim, disagreement, risk factor, horizon, and universe;
-- falsifiers with id, observable, condition, threshold, and exact test;
+- falsifiers with id, observable, condition, threshold, exact test, and role
+  (claim, assumption, or control);
 - the committed study reference plus description, outputs, and tests, never
   inline Rust or caller paths; the adapter resolves source, dependencies, and
   configuration from the accepted commit. It requires the model's declared window
@@ -1284,9 +1329,9 @@ and falsification-plan fields. It MUST include:
   Entries are strict tagged objects with `data_type` and `symbols`, plus
   `interval` only for bars (`1min` or `1d`), and MUST canonically equal the
   compiled source-and-dependency union. All subscription symbols MUST belong
-  to the hypothesis universe. Optional global symbols MUST equal the
-  subscription symbol union, and any legacy interval MUST match the single
-  bars interval (never for tick-only inputs). The adapter materializes that
+   to the hypothesis universe. Interval-only configuration is rejected; optional
+   global symbols MUST equal the subscription symbol union, and no interval field
+   is accepted. The adapter materializes that
   symbol union and the unchanged start/end bounds into the study run; the
   strategy bundle materializes the universe symbols and the same
   window so a strategy backtest never relies on the design agent to declare
@@ -1302,11 +1347,16 @@ contract.
 
 ### Falsification Trials Completion
 
-In the current `2.0.0` topology this contract is returned by the deterministic
+In the current `2.3.0` topology this contract is returned by the deterministic
 `run_falsification_trials` executor, not a phase-agent tool call. It runs the
 accepted model through the study runner and resolves evidence in deterministic
-code. The broader evidence requirements below remain the design baseline; they
-do not imply a trials conversation or additional implemented output receipts.
+code. The returned contract carries `trials` plus the accepted research
+evidence envelope (`research`) built only from real run outputs: per-role
+assumptions and controls with observations and run states, the falsification
+plan, model and fitted references, fitted parameters, runtime configuration,
+and the report digest. The broader evidence requirements below remain the
+design baseline; they do not imply a trials conversation or additional
+implemented output receipts.
 
 The contract MUST include:
 
@@ -1326,22 +1376,62 @@ workflow instead of creating an agent repair turn.
 
 ### Verdict Completion
 
-The verdict remains derived deterministically from recorded falsifier evidence.
-The model submits only the operator's intent:
+The verdict agent interprets the accepted research evidence envelope and
+authors the outcome in prose-first conversation with the operator; the engine
+validates the typed contract and the declared transition target, not the
+scientific interpretation:
 
 ```json
 {
-  "verdict_ref": "verdict-...",
-  "operator_message_id": "message-...",
-  "operator_intent": "continue",
-  "summary": "The operator accepted the recorded verdict."
+  "verdict": {
+    "outcome": "supported",
+    "reason": "The record and its limitations.",
+    "trials": []
+  },
+  "target": "strategy_design"
 }
 ```
 
-`operator_intent` is `continue` or `loop_back`. The gate verifies that the
-message is the latest applicable operator turn and that the interpretation is
-consistent with it. Ambiguity returns `remain` or causes the model to call
-`request_operator_input`; no substring marker classifier is used.
+`outcome` is `supported`, `refuted`, or `inconclusive`. Missing evidence,
+execution failures, and never-run tests are distinct from a measured falsifier
+breach. Legal targets are `strategy_design` (continue), `model_creation` (same
+premise, revised model), and `discovery` (premise not worth pursuing).
+Ambiguity keeps the agent in the phase; the operator is asked through
+`request_workflow_input`, never a keyword classifier.
+
+### Candidate Evaluation Completion
+
+The optimization phase evaluates a bounded parameter search for the designed
+strategy. The contract MUST include the validated strategy reference, the batch
+identity returned by `run_backtest_batch`, one assignment record per submitted
+parameter vector with its run id and honest state (`succeeded`, `failed`,
+`running`, or `unknown`) plus observed metrics only when a run produced them, a
+shortlist whose parameter vectors canonically match submitted assignments with
+a rationale per entry, the declared selection rule, and limitations. Submission
+validates every point before launching any; unknown-outcome runs are recorded
+truthfully and never relaunched automatically. The fold stores the typed
+evaluation in state, and live and replay share the same decoder.
+
+### Robustness Chain Completion
+
+The null-testing contract records the observed statistic and its run, the null
+mode and block size, one record per seeded replicate with honest states and
+observed metrics only, the exceedance count, and the empirical
+`(1+k)/(1+n)` p-value; the validator recomputes exceedance and p from the
+recorded values. The variation contract records the selected center and the
+deterministic one-key-diff neighborhood (at most sixteen points), with honest
+states, metrics only when runs produced them, the varied parameter names, and a
+stability assessment; the phase report projects the same payload for the UI
+charts. The forward-validation contract repeats both designs on the protected
+forward partition and records the forward window; it must not re-select
+parameters from forward results. Job submissions in this chain append exposure
+records at submission (null-test, variation, and holdout-look kinds included), and
+accepted completions reference them. The frozen research design
+(`hypothesis_development/design.py`) is derived from the accepted development
+evidence, and its digest is stamped on every forward submission. Forward validation
+(`provenance.py`) rejects a reported job that did not run the frozen strategy, the
+reported parameters, the forward window, and the frozen design; an executed forward
+job left unreported; and a reported metric the harness did not produce.
 
 ## Recovery and Idempotency
 
@@ -1710,7 +1800,7 @@ repair-budget mechanism is complete.
 | `workflows/registry/hypothesis_development/__init__.py` | Concrete workflow public facade, including `fold_transition` and `rebuild_state`. |
 | `hypothesis_development/spec.py`, `doctrine.py`, `piping.py` | One phase declaration for topology/policy/payload folds, domain ports/reducer binding, and accepted handoffs applied once. |
 | `hypothesis_development/session_services.py` | Session role policy, schema/knowledge/authoring bindings, validation/application, and failure callback. |
-| `hypothesis_development/services.py`, `rebuild.py`, `state.py`, `artifacts.py`, `ledger.py`, `jobs.py`, `errors.py`, `primitives.py` | Domain validation/evidence, shared live/replay fold, state, artifacts, ledger, jobs, and domain values. |
+| `hypothesis_development/services.py`, `rebuild.py`, `state.py`, `artifacts.py`, `exposure.py`, `design.py`, `provenance.py`, `jobs.py`, `errors.py`, `primitives.py` | Domain validation/evidence, shared live/replay fold, state, artifacts, submission exposure ledger, the frozen research design, completion provenance checks, jobs, and domain values. |
 | `hypothesis_development/phases/`, `contracts/`, `gates/`, `prompts/`, `composers/` | Phase declarations, typed completion/validation, domain acceptance, agent instructions, and construction. Discovery has its own contract/prompt; `prompts/model_creation.py` replaces the retired creation prompt. Domain acceptance modules are not operator workflow gates. |
 | `workflows/runtime.py` | Composition and exported typed workflow session ports. |
 | `workflows/local.py` | MCP runners, bounded polling, and local composition. |

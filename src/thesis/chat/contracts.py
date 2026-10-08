@@ -18,6 +18,14 @@ from enum import Enum, StrEnum
 from types import MappingProxyType
 from typing import Any, cast
 
+from thesis.integrations.mcp import (
+    TOOL_LAUNCH_TRADER,
+    TOOL_RUN_BACKTEST,
+    TOOL_RUN_SCREENER,
+    TOOL_RUN_STUDY,
+    ExecutionCertainty,
+)
+
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$")
 _WORKSPACE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
 _HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -39,6 +47,10 @@ class RecordNotFound(LookupError):
 
 class CrossWorkspaceLinkError(ChatContractError):
     """A record attempted to link to an entity in another workspace."""
+
+
+class ToolJobConflictError(ChatContractError):
+    """A tool job id is already registered as a different operation."""
 
 
 class ChatState(StrEnum):
@@ -106,6 +118,30 @@ class ToolJobState(StrEnum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+#: Thesis operation name for the harness-backed falsification research model.
+HARNESS_RESEARCH_MODEL_TOOL = "harness.research_model"
+
+#: Operations whose execution state and results are owned by one harness job
+#: record.  Every other tracking operation is non-harness: tracking owns its
+#: attribution and outcome observation, but no harness report or status surface
+#: may present it as a harness execution.  The names reuse the published
+#: harness operation constants rather than duplicating string literals.
+HARNESS_EXECUTION_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        TOOL_LAUNCH_TRADER,
+        TOOL_RUN_BACKTEST,
+        TOOL_RUN_SCREENER,
+        TOOL_RUN_STUDY,
+        HARNESS_RESEARCH_MODEL_TOOL,
+    }
+)
+
+
+def is_harness_execution_tool(tool_name: str) -> bool:
+    """Return whether one operation submits a harness-owned execution."""
+    return tool_name in HARNESS_EXECUTION_TOOL_NAMES
 
 
 class SubAgentKind(StrEnum):
@@ -238,6 +274,20 @@ def _normalise_ids(values: tuple[str, ...], name: str) -> tuple[str, ...]:
     return result
 
 
+def _normalise_attribution(values: Mapping[str, object]) -> Mapping[str, object]:
+    """Validate and freeze one JSON-shaped operation attribution mapping."""
+    if not isinstance(values, Mapping):
+        raise ChatContractError("attribution must be a mapping")
+    result: dict[str, object] = {}
+    for key, value in values.items():
+        if not isinstance(key, str) or not key.strip():
+            raise ChatContractError("attribution keys must be non-empty strings")
+        if not isinstance(value, str | int | float | bool | None):
+            raise ChatContractError("attribution values must be JSON scalars")
+        result[key] = value
+    return MappingProxyType(result)
+
+
 def _json_value(value: object) -> object:
     if isinstance(value, Enum):
         return value.value
@@ -368,7 +418,7 @@ class RecordLinks:
     strategy_ids: tuple[str, ...] = ()
     experiment_ids: tuple[str, ...] = ()
     workflow_execution_ids: tuple[str, ...] = ()
-    tool_job_ids: tuple[str, ...] = ()
+    job_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         for name in (
@@ -377,7 +427,7 @@ class RecordLinks:
             "strategy_ids",
             "experiment_ids",
             "workflow_execution_ids",
-            "tool_job_ids",
+            "job_ids",
         ):
             object.__setattr__(self, name, _normalise_ids(getattr(self, name), name))
 
@@ -391,7 +441,7 @@ class RecordLinks:
                 "strategy_ids",
                 "experiment_ids",
                 "workflow_execution_ids",
-                "tool_job_ids",
+                "job_ids",
             )
         }
         for name, additions in updates.items():
@@ -455,8 +505,8 @@ class ChatThread(ConversationRecord):
         return self.links.experiment_ids
 
     @property
-    def tool_job_ids(self) -> tuple[str, ...]:
-        return self.links.tool_job_ids
+    def job_ids(self) -> tuple[str, ...]:
+        return self.links.job_ids
 
     @property
     def execution_ids(self) -> tuple[str, ...]:
@@ -601,8 +651,8 @@ class Investigation(WorkspaceRecord):
         return self.links.workflow_execution_ids
 
     @property
-    def tool_job_ids(self) -> tuple[str, ...]:
-        return self.links.tool_job_ids
+    def job_ids(self) -> tuple[str, ...]:
+        return self.links.job_ids
 
 
 @dataclass(frozen=True, slots=True)
@@ -638,7 +688,7 @@ class WorkflowExecution(ConversationRecord):
     investigation_id: str | None = None
     strategy_ids: tuple[str, ...] = ()
     experiment_ids: tuple[str, ...] = ()
-    tool_job_ids: tuple[str, ...] = ()
+    job_ids: tuple[str, ...] = ()
     state: WorkflowExecutionState = WorkflowExecutionState.QUEUED
     phase: str | None = None
     intent_epoch: int = 0
@@ -670,9 +720,7 @@ class WorkflowExecution(ConversationRecord):
             "experiment_ids",
             _normalise_ids(self.experiment_ids, "experiment_id"),
         )
-        object.__setattr__(
-            self, "tool_job_ids", _normalise_ids(self.tool_job_ids, "tool_job_id")
-        )
+        object.__setattr__(self, "job_ids", _normalise_ids(self.job_ids, "job_id"))
         object.__setattr__(
             self,
             "steering_message_ids",
@@ -687,14 +735,22 @@ class WorkflowExecution(ConversationRecord):
 
 @dataclass(frozen=True, slots=True)
 class ToolJob(ConversationRecord):
-    """An externally submitted tool operation whose result is never discarded."""
+    """An externally submitted tool operation whose result is never discarded.
 
-    tool_job_id: str
+    A harness-backed operation's execution state and results are owned by its
+    harness job record under the same ``job_id``.  Tracking owns attribution,
+    submission certainty, and late-result observation only: ``state`` is a
+    tracking lifecycle, never the execution-state authority for a harness
+    execution, and ``error_message`` never asserts that a harness execution
+    failed.
+    """
+
+    job_id: str
     execution_id: str
     chat_id: str
-    correlation_id: str
     tool_name: str
     submitted_by: str
+    attribution: Mapping[str, object] = field(default_factory=dict)
     investigation_id: str | None = None
     strategy_ids: tuple[str, ...] = ()
     experiment_ids: tuple[str, ...] = ()
@@ -707,14 +763,16 @@ class ToolJob(ConversationRecord):
 
     def __post_init__(self) -> None:
         for name in (
-            "tool_job_id",
+            "job_id",
             "execution_id",
             "chat_id",
-            "correlation_id",
             "tool_name",
             "submitted_by",
         ):
             _validate_id(getattr(self, name), name)
+        object.__setattr__(
+            self, "attribution", _normalise_attribution(self.attribution)
+        )
         if self.investigation_id is not None:
             _validate_id(self.investigation_id, "investigation_id")
         if self.intent_epoch < 0:
@@ -734,6 +792,26 @@ class ToolJob(ConversationRecord):
         if self.updated_at is not None:
             _validate_timestamp(self.updated_at, "updated_at")
         ConversationRecord.__post_init__(self)
+
+    @property
+    def is_harness_execution(self) -> bool:
+        """Return whether a harness job record owns this job's execution."""
+        return is_harness_execution_tool(self.tool_name)
+
+    @property
+    def submission_certainty(self) -> ExecutionCertainty:
+        """Return tracking's certainty about whether execution started.
+
+        A certainty retained from the observed outcome wins; an accepted but
+        unstarted operation is ``not_started``, and everything else defaults to
+        ``unknown_outcome`` rather than claiming an observed failure.
+        """
+        declared = (self.result or {}).get("executionCertainty")
+        if declared in ("not_started", "observed_failure", "unknown_outcome"):
+            return cast(ExecutionCertainty, declared)
+        if self.state is ToolJobState.SUBMITTED:
+            return "not_started"
+        return "unknown_outcome"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1020,9 +1098,12 @@ __all__ = [
     "CompletionMode",
     "ConversationRecord",
     "CrossWorkspaceLinkError",
+    "HARNESS_EXECUTION_TOOL_NAMES",
+    "HARNESS_RESEARCH_MODEL_TOOL",
     "InvalidLifecycleTransition",
     "Investigation",
     "InvestigationState",
+    "is_harness_execution_tool",
     "MessageRole",
     "MessageState",
     "normalise_reasoning",
@@ -1034,6 +1115,7 @@ __all__ = [
     "WORKFLOW_NODE_ROLE",
     "RECORD_ANCHOR_ROLES",
     "ToolJob",
+    "ToolJobConflictError",
     "ToolJobState",
     "TranscriptItemKind",
     "WorkflowDefinition",

@@ -29,8 +29,8 @@ from thesis.strategies.bundles import StrategyBundle
 
 BacktestMode = Literal["local", "remote"]
 
-_SUCCESS_STATES = frozenset({"succeeded", "completed", "success", "complete"})
-_PENDING_STATES = frozenset({"queued", "submitted", "pending", "running"})
+_SUCCESS_STATES = frozenset({"succeeded"})
+_PENDING_STATES = frozenset({"queued", "running"})
 
 
 class BacktestRunError(RuntimeError):
@@ -41,16 +41,16 @@ class BacktestRunError(RuntimeError):
 class BacktestRunRequest:
     """The deterministic input handed to an injected backtest runner."""
 
-    run_id: str
+    job_id: str
     workspace_id: str
     bundle: StrategyBundle
     workflow_execution_id: str
     experiment_id: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.run_id, str) or not self.run_id.strip():
-            raise BacktestRunError("run_id must be a non-empty string")
-        object.__setattr__(self, "run_id", self.run_id.strip())
+        if not isinstance(self.job_id, str) or not self.job_id.strip():
+            raise BacktestRunError("job_id must be a non-empty string")
+        object.__setattr__(self, "job_id", self.job_id.strip())
         if not isinstance(self.workspace_id, str) or not self.workspace_id.strip():
             raise BacktestRunError("workspace_id must be a non-empty string")
         object.__setattr__(self, "workspace_id", self.workspace_id.strip())
@@ -74,7 +74,7 @@ class BacktestRunRequest:
         return {
             "bundleSha256": self.bundle.bundle_sha256,
             "experimentId": self.experiment_id,
-            "runId": self.run_id,
+            "jobId": self.job_id,
             "strategyId": self.bundle.strategy_id,
             "workspaceId": self.workspace_id,
             "workflowExecutionId": self.workflow_execution_id,
@@ -169,7 +169,7 @@ class HarnessBacktestRunner:
     def run(self, request: BacktestRunRequest) -> BacktestRunResult:
         """Launch one backtest and resolve pending jobs with one result query."""
         payload = BacktestRequest(
-            run_id=request.run_id,
+            job_id=request.job_id,
             configuration=request.bundle.harness_configuration,
             strategy_bundle=request.bundle.canonical_document,
             metadata={
@@ -181,11 +181,13 @@ class HarnessBacktestRunner:
             },
         )
         launched = self._client.launch_backtest(payload)
+        _require_acknowledged_job(request.job_id, launched.job_id)
         root = _result_root(launched)
         result = launched
         if launched.state.casefold() in _PENDING_STATES:
             for _ in range(self._poll_attempts):
                 result = self._client.query_backtest(launched.job_id)
+                _require_acknowledged_job(request.job_id, result.job_id)
                 root = _result_root(result) or root
                 if result.state.casefold() not in _PENDING_STATES:
                     break
@@ -196,8 +198,17 @@ class HarnessBacktestRunner:
                 )
         elif launched.metrics is None:
             result = self._client.query_backtest(launched.job_id)
+            _require_acknowledged_job(request.job_id, result.job_id)
             root = _result_root(result) or root
         return _result(result, self._mode, root)
+
+
+def _require_acknowledged_job(submitted: str, acknowledged: str) -> None:
+    if acknowledged != submitted:
+        raise BacktestRunError(
+            f"harness acknowledged job_id {acknowledged!r} for submitted "
+            f"job_id {submitted!r}"
+        )
 
 
 def _result(

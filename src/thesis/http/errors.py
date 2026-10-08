@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, ConfigDict
@@ -11,6 +12,7 @@ from thesis.chat import (
     CrossWorkspaceLinkError,
     InvalidLifecycleTransition,
     RecordNotFound,
+    ToolJobConflictError,
 )
 from thesis.integrations.harness_activation import (
     CapabilityUnavailableError,
@@ -77,6 +79,8 @@ def service_error(error: Exception, *, resource: str = "record") -> HTTPExceptio
         )
     elif isinstance(error, CrossWorkspaceLinkError):
         status, code, message = 409, "cross_workspace_link", str(error)
+    elif isinstance(error, ToolJobConflictError):
+        status, code, message = 409, "tool_job_conflict", str(error)
     elif isinstance(error, InvalidLifecycleTransition):
         status, code, message = 409, "invalid_lifecycle_transition", str(error)
     elif isinstance(error, HarnessMcpAuthError):
@@ -101,6 +105,14 @@ def service_error(error: Exception, *, resource: str = "record") -> HTTPExceptio
     else:
         _LOGGER.error("HTTP service request failed", exc_info=error)
         status, code, message = 500, "internal_error", "request failed"
+    if isinstance(error, (HarnessMcpError, HarnessActivationError)):
+        retained_job_id = error.job_id
+        if retained_job_id is not None:
+            retained = {} if not isinstance(details, Mapping) else dict(details)
+            retained["job_id"] = retained_job_id
+            if isinstance(error, HarnessMcpError):
+                retained["executionCertainty"] = error.execution_certainty
+            details = retained
     detail: dict[str, object] = {"code": code, "message": message}
     if details is not None:
         detail["details"] = details

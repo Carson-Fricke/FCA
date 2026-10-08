@@ -162,12 +162,6 @@ fn currency(text: &str, field: &str) -> Result<String, ConfigError> {
     )))
 }
 
-fn bar_interval(text: &str, field: &str) -> Result<String, ConfigError> {
-    harness_contracts::validate_bar_interval(text)
-        .map_err(|e| ConfigError(format!("{field}: {e}")))?;
-    Ok(text.to_string())
-}
-
 fn enum_value(text: &str, allowed: &[&str], field: &str) -> Result<String, ConfigError> {
     if allowed.contains(&text) {
         return Ok(text.to_string());
@@ -552,6 +546,36 @@ fn build_deployment(value: YamlValue) -> Result<Value, ConfigError> {
     }))
 }
 
+fn build_null_transform(value: YamlValue) -> Result<Value, ConfigError> {
+    let mut map = as_map(value, "null")?;
+    let mode_value = map
+        .remove("mode")
+        .ok_or_else(|| ConfigError("Field required: null.mode".to_string()))?;
+    let mode = enum_value(
+        &as_str(mode_value, "null.mode")?,
+        &["block_permutation"],
+        "null.mode",
+    )?;
+    let block_size_value = map
+        .remove("block_size")
+        .ok_or_else(|| ConfigError("Field required: null.block_size".to_string()))?;
+    let block_size = as_int(block_size_value, "null.block_size")?;
+    if !(1..=10_000).contains(&block_size) {
+        return Err(ConfigError(
+            "null.block_size must be between 1 and 10000".to_string(),
+        ));
+    }
+    let seed_value = map
+        .remove("seed")
+        .ok_or_else(|| ConfigError("Field required: null.seed".to_string()))?;
+    let seed = as_int(seed_value, "null.seed")?;
+    if seed < 0 {
+        return Err(ConfigError("null.seed must not be negative".to_string()));
+    }
+    ensure_empty(&map, "null transform")?;
+    Ok(json!({"mode": mode, "block_size": block_size, "seed": seed}))
+}
+
 fn build_data_snapshot(value: YamlValue) -> Result<Value, ConfigError> {
     let mut map = as_map(value, "data")?;
     let snapshot_id = non_empty_text(
@@ -563,39 +587,37 @@ fn build_data_snapshot(value: YamlValue) -> Result<Value, ConfigError> {
         sha256(&fingerprint, "fingerprint")?;
     }
     let symbols = symbols(take(&mut map, "symbols")?, "symbols")?;
-    let subscriptions = take_opt(&mut map, "subscriptions")
-        .map(|value| {
-            let items = as_seq(value, "data.subscriptions")?;
-            let mut inputs = Vec::new();
-            for item in items {
-                inputs.push(
-                    serde_json::from_value::<harness_contracts::Subscription>(config_value(&item)?)
-                        .map_err(|e| ConfigError(format!("data.subscriptions: {e}")))?,
-                );
-            }
-            let output = harness_contracts::canonical_subscriptions(inputs).map_err(ConfigError)?;
-            serde_json::to_value(output).map_err(|e| ConfigError(e.to_string()))
-        })
-        .transpose()?;
-    let interval = match take_opt(&mut map, "bar_interval") {
-        Some(value) => Some(bar_interval(
-            &as_str(value, "bar_interval")?,
-            "bar_interval",
-        )?),
-        None if subscriptions.is_some() => None,
-        None => return Err(ConfigError("Field required: bar_interval".to_string())),
-    };
+    if take_opt(&mut map, "bar_interval").is_some() {
+        return Err(ConfigError(
+            "data.bar_interval is not accepted; declare data.subscriptions".to_string(),
+        ));
+    }
+    let subscriptions_value = take_opt(&mut map, "subscriptions")
+        .ok_or_else(|| ConfigError("Field required: subscriptions".to_string()))?;
+    let items = as_seq(subscriptions_value, "data.subscriptions")?;
+    let mut inputs = Vec::new();
+    for item in items {
+        inputs.push(
+            serde_json::from_value::<harness_contracts::Subscription>(config_value(&item)?)
+                .map_err(|e| ConfigError(format!("data.subscriptions: {e}")))?,
+        );
+    }
+    let output = harness_contracts::canonical_subscriptions(inputs).map_err(ConfigError)?;
+    let subscriptions = serde_json::to_value(&output).map_err(|e| ConfigError(e.to_string()))?;
+    let interval = output.iter().find_map(|subscription| match subscription {
+        harness_contracts::Subscription::Bars { interval, .. } => Some(interval.clone()),
+        harness_contracts::Subscription::Quote { .. }
+        | harness_contracts::Subscription::Trade { .. } => None,
+    });
     ensure_empty(&map, "data")?;
     let mut data = json!({
         "snapshot_id": snapshot_id,
         "fingerprint": fingerprint,
         "symbols": symbols,
+        "subscriptions": subscriptions,
     });
     if let Some(interval) = interval {
         data["bar_interval"] = json!(interval);
-    }
-    if let Some(subscriptions) = subscriptions {
-        data["subscriptions"] = subscriptions;
     }
     Ok(data)
 }
@@ -699,7 +721,7 @@ pub fn build_backtest(mapping: &Mapping) -> Result<Value, ConfigError> {
     if version != 1 {
         return Err(ConfigError("schema_version must be 1".into()));
     }
-    let run_id = identifier(&as_str(take(&mut map, "run_id")?, "run_id")?, "run_id")?;
+    let job_id = identifier(&as_str(take(&mut map, "job_id")?, "job_id")?, "job_id")?;
     let start = datetime_value(&as_str(take(&mut map, "start")?, "start")?, "start")?;
     let end = datetime_value(&as_str(take(&mut map, "end")?, "end")?, "end")?;
     if DateTime::parse_from_rfc3339(start["$datetime"].as_str().unwrap_or_default()).unwrap()
@@ -737,6 +759,10 @@ pub fn build_backtest(mapping: &Mapping) -> Result<Value, ConfigError> {
     let risk_pipeline = build_risk_pipeline(take(&mut map, "risk_pipeline")?)?;
     let fees = build_fees(take(&mut map, "fees")?)?;
     let deployment = build_deployment(take(&mut map, "deployment")?)?;
+    let null_transform = match take_opt(&mut map, "null") {
+        None | Some(YamlValue::Null) => None,
+        Some(value) => Some(build_null_transform(value)?),
+    };
     ensure_empty(&map, "backtest configuration")?;
     if deployment["network_access"].as_str() != Some("disabled") {
         return Err(ConfigError(
@@ -748,10 +774,10 @@ pub fn build_backtest(mapping: &Mapping) -> Result<Value, ConfigError> {
             "backtest deployments must use exactly one replica".to_string(),
         ));
     }
-    Ok(json!({
+    let mut canonical = json!({
         "schema_version": 1,
         "shell": shell,
-        "run_id": run_id,
+        "job_id": job_id,
         "start": start,
         "end": end,
         "clock": clock,
@@ -764,7 +790,11 @@ pub fn build_backtest(mapping: &Mapping) -> Result<Value, ConfigError> {
         "risk_pipeline": risk_pipeline,
         "fees": fees,
         "deployment": deployment,
-    }))
+    });
+    if let Some(null_transform) = null_transform {
+        canonical["null"] = null_transform;
+    }
+    Ok(canonical)
 }
 
 /// Build the canonical trader configuration tree.
@@ -794,8 +824,11 @@ pub fn build_trader(mapping: &Mapping) -> Result<Value, ConfigError> {
     let market_data = build_runtime_adapter(take(&mut map, "market_data")?, "market_data")?;
     let broker = build_runtime_adapter(take(&mut map, "broker")?, "broker")?;
     let deployment = build_deployment(take(&mut map, "deployment")?)?;
+    let job_id = take_opt(&mut map, "job_id")
+        .map(|value| as_str(value, "job_id").and_then(|text| identifier(&text, "job_id")))
+        .transpose()?;
     ensure_empty(&map, "trader configuration")?;
-    Ok(json!({
+    let mut document = json!({
         "schema_version": 1,
         "shell": "trader",
         "mode": mode,
@@ -807,5 +840,9 @@ pub fn build_trader(mapping: &Mapping) -> Result<Value, ConfigError> {
         "market_data": market_data,
         "broker": broker,
         "deployment": deployment,
-    }))
+    });
+    if let (Some(job_id), Some(entries)) = (job_id, document.as_object_mut()) {
+        entries.insert("job_id".to_string(), Value::String(job_id));
+    }
+    Ok(document)
 }

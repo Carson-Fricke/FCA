@@ -227,7 +227,7 @@ def test_arrival_after_post_provider_pull_matches_exact_live_replay_request(
     assert isinstance(serialized_result, Mapping)
     assert serialized_result["datums"] == [datum.as_dict() for datum in datums]
     assert records[3].data is not None
-    assert records[3].data["datums"] == [datum.as_dict() for datum in datums]
+    assert "sessionMessage" in records[3].data
     assert (
         service.chat.read_consumed_input(
             anchor.workspace_id, anchor.chat_id, anchor.schedule_id

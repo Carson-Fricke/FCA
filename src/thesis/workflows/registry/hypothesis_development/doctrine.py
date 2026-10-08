@@ -19,7 +19,10 @@ from thesis.research.hypothesis import (
 from thesis.workflows.core.spec import WorkflowContext
 from thesis.workflows.core.workflow import Workflow, WorkflowDoctrine
 
-from .artifacts import discovery_report_artifact
+from .artifacts import (
+    discovery_report_artifact,
+    variation_report_artifact,
+)
 from .contracts.creation import HypothesisDevelopmentRequest
 from .errors import (
     HypothesisDevelopmentIntakeError,
@@ -27,11 +30,14 @@ from .errors import (
 )
 from .phases import (
     _DISCOVERY,
+    _FORWARD_VALIDATION,
     _MODEL_CREATION,
+    _NULL_TESTING,
     _OPTIMIZATION,
     _STRATEGY_BACKTESTING,
     _STRATEGY_DESIGN,
     _STRATEGY_RCA,
+    _VARIATION,
     _VERDICT,
     phase_from_value,
     workflow_definition,
@@ -212,7 +218,13 @@ def _phase_summary(state: HypothesisDevelopmentState, phase: object) -> str:
     resolved = phase_from_value(_phase_value(phase))
     if resolved is _DISCOVERY:
         if state.discovery is not None:
-            return f"Discovery candidate: {state.discovery.candidate.opportunity}"
+            candidate = state.discovery.candidate
+            if candidate is not None:
+                return f"Discovery candidate: {candidate.opportunity}"
+            return (
+                "Discovery concluded no candidate: "
+                f"{state.discovery.no_candidate_reason}"
+            )
         return "Discovery completed without a recorded candidate."
     if resolved is _MODEL_CREATION:
         if state.hypothesis is not None:
@@ -221,11 +233,11 @@ def _phase_summary(state: HypothesisDevelopmentState, phase: object) -> str:
             return f"Drafted hypothesis: {state.draft.claim}"
     elif resolved is _VERDICT and state.verdict is not None:
         return f"Verdict: {state.verdict.outcome}. {state.verdict.reason}".strip()
-    elif resolved is _STRATEGY_DESIGN and state.strategy_bundle is not None:
-        bundle = state.strategy_bundle
+    elif resolved is _STRATEGY_DESIGN and state.strategy is not None:
+        reference = state.strategy
         return (
-            f"Designed strategy {bundle.strategy_id} {bundle.version} "
-            f"(sha256 {bundle.bundle_sha256[:12]}â€¦)."
+            f"Designed strategy {reference['programId']} {reference['version']} "
+            f"(commit {str(reference['gitCommit'])[:12]})."
         )
     elif resolved is _STRATEGY_BACKTESTING and state.strategy_backtest is not None:
         return (
@@ -234,8 +246,36 @@ def _phase_summary(state: HypothesisDevelopmentState, phase: object) -> str:
         )
     elif resolved is _STRATEGY_RCA:
         return f"Recorded {len(state.rca)} strategy RCA diagnosis(es)."
-    elif resolved is _OPTIMIZATION and state.optimization_backtest is not None:
-        return "Optimization backtest completed."
+    elif resolved is _OPTIMIZATION and state.candidate_evaluation is not None:
+        evaluation = state.candidate_evaluation
+        return (
+            f"Candidate evaluation {evaluation.batch_id} selected "
+            f"{len(evaluation.shortlist)} of {len(evaluation.assignments)} "
+            "candidate(s) for the shortlist."
+        )
+    elif resolved is _NULL_TESTING and state.null_testing is not None:
+        evaluation = state.null_testing
+        succeeded = sum(
+            1 for replicate in evaluation.replicates if replicate.state == "succeeded"
+        )
+        return (
+            f"Null test {evaluation.batch_id} measured {evaluation.statistic} "
+            f"p={evaluation.p_value:.4g} from {succeeded} succeeded replicate(s)."
+        )
+    elif resolved is _VARIATION and state.variation is not None:
+        evaluation = state.variation
+        return (
+            f"Variation {evaluation.batch_id} varied "
+            f"{len(evaluation.parameters)} parameter(s) across "
+            f"{len(evaluation.points)} point(s)."
+        )
+    elif resolved is _FORWARD_VALIDATION and state.forward_validation is not None:
+        evaluation = state.forward_validation
+        return (
+            f"Forward validation measured {evaluation.statistic} "
+            f"p={evaluation.null.p_value:.4g} on "
+            f"[{evaluation.window.start}, {evaluation.window.end})."
+        )
     return f"{resolved.value.capitalize()} phase completed."
 
 
@@ -246,9 +286,10 @@ def _phase_report(
 ) -> Mapping[str, object] | None:
     """Return the rich structured report one phase exit projects, if any.
 
-    Discovery projects its selected candidate as the discovery artifact; every
-    other phase's report stays empty (model creation's hypothesis result is the
-    durable hypothesis document, not a phase report).
+    Discovery projects its selected candidate as the discovery artifact and
+    variation projects its parameter neighborhood as the variation artifact;
+    every other phase's report stays empty (model creation's hypothesis result
+    is the durable hypothesis document, not a phase report).
     """
     if active is None:
         return None
@@ -256,6 +297,10 @@ def _phase_report(
     if phase is None:
         return None
     resolved = phase_from_value(_phase_value(phase))
+    if resolved is _VARIATION:
+        if state.variation is None:
+            return None
+        return variation_report_artifact(state)
     if resolved is not _DISCOVERY:
         return None
     if state.discovery is None:
@@ -280,16 +325,18 @@ def _project(
         fitted_model_reference=state.fitted_model_reference,
         fitted_parameters=state.fitted_parameters,
         research_model_runtime_configuration=state.research_model_runtime_configuration,
+        research_evidence=state.research_evidence,
         plan=state.plan,
         trials=state.trials,
         rca=state.rca,
         verdict=state.verdict,
-        strategy_bundle=state.strategy_bundle,
-        exit_criteria=state.exit_criteria,
+        strategy=state.strategy,
         hypothesis_cycles=state.hypothesis_cycles,
-        strategy_cycles=state.strategy_cycles,
         strategy_backtest=state.strategy_backtest,
-        optimization_backtest=state.optimization_backtest,
+        candidate_evaluation=state.candidate_evaluation,
+        null_testing=state.null_testing,
+        variation=state.variation,
+        forward_validation=state.forward_validation,
         journal_id=state.journal_id,
         detail=state.detail,
     )

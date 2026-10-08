@@ -3,6 +3,7 @@
 	import ThinkingAccordion from './ThinkingAccordion.svelte';
 	import ToolResultCard from './ToolResultCard.svelte';
 	import FalsificationReportCard from './FalsificationReportCard.svelte';
+	import VariationReportCard from './VariationReportCard.svelte';
 	import TypingDots from '$lib/components/common/TypingDots.svelte';
 	import type { ScopeEntry } from '$lib/transcript';
 	import type { ExecutionEvent, SteeringPercolationTarget, SubAgentNode } from '$lib/types';
@@ -142,6 +143,8 @@
 			{/if}
 		{:else if entry.kind === 'falsification'}
 			<FalsificationReportCard data={entry.data} {workspaceId} />
+		{:else if entry.kind === 'variation'}
+			<VariationReportCard data={entry.data} {workspaceId} />
 		{:else if entry.kind === 'tool'}
 			<div class="flex justify-start" data-testid="scope-tool">
 				<div class="w-full">

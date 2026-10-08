@@ -9,7 +9,7 @@ use axum::Json;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use super::store::{JobRecord, RunCatalogRecord};
+use super::store::JobRecord;
 
 /// Probe-safe liveness response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -25,11 +25,11 @@ pub struct AuthCheckResponse {
     pub status: &'static str,
 }
 
-/// Stored backtest runs sorted by run ID.
+/// Stored jobs sorted by job ID.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct RunListResponse {
-    /// Catalog rows.
-    pub runs: Vec<RunCatalogRecord>,
+pub struct JobListResponse {
+    /// Authoritative job records.
+    pub jobs: Vec<JobRecord>,
 }
 
 /// One stored run artifact in the Thesis reproducibility-manifest shape.
@@ -39,9 +39,9 @@ pub struct RunListResponse {
 /// `sha256`, and `sizeBytes`) and by the harness status surface.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ArtifactSummary {
-    /// Artifact name relative to the run prefix.
+    /// Artifact name relative to the job artifact prefix.
     pub name: String,
-    /// Full object path (`backtests/{run_id}/{name}`) as a confined URI.
+    /// Full object path (`jobs/{job_id}/{name}`) as a confined URI.
     pub uri: String,
     /// SHA-256 hex digest of the artifact payload.
     pub sha256: String,
@@ -56,7 +56,7 @@ pub struct ArtifactSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ArtifactListResponse {
     /// Run identifier.
-    pub run_id: String,
+    pub job_id: String,
     /// Artifact manifest entries.
     pub artifacts: Vec<ArtifactSummary>,
 }
@@ -70,8 +70,8 @@ pub struct LaunchAcceptedResponse {
     pub state: super::store::JobState,
 }
 
-/// The persisted state of one backtest launch job.
-pub type BacktestJobStatusResponse = JobRecord;
+/// The persisted state of one launch job.
+pub type JobStatusResponse = JobRecord;
 
 /// Build the error envelope used by every failure response.
 #[must_use]
@@ -115,23 +115,13 @@ impl ApiError {
         self
     }
 
-    /// A 404 for a missing run.
-    #[must_use]
-    pub fn run_not_found() -> Self {
-        Self::new(
-            StatusCode::NOT_FOUND,
-            "run_not_found",
-            "the requested backtest run does not exist",
-        )
-    }
-
     /// A 404 for a missing artifact.
     #[must_use]
     pub fn artifact_not_found() -> Self {
         Self::new(
             StatusCode::NOT_FOUND,
             "artifact_not_found",
-            "the requested artifact is not part of the run",
+            "the requested artifact is not part of the job",
         )
     }
 
@@ -143,6 +133,28 @@ impl ApiError {
             "job_not_found",
             "the requested job does not exist",
         )
+    }
+
+    /// A 409 for a job ID submitted with different accepted input.
+    #[must_use]
+    pub fn job_conflict(detail: &str) -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            "job_conflict",
+            "the job ID already exists with different input",
+        )
+        .with_details(json!(detail))
+    }
+
+    /// A 500 for a durable-store admission or publication failure.
+    #[must_use]
+    pub fn store_error(detail: &str) -> Self {
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "store_error",
+            "the job could not be persisted",
+        )
+        .with_details(json!(detail))
     }
 
     /// A 422 for a request-validation failure.

@@ -32,11 +32,11 @@ _HARNESS_CAPABILITIES = (
 )
 
 # Canonical harness HTTP routes.  The launch route decodes a backtest
-# configuration document, jobs expose lifecycle state, and runs/artifacts
-# expose the manifest, metrics, and artifact references.
+# configuration document, jobs expose lifecycle state, and the job and its
+# artifacts expose the manifest, metrics, and artifact references.
 _HEALTH_ROUTE = "healthz"
 _BACKTEST_JOB_ROUTE = "v1/backtests/jobs"
-_BACKTEST_RUN_ROUTE = "v1/backtests/runs"
+_JOB_ROUTE = "v1/jobs"
 
 
 class HarnessError(RuntimeError):
@@ -92,15 +92,15 @@ class HarnessCredentials:
 class BacktestRequest:
     """Opaque, deterministic input accepted by the published backtest API."""
 
-    run_id: str
+    job_id: str
     configuration: object
     strategy_bundle: object | None = None
     metadata: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not isinstance(self.run_id, str) or not self.run_id.strip():
-            raise ValueError("run_id must be a non-empty string")
-        object.__setattr__(self, "run_id", self.run_id.strip())
+        if not isinstance(self.job_id, str) or not self.job_id.strip():
+            raise ValueError("job_id must be a non-empty string")
+        object.__setattr__(self, "job_id", self.job_id.strip())
         if not isinstance(self.metadata, Mapping):
             raise TypeError("metadata must be a mapping")
         object.__setattr__(self, "metadata", dict(self.metadata))
@@ -108,7 +108,7 @@ class BacktestRequest:
     def to_payload(self) -> dict[str, object]:
         """Serialize only published request fields, preserving configuration data."""
         return {
-            "run_id": self.run_id,
+            "job_id": self.job_id,
             "configuration": _json_value(self.configuration),
             "strategy_bundle": _json_value(self.strategy_bundle),
             "metadata": _json_value(self.metadata),
@@ -261,21 +261,29 @@ class HarnessApiAdapter:
         if not report.status("backtest").available:
             raise HarnessCapabilityUnavailable("backtest", report)
         response = self._http.post(_BACKTEST_JOB_ROUTE, json=_launch_document(request))
-        return _api_result(response, "backtest", fallback=report)
+        result = _api_result(response, "backtest", fallback=report)
+        if result.job_id != request.job_id:
+            raise HarnessProtocolError(
+                f"harness acknowledged job_id {result.job_id!r} for submitted "
+                f"job_id {request.job_id!r}"
+            )
+        return result
 
     def query_backtest(self, job_id: str) -> HarnessBacktestResult:
-        """Retrieve one canonical job and enrich it from its run and artifacts."""
+        """Retrieve one canonical job and enrich it from its artifacts."""
         report = self.capabilities()
         if not report.status("result_query").available:
             raise HarnessCapabilityUnavailable("result_query", report)
         identifier = _job_id(job_id)
-        response = self._http.get(f"{_BACKTEST_JOB_ROUTE}/{identifier}")
+        response = self._http.get(f"{_JOB_ROUTE}/{identifier}")
         job = _api_result(response, "result_query", fallback=report)
-        run = self._optional_object(f"{_BACKTEST_RUN_ROUTE}/{identifier}")
-        artifacts = self._optional_object(
-            f"{_BACKTEST_RUN_ROUTE}/{identifier}/artifacts"
-        )
-        manifest, metrics, result_artifacts = _result_documents(run, artifacts)
+        if job.job_id != identifier:
+            raise HarnessProtocolError(
+                f"harness returned job_id {job.job_id!r} for requested "
+                f"job_id {identifier!r}"
+            )
+        artifacts = self._optional_object(f"{_JOB_ROUTE}/{identifier}/artifacts")
+        manifest, metrics, result_artifacts = _result_documents(job, artifacts)
         return HarnessBacktestResult(
             job_id=job.job_id,
             state=job.state,
@@ -389,30 +397,28 @@ def _launch_document(request: BacktestRequest) -> dict[str, object]:
 
     The harness launch route decodes a ``shell: backtest`` configuration
     document, not a client envelope, so the submitted ``configuration`` is
-    forwarded as-is with the request's ``run_id`` applied.
+    forwarded as-is with the request's ``job_id`` applied.
     """
     configuration = request.configuration
     if not isinstance(configuration, Mapping):
         raise HarnessProtocolError("backtest configuration must be a JSON object")
     document = {str(key): _json_value(value) for key, value in configuration.items()}
-    document["run_id"] = request.run_id
+    document["job_id"] = request.job_id
     return document
 
 
 def _result_documents(
-    run: Mapping[str, object] | None,
+    job: HarnessBacktestResult,
     artifacts: Mapping[str, object] | None,
 ) -> tuple[object | None, object | None, object | None]:
-    """Assemble manifest, metrics, and artifact references from canonical rows."""
-    metrics = run.get("metrics") if isinstance(run, Mapping) else None
+    """Assemble manifest, metrics, and artifact references from one job row."""
+    metrics = job.raw.get("metrics") if isinstance(job.raw, Mapping) else None
     entries: object | None = None
     if isinstance(artifacts, Mapping) and isinstance(artifacts.get("artifacts"), list):
         entries = artifacts["artifacts"]
     manifest: object | None = None
-    if isinstance(run, Mapping) and isinstance(entries, list):
-        run_id = run.get("run_id")
-        if isinstance(run_id, str) and run_id.strip():
-            manifest = {"manifestId": run_id.strip(), "artifacts": entries}
+    if isinstance(entries, list):
+        manifest = {"manifestId": job.job_id, "artifacts": entries}
     return manifest, metrics, entries
 
 

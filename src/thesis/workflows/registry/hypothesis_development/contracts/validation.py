@@ -63,6 +63,10 @@ HYPOTHESIS_PAYLOAD_SCHEMA: dict[str, Any] = {
                         "maxLength": 8192,
                         "pattern": r"\S",
                     },
+                    "role": {
+                        "type": "string",
+                        "enum": ["claim", "assumption", "control"],
+                    },
                 },
                 "required": ["observable", "condition", "threshold", "test"],
             },
@@ -123,23 +127,97 @@ DISCOVERY_CANDIDATE_FIELDS: tuple[str, ...] = (
     "effect",
     "competingExplanation",
     "evidence",
+    "entryIdea",
+    "exitIdea",
+    "assumptions",
+    "buildingBlocks",
+    "validationQuestions",
+    "exploratoryEvidence",
 )
+
+_DISCOVERY_TEXT_FIELDS: tuple[str, ...] = (
+    "opportunity",
+    "signal",
+    "informationTime",
+    "direction",
+    "holdingPeriod",
+    "profitSource",
+    "effect",
+    "competingExplanation",
+    "entryIdea",
+    "exitIdea",
+)
+
+DISCOVERY_CANDIDATE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        **{
+            name: {
+                "type": "string",
+                "minLength": 1,
+                "pattern": r"\S",
+                "maxLength": 4_096,
+            }
+            for name in _DISCOVERY_TEXT_FIELDS
+        },
+        "evidence": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8_192,
+            "pattern": r"\S",
+        },
+        "exploratoryEvidence": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8_192,
+            "pattern": r"\S",
+        },
+        "assumptions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2_048,
+                "pattern": r"\S",
+            },
+        },
+        "buildingBlocks": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": r"\S",
+            },
+        },
+        "validationQuestions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2_048,
+                "pattern": r"\S",
+            },
+        },
+    },
+    "required": list(DISCOVERY_CANDIDATE_FIELDS),
+}
 
 DISCOVERY_PAYLOAD_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "candidate": {
-            "type": "object",
-            "properties": {
-                name: {
-                    "type": "string",
-                    "minLength": 1,
-                    "pattern": r"\S",
-                    "maxLength": 8192 if name == "evidence" else 4096,
-                }
-                for name in DISCOVERY_CANDIDATE_FIELDS
-            },
-            "required": list(DISCOVERY_CANDIDATE_FIELDS),
+        "candidate": DISCOVERY_CANDIDATE_SCHEMA,
+        "noCandidateReason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4_096,
+            "pattern": r"\S",
         },
         "attempts": {
             "type": "array",
@@ -153,7 +231,6 @@ DISCOVERY_PAYLOAD_SCHEMA: dict[str, Any] = {
                         "maxLength": 4096,
                         "pattern": r"\S",
                     },
-                    "studyId": {"type": "string", "pattern": IDENTIFIER_PATTERN},
                     "dataTypes": {
                         "type": "array",
                         "minItems": 1,
@@ -172,12 +249,12 @@ DISCOVERY_PAYLOAD_SCHEMA: dict[str, Any] = {
                         "pattern": r"\S",
                     },
                     "changed": {"type": "boolean"},
-                    "runId": {
+                    "jobId": {
                         "type": ["string", "null"],
                         "pattern": IDENTIFIER_PATTERN,
                     },
                 },
-                "required": ["purpose", "studyId", "dataTypes", "window", "result"],
+                "required": ["purpose", "dataTypes", "window", "result"],
             },
         },
         "untouchedData": {
@@ -193,24 +270,82 @@ DISCOVERY_PAYLOAD_SCHEMA: dict[str, Any] = {
             "pattern": r"\S",
         },
     },
-    "required": ["candidate", "attempts", "untouchedData", "limitations"],
+    "anyOf": [
+        {"required": ["candidate", "attempts", "untouchedData", "limitations"]},
+        {
+            "required": [
+                "noCandidateReason",
+                "attempts",
+                "untouchedData",
+                "limitations",
+            ]
+        },
+    ],
 }
 
 DISCOVERY_COMPLETION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "target": {"type": "string", "enum": ["model_creation"]},
+        "target": {"type": "string", "enum": ["model_creation", "completed"]},
         "discovery": DISCOVERY_PAYLOAD_SCHEMA,
     },
     "required": ["discovery"],
 }
 
+_VERDICT_OUTCOMES: tuple[str, ...] = ("supported", "refuted", "inconclusive")
+
+_VERDICT_TRIAL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "testId": {"type": "string", "pattern": IDENTIFIER_PATTERN},
+        "falsifierId": {"type": "string", "pattern": IDENTIFIER_PATTERN},
+        "jobId": {"type": "string", "minLength": 1, "maxLength": 256},
+        "digest": {"type": "string", "pattern": r"^[0-9a-f]{64}$"},
+        "runState": {"type": "string", "minLength": 1, "maxLength": 64},
+        "observed": {"type": ["number", "null"]},
+        "falsified": {"type": "boolean"},
+        "detail": {"type": ["string", "null"]},
+    },
+    "required": ["testId", "falsifierId", "jobId", "digest", "runState", "falsified"],
+}
+
+VERDICT_PAYLOAD_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "target": {"type": "string"},
+        "outcome": {"type": "string", "enum": list(_VERDICT_OUTCOMES)},
+        "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2_048,
+            "pattern": r"\S",
+        },
+        "evidence": {"type": "string"},
+        "trials": {"type": "array", "items": _VERDICT_TRIAL_SCHEMA},
+    },
+    "required": ["outcome", "reason"],
+}
+
 
 def discovery_payload_errors(payload: Mapping[str, object]) -> list[str]:
     """Return every structural miss using the advertised discovery schema."""
-    return [
+    errors = [
         miss.render()
         for miss in violations(DISCOVERY_PAYLOAD_SCHEMA, payload, "discovery")
+    ]
+    candidate = payload.get("candidate")
+    no_candidate_reason = payload.get("noCandidateReason")
+    if (candidate is None) == (no_candidate_reason is None):
+        errors.append(
+            "discovery: exactly one of candidate or noCandidateReason is required"
+        )
+    return errors
+
+
+def verdict_payload_errors(payload: Mapping[str, object]) -> list[str]:
+    """Return every structural miss using the advertised verdict schema."""
+    return [
+        miss.render() for miss in violations(VERDICT_PAYLOAD_SCHEMA, payload, "verdict")
     ]
 
 
@@ -262,11 +397,14 @@ def format_contract_errors(errors: Sequence[str]) -> str:
 
 __all__ = [
     "DISCOVERY_CANDIDATE_FIELDS",
+    "DISCOVERY_CANDIDATE_SCHEMA",
     "DISCOVERY_COMPLETION_SCHEMA",
     "DISCOVERY_PAYLOAD_SCHEMA",
     "HYPOTHESIS_COMPLETION_SCHEMA",
     "HYPOTHESIS_PAYLOAD_SCHEMA",
+    "VERDICT_PAYLOAD_SCHEMA",
     "discovery_payload_errors",
     "format_contract_errors",
     "hypothesis_payload_errors",
+    "verdict_payload_errors",
 ]

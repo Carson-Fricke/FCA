@@ -16,7 +16,7 @@
 				"schema_version": 1,
 				"content_hash": "1111111111111111111111111111111111111111111111111111111111111111",
 				"input_consumed_positions": {"root": 0},
-				"links": {"chat_ids": [], "investigation_ids": [], "strategy_ids": ["str-1"], "experiment_ids": [], "workflow_execution_ids": ["exec-1"], "tool_job_ids": []}
+				"links": {"chat_ids": [], "investigation_ids": [], "strategy_ids": ["str-1"], "experiment_ids": [], "workflow_execution_ids": ["exec-1"], "job_ids": []}
 			},
 			{
 				"chat_id": "chat-2",
@@ -33,7 +33,7 @@
 				"schema_version": 1,
 				"content_hash": "2222222222222222222222222222222222222222222222222222222222222222",
 				"input_consumed_positions": {},
-				"links": {"chat_ids": [], "investigation_ids": ["inv-41"], "strategy_ids": [], "experiment_ids": [], "workflow_execution_ids": [], "tool_job_ids": []}
+				"links": {"chat_ids": [], "investigation_ids": ["inv-41"], "strategy_ids": [], "experiment_ids": [], "workflow_execution_ids": [], "job_ids": []}
 			}
 		]
 	},
@@ -54,7 +54,7 @@
 				"schema_version": 1,
 				"content_hash": "3333333333333333333333333333333333333333333333333333333333333333",
 				"input_consumed_positions": {"root": 0},
-				"links": {"chat_ids": [], "investigation_ids": [], "strategy_ids": ["str-b1"], "experiment_ids": [], "workflow_execution_ids": ["exec-b1"], "tool_job_ids": []}
+				"links": {"chat_ids": [], "investigation_ids": [], "strategy_ids": ["str-b1"], "experiment_ids": [], "workflow_execution_ids": ["exec-b1"], "job_ids": []}
 			}
 		]
 	}

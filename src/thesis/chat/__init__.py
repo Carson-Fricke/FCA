@@ -1,6 +1,5 @@
 """Public workspace chat, investigation, and workflow contracts."""
 
-from thesis.chat.azure import AzureBlobChatPersistence
 from thesis.chat.contracts import (
     RECORD_ANCHOR_ROLES,
     AgentInvocation,
@@ -26,6 +25,7 @@ from thesis.chat.contracts import (
     SubAgentRecord,
     SubAgentStatus,
     ToolJob,
+    ToolJobConflictError,
     ToolJobState,
     TranscriptItemKind,
     WorkflowDefinition,
@@ -45,7 +45,6 @@ __all__ = [
     "AgentInvocationState",
     "Attachment",
     "AttachmentState",
-    "AzureBlobChatPersistence",
     "ChatContractError",
     "ChatMessage",
     "ChatPersistence",
@@ -72,6 +71,7 @@ __all__ = [
     "SubAgentRecord",
     "SubAgentStatus",
     "ToolJob",
+    "ToolJobConflictError",
     "ToolJobState",
     "TranscriptItemKind",
     "WorkflowDefinition",

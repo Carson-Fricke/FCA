@@ -61,6 +61,12 @@ Pages are `*.md` under the corpus root with YAML front matter delimited by
 - `source`: required mapping {url: required http/https, publisher: optional
   str, content_hash: required 64-hex lowercase sha256}
 - `tags`: required list of strings (may be empty)
+- `collections`: optional list of unique kebab-case tokens
+  (`^[a-z0-9]+(?:-[a-z0-9]+)*$`) naming the phase-scoped collections a page
+  belongs to (for example `model-cards` or `discovery`).  Absent or empty
+  means no collection; an explicit `collections: []` parses as absent,
+  duplicates and non-kebab-case tokens are rejected, and rendered front
+  matter omits the field when it is empty.
 - `links`: required list of strings (page ids or repository-relative corpus
   paths; may be empty)
 - `relationships`: required list of mappings

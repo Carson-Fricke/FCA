@@ -16,7 +16,9 @@ def _model(tests: dict[str, str]) -> ResearchModel:
         description="Midquote reversal study",
         source=_SOURCE,
         outputs=("sharpe",),
-        harness_configuration={"interval": "1min"},
+        harness_configuration={
+            "subscriptions": [{"data_type": "quote", "symbols": ["SPY"]}]
+        },
         tests=tests,
     )
 

@@ -40,7 +40,7 @@ pub fn create_app(config: AppConfig) -> Result<Router, AuthError> {
         .route("/health", get(routes::health))
         .route("/healthz", get(routes::health));
 
-    let protected = routes::runs_router()
+    let protected = routes::jobs_router()
         .merge(routes::launch_router())
         .merge(routes::screeners_router())
         .route("/v1/auth/check", get(routes::auth_check))

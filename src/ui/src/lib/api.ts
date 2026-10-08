@@ -27,6 +27,7 @@ import type { TimelinePageWire, CreateMessageResponseWire, SubAgentNodeWire, Cha
 export { ThesisApiError } from './transport';
 import type {
 	ArtifactEntry,
+	ArtifactFileContent,
 	BackendKind,
 	BacktestDetail,
 	BacktestLaunchResult,
@@ -40,7 +41,6 @@ import type {
 	HarnessArtifactManifest,
 	HarnessJobResult,
 	HarnessJobStatus,
-	HarnessRunRecord,
 	HarnessStatus,
 	KnowledgeHit,
 	LaunchBacktestInput,
@@ -59,8 +59,8 @@ import type {
 	WidgetDefinition,
 	WorkflowExecutionRecord,
 	WorkflowDefinition,
+	WorkspaceArtifactCatalog,
 	WorkspaceSnapshot,
-	WorkspaceStateData,
 	WorkspaceSummary
 } from './types';
 
@@ -280,10 +280,9 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 /**
  * Fetch that resolves to `fallback` on a 404. Used for optional resources
- * (a chat's execution, a workspace-state document that has not been
- * persisted) and for the activation-consent surface, which the local
- * composition does not serve yet. Any other failure still throws so real
- * backend or configuration errors are not masked.
+ * (a chat's execution, an activation-consent surface the local composition
+ * does not serve yet) so an expected absence stays quiet. Any other failure
+ * still throws so real backend or configuration errors are not masked.
  */
 async function apiFetchOptional<T>(path: string, fallback: T, init?: RequestInit): Promise<T> {
 	try {
@@ -512,7 +511,7 @@ export function createChat(
 				owner_actor_id: owner,
 				created_at: new Date().toISOString(),
 				updated_at: null,
-				links: { chat_ids: [], investigation_ids: [], strategy_ids: [], experiment_ids: [], workflow_execution_ids: [], tool_job_ids: [] },
+				links: { chat_ids: [], investigation_ids: [], strategy_ids: [], experiment_ids: [], workflow_execution_ids: [], job_ids: [] },
 				input_consumed_positions: {},
 				created_by: owner,
 				schema_version: 1,
@@ -923,10 +922,10 @@ export function createStrategy(
 				symbol: input.symbol.toUpperCase(),
 				status,
 				description,
-				pnl: 0,
-				return_pct: 0,
-				win_rate: 0,
-				capital: 0,
+				pnl: null,
+				return_pct: null,
+				win_rate: null,
+				capital: null,
 				code: '',
 				versions: [{ version: '0.1.0', created_at: now, parent_version: null, note: 'Created' }],
 				created_at: now
@@ -986,28 +985,28 @@ function fixtureArtifacts(
 	if (!count) return [];
 	const per = Math.floor(total / count);
 	const digest = doc.manifest?.run_digest ?? null;
-	const runId = doc.manifest?.run_id ?? doc.id;
+	const jobId = doc.manifest?.job_id ?? doc.job_id;
 	return Array.from({ length: count }, (_, index) => {
 		const name = FIXTURE_ARTIFACT_NAMES[index] ?? `artifact-${index + 1}.bin`;
 		const size = index === count - 1 ? Math.max(0, total - per * (count - 1)) : per;
 		return {
 			name,
 			size,
-			object_path: `backtests/${runId}/artifacts/${name}`,
+			object_path: `jobs/${jobId}/${name}`,
 			sas_url: null,
 			sha256: digest
 		};
 	});
 }
 
-export function getBacktest(workspaceId: string, backtestId: string): Promise<BacktestDetail> {
+export function getBacktest(workspaceId: string, jobId: string): Promise<BacktestDetail> {
 	if (fixtureMode) {
 		return wait(10).then(() => {
 			const doc =
-				fixtures.backtestDetail[backtestId];
+				fixtures.backtestDetail[jobId];
 			const series =
-				fixtures.backtestSeries[backtestId];
-			if (!doc || !series) throw new Error(`unknown backtest ${backtestId}`);
+				fixtures.backtestSeries[jobId];
+			if (!doc || !series) throw new Error(`unknown backtest ${jobId}`);
 			return {
 				...plain(doc),
 				equity: plain(series.equity),
@@ -1017,32 +1016,30 @@ export function getBacktest(workspaceId: string, backtestId: string): Promise<Ba
 		});
 	}
 	return apiFetch<BacktestDetail>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/backtests/${encodeURIComponent(backtestId)}`
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/backtests/${encodeURIComponent(jobId)}`
 	);
 }
 
 /**
- * Materialize one harness run into workspace card data.
+ * Materialize one harness job into workspace card data.
  *
- * Called once the harness MCP tool returns a run id. Thesis owns the harness
+ * Called once the harness MCP tool returns a job id. Thesis owns the harness
  * boundary, so the same call yields the report for local and Azure execution.
  */
 export function materializeBacktestRun(
 	workspaceId: string,
-	runId: string,
+	jobId: string,
 	options: { chatId?: string | null; executionId?: string | null } = {}
 ): Promise<BacktestRunCard> {
 	const params = new URLSearchParams();
 	if (options.chatId) params.set('chat_id', options.chatId);
 	if (options.executionId) params.set('execution_id', options.executionId);
 	const query = params.toString();
-	const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}/backtests/runs/${encodeURIComponent(runId)}${query ? `?${query}` : ''}`;
+	const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}/backtests/jobs/${encodeURIComponent(jobId)}${query ? `?${query}` : ''}`;
 	if (fixtureMode) {
 		return wait(10).then(() => ({
-			status: 'complete' as const,
-			run_id: runId,
-			state: 'completed',
-			backtest_id: null,
+			job_id: jobId,
+			state: 'succeeded',
 			backtest: null
 		}));
 	}
@@ -1050,10 +1047,10 @@ export function materializeBacktestRun(
 }
 
 /**
- * Launch a backtest through the canonical `POST /v1/backtests/jobs` route.
- * The Thesis harness router fronts the harness MCP `run_backtest` tool, so the
- * same call works whether the harness is local or remote. Fixture mode resolves
- * a synthetic accepted outcome shaped like the legacy launch document.
+ * Launch a backtest through the workspace launch route. The Thesis harness
+ * adapter fronts the harness MCP `run_backtest` tool, so the same call works
+ * whether the harness is local or remote. Fixture mode resolves a synthetic
+ * accepted outcome shaped like the launch document.
  */
 export function launchBacktest(
 	workspaceId: string,
@@ -1073,40 +1070,25 @@ export function launchBacktest(
 			environment: body.environment,
 			exit_code: 0,
 			job_id: `job-local-${store.nextId++}`,
-			state: 'accepted',
+			state: 'succeeded',
 			request_payload: { ...body }
 		}));
 	}
-	return apiFetch<HarnessJobResult>('/v1/backtests/jobs', {
-		method: 'POST',
-		body: JSON.stringify({
-			config_path: input.configPath,
-			workspace: workspaceId
-		})
-	}).then((job) => ({
-		action: job.action,
-		bundle_ref: body.bundle_ref,
-		environment: body.environment,
-		exit_code: job.exit_code,
-		job_id: job.job_id,
-		state: job.state,
-		request_payload: job.result
-	}));
+	return apiFetch<BacktestLaunchResult>(
+		`/v1/workspaces/${encodeURIComponent(workspaceId)}/backtests/launch`,
+		{
+			method: 'POST',
+			body: JSON.stringify(body)
+		}
+	);
 }
 
 // ---------------------------------------------------------------------------
 // Harness topology + MCP operations (thesis.http.harness, `/v1/harness/status`
-// and the canonical `/v1/backtests/jobs|runs` routes).
+// and the canonical `/v1/jobs` read routes).
 // ---------------------------------------------------------------------------
 
-const TERMINAL_JOB_STATES = new Set([
-	'completed',
-	'failed',
-	'cancelled',
-	'canceled',
-	'archived',
-	'error'
-]);
+const TERMINAL_JOB_STATES = new Set(['succeeded', 'failed', 'cancelled']);
 
 /**
  * Read the harness topology and connection status. The route answers 200 even
@@ -1123,9 +1105,9 @@ export function getHarnessStatus(): Promise<HarnessStatus> {
 			server: { serverInfo: { name: 'harness', version: '0.1.0' } },
 			tools: [
 				{ name: 'run_backtest', description: 'Run one deterministic backtest' },
-				{ name: 'get_job_status', description: 'Read a backtest job' },
-				{ name: 'get_run', description: 'Read a stored run' },
-				{ name: 'list_artifacts', description: 'List a run artifact manifest' }
+				{ name: 'get_job_status', description: 'Read one harness job' },
+				{ name: 'get_job_result', description: 'Read one job result' },
+				{ name: 'list_artifacts', description: 'List a job artifact manifest' }
 			],
 			health: { status: 'ok' },
 			error: null
@@ -1134,37 +1116,37 @@ export function getHarnessStatus(): Promise<HarnessStatus> {
 	return apiFetch<HarnessStatus>('/v1/harness/status');
 }
 
-/** Read one canonical backtest job row. */
+/** Read one canonical harness job row. */
 export function getHarnessJob(jobId: string): Promise<HarnessJobStatus> {
 	if (fixtureMode) {
-		return wait(5).then(() => ({ job_id: jobId, state: 'completed' }));
+		return wait(5).then(() => ({ job_id: jobId, state: 'succeeded' }));
 	}
 	return apiFetch<HarnessJobStatus>(
-		`/v1/backtests/jobs/${encodeURIComponent(jobId)}`
+		`/v1/jobs/${encodeURIComponent(jobId)}`
 	);
 }
 
-/** Read one stored run's catalog row. */
-export function getHarnessRun(runId: string): Promise<HarnessRunRecord> {
+/** Read one stored job's result row. */
+export function getHarnessJobResult(jobId: string): Promise<HarnessJobResult> {
 	if (fixtureMode) {
 		return wait(5).then(() => ({
-			run_id: runId,
-			status: 'completed',
+			job_id: jobId,
+			state: 'succeeded',
 			strategy_id: 'fixture'
 		}));
 	}
-	return apiFetch<HarnessRunRecord>(
-		`/v1/backtests/runs/${encodeURIComponent(runId)}`
+	return apiFetch<HarnessJobResult>(
+		`/v1/jobs/${encodeURIComponent(jobId)}/result`
 	);
 }
 
-/** Read one run's artifact manifest on the canonical `uri`/`sha256`/`sizeBytes` shape. */
-export function listHarnessArtifacts(runId: string): Promise<HarnessArtifactManifest> {
+/** Read one job's artifact manifest on the canonical `uri`/`sha256`/`sizeBytes` shape. */
+export function listHarnessArtifacts(jobId: string): Promise<HarnessArtifactManifest> {
 	if (fixtureMode) {
-		return wait(5).then(() => ({ run_id: runId, artifacts: [] }));
+		return wait(5).then(() => ({ job_id: jobId, artifacts: [] }));
 	}
 	return apiFetch<HarnessArtifactManifest>(
-		`/v1/backtests/runs/${encodeURIComponent(runId)}/artifacts`
+		`/v1/jobs/${encodeURIComponent(jobId)}/artifacts`
 	);
 }
 
@@ -1383,13 +1365,16 @@ export function runScreener(
 			const resultId = `sha256:${fixtureDigest(
 				`${workspaceId}\u0000${definition.definitionId}\u0000${input.as_of}`
 			)}`;
+			const jobId = `job-${fixtureDigest(
+				`job\u0000${workspaceId}\u0000${definition.definitionId}\u0000${input.as_of}`
+			)}`;
 			const created: ScreeningResult = {
 				result_id: resultId,
 				workspace_id: workspaceId,
 				definition_id: definition.definitionId,
 				definition_hash: definition.definitionSha256,
-				run_id: `screen-${resultId.slice(7, 23)}`,
-				status: 'complete',
+				job_id: jobId,
+				status: 'succeeded',
 				as_of: input.as_of,
 				rows,
 				provenance: {
@@ -1401,6 +1386,7 @@ export function runScreener(
 						bundle_hash: definition.sourceSha256,
 						definition_hash: definition.definitionSha256,
 						definition_id: definition.definitionId,
+						job_id: jobId,
 						rank_metric: definition.rankMetric,
 						universe_revision: definition.universeRevision
 					}
@@ -1439,17 +1425,40 @@ export function getScreenerResult(
 	return apiFetch<ScreeningResult>(path);
 }
 
-export function getWorkspaceState(workspaceId: string): Promise<WorkspaceStateData | null> {
+/** Fetch the durable artifact catalog for one workspace. */
+export function listWorkspaceArtifacts(workspaceId: string): Promise<WorkspaceArtifactCatalog> {
+	const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}/artifacts`;
 	if (fixtureMode) {
 		return wait(5).then(() => {
-			const doc = fixtures.workspaceState[workspaceId];
-			return doc ? plain(doc) : null;
+			const doc = fixtures.workspaceArtifacts[workspaceId];
+			return doc
+				? plain(doc)
+				: {
+						workspace_id: workspaceId,
+						items: [],
+						sources: { strategies: 'empty', studies: 'empty', indicators: 'empty' }
+					};
 		});
 	}
-	return apiFetchOptional<WorkspaceStateData | null>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/state`,
-		null
-	);
+	return apiFetch<WorkspaceArtifactCatalog>(path);
+}
+
+/** Fetch one bounded UTF-8 artifact file for the in-page viewer. */
+export function getArtifactFile(
+	workspaceId: string,
+	artifactId: string,
+	filePath: string
+): Promise<ArtifactFileContent> {
+	const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+	const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}/artifacts/${encodeURIComponent(artifactId)}/files/${encodedPath}`;
+	if (fixtureMode) {
+		return wait(3).then(() => {
+			const doc = fixtures.artifactFiles[`${artifactId}|${filePath}`];
+			if (!doc) throw new ThesisApiError(404, path);
+			return plain(doc);
+		});
+	}
+	return apiFetch<ArtifactFileContent>(path);
 }
 
 export function searchKnowledge(query: string): Promise<KnowledgeHit[]> {

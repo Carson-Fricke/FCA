@@ -234,8 +234,6 @@ def test_live_tool_result_is_one_canonical_message_with_all_datums(
     datums = result.content.result["datums"]
     assert isinstance(datums, tuple) and len(datums) == 2
     assert records[2].data is not None
-    visible_datums = records[2].data["datums"]
-    assert isinstance(visible_datums, list | tuple) and len(visible_datums) == 2
     assert records[2].data["activityKind"] == "delivery"
     assert requests[1][1:] == project_native_messages(messages[:3])
     assert (

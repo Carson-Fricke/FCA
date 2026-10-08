@@ -25,6 +25,8 @@ links:
   - stability-across-periods
   - discovery-versus-validation-data
   - tradability-break-even-and-oos
+  - directional-change-events
+  - perceptually-important-points
 relationships:
   - type: relates
     target: discovery-study-design
@@ -42,6 +44,10 @@ relationships:
     target: discovery-versus-validation-data
   - type: relates
     target: tradability-break-even-and-oos
+  - type: relates
+    target: directional-change-events
+  - type: relates
+    target: perceptually-important-points
 trust:
   tier: curated
   state: published
@@ -96,6 +102,12 @@ data](discovery-versus-validation-data), [Signal size
 buckets](signal-size-buckets), and [Tradability, break-even, and
 out-of-sample](tradability-break-even-and-oos).
 
+Legitimate exploratory directions include event-time segmentation with
+[Directional change events](directional-change-events) and path-shape
+summarization with [Perceptually important
+points](perceptually-important-points); label them exploratory and count the
+thresholds, windows, and parameters tried.
+
 ## Related
 
 - [Discovery study design](discovery-study-design)
@@ -106,3 +118,5 @@ out-of-sample](tradability-break-even-and-oos).
 - [Stability across periods](stability-across-periods)
 - [Discovery versus validation data](discovery-versus-validation-data)
 - [Tradability, break-even, and out-of-sample](tradability-break-even-and-oos)
+- [Directional change events](directional-change-events)
+- [Perceptually important points](perceptually-important-points)

@@ -28,6 +28,9 @@ from thesis.strategies.validation import (
 )
 from thesis.workspaces.repository import WorkspaceRepositoryProvider
 
+_VersionHistory = list[tuple[str, dict[str, object], str]]
+_VerifiedVersions = tuple[tuple[str, dict[str, object], str], ...]
+
 
 class StrategyArtifactError(ValueError):
     """A strategy artifact or completion receipt is invalid or unpublished."""
@@ -45,6 +48,7 @@ class WorkspaceStrategyArtifacts:
         self.validator = (
             validator if validator is not None else StructuralStrategyValidator()
         )
+        self._versions_cache: dict[str, tuple[str | None, _VerifiedVersions]] = {}
 
     def author(
         self,
@@ -270,18 +274,13 @@ class WorkspaceStrategyArtifacts:
 
     def list(self, workspace_id: str) -> tuple[dict[str, object], ...]:
         """Project only durable, published and hash-verified manifests for the UI."""
-        root = self.provider.open(workspace_id).root
-        git = GitCoordinator(root)
+        root, git, _head, verified_versions = self._verified_versions(workspace_id)
         groups: dict[str, dict[str, object]] = {}
-        verified_versions = []
-        for path in git.tracked_paths("strategies"):
-            if re.fullmatch(r"strategies/[^/]+/[^/]+/manifest\.json", path) is None:
-                continue
-            verified = self._verified(root, git, path)
-            if verified is not None:
-                manifest, commit = verified
-                verified_versions.append((git.commit_time(commit), manifest, commit))
-        order = {commit: index for index, commit in enumerate(git.commit_order())}
+        order = (
+            {commit: index for index, commit in enumerate(git.commit_order())}
+            if verified_versions
+            else {}
+        )
         for created_at, manifest, _commit in sorted(
             verified_versions, key=lambda item: order[item[2]]
         ):
@@ -310,10 +309,12 @@ class WorkspaceStrategyArtifacts:
                 "symbol": manifest["symbol"],
                 "description": manifest["description"],
                 "status": manifest["status"],
-                "pnl": 0.0,
-                "return_pct": 0.0,
-                "win_rate": 0.0,
-                "capital": 0.0,
+                # No backtest is linked to a strategy here, so its performance is
+                # unknown: publish None, never a zero.
+                "pnl": None,
+                "return_pct": None,
+                "win_rate": None,
+                "capital": None,
                 "code": _confined(root, source_path).read_text(encoding="utf-8"),
                 "versions": versions,
                 "created_at": created_at
@@ -321,6 +322,169 @@ class WorkspaceStrategyArtifacts:
                 else previous["created_at"],
             }
         return tuple(groups[key] for key in sorted(groups))
+
+    def catalog(self, workspace_id: str) -> tuple[dict[str, object], ...]:
+        """Project verified manifests with latest-version files and history."""
+        _root, git, _head, verified_versions = self._verified_versions(workspace_id)
+        order = (
+            {commit: index for index, commit in enumerate(git.commit_order())}
+            if verified_versions
+            else {}
+        )
+        groups: dict[str, list[tuple[str, dict[str, object], str]]] = {}
+        for created_at, manifest, commit in sorted(
+            verified_versions, key=lambda item: order[item[2]]
+        ):
+            if manifest["workspaceId"] != workspace_id:
+                continue
+            strategy_id = cast(str, manifest["strategyId"])
+            groups.setdefault(strategy_id, []).append((created_at, manifest, commit))
+        return tuple(
+            self._catalog_entry(workspace_id, strategy_id, groups[strategy_id])
+            for strategy_id in sorted(groups)
+        )
+
+    def read_file(
+        self, workspace_id: str, strategy_id: str, relative_path: str
+    ) -> bytes:
+        """Read one latest-version file from a strategy's published artifact."""
+        root, git, head, verified_versions = self._verified_versions(workspace_id)
+        if head is None:
+            raise StrategyArtifactError("workspace has no committed strategies")
+        order = {commit: index for index, commit in enumerate(git.commit_order())}
+        selected: tuple[dict[str, object], str] | None = None
+        for _created_at, manifest, commit in verified_versions:
+            if (
+                manifest["workspaceId"] != workspace_id
+                or manifest["strategyId"] != strategy_id
+            ):
+                continue
+            if selected is None or order[commit] > order[selected[1]]:
+                selected = (manifest, commit)
+        if selected is None:
+            raise KeyError(strategy_id)
+        manifest, _commit = selected
+        allowed = {"manifest.json", "publication.json"} | _bundle_paths(
+            manifest["bundle"]
+        )
+        if relative_path not in allowed:
+            raise KeyError(relative_path)
+        return _confined(
+            root, f"{manifest['artifactPath']}/{relative_path}"
+        ).read_bytes()
+
+    def _verified_versions(
+        self, workspace_id: str
+    ) -> tuple[Path, GitCoordinator, str | None, _VerifiedVersions]:
+        """Return HEAD-keyed verified manifests, cached until the next commit."""
+        root = self.provider.open(workspace_id).root
+        git = GitCoordinator(root)
+        head = git.head()
+        cached = self._versions_cache.get(workspace_id)
+        if cached is not None and cached[0] == head:
+            return root, git, head, cached[1]
+        verified_versions: list[tuple[str, dict[str, object], str]] = []
+        for path in git.tracked_paths("strategies"):
+            if re.fullmatch(r"strategies/[^/]+/[^/]+/manifest\.json", path) is None:
+                continue
+            verified = self._verified(root, git, path)
+            if verified is not None:
+                manifest, commit = verified
+                verified_versions.append((git.commit_time(commit), manifest, commit))
+        result = tuple(verified_versions)
+        if len(self._versions_cache) > 16:
+            self._versions_cache.clear()
+        self._versions_cache[workspace_id] = (head, result)
+        return root, git, head, result
+
+    def _catalog_entry(
+        self,
+        workspace_id: str,
+        strategy_id: str,
+        versions: _VersionHistory,
+    ) -> dict[str, object]:
+        _created_at, manifest, commit = versions[-1]
+        bundle = cast(dict[str, object], manifest["bundle"])
+        manifest_bytes = _json_bytes(manifest)
+        files: list[dict[str, object]] = []
+        for collection_name in ("source", "tests"):
+            collection = bundle.get(collection_name)
+            if not isinstance(collection, list):
+                continue
+            for file in collection:
+                if not isinstance(file, Mapping):
+                    continue
+                payload = base64.b64decode(cast(str, file["content"]), validate=True)
+                files.append(
+                    _file_entry(
+                        cast(str, file["path"]), cast(str, file["sha256"]), len(payload)
+                    )
+                )
+        files.append(
+            _file_entry(
+                "manifest.json", content_hash(manifest_bytes), len(manifest_bytes)
+            )
+        )
+        marker = _json_bytes(
+            {
+                "schema": "fca-strategy-publication-v1",
+                "publicationId": manifest["publicationId"],
+                "gitCommit": commit,
+                "manifestSha256": content_hash(manifest_bytes),
+            }
+        )
+        files.append(_file_entry("publication.json", content_hash(marker), len(marker)))
+        files.sort(key=lambda item: cast(str, item["path"]))
+        limitations_value = bundle.get("limitations")
+        limitations: list[str] = (
+            [item for item in limitations_value if isinstance(item, str)]
+            if isinstance(limitations_value, list)
+            else []
+        )
+        history = [
+            {
+                "label": f"v{version_manifest['version']}",
+                "created_at": version_created_at,
+                "note": (
+                    f"from v{version_manifest['parentVersion']}"
+                    if version_manifest["parentVersion"]
+                    else "root"
+                ),
+            }
+            for version_created_at, version_manifest, _version_commit in versions
+        ]
+        return {
+            "id": strategy_id,
+            "workspace_id": workspace_id,
+            "kind": "strategy",
+            "title": manifest["name"],
+            "subtitle": f"{strategy_id} · {manifest['symbol']}",
+            "description": manifest["description"],
+            "status": manifest["status"],
+            "version": manifest["version"],
+            "artifact_path": manifest["artifactPath"],
+            "created_at": versions[0][0],
+            "updated_at": versions[-1][0],
+            "git_commit": commit,
+            "digests": {
+                "source_sha256": manifest["sourceSha256"],
+                "bundle_sha256": manifest["bundleSha256"],
+                "manifest_sha256": content_hash(manifest_bytes),
+            },
+            "inputs": _strategy_inputs(bundle.get("harnessConfiguration")),
+            "files": files,
+            "file_count": len(files),
+            "size_bytes": sum(cast(int, item["size_bytes"]) for item in files),
+            "history": history,
+            "preview": {
+                "type": "strategy",
+                "entrypoint": manifest["entrypoint"],
+                "symbol": manifest["symbol"],
+                "exit_criteria": _exit_criteria(manifest.get("exitCriteria")),
+                "limitations": limitations,
+                "signals": None,
+            },
+        }
 
     @staticmethod
     def _verified(
@@ -436,6 +600,89 @@ def _json_bytes(value: object) -> bytes:
         )
         + "\n"
     ).encode("utf-8")
+
+
+def _file_entry(path: str, sha256: str, size_bytes: int) -> dict[str, object]:
+    return {
+        "path": path,
+        "sha256": sha256,
+        "size_bytes": size_bytes,
+        "viewer": _viewer_for(path),
+    }
+
+
+def _viewer_for(path: str) -> str:
+    suffix = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+    if suffix == "json":
+        return "json"
+    if suffix in {"md", "markdown"}:
+        return "markdown"
+    if suffix in {"rs", "toml", "yaml", "yml", "lock"}:
+        return "code"
+    return "text"
+
+
+def _bundle_paths(bundle: object) -> set[str]:
+    if not isinstance(bundle, Mapping):
+        return set()
+    paths: set[str] = set()
+    for collection_name in ("source", "tests"):
+        collection = bundle.get(collection_name)
+        if not isinstance(collection, list):
+            continue
+        for file in collection:
+            if isinstance(file, Mapping) and isinstance(file.get("path"), str):
+                paths.add(file["path"])
+    return paths
+
+
+def _strategy_inputs(configuration: object) -> list[dict[str, object]]:
+    if not isinstance(configuration, Mapping):
+        return []
+    subscriptions: object = configuration.get("subscriptions")
+    if subscriptions is None:
+        data = configuration.get("data")
+        subscriptions = data.get("subscriptions") if isinstance(data, Mapping) else None
+    if not isinstance(subscriptions, list):
+        return []
+    inputs: list[dict[str, object]] = []
+    for item in subscriptions:
+        if not isinstance(item, Mapping):
+            continue
+        data_type = item.get("data_type")
+        symbols = item.get("symbols")
+        interval = item.get("interval")
+        inputs.append(
+            {
+                "data_type": data_type if isinstance(data_type, str) else "unknown",
+                "symbols": (
+                    [symbol for symbol in symbols if isinstance(symbol, str)]
+                    if isinstance(symbols, list)
+                    else []
+                ),
+                "interval": interval if isinstance(interval, str) else None,
+            }
+        )
+    return inputs
+
+
+def _exit_criteria(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    criteria: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        criteria.append(
+            {
+                "falsifier_id": item.get("falsifierId"),
+                "observable": item.get("observable"),
+                "condition": item.get("condition"),
+                "threshold": item.get("threshold"),
+                "description": item.get("description"),
+            }
+        )
+    return criteria
 
 
 def _confined(root: Path, relative: str) -> Path:

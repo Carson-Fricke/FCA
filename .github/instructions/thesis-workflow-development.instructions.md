@@ -51,6 +51,15 @@ agents. Read the repository source directly:
     verification once after edits freeze and MUST include
     `tests/thesis/agent/runtime/test_delivery_architecture.py` once the delivery
     modules are final. Rewrite old-contract tests; do not keep two truths.
+11. **Submission identity is retained before dispatch.** A phase that submits
+    harness work allocates `job_id` once and durably registers the submission,
+    with immutable program/model attribution, before invoking the harness.
+    Recovery reads that retained reference rather than only completed
+    trial/report records; a stale revision's reference is never reused, and an
+    interrupted submission is reconciled by its original ID instead of replayed
+    or reallocated. Waiting stays at the call site; do not add polling,
+    submission services, phases, or gates to the engine. See the "Execution Job
+    Contract" in `.github/instructions/copilot-instructions.md`.
 
 ## Required reading before edits
 

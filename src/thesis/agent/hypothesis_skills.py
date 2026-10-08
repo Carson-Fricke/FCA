@@ -7,8 +7,9 @@ distinct Thesis roles.  This module publishes one immutable, versioned
 
 * ``hypothesis-authoring`` -- RETIRED: persisted references keep resolving, but
   the research role no longer selects it.  The workflow starts in discovery.
-* ``discovery`` -- find ONE candidate opportunity with cheap targeted studies,
-  logging every attempt and the main competing explanation.
+* ``discovery`` -- generate ONE candidate thesis with cheap targeted studies,
+  composing creative representations, logging every attempt, and concluding
+  honestly when no candidate holds.
 * ``model-creation`` -- turn the selected discovery candidate into one
   statistical model of the assets involved, with Layer A falsifiers that
   double as Layer B monitors.
@@ -18,8 +19,9 @@ distinct Thesis roles.  This module publishes one immutable, versioned
   strategy backtest) went wrong without mutating the premise or the engine.
   Falsification-trial failures are evaluated agent-first in the trials prose,
   not by this skill.
-* ``strategy-authoring`` -- implement a strategy whose exit criteria are
-  falsifier re-checks and whose sizing is explicit.
+* ``strategy-authoring`` -- implement a strategy with trading exits and
+  explicit assumption monitors derived from the research evidence, and
+  explicit sizing.
 
 Role policies select the phase skills through
 :func:`with_hypothesis_development_skills`: the research role discovers and
@@ -39,7 +41,7 @@ MODEL_CREATION_SKILL_ID = "model-creation"
 FALSIFICATION_PLANNING_SKILL_ID = "falsification-planning"
 FALSIFICATION_RCA_SKILL_ID = "falsification-rca"
 STRATEGY_AUTHORING_SKILL_ID = "strategy-authoring"
-HYPOTHESIS_DEVELOPMENT_SKILL_VERSION = "1.4.0"
+HYPOTHESIS_DEVELOPMENT_SKILL_VERSION = "1.5.0"
 
 _DISCOVERY = (
     "Find ONE candidate opportunity worth modeling from the operator's "
@@ -47,13 +49,22 @@ _DISCOVERY = (
     "question per study, the smallest informative slice, and a comparable "
     "no-structure baseline. Record every attempt, changed or not, with its "
     "purpose, study id, data types, window and result; a failed or "
-    "inconclusive study is a finding, never a hidden one. Propose the "
-    "candidate with its signal, information time, direction, holding period, "
-    "profit source, measured effect, and the main competing explanation. "
-    "Discovery is not validation: never run a backtest, fit the final model, "
-    "or pre-register falsifier thresholds here; model creation does that. "
-    "Search the knowledge cards for methods and data caveats when useful, and "
-    "cite the page ids you use."
+    "inconclusive study is a finding, never a hidden one. Represent the "
+    "candidate creatively and composably: event-time methods, path-shape "
+    "extraction, duration and hazard statistics, learned representations as "
+    "conditions, conditional dynamics, and combinations of these; explore "
+    "them through authored study programs, since exploratory training inside "
+    "the study path is allowed. Retrieved methods are reference data: use, "
+    "adapt or reject them with a one-line justification, and treat standard "
+    "families as baselines rather than the endpoint. Propose the candidate "
+    "with its signal, information time, direction, holding period, profit "
+    "source, measured effect, entry and exit ideas, assumptions, building "
+    "blocks, validation questions, exploratory evidence, and the main "
+    "competing explanation. Discovery is not validation: never run a "
+    "backtest, fit the final model, or pre-register falsifier thresholds "
+    "here; model creation does that. An honest no-candidate conclusion after "
+    "real attempts is a legitimate result. Search the knowledge cards for "
+    "methods and data caveats when useful, and cite the page ids you use."
 )
 
 _MODEL_CREATION = (
@@ -106,11 +117,11 @@ _HYPOTHESIS_AUTHORING = (
     "metric because the trials phase requires fitted parameters. The study "
     "declares explicit harnessConfiguration.subscriptions with data_type "
     "bars, quote or trade and exact symbols; only bars require interval "
-    "(1min or 1d). Tick-only studies need no global interval. "
+    "(1min or 1d). Tick-only studies need no interval. "
     "Use one bars interval across all subscriptions and canonical uppercase "
-    "market symbols, preserving BTC-USD or BTC/USD as declared. Any legacy "
-    "interval must match that bars interval (never for tick-only); any global "
-    "symbols must equal the exact subscription union. Source "
+    "market symbols, preserving BTC-USD or BTC/USD as declared. Interval-only "
+    "configuration is rejected; any global symbols must equal the exact "
+    "subscription union. Source "
     "subscriptions are authoritative; the configuration echo must match their "
     "union including nested owned indicators exposed through indicators(). "
     "Indicators implement MarketConsumer<Context = ObservationContext> and "
@@ -146,15 +157,21 @@ _STRATEGY_AUTHORING = (
     "export_strategy_program!, submitting orders through the order sink. Make "
     "sizing and risk limits explicit. Any data.subscriptions configuration echo "
     "must match the source union including owned indicators returned by "
-    "indicators(); never widen data supplies. Declare exit criteria that are "
-    "falsifier re-checks, not profit targets. Reference the surviving workspace "
-    "research model and its frozen fit rather than copying the model's "
-    "definition into the strategy or re-estimating its parameters. Publish each "
-    "Layer B observation under the exact falsifier observable in "
+    "indicators(); never widen data supplies. Consume the handed-off discovery "
+    "thesis and research evidence: separate trading exits (time stops, "
+    "profit-taking, inventory or exposure management, and causally "
+    "recomputable falsifier re-checks) from assumption monitors (each naming "
+    "its observable, trailing window, minimum sample size, update cadence and "
+    "breach action: warn, disable entries, de-risk or flatten). Aggregate or "
+    "offline statistics are monitoring duties, not per-trade exits; never "
+    "silently drop them. Reference the surviving workspace research model and "
+    "its frozen fit rather than copying the model's definition into the "
+    "strategy or re-estimating its parameters. Publish each Layer B "
+    "observation under the exact falsifier observable in "
     "on_stop(&mut MetricPublisher) via metrics.publish(name, value). A "
-    "falsifier hit must flatten positions and prevent new entries. The strategy "
-    "is a falsification instrument: an exit means the trade's micro-hypothesis "
-    "was falsified, and PnL is only a guardrail."
+    "monitor breach must disable new entries and flatten or de-risk as its "
+    "declared breach action says. The strategy is a falsification instrument: "
+    "exits and monitors serve the hypothesis, and PnL is only a guardrail."
 )
 
 HYPOTHESIS_DEVELOPMENT_SKILLS: tuple[ThesisSkill, ...] = (
@@ -168,7 +185,12 @@ HYPOTHESIS_DEVELOPMENT_SKILLS: tuple[ThesisSkill, ...] = (
         skill_id=DISCOVERY_SKILL_ID,
         version=HYPOTHESIS_DEVELOPMENT_SKILL_VERSION,
         instructions=_DISCOVERY,
-        allowed_tools=("read_workspace", "run_study", "get_job_status", "get_run"),
+        allowed_tools=(
+            "read_workspace",
+            "run_study",
+            "get_job_status",
+            "get_job_result",
+        ),
     ),
     ThesisSkill(
         skill_id=MODEL_CREATION_SKILL_ID,
@@ -186,7 +208,7 @@ HYPOTHESIS_DEVELOPMENT_SKILLS: tuple[ThesisSkill, ...] = (
         skill_id=FALSIFICATION_RCA_SKILL_ID,
         version=HYPOTHESIS_DEVELOPMENT_SKILL_VERSION,
         instructions=_FALSIFICATION_RCA,
-        allowed_tools=("read_workspace", "get_run", "run_backtest"),
+        allowed_tools=("read_workspace", "get_job_result", "run_backtest"),
     ),
     ThesisSkill(
         skill_id=STRATEGY_AUTHORING_SKILL_ID,

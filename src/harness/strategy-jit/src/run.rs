@@ -76,10 +76,14 @@ pub fn configuration_subscriptions(
 ) -> Result<Vec<MarketSubscription>, ConfigurationRunError> {
     let workspace = ManagedWorkspace::open_default()?;
     let programs = build_instances(configuration, &workspace)?;
-    let inputs: Vec<MarketSubscription> = programs
-        .iter()
-        .flat_map(|program| program.runtime.subscriptions().unwrap_or_default())
-        .collect();
+    let mut inputs: Vec<MarketSubscription> = Vec::new();
+    for program in &programs {
+        inputs.extend(
+            program.runtime.subscriptions().ok_or_else(|| {
+                JitError::Invalid("program must declare its subscriptions".into())
+            })?,
+        );
+    }
     let inputs = inputs
         .into_iter()
         .map(|input| match input.data_type.as_str() {
@@ -116,7 +120,7 @@ pub fn inspect_configuration(
     configuration: &BacktestConfig,
 ) -> Result<serde_json::Value, crate::compile::ValidationFailure> {
     use crate::compile::ValidationFailure;
-    use backtest::backtest::engine_core::{default_subscriptions, normalize_subscriptions};
+    use backtest::backtest::engine_core::normalize_subscriptions;
 
     let subscriptions =
         configuration_subscriptions(configuration).map_err(|error| match error {
@@ -128,22 +132,11 @@ pub fn inspect_configuration(
         })?;
     let subscriptions = normalize_subscriptions(&subscriptions)
         .map_err(|error| ValidationFailure::configuration(error.to_string()))?;
-    let expected = if configuration.has_subscription_echo() {
-        configuration.data_subscriptions.clone()
-    } else {
-        default_subscriptions(configuration)
-    };
-    let expected = normalize_subscriptions(&expected)
+    let expected = normalize_subscriptions(&configuration.data_subscriptions)
         .map_err(|error| ValidationFailure::configuration(error.to_string()))?;
     if expected != subscriptions {
         return Err(ValidationFailure::configuration(
-            if configuration.has_subscription_echo() {
-                "data.subscriptions does not match runtime subscription union"
-            } else if configuration.shell == "study" {
-                "legacy study symbols and interval do not match runtime subscription union"
-            } else {
-                "configured symbols and interval do not match runtime subscription union"
-            },
+            "data.subscriptions does not match runtime subscription union",
         ));
     }
     Ok(serde_json::json!({

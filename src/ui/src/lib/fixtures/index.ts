@@ -19,10 +19,12 @@ import riskDecisions from './risk-decisions.json';
 import widgets from './widgets.json';
 import screeners from './screeners.json';
 import screenerResults from './screener-results.json';
-import workspaceState from './workspace-state.json';
+import workspaceArtifacts from './workspace-artifacts.json';
+import artifactFiles from './artifact-files.json';
 import knowledgeSearch from './knowledge-search.json';
 import consentProposal from './consent-proposal.json';
 import type {
+	ArtifactFileContent,
 	BacktestDetail,
 	BacktestSummaryRow,
 	ConsentProposal,
@@ -39,9 +41,9 @@ import type {
 	Strategy,
 	TradeRecord,
 	WidgetDefinition,
+	WorkspaceArtifactCatalog,
 	WorkspaceOverview,
 	WorkspaceSnapshot,
-	WorkspaceStateData,
 	WorkspaceSummary
 } from '../types';
 import { decodeWire } from '../wire';
@@ -65,9 +67,10 @@ export interface Fixtures {
 	widgets: Record<string, { items: WidgetDefinition[] }>;
 	screeners: Record<string, { items: ScreenerDefinition[] }>;
 	screenerResults: Record<string, { items: ScreeningResult[] }>;
-	workspaceState: Record<string, WorkspaceStateData>;
 	knowledgeSearch: { items: KnowledgeHit[] };
 	consentProposal: { proposal: ConsentProposal };
+	workspaceArtifacts: Record<string, WorkspaceArtifactCatalog>;
+	artifactFiles: Record<string, ArtifactFileContent>;
 }
 
 export const fixtures: Fixtures = {
@@ -91,7 +94,8 @@ export const fixtures: Fixtures = {
 	widgets,
 	screeners,
 	screenerResults,
-	workspaceState,
 	knowledgeSearch,
-	consentProposal
+	consentProposal,
+	workspaceArtifacts,
+	artifactFiles
 } as unknown as Fixtures;

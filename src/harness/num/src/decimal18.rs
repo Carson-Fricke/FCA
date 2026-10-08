@@ -1,8 +1,8 @@
 //! Scale-18 fixed-point decimal core.
 //!
-//! This is the Rust port of the pinned native kernel in
-//! `src/harness/native/decimal.zig`: an `i128` unscaled value at scale 18,
-//! matching the repository's binary decimal convention `decimal128(38, 18)`.
+//! This is the Rust port of the pinned native kernel: an `i128` unscaled value
+//! at scale 18, matching the repository's binary decimal convention
+//! `decimal128(38, 18)`.
 //! Exact inputs never round; `mul` and `div` round the exact result to scale 18
 //! using half-even by default, and every operation is range-checked against
 //! `decimal128(38, 18)`.

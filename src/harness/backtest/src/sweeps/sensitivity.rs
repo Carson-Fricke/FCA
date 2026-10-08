@@ -37,7 +37,7 @@ impl std::error::Error for SensitivityError {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunRecord {
     /// Run identifier.
-    pub run_id: String,
+    pub job_id: String,
     /// Optional configuration digest.
     pub configuration_digest: Option<String>,
     /// String-exact headline metrics.
@@ -57,7 +57,7 @@ pub struct RankedRun {
     /// One-based ordinal rank.
     pub rank: usize,
     /// Run identifier.
-    pub run_id: String,
+    pub job_id: String,
     /// Metric value.
     pub value: Decimal18,
     /// Optional configuration digest.
@@ -87,14 +87,14 @@ pub fn rank_runs(
         } else {
             left.1.cmp(&right.1)
         };
-        ordering.then_with(|| left.0.run_id.cmp(&right.0.run_id))
+        ordering.then_with(|| left.0.job_id.cmp(&right.0.job_id))
     });
     Ok(scored
         .into_iter()
         .enumerate()
         .map(|(index, (record, value))| RankedRun {
             rank: index + 1,
-            run_id: record.run_id.clone(),
+            job_id: record.job_id.clone(),
             value,
             configuration_digest: record.configuration_digest.clone(),
         })
@@ -171,11 +171,11 @@ pub fn parameter_sensitivity(
     }
     let by_run: BTreeMap<&str, &super::spec::SweepPoint> = points
         .iter()
-        .map(|point| (point.run_id.as_str(), point))
+        .map(|point| (point.job_id.as_str(), point))
         .collect();
     let mut usable: Vec<(&super::spec::SweepPoint, Decimal18)> = Vec::new();
     for record in records {
-        let Some(point) = by_run.get(record.run_id.as_str()) else {
+        let Some(point) = by_run.get(record.job_id.as_str()) else {
             continue;
         };
         if let Some(value) = metric_value(record, metric) {

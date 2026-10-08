@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use backtest::backtest::config::BacktestConfig;
 use backtest::backtest::engine_core::MarketSubscription;
-use backtest::backtest::job::{lake_fixture, lake_fixture_with_subscriptions, parse_timestamp_ns};
+use backtest::backtest::job::{lake_fixture_with_subscriptions, parse_timestamp_ns};
 use harness_lakeclient::testing::{
     bars_stream, quote_stream, trade_stream, FakeBarRow, FakeLakeConfig, FakeLakeServer,
     FakeQuoteRow, FakeTradeRow,
@@ -223,7 +223,13 @@ fn multi_symbol_study_acquires_every_symbol_and_keeps_canonical_order() {
         ..FakeLakeConfig::new(TOKEN)
     });
 
-    let fixture = lake_fixture(&config(), &client(&server)).expect("lake fixture");
+    let subscriptions = vec![MarketSubscription {
+        data_type: "bars".to_string(),
+        symbols: vec!["SPY".to_string(), "QQQ".to_string()],
+        interval: Some("1min".to_string()),
+    }];
+    let fixture = lake_fixture_with_subscriptions(&config(), &client(&server), &subscriptions)
+        .expect("lake fixture");
 
     // The fake serves one body per data type; every event is re-keyed to its
     // configured symbol, and the merged vector is sorted by

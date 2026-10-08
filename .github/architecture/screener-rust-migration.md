@@ -95,8 +95,10 @@ Contracts are code: types, schemas, models, and their focused tests. Behavior
 - **Harness contracts:** `shell: screen` config model; authoring
   `ScreeningProgram` trait + vtable + entry macro + ABI version and capability
   gate; screening context surface; MCP `run_screener` /
-  `get_screener_status` / `screener_config_template` schemas; result artifact
-  schema (`screen.json`).
+  `screener_config_template` schemas plus the shared job `get_job_status` /
+  `get_job_result` / `list_artifacts` / `read_artifact` schemas; result artifact
+  schema (`screen.json`, `fca-harness-screen-v2`, closed status
+  `succeeded`/`failed`).
 - **Thesis contracts:** definition document (source, params, universe, as_of,
   lookback, `bundle_hash`), run-import record, error taxonomy (422/503), tested
   against a fake MCP client.
@@ -124,15 +126,16 @@ Contracts are code: types, schemas, models, and their focused tests. Behavior
   `HARNESS_DATA_DIR`/`LAKE_LOCAL_DATA_DIR`, `marketdata` path readers,
   `strategy-jit` `&Path` data roots. Replay streams through the route.
 - `ScreeningProgram` execution behind the JIT seam; `screen-job`; HTTP
-  `POST /v1/screeners/jobs`, `GET /v1/screeners/jobs/{id}`; MCP tools;
-  artifacts in the existing RunStore. Ensure bars (which ensures trades) before
-  a run; fail loud when the lake cannot serve the window.
+  `POST /v1/screeners/jobs` with status and artifacts on the neutral
+  `/v1/jobs/{job_id}` routes; MCP tools; artifacts in the authoritative job
+  store. Ensure bars (which ensures trades) before a run; fail loud when the
+  lake cannot serve the window.
 
 ### P4 — Frontend Rust authoring
 
 - Rust editor replacing the Python editor; filter builder generates SDK source
   or `shell: screen` parameters; server compiler diagnostics surfaced inline;
-  provenance display (bundle hash, compiler output, run id).
+  provenance display (bundle hash, compiler output, job id).
 
 ### P5 — Thesis as a thin client
 
@@ -154,6 +157,7 @@ Contracts are code: types, schemas, models, and their focused tests. Behavior
   ties; identical inputs produce byte-identical results.
 - Screening program capability: no order surface by construction; no file,
   network, or clock access.
-- MCP naming follows the existing catalog: `run_screener` returns a run id and
-  state; status follows `get_screener_status`; artifacts use the existing
-  `get_run` / `list_artifacts` / `read_artifact` tools.
+- MCP naming follows the existing catalog: `run_screener` returns a job id and
+  state; status and result follow the neutral `get_job_status` /
+  `get_job_result` tools; artifacts use the existing `list_artifacts` /
+  `read_artifact` tools.

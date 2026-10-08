@@ -1424,25 +1424,6 @@
             }
           ],
           "default": null
-        },
-        "toolCallId": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "toolCalls": {
-          "default": [],
-          "items": {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          "type": "array"
         }
       },
       "required": [
@@ -1760,14 +1741,14 @@
           },
           "type": "array"
         },
-        "strategy_ids": {
+        "job_ids": {
           "default": [],
           "items": {
             "type": "string"
           },
           "type": "array"
         },
-        "tool_job_ids": {
+        "strategy_ids": {
           "default": [],
           "items": {
             "type": "string"
@@ -2299,17 +2280,6 @@
           "minLength": 1,
           "type": "string"
         },
-        "correlation_id": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "experiment_ids": {
           "default": [],
           "items": {
@@ -2320,6 +2290,17 @@
         "investigation_id": {
           "anyOf": [
             {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "job_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
               "type": "string"
             },
             {
@@ -2888,6 +2869,12 @@
             }
           ]
         },
+        "job_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "parent_conversation_id": {
           "anyOf": [
             {
@@ -2939,12 +2926,6 @@
           },
           "type": "array"
         },
-        "tool_job_ids": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "trigger_message_id": {
           "type": "string"
         },
@@ -2986,7 +2967,7 @@
         "investigation_id",
         "strategy_ids",
         "experiment_ids",
-        "tool_job_ids",
+        "job_ids",
         "state",
         "phase",
         "intent_epoch",

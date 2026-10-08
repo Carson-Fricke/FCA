@@ -223,7 +223,9 @@ describe('node input and canonical history', () => {
 	it.each(['completed', 'cancelled'])('renders %s history read-only and unmatched tools as unknown', async (status) => {
 		fixture.terminal = status === 'completed'; fixture.cancelled = status === 'cancelled';
 		surface([{ ...message('envelope', 'assistant'), data: { subAgentId: 'subagent-a',
-			toolCalls: [{ id: 'call', function: { name: 'run_study', arguments: '{}' } }] } }]);
+			sessionMessage: { message_id: 'envelope', direction: 'outgoing', position: 0,
+				content: { text: 'envelope', source: 'agent',
+					requests: [{ id: 'call', name: 'run_study', arguments: '{}' }], correlation: null, result: null } } } }]);
 		await waitFor(() => expect(screen.getByTestId('tool-result-status')).toHaveTextContent('unknown_outcome'));
 		expect(screen.queryByTestId('sub-agent-composer-input')).toBeNull();
 	});

@@ -2,25 +2,36 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import cast
 
 from thesis.agent.runtime.context import ToolContext
 from thesis.agent.runtime.schema import render_violations, validate_arguments
 from thesis.agent.runtime.session import RegisteredTool, ToolExecution
+from thesis.experiments.mandate import DataWindowPolicy
 from thesis.integrations.mcp import HarnessMcpError
 from thesis.persistence.git import GitPublicationError
 from thesis.workspaces.local import WorkspaceRepositoryError
 from thesis.workspaces.programs import (
+    MAX_BATCH_POINTS,
     MAX_LIST_RESULTS,
+    MAX_NULL_BLOCK_SIZE,
+    MAX_NULL_SEEDS,
     MAX_READ_CHARS,
     PROGRAM_CONFIGURATION_SCHEMA,
     PROGRAM_ID_PATTERN,
+    JobRetention,
+    JobSettlement,
     ProgramArtifactError,
     ProgramKind,
     ProgramPublicationError,
     WorkspacePrograms,
 )
+
+#: Retain one job id for a trusted session context before harness dispatch.
+ContextJobRetention = Callable[
+    [ToolContext, str, str, Mapping[str, object]], JobSettlement
+]
 
 PROGRAM_TOOL_NAMES = (
     "author_study",
@@ -35,6 +46,8 @@ PROGRAM_TOOL_NAMES = (
     "list_strategies",
     "validate_strategy",
     "run_backtest",
+    "run_backtest_batch",
+    "run_null_batch",
     "author_indicator",
     "update_indicator",
     "read_indicator",
@@ -52,23 +65,49 @@ _SOURCE = {"type": "string", "minLength": 1, "maxLength": 1_048_576}
 _DEPENDENCIES = {"type": "array", "uniqueItems": True, "items": _ID}
 
 
+def _context_retention(
+    retention: ContextJobRetention, context: ToolContext
+) -> JobRetention:
+    """Bind one trusted session context to the service retention signature."""
+
+    def retain(
+        job_id: str, tool_name: str, attribution: Mapping[str, object]
+    ) -> JobSettlement:
+        return retention(context, job_id, tool_name, attribution)
+
+    return retain
+
+
 def program_registered_tools(
     service: WorkspacePrograms,
     context: ToolContext,
+    *,
+    data_window: DataWindowPolicy | None = None,
+    job_retention: ContextJobRetention | None = None,
 ) -> tuple[RegisteredTool, ...]:
     """Use the existing session dispatcher and inbox, never a parallel executor.
 
     Only author/update accept source; execution consumes committed IDs. Workspace
     authority comes out of band from ``context``, not program contents or metadata.
     Composition must replace conflicting harness/legacy author tool registrations.
+    ``data_window`` is the workflow execution's research-mandate policy, forwarded
+    to every execution handler; a missing policy leaves execution unrestricted.
+    ``job_retention`` durably records each fresh execution id before dispatch for
+    contexts that own a steerable workflow execution; chat-level contexts leave
+    it unset and run unretained.
     """
+    retain = (
+        None if job_retention is None else _context_retention(job_retention, context)
+    )
     tools = []
     for name in PROGRAM_TOOL_NAMES:
         operation, _, suffix = name.partition("_")
         if operation == "list":
             kind = cast(ProgramKind, _LIST_KINDS[suffix])
+        elif name in ("run_backtest", "run_backtest_batch", "run_null_batch"):
+            kind = "strategy"
         else:
-            kind = cast(ProgramKind, "strategy" if name == "run_backtest" else suffix)
+            kind = cast(ProgramKind, suffix)
         properties: dict[str, object] = {"program_id": _ID}
         required = ["program_id"]
         if operation == "list":
@@ -96,6 +135,8 @@ def program_registered_tools(
                     "type": "string",
                     "pattern": r"^[A-Za-z_][A-Za-z0-9_]*$",
                 }
+            elif kind == "strategy":
+                properties["parameter_declaration"] = {"type": "object"}
         elif operation == "update":
             properties.update(
                 {
@@ -110,6 +151,8 @@ def program_registered_tools(
                 }
             )
             required.append("expected_version")
+            if kind == "strategy":
+                properties["parameter_declaration"] = {"type": "object"}
         elif operation == "read":
             properties.update(
                 {
@@ -128,6 +171,41 @@ def program_registered_tools(
                 "pattern": r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
             }
             required.append("commit")
+        elif name == "run_backtest":
+            properties["parameters"] = {"type": "object"}
+        elif name == "run_backtest_batch":
+            properties.update(
+                {
+                    "assignments": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": MAX_BATCH_POINTS,
+                        "items": {"type": "object"},
+                    },
+                    "label": {"type": "string", "minLength": 1, "maxLength": 200},
+                }
+            )
+            required.append("assignments")
+        elif name == "run_null_batch":
+            properties.update(
+                {
+                    "parameters": {"type": "object"},
+                    "block_size": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": MAX_NULL_BLOCK_SIZE,
+                    },
+                    "seeds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": MAX_NULL_SEEDS,
+                        "uniqueItems": True,
+                        "items": {"type": "integer", "minimum": 0},
+                    },
+                    "label": {"type": "string", "minLength": 1, "maxLength": 200},
+                }
+            )
+            required.extend(["block_size", "seeds"])
         if name == "read_sdk_reference":
             properties = {
                 "topic": {
@@ -235,6 +313,10 @@ def program_registered_tools(
                                 str,
                                 arguments.get("indicator_type", "AuthoredIndicator"),
                             ),
+                            parameter_declaration=cast(
+                                Mapping[str, object] | None,
+                                arguments.get("parameter_declaration"),
+                            ),
                         )
                     elif tool_operation == "update":
                         result = service.update(
@@ -250,6 +332,10 @@ def program_registered_tools(
                             ),
                             indicator_ids=cast(
                                 list[str] | None, arguments.get("indicator_ids")
+                            ),
+                            parameter_declaration=cast(
+                                Mapping[str, object] | None,
+                                arguments.get("parameter_declaration"),
                             ),
                         )
                     elif tool_operation == "read":
@@ -272,8 +358,54 @@ def program_registered_tools(
                             program_id,
                             cast(str, arguments["commit"]),
                         )
+                    elif tool_name == "run_backtest":
+                        result = service.run(
+                            workspace,
+                            "strategy",
+                            program_id,
+                            parameters=cast(
+                                Mapping[str, object] | None,
+                                arguments.get("parameters"),
+                            ),
+                            data_window=data_window,
+                            retain=retain,
+                        )
+                    elif tool_name == "run_backtest_batch":
+                        result = service.run_batch(
+                            workspace,
+                            "strategy",
+                            program_id,
+                            cast(
+                                Sequence[Mapping[str, object]],
+                                arguments["assignments"],
+                            ),
+                            label=cast(str | None, arguments.get("label")),
+                            data_window=data_window,
+                            retain=retain,
+                        )
+                    elif tool_name == "run_null_batch":
+                        result = service.run_null_batch(
+                            workspace,
+                            "strategy",
+                            program_id,
+                            parameters=cast(
+                                Mapping[str, object] | None,
+                                arguments.get("parameters"),
+                            ),
+                            block_size=cast(int, arguments["block_size"]),
+                            seeds=cast(Sequence[int], arguments["seeds"]),
+                            label=cast(str | None, arguments.get("label")),
+                            data_window=data_window,
+                            retain=retain,
+                        )
                     else:
-                        result = service.run(workspace, tool_kind, program_id)
+                        result = service.run(
+                            workspace,
+                            tool_kind,
+                            program_id,
+                            data_window=data_window,
+                            retain=retain,
+                        )
             except ProgramPublicationError as error:
                 return ToolExecution(
                     ok=False,
@@ -345,6 +477,12 @@ def program_registered_tools(
                             if operation == "publish"
                             else f"List committed workspace {kind} IDs at HEAD with content version, hashes, and compact configuration. Read a selected ID before patching; author only a new ID."
                             if operation == "list"
+                            else "Submit one to 16 distinct validated parameter assignments for a strategy through the existing run boundary; every point is validated before any submission and the deterministic batch id carries per-point run receipts. Unknown-outcome points are recorded truthfully and never replayed automatically; inspect each run before an explicit retry."
+                            if name == "run_backtest_batch"
+                            else "Submit one block-permutation null run per seed (1 to 16 unique seeds) for a committed strategy; the parameter assignment and block_size are validated before any submission, every point carries the frozen null config and a fresh opaque run id, and unknown outcomes are recorded truthfully and never replayed."
+                            if name == "run_null_batch"
+                            else "Run a committed workspace strategy by program_id with an optional parameters assignment validated against its parameter_declaration before submission; omitted names receive declared defaults."
+                            if name == "run_backtest"
                             else f"{operation.title()} a workspace {kind} by program_id. Latest committed contents are authoritative. "
                             "Author with source or template=basic and complete dated configuration with exact subscriptions. "
                             "Updates require a current content version; provide paired expected/replacement for a source patch or configuration alone. Validate before running. "

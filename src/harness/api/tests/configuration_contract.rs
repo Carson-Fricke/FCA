@@ -3,6 +3,9 @@ use api::http::configuration::{
 };
 use backtest::backtest::config::BacktestConfig;
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static CONTRACT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 fn acceptance(document: &Value, expected: bool) {
     let text = document.to_string();
@@ -25,7 +28,11 @@ fn acceptance(document: &Value, expected: bool) {
         api::parse_configuration_shell(&text).as_deref(),
         document["shell"].as_str()
     );
-    let path = std::env::temp_dir().join(format!("harness-contract-{}.json", std::process::id()));
+    let path = std::env::temp_dir().join(format!(
+        "harness-contract-{}-{}.json",
+        std::process::id(),
+        CONTRACT_TEMP.fetch_add(1, Ordering::Relaxed)
+    ));
     std::fs::write(&path, &text).unwrap();
     let loaded = if document["shell"] == "study" {
         backtest::backtest::job::load_study_config(&path)
@@ -38,8 +45,9 @@ fn acceptance(document: &Value, expected: bool) {
 
 #[test]
 fn replay_acceptance_is_shared_at_real_boundaries() {
-    let valid = json!({"shell":"study","run_id":"parity","initial_cash":123.5,
-        "data":{"subscriptions":[{"data_type":"quote","symbols":["SPY"]}]}});
+    let valid = json!({"shell":"study","job_id":"parity","initial_cash":123.5,
+        "data":{"symbols":["SPY"],
+            "subscriptions":[{"data_type":"quote","symbols":["SPY"]}]}});
     acceptance(&valid, true);
     for (field, value) in [
         ("seed", json!("wrong")),
@@ -61,14 +69,65 @@ fn replay_acceptance_is_shared_at_real_boundaries() {
         bad["data"]["subscriptions"] = json!([input]);
         acceptance(&bad, false);
     }
-    acceptance(&json!({"shell":"backtest","run_id":"defaults"}), true);
-    acceptance(&json!({"shell":"study","run_id":"missing-interval"}), false);
+    acceptance(
+        &json!({"shell":"backtest","job_id":"missing-subscriptions"}),
+        false,
+    );
+    acceptance(
+        &json!({"shell":"backtest","job_id":"interval-only",
+            "data":{"symbols":["SPY"],"bar_interval":"1min"}}),
+        false,
+    );
+    acceptance(
+        &json!({"shell":"backtest","job_id":"top-level-symbols","symbols":["SPY"],
+            "data":{"symbols":["SPY"],
+                "subscriptions":[{"data_type":"quote","symbols":["SPY"]}]}}),
+        false,
+    );
+    acceptance(&json!({"shell":"study","job_id":"missing-interval"}), false);
+}
+
+#[test]
+fn null_transform_is_replay_only_strict_and_hash_conditional() {
+    let data = json!({"symbols": ["SPY"],
+        "subscriptions": [{"data_type": "bars", "symbols": ["SPY"], "interval": "1min"}]});
+    let valid = json!({"shell":"study","job_id":"null-block","data":data.clone(),
+        "null":{"mode":"block_permutation","block_size":4,"seed":9}});
+    acceptance(&valid, true);
+    for (field, value) in [
+        ("mode", json!("shuffle")),
+        ("mode", json!(1)),
+        ("block_size", json!(0)),
+        ("block_size", json!(10001)),
+        ("seed", json!(-1)),
+        ("unknown", json!(true)),
+    ] {
+        let mut bad = valid.clone();
+        bad["null"][field] = value;
+        acceptance(&bad, false);
+    }
+    for field in ["mode", "block_size", "seed"] {
+        let mut missing = valid.clone();
+        missing["null"].as_object_mut().unwrap().remove(field);
+        acceptance(&missing, false);
+    }
+    let without = json!({"shell":"study","job_id":"null-block","data":data.clone()});
+    acceptance(&without, true);
+    let present = config::replay::validate_document(&valid).unwrap();
+    let absent = config::replay::validate_document(&without).unwrap();
+    assert!(present.get("null").is_some());
+    assert!(absent.get("null").is_none());
+    assert_ne!(
+        config::configuration_hash(&present),
+        config::configuration_hash(&absent)
+    );
 }
 
 #[test]
 fn submitted_and_resolved_identities_are_deliberately_distinct() {
-    let document =
-        json!({"shell":"backtest","run_id":"identity", "data":{"snapshot_id":"caf\u{e9}"}});
+    let document = json!({"shell":"backtest","job_id":"identity",
+        "data":{"snapshot_id":"caf\u{e9}","symbols":["SPY"],
+            "subscriptions":[{"data_type":"quote","symbols":["SPY"]}]}});
     let parsed = StrictJsonConfigurationParser
         .parse(document.to_string().as_bytes())
         .unwrap();
@@ -87,15 +146,16 @@ fn submitted_and_resolved_identities_are_deliberately_distinct() {
 
 #[test]
 fn numeric_parameters_and_normalized_symbols_agree_between_yaml_json_and_engine() {
-    let document = json!({"shell":"backtest","run_id":"decimals","initial_cash":100.5,
-        "data":{"symbols":["spy","QQQ","spy"]},
+    let document = json!({"shell":"backtest","job_id":"decimals","initial_cash":100.5,
+        "data":{"symbols":["spy","QQQ","spy"],
+            "subscriptions":[{"data_type":"quote","symbols":["spy","QQQ"]}]},
         "strategy_instances":[{"instance_id":"test","implementation":"jit",
             "bundle_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "capital_fraction":"1.00","symbols":["SPY"],"parameters":{"threshold":0.125}}]});
     let canonical = config::replay::validate_document(&document).unwrap();
     let engine = BacktestConfig::from_yaml(&document.to_string()).unwrap();
     assert_eq!(engine.canonical_json().to_serde_value(), canonical);
-    let yaml = "shell: backtest\nrun_id: decimals\ninitial_cash: 100.500\ndata:\n  symbols: [spy, QQQ, spy]\nstrategy_instances:\n  - instance_id: test\n    implementation: jit\n    bundle_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n    capital_fraction: 1.00\n    symbols: [SPY]\n    parameters:\n      threshold: 0.1250\n";
+    let yaml = "shell: backtest\njob_id: decimals\ninitial_cash: 100.500\ndata:\n  symbols: [spy, QQQ, spy]\n  subscriptions:\n    - data_type: quote\n      symbols: [spy, QQQ]\nstrategy_instances:\n  - instance_id: test\n    implementation: jit\n    bundle_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n    capital_fraction: 1.00\n    symbols: [SPY]\n    parameters:\n      threshold: 0.1250\n";
     assert_eq!(
         BacktestConfig::from_yaml(yaml)
             .unwrap()
@@ -108,7 +168,8 @@ fn numeric_parameters_and_normalized_symbols_agree_between_yaml_json_and_engine(
 fn screening_schema_is_shared_by_api_mcp_and_cli() {
     let source = "// screening source\n";
     let digest = backtest::sha256::digest_hex(source.as_bytes());
-    let document = json!({"schema_version":1,"shell":"screen","name":"parity",
+    let document = json!({"schema_version":1,"shell":"screen","job_id":"parity-screen",
+        "name":"parity",
         "as_of":"2024-01-19","bar_interval":"1d","lookback_days":20,"rank_metric":"close",
         "source":source,"bundle_hash":digest,
         "definition_id":format!("sha256:{}", "0".repeat(64)),"definition_hash":"0".repeat(64)});
@@ -146,8 +207,10 @@ fn nanosecond_bounds_match_typed_resolved_identity_after_api_validation() {
         "2024-01-02T14:30:00.123456789Z",
         "2024-01-02T14:30:00.123456790Z",
     ] {
-        let document = json!({"shell":"backtest","run_id":"nanos",
-            "start":"2024-01-02T16:30:00.123456788+02:00","end":end});
+        let document = json!({"shell":"backtest","job_id":"nanos",
+            "start":"2024-01-02T16:30:00.123456788+02:00","end":end,
+            "data":{"symbols":["SPY"],
+                "subscriptions":[{"data_type":"quote","symbols":["SPY"]}]}});
         let parsed = StrictJsonConfigurationParser
             .parse(document.to_string().as_bytes())
             .unwrap();

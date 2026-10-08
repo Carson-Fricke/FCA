@@ -1,10 +1,10 @@
-"""Filesystem-backed durable persistence for workspace chat records.
+"""Filesystem-backed chat persistence, used by restart-durability tests.
 
 The chat service persists immutable record snapshots through the
-:class:`~thesis.chat.service.ChatPersistence` port.  The in-memory adapter is
-suitable for tests but loses every conversation when the process restarts; this
-adapter writes each snapshot as one atomically-replaced JSON document under a
-workspace-scoped root so the local stack survives restarts.
+:class:`~thesis.chat.service.ChatPersistence` port.  The served application
+persists chats in Cosmos (``thesis.cosmos.records``).  This adapter writes each
+snapshot as one atomically-replaced JSON document under a workspace-scoped root,
+so tests can exercise reload after a simulated restart.
 
 Layout::
 
@@ -76,7 +76,7 @@ _ID_FIELDS: Mapping[RecordType, str] = {
     Attachment: "attachment_id",
     Investigation: "investigation_id",
     WorkflowExecution: "execution_id",
-    ToolJob: "tool_job_id",
+    ToolJob: "job_id",
     SubAgentRecord: "sub_agent_id",
     AgentInvocation: "invocation_id",
 }
@@ -194,6 +194,18 @@ def _mapping(value: object) -> dict[str, object] | None:
     return {str(key): item for key, item in value.items()}
 
 
+def _attribution(value: object) -> Mapping[str, object]:
+    """Decode one strict operation-attribution mapping, defaulting to empty."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise TypeError("expected an attribution mapping payload")
+    for key in value:
+        if not isinstance(key, str) or not key.strip():
+            raise TypeError("attribution keys must be non-empty strings")
+    return dict(value)
+
+
 def _links(value: object) -> RecordLinks:
     data = value if isinstance(value, Mapping) else {}
     return RecordLinks(
@@ -202,7 +214,7 @@ def _links(value: object) -> RecordLinks:
         strategy_ids=_ids(data.get("strategy_ids")),
         experiment_ids=_ids(data.get("experiment_ids")),
         workflow_execution_ids=_ids(data.get("workflow_execution_ids")),
-        tool_job_ids=_ids(data.get("tool_job_ids")),
+        job_ids=_ids(data.get("job_ids")),
     )
 
 
@@ -315,7 +327,7 @@ def _from_payload(record_type: RecordType, data: Mapping[str, object]) -> Record
             ),
             strategy_ids=_ids(data.get("strategy_ids")),
             experiment_ids=_ids(data.get("experiment_ids")),
-            tool_job_ids=_ids(data.get("tool_job_ids")),
+            job_ids=_ids(data.get("job_ids")),
             state=WorkflowExecutionState(str(data["state"])),
             phase=None if data.get("phase") is None else str(data["phase"]),
             intent_epoch=_int(data.get("intent_epoch")),
@@ -422,12 +434,12 @@ def _from_payload(record_type: RecordType, data: Mapping[str, object]) -> Record
         workspace_id=str(data["workspace_id"]),
         created_at=_datetime(data["created_at"]),
         created_by=str(data["created_by"]),
-        tool_job_id=str(data["tool_job_id"]),
+        job_id=str(data["job_id"]),
         execution_id=str(data["execution_id"]),
         chat_id=str(data["chat_id"]),
-        correlation_id=str(data["correlation_id"]),
         tool_name=str(data["tool_name"]),
         submitted_by=str(data["submitted_by"]),
+        attribution=_attribution(data.get("attribution")),
         investigation_id=(
             None
             if data.get("investigation_id") is None

@@ -68,6 +68,13 @@ class ProgramSnapshots(Protocol):
         Pinned loads assemble every dependency at the selected commit.
         """
 
+    def job_result(self, job_id: str) -> Mapping[str, object]:
+        """Return the harness's authoritative result payload for one job id.
+
+        Forward validation reads it to prove that reported metrics and states
+        are the harness's own, not values typed into a completion.
+        """
+
 
 @dataclass(frozen=True, slots=True)
 class StudyProgramReference:
@@ -145,7 +152,7 @@ _SAFE_STRATEGY_ID = re.compile(r"[^A-Za-z0-9._:@-]+")
 class ResearchModelRunRequest:
     """One workspace-bound historical model evaluation."""
 
-    run_id: str
+    job_id: str
     workspace_id: str
     model: ResearchModel
     workflow_execution_id: str
@@ -197,7 +204,7 @@ class BacktestResearchModelRunner:
         bundle = _adapter_bundle(request, model_reference)
         backtest = self._backtests.run(
             BacktestRunRequest(
-                run_id=request.run_id,
+                job_id=request.job_id,
                 workspace_id=request.workspace_id,
                 bundle=bundle,
                 workflow_execution_id=request.workflow_execution_id,
@@ -291,13 +298,13 @@ def _window_bound(
 def study_configuration(
     model: ResearchModel,
     *,
-    run_id: str,
+    job_id: str,
     universe: Sequence[str] = (),
 ) -> dict[str, object]:
     """Materialize the harness study configuration for one research model.
 
     The model's harness configuration is piped through unchanged except for the
-    fields the run owns: the study shell, run id, resolved symbol set, and the
+    fields the run owns: the study shell, job id, resolved symbol set, and the
     authored program instance.  ``start``/``end`` keep exactly the bounds the
     model declared; the same function backs both validation and execution, so
     the validated document is the one that runs.
@@ -306,61 +313,34 @@ def study_configuration(
     validate_market_configuration(configuration)
     configuration.pop("interval", None)
     subscriptions = configuration.pop("subscriptions", None)
-    shorthand_symbols = (
-        configuration.pop("symbols", None)
-        or configuration.pop("requiredSymbols", None)
-        or configuration.pop("required_symbols", None)
-    )
+    configuration.pop("symbols", None)
+    configuration.pop("requiredSymbols", None)
+    configuration.pop("required_symbols", None)
     data = configuration.get("data")
     if not isinstance(data, dict):
         data = {}
         configuration["data"] = data
     if subscriptions is None:
-        subscriptions = cast(object, data.get("subscriptions"))
-    if subscriptions is not None:
-        assert isinstance(subscriptions, list)
-        symbols = list(
-            dict.fromkeys(
-                symbol for item in subscriptions for symbol in item["symbols"]
-            )
+        subscriptions = cast(object, data.pop("subscriptions", None))
+    if not isinstance(subscriptions, list) or not subscriptions:
+        raise ResearchModelError("study configuration must declare subscriptions")
+    symbols = list(
+        dict.fromkeys(symbol for item in subscriptions for symbol in item["symbols"])
+    )
+    if universe and set(symbols) - set(universe):
+        raise ResearchModelError(
+            "subscription symbols must be present in the declared universe"
         )
-        if universe and set(symbols) - set(universe):
-            raise ResearchModelError(
-                "subscription symbols must be present in the declared universe"
-            )
-        if "subscriptions" in data and data["subscriptions"] != subscriptions:
-            raise ResearchModelError(
-                "data.subscriptions conflicts with model subscriptions"
-            )
-        data["subscriptions"] = subscriptions
-        data.pop("bar_interval", None)
-        data["symbols"] = symbols
-    else:
-        data["bar_interval"] = model.bar_interval
-        symbols = data.get("symbols")
-    if subscriptions is None and (not isinstance(symbols, list) or not symbols):
-        candidate_symbols: object = None
-        if isinstance(shorthand_symbols, list | tuple) and shorthand_symbols:
-            candidate_symbols = shorthand_symbols
-        elif universe:
-            candidate_symbols = universe
-        if isinstance(candidate_symbols, Sequence) and not isinstance(
-            candidate_symbols, str | bytes
-        ):
-            symbols = [str(item) for item in candidate_symbols if str(item).strip()]
-        if symbols:
-            data["symbols"] = list(dict.fromkeys(symbols))
-    if subscriptions is None and (not isinstance(symbols, list) or not symbols):
-        symbols = ["SPY"]
-        data["symbols"] = symbols
+    data["subscriptions"] = subscriptions
+    data.pop("bar_interval", None)
+    data["symbols"] = symbols
     resolved_symbols = data["symbols"]
     assert isinstance(resolved_symbols, list)
-    configuration["symbols"] = list(resolved_symbols)
     window_start, window_end = study_window(configuration)
     configuration["start"] = window_start
     configuration["end"] = window_end
     configuration["shell"] = "study"
-    configuration["run_id"] = run_id
+    configuration["job_id"] = job_id
     source = model.source.replace("\r\n", "\n")
     configuration["strategy_instances"] = [
         {
@@ -383,7 +363,7 @@ def _adapter_bundle(
 ) -> StrategyBundle:
     model = request.model
     configuration = study_configuration(
-        model, run_id=request.run_id, universe=request.universe
+        model, job_id=request.job_id, universe=request.universe
     )
     return StrategyBundle.create(
         strategy_id=_instance_id(f"research-{model.model_id}"),

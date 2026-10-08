@@ -13,7 +13,6 @@ from .contracts import (
     DiscoveryAttempt,
     DiscoveryCandidate,
     DiscoveryDraft,
-    ExitCriterion,
     FalsificationPlan,
     FalsificationTrial,
     FalsificationVerdict,
@@ -22,6 +21,7 @@ from .contracts import (
     HypothesisDraft,
     PlaceboControl,
     RcaDiagnosis,
+    StrategyBacktest,
 )
 from .errors import (
     FalsificationComposeError,
@@ -71,7 +71,7 @@ __all__ = [
     "DiscoveryAttempt",
     "DiscoveryCandidate",
     "DiscoveryDraft",
-    "ExitCriterion",
+    "StrategyBacktest",
     "FalsificationComposeError",
     "FalsificationPlan",
     "FalsificationTrial",

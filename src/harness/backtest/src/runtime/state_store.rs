@@ -184,8 +184,8 @@ fn decimal_eq(left: &str, right: &str) -> bool {
 fn options_to_json(options: &PaperOptions) -> BTreeMap<String, JsonValue> {
     BTreeMap::from([
         (
-            "run_id".to_string(),
-            JsonValue::String(options.run_id.clone()),
+            "job_id".to_string(),
+            JsonValue::String(options.job_id.clone()),
         ),
         (
             "initial_cash".to_string(),
@@ -633,7 +633,7 @@ pub struct RuntimeSnapshot {
     /// Snapshot format version.
     pub format_version: u64,
     /// Run identifier.
-    pub run_id: String,
+    pub job_id: String,
     /// Capture trigger.
     pub trigger: SnapshotTrigger,
     /// Caller capture sequence.
@@ -668,7 +668,7 @@ impl RuntimeSnapshot {
     pub fn to_json(&self) -> JsonValue {
         let mut content = object([
             ("format_version", JsonValue::UInt(self.format_version)),
-            ("run_id", JsonValue::String(self.run_id.clone())),
+            ("job_id", JsonValue::String(self.job_id.clone())),
             ("trigger", JsonValue::string(self.trigger.value())),
             ("sequence", JsonValue::UInt(self.sequence)),
             ("dispatched_count", JsonValue::UInt(self.dispatched_count)),
@@ -766,7 +766,7 @@ impl RuntimeSnapshot {
         };
         let mut snapshot = Self {
             format_version: as_u64(required(entries, "format_version")?, "format_version")?,
-            run_id: as_str(required(entries, "run_id")?, "run_id")?,
+            job_id: as_str(required(entries, "job_id")?, "job_id")?,
             trigger,
             sequence: as_u64(required(entries, "sequence")?, "sequence")?,
             dispatched_count: as_u64(required(entries, "dispatched_count")?, "dispatched_count")?,
@@ -839,7 +839,7 @@ pub struct StoredSnapshot {
     /// Snapshot format version.
     pub format_version: u64,
     /// Run identifier.
-    pub run_id: String,
+    pub job_id: String,
     /// Snapshot identity.
     pub snapshot_id: String,
     /// SHA-256 of the payload bytes.
@@ -854,7 +854,7 @@ impl StoredSnapshot {
     pub fn to_json(&self) -> JsonValue {
         object([
             ("format_version", JsonValue::UInt(self.format_version)),
-            ("run_id", JsonValue::String(self.run_id.clone())),
+            ("job_id", JsonValue::String(self.job_id.clone())),
             ("snapshot_id", JsonValue::String(self.snapshot_id.clone())),
             (
                 "payload_sha256",
@@ -881,7 +881,7 @@ impl StoredSnapshot {
         }
         let pointer = Self {
             format_version,
-            run_id: as_str(required(entries, "run_id")?, "run_id")?,
+            job_id: as_str(required(entries, "job_id")?, "job_id")?,
             snapshot_id: as_str(required(entries, "snapshot_id")?, "snapshot_id")?,
             payload_sha256: as_str(required(entries, "payload_sha256")?, "payload_sha256")?,
             byte_length: as_u64(required(entries, "byte_length")?, "byte_length")?,
@@ -924,26 +924,26 @@ impl SnapshotSchedule {
     }
 }
 
-fn payload_key(run_id: &str, snapshot_id: &str) -> String {
-    format!("runs/{run_id}/snapshots/{snapshot_id}.json")
+fn payload_key(job_id: &str, snapshot_id: &str) -> String {
+    format!("runs/{job_id}/snapshots/{snapshot_id}.json")
 }
 
-fn pointer_key(run_id: &str) -> String {
-    format!("runs/{run_id}/latest.json")
+fn pointer_key(job_id: &str) -> String {
+    format!("runs/{job_id}/latest.json")
 }
 
 /// Persist, verify, and restore canonical runtime state snapshots.
 pub struct RuntimeStateStore {
-    run_id: String,
+    job_id: String,
     stores: Vec<Box<dyn SnapshotObjectStore>>,
 }
 
 impl RuntimeStateStore {
     /// Create a store bound to one run identifier.
     #[must_use]
-    pub fn new(run_id: impl Into<String>) -> Self {
+    pub fn new(job_id: impl Into<String>) -> Self {
         Self {
-            run_id: run_id.into(),
+            job_id: job_id.into(),
             stores: Vec::new(),
         }
     }
@@ -955,8 +955,8 @@ impl RuntimeStateStore {
 
     /// The deployment run identifier.
     #[must_use]
-    pub fn run_id(&self) -> &str {
-        &self.run_id
+    pub fn job_id(&self) -> &str {
+        &self.job_id
     }
 
     /// Persist one snapshot atomically and return its pointer record.
@@ -966,23 +966,23 @@ impl RuntimeStateStore {
     /// Returns [`StateStoreError::Write`] when a store fails to persist the
     /// payload or pointer verbatim.
     pub fn save(&mut self, snapshot: &RuntimeSnapshot) -> Result<StoredSnapshot, StateStoreError> {
-        if snapshot.run_id != self.run_id {
+        if snapshot.job_id != self.job_id {
             return Err(StateStoreError::Integrity(format!(
                 "snapshot run {:?} does not match store run {:?}",
-                snapshot.run_id, self.run_id
+                snapshot.job_id, self.job_id
             )));
         }
         let payload = snapshot.payload_bytes();
         let pointer = StoredSnapshot {
             format_version: FORMAT_VERSION,
-            run_id: snapshot.run_id.clone(),
+            job_id: snapshot.job_id.clone(),
             snapshot_id: snapshot.snapshot_id(),
             payload_sha256: digest_hex(&payload),
             byte_length: payload.len() as u64,
         };
-        let payload_key = payload_key(&snapshot.run_id, &snapshot.snapshot_id());
+        let payload_key = payload_key(&snapshot.job_id, &snapshot.snapshot_id());
         let pointer_bytes = pointer.to_json().to_canonical_string_utf8().into_bytes();
-        let pointer_key = pointer_key(&snapshot.run_id);
+        let pointer_key = pointer_key(&snapshot.job_id);
         for store in &mut self.stores {
             store.replace(&payload_key, &payload);
             if store.read(&payload_key).as_deref() != Some(payload.as_slice()) {
@@ -1018,7 +1018,7 @@ impl RuntimeStateStore {
         if failures.is_empty() {
             return Err(StateStoreError::Missing(format!(
                 "no snapshot is stored for run {:?}",
-                self.run_id
+                self.job_id
             )));
         }
         for priority in [0usize, 1, 2] {
@@ -1043,7 +1043,7 @@ impl RuntimeStateStore {
     ///
     /// Returns [`StateStoreError`] when no store holds a valid pointer.
     pub fn latest(&self) -> Result<StoredSnapshot, StateStoreError> {
-        let key = pointer_key(&self.run_id);
+        let key = pointer_key(&self.job_id);
         let mut errors: Vec<StateStoreError> = Vec::new();
         for store in &self.stores {
             let Some(raw) = store.read(&key) else {
@@ -1061,7 +1061,7 @@ impl RuntimeStateStore {
         if errors.is_empty() {
             return Err(StateStoreError::Missing(format!(
                 "no snapshot pointer is stored for run {:?}",
-                self.run_id
+                self.job_id
             )));
         }
         Err(errors.remove(0))
@@ -1089,17 +1089,17 @@ impl RuntimeStateStore {
         order_owners: Option<&BTreeMap<String, String>>,
         random_states: &[RandomState],
     ) -> Result<RuntimeSnapshot, StateStoreError> {
-        if shell.run_id() != self.run_id {
+        if shell.job_id() != self.job_id {
             return Err(StateStoreError::Integrity(format!(
                 "shell run {:?} does not match store run {:?}",
-                shell.run_id(),
-                self.run_id
+                shell.job_id(),
+                self.job_id
             )));
         }
-        if options.run_id != self.run_id {
+        if options.job_id != self.job_id {
             return Err(StateStoreError::Integrity(format!(
                 "options run {:?} does not match store run {:?}",
-                options.run_id, self.run_id
+                options.job_id, self.job_id
             )));
         }
         let mut ids: Vec<String> = Vec::new();
@@ -1178,7 +1178,7 @@ impl RuntimeStateStore {
         let watermarks = shell.venue_watermarks();
         Ok(RuntimeSnapshot {
             format_version: FORMAT_VERSION,
-            run_id: self.run_id.clone(),
+            job_id: self.job_id.clone(),
             trigger,
             sequence,
             dispatched_count: result.dispatched_count,
@@ -1210,10 +1210,10 @@ impl RuntimeStateStore {
         options: PaperOptions,
     ) -> Result<PaperRuntimeShell, StateStoreError> {
         self.validate_snapshot_run(snapshot)?;
-        if options.run_id != self.run_id {
+        if options.job_id != self.job_id {
             return Err(StateStoreError::Restore(format!(
                 "options run {:?} does not match store run {:?}",
-                options.run_id, self.run_id
+                options.job_id, self.job_id
             )));
         }
         let books: Vec<(String, String)> = snapshot
@@ -1358,10 +1358,10 @@ impl RuntimeStateStore {
     }
 
     fn validate_snapshot_run(&self, snapshot: &RuntimeSnapshot) -> Result<(), StateStoreError> {
-        if snapshot.run_id != self.run_id {
+        if snapshot.job_id != self.job_id {
             return Err(StateStoreError::Restore(format!(
                 "snapshot run {:?} does not match store run {:?}",
-                snapshot.run_id, self.run_id
+                snapshot.job_id, self.job_id
             )));
         }
         Ok(())
@@ -1371,7 +1371,7 @@ impl RuntimeStateStore {
         &self,
         store: &dyn SnapshotObjectStore,
     ) -> Result<RuntimeSnapshot, StateStoreError> {
-        let pointer_key = pointer_key(&self.run_id);
+        let pointer_key = pointer_key(&self.job_id);
         let raw = store.read(&pointer_key).ok_or_else(|| {
             StateStoreError::Missing(format!(
                 "object {pointer_key:?} is not available in the snapshot store"
@@ -1383,13 +1383,13 @@ impl RuntimeStateStore {
             ))
         })?;
         let pointer = StoredSnapshot::from_json(&parse_json(&text, &pointer_key)?)?;
-        if pointer.run_id != self.run_id {
+        if pointer.job_id != self.job_id {
             return Err(StateStoreError::Integrity(format!(
                 "snapshot pointer at {pointer_key:?} references run {:?}",
-                pointer.run_id
+                pointer.job_id
             )));
         }
-        let payload_key = payload_key(&self.run_id, &pointer.snapshot_id);
+        let payload_key = payload_key(&self.job_id, &pointer.snapshot_id);
         let payload = store.read(&payload_key).ok_or_else(|| {
             StateStoreError::Missing(format!(
                 "object {payload_key:?} is not available in the snapshot store"
@@ -1420,10 +1420,10 @@ impl RuntimeStateStore {
                 snapshot.snapshot_id()
             )));
         }
-        if snapshot.run_id != self.run_id {
+        if snapshot.job_id != self.job_id {
             return Err(StateStoreError::Integrity(format!(
                 "snapshot run {:?} does not match store run {:?}",
-                snapshot.run_id, self.run_id
+                snapshot.job_id, self.job_id
             )));
         }
         Ok(snapshot)

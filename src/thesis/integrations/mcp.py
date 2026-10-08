@@ -1,7 +1,7 @@
 """Thesis client for the harness-hosted MCP server.
 
-The harness exposes backtests, studies, run queries, artifacts, and the
-supervised trader as MCP tools over JSON-RPC 2.0.  The harness hosts the MCP
+The harness exposes backtests, studies, job status/result queries, artifacts,
+and the supervised trader as MCP tools over JSON-RPC 2.0.  The harness hosts the MCP
 server itself (the ``POST /mcp`` route on the harness API, or the harness
 process's own stdio server for local operators); Thesis is only a client and
 never spawns a harness process.
@@ -79,12 +79,11 @@ _LOGGER = logging.getLogger(__name__)
 TOOL_RUN_BACKTEST = "run_backtest"
 TOOL_BACKTEST_CONFIG_TEMPLATE = "backtest_config_template"
 TOOL_GET_JOB_STATUS = "get_job_status"
-TOOL_GET_RUN = "get_run"
+TOOL_GET_JOB_RESULT = "get_job_result"
 TOOL_LIST_ARTIFACTS = "list_artifacts"
 TOOL_READ_ARTIFACT = "read_artifact"
 TOOL_RUN_STUDY = "run_study"
 TOOL_RUN_SCREENER = "run_screener"
-TOOL_GET_SCREENER_STATUS = "get_screener_status"
 TOOL_SCREENER_CONFIG_TEMPLATE = "screener_config_template"
 TOOL_VALIDATE_STUDY = "validate_study"
 TOOL_VALIDATE_STRATEGY = "validate_strategy"
@@ -96,6 +95,7 @@ class HarnessMcpError(RuntimeError):
     """Base error for a failed or misused harness MCP client call."""
 
     execution_certainty: ExecutionCertainty = "unknown_outcome"
+    job_id: str | None = None
 
 
 class HarnessMcpProtocolError(HarnessMcpError):
@@ -524,12 +524,18 @@ class HarnessMcpClient:
         )
 
     def run_backtest(
-        self, *, config_path: str, workspace: str | None = None
+        self,
+        *,
+        config_path: str,
+        workspace: str | None = None,
+        job_id: str | None = None,
     ) -> McpToolResult:
         """Call the ``run_backtest`` tool."""
         arguments: dict[str, object] = {"config_path": config_path}
         if workspace is not None:
             arguments["workspace"] = workspace
+        if job_id is not None:
+            arguments["job_id"] = job_id
         return self.call_tool(TOOL_RUN_BACKTEST, arguments)
 
     def validate_study(self, *, model: Mapping[str, object]) -> McpToolResult:
@@ -552,30 +558,32 @@ class HarnessMcpClient:
         """Call the ``get_job_status`` tool."""
         return self.call_tool(TOOL_GET_JOB_STATUS, {"job_id": job_id})
 
-    def get_run(self, *, run_id: str) -> McpToolResult:
-        """Call the ``get_run`` tool."""
-        return self.call_tool(TOOL_GET_RUN, {"run_id": run_id})
+    def get_job_result(self, *, job_id: str) -> McpToolResult:
+        """Call the ``get_job_result`` tool."""
+        return self.call_tool(TOOL_GET_JOB_RESULT, {"job_id": job_id})
 
-    def list_artifacts(self, *, run_id: str) -> McpToolResult:
+    def list_artifacts(self, *, job_id: str) -> McpToolResult:
         """Call the ``list_artifacts`` tool."""
-        return self.call_tool(TOOL_LIST_ARTIFACTS, {"run_id": run_id})
+        return self.call_tool(TOOL_LIST_ARTIFACTS, {"job_id": job_id})
 
-    def read_artifact(self, *, run_id: str, name: str) -> McpToolResult:
+    def read_artifact(self, *, job_id: str, name: str) -> McpToolResult:
         """Call the ``read_artifact`` tool."""
-        return self.call_tool(TOOL_READ_ARTIFACT, {"run_id": run_id, "name": name})
+        return self.call_tool(TOOL_READ_ARTIFACT, {"job_id": job_id, "name": name})
 
     def run_screener(
-        self, *, config: Mapping[str, object], workspace: str | None = None
+        self,
+        *,
+        config: Mapping[str, object],
+        workspace: str | None = None,
+        job_id: str | None = None,
     ) -> McpToolResult:
         """Call the ``run_screener`` tool with one materialized run config."""
         arguments: dict[str, object] = {"config": dict(config)}
         if workspace is not None:
             arguments["workspace"] = workspace
+        if job_id is not None:
+            arguments["job_id"] = job_id
         return self.call_tool(TOOL_RUN_SCREENER, arguments)
-
-    def get_screener_status(self, *, job_id: str) -> McpToolResult:
-        """Call the ``get_screener_status`` tool."""
-        return self.call_tool(TOOL_GET_SCREENER_STATUS, {"job_id": job_id})
 
     def screener_config_template(self) -> McpToolResult:
         """Call the ``screener_config_template`` tool."""
@@ -717,7 +725,9 @@ class HarnessMcpBoundary:
         """Launch the requested backtest through the MCP boundary."""
         self._reject_credential(bearer_token)
         self._capabilities.require_capability("backtest")
-        result = self.client.run_backtest(config_path=request.config_path)
+        result = self.client.run_backtest(
+            config_path=request.config_path, job_id=request.job_id
+        )
         return self._outcome(request, result)
 
     def launch_trader(
@@ -1006,9 +1016,8 @@ __all__ = [
     "PROTOCOL_VERSION",
     "THESIS_LOCATION_VARIABLE",
     "TOOL_BACKTEST_CONFIG_TEMPLATE",
+    "TOOL_GET_JOB_RESULT",
     "TOOL_GET_JOB_STATUS",
-    "TOOL_GET_RUN",
-    "TOOL_GET_SCREENER_STATUS",
     "TOOL_LAUNCH_TRADER",
     "TOOL_LIST_ARTIFACTS",
     "TOOL_READ_ARTIFACT",

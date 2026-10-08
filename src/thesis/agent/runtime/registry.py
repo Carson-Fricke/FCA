@@ -27,6 +27,7 @@ from thesis.agent.runtime.knowledge_tools import (
 from thesis.agent.runtime.policy import SpawnPolicy
 from thesis.agent.runtime.program_tools import (
     PROGRAM_TOOL_NAMES,
+    ContextJobRetention,
     program_registered_tools,
 )
 from thesis.agent.runtime.session import (
@@ -44,6 +45,7 @@ from thesis.agent.runtime.workflow_tools import (
     WorkflowLauncher,
     workflow_registered_tools,
 )
+from thesis.experiments.mandate import DataWindowPolicy
 from thesis.knowledge.service import KnowledgeScope, KnowledgeService
 from thesis.workspaces.programs import WorkspacePrograms
 
@@ -125,6 +127,8 @@ def build_session_registry(
     knowledge_scope: KnowledgeScope = "both",
     knowledge_collections: tuple[str, ...] | None = None,
     programs: WorkspacePrograms | None = None,
+    data_window: DataWindowPolicy | None = None,
+    job_retention: ContextJobRetention | None = None,
 ) -> SessionToolRegistry:
     """Compose the merged, policy-scoped catalog for one session context.
 
@@ -150,7 +154,14 @@ def build_session_registry(
             )
         )
     if programs is not None:
-        tools.extend(program_registered_tools(programs, context))
+        tools.extend(
+            program_registered_tools(
+                programs,
+                context,
+                data_window=data_window,
+                job_retention=job_retention,
+            )
+        )
     if strategy_authoring is not None and programs is None:
         tools.extend(strategy_registered_tools(strategy_authoring, context))
     if harness_tools is not None:

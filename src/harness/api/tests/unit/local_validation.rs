@@ -10,7 +10,10 @@ fn local_validator_reuses_full_success_and_deterministic_failure_results() {
         "source": include_str!("../../../strategy-jit/tests/fixtures/study_program.rs"),
         "harnessConfiguration": {
             "start": "2024-01-02T14:30:00Z", "end": "2024-01-04T21:00:00Z",
-            "interval": "1min", "symbols": ["AAA", "BBB", "CCC"],
+            "symbols": ["AAA", "BBB", "CCC"],
+            "subscriptions": [
+                {"data_type": "bars", "symbols": ["AAA", "BBB", "CCC"], "interval": "1min"}
+            ],
         },
     });
     let first = NativeStudyValidator.validate_result(&model).unwrap();
@@ -26,9 +29,9 @@ fn local_validator_reuses_full_success_and_deterministic_failure_results() {
     assert_eq!(first["subscriptions"], second["subscriptions"]);
 
     let mut changed = model.clone();
-    changed["harnessConfiguration"]["interval"] = json!("1d");
+    changed["harnessConfiguration"]["subscriptions"][0]["interval"] = json!("1d");
     let mismatch = NativeStudyValidator.validate_result(&changed).unwrap_err();
-    assert!(mismatch.message().contains("do not match"));
+    assert!(mismatch.message().contains("does not match"));
     assert_eq!(
         mismatch.payload().unwrap()["deterministicCompilerDiagnostic"],
         false

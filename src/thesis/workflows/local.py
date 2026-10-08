@@ -50,14 +50,15 @@ from thesis.workflows.runtime import (
 _LOCAL_PROFILE_ID = "local-openrouter"
 _LOCAL_POLICY_VERSION = "1.0.0"
 _ROLES: tuple[Role, ...] = ("primary", "coding", "critique", "research")
-_PENDING_STATES = frozenset({"queued", "submitted", "pending", "running"})
-_SUCCESS_STATES = frozenset({"succeeded", "completed", "success", "complete"})
+_PENDING_STATES = frozenset({"queued", "running"})
+_SUCCESS_STATES = frozenset({"succeeded"})
+_FAILURE_STATES = frozenset({"failed", "cancelled"})
+_TERMINAL_STATES = _SUCCESS_STATES | _FAILURE_STATES
 
 #: Allow market-data ensure to finish, but never poll indefinitely.
 _DEFAULT_POLL_INITIAL_INTERVAL_SECONDS = 0.25
 _DEFAULT_POLL_MAX_INTERVAL_SECONDS = 5.0
 _DEFAULT_POLL_TIMEOUT_SECONDS = 1800.0
-_TERMINAL_STATES = _SUCCESS_STATES | {"failed", "cancelled", "canceled", "stopped"}
 
 
 class McpBacktestRunner:
@@ -66,12 +67,12 @@ class McpBacktestRunner:
     Configuration mappings travel inline across hosts; string configurations
     name existing paths on the harness host.
 
-    A deterministic run id is resolved against the harness job store first: a
-    pending job is joined (a resumed execution polls the run already in flight
-    instead of launching a duplicate). Terminal jobs are relaunched, because a
-    run id is reused across revision cycles and a succeeded job may describe a
-    superseded model or strategy. Polling uses wall-clock backoff until the
-    harness reports the job terminal, within a deadline; a status failure raises
+    The submitted job id is allocated by the caller and carried unchanged: a
+    pending job is joined and polled, and a terminal job's stored result is
+    returned instead of relaunching the same id. A launch acknowledgement whose
+    job id differs from the submitted one fails closed. Polling uses wall-clock
+    backoff until the harness reports the job terminal, within a deadline; a
+    status failure raises
     :class:`~thesis.workflows.backtests.BacktestRunError`.
     """
 
@@ -117,18 +118,12 @@ class McpBacktestRunner:
         self._sleep = sleep
 
     def run(self, request: BacktestRunRequest) -> BacktestRunResult:
-        """Join or launch one harness run and map its structured result."""
+        """Join or launch one harness job and map its structured result."""
         self._check_cancelled(request)
-        reusable = self._existing_run(request.run_id)
-        if reusable is not None:
-            return self._resolve(request, reusable)
-        configuration = request.bundle.harness_configuration
-        if isinstance(configuration, Mapping):
-            arguments = {"config": _jsonable(configuration)}
-        elif isinstance(configuration, str) and configuration.strip():
-            arguments = {"config_path": configuration}
-        else:
-            raise BacktestRunError("harness configuration must be a path or mapping")
+        existing = self._existing_job(request.job_id)
+        if existing is not None:
+            return self._resolve(request, existing)
+        arguments = self._launch_arguments(request)
         self._check_cancelled(request)
         launched = self._harness_tools.call_tool(self._launch_tool, arguments)
         if not launched.ok:
@@ -140,16 +135,28 @@ class McpBacktestRunner:
             raise BacktestRunError(detail)
         return self._resolve(request, launched)
 
-    def _existing_run(self, run_id: str) -> HarnessToolResult | None:
-        """Return a still-pending harness job for one deterministic run id.
+    def _launch_arguments(self, request: BacktestRunRequest) -> dict[str, object]:
+        """Render the harness launch arguments carrying the submitted job id."""
+        configuration = request.bundle.harness_configuration
+        if isinstance(configuration, Mapping):
+            document = {
+                str(key): _jsonable(value) for key, value in configuration.items()
+            }
+            document["job_id"] = request.job_id
+            return {"config": document}
+        if isinstance(configuration, str) and configuration.strip():
+            return {"config_path": configuration}
+        raise BacktestRunError("harness configuration must be a path or mapping")
 
-        Only in-flight jobs are joined: run ids are scoped to the hypothesis or
-        strategy revision, so a resumed execution joins the run already
-        executing instead of launching a duplicate. A terminal job is
-        relaunched so a revised artifact is always re-executed.
+    def _existing_job(self, job_id: str) -> HarnessToolResult | None:
+        """Return the harness job for one job id, pending or terminal.
+
+        A pending job is joined and polled; a terminal job's stored result is
+        returned instead of relaunching the same job id. Only an exact
+        not-found response is absence.
         """
         try:
-            status = self._harness_tools.call_tool("get_job_status", {"job_id": run_id})
+            status = self._harness_tools.call_tool("get_job_status", {"job_id": job_id})
         except Exception as error:  # noqa: BLE001 - unknown lookup is not absence
             raise BacktestRunError(
                 f"{self._runner_label} status lookup failed: {error}"
@@ -158,7 +165,7 @@ class McpBacktestRunner:
             failure = status.failure
             # This is the harness's exact domain not-found response, not an
             # arbitrary transport/auth/protocol failure or a guessed substring.
-            absent = f"job '{run_id}' does not exist"
+            absent = f"job '{job_id}' does not exist"
             if (
                 failure is not None
                 and failure.kind in {"tool", "harness"}
@@ -168,11 +175,9 @@ class McpBacktestRunner:
             raise BacktestRunError(
                 status.text or (failure.message if failure else "status lookup failed")
             )
-        state = (_first_text(status.structured, "status", "state") or "").casefold()
-        if state in _PENDING_STATES:
+        state = (_text(status.structured.get("state")) or "").casefold()
+        if state in _PENDING_STATES or state in _TERMINAL_STATES:
             return status
-        if state in _TERMINAL_STATES:
-            return None
         raise BacktestRunError(
             f"{self._runner_label} status lookup returned unknown state {state!r}"
         )
@@ -181,62 +186,69 @@ class McpBacktestRunner:
         self, request: BacktestRunRequest, launched: HarnessToolResult
     ) -> BacktestRunResult:
         structured = dict(launched.structured)
-        run_id = (
-            _first_text(structured, "run_id", "study_id", "job_id") or request.run_id
-        )
-        state = _first_text(structured, "status", "state") or (
-            "succeeded"
-            if structured.get("exit_code") == 0
-            else "failed"
-            if isinstance(structured.get("exit_code"), int)
-            else ""
-        )
-        if state.casefold() in _PENDING_STATES:
-            terminal = self._poll_terminal(request, run_id)
+        returned = _text(structured.get("job_id"))
+        if returned is None:
+            raise BacktestRunError(
+                f"{self._runner_label} did not acknowledge submitted job "
+                f"{request.job_id!r}"
+            )
+        if returned != request.job_id:
+            raise BacktestRunError(
+                f"{self._runner_label} acknowledged job_id {returned!r} for "
+                f"submitted job {request.job_id!r}"
+            )
+        job_id = request.job_id
+        state = (_text(structured.get("state")) or "").casefold()
+        if state in _PENDING_STATES:
+            terminal = self._poll_terminal(request, job_id)
             structured.update(terminal.structured)
-            state = _first_text(terminal.structured, "status", "state") or "failed"
-        if state.casefold() not in _TERMINAL_STATES:
+            state = (_text(structured.get("state")) or "").casefold()
+        if state not in _TERMINAL_STATES:
             raise BacktestRunError(
                 f"{self._runner_label} returned unknown state {state!r}"
             )
-        # Failed jobs need not have a run/results row. Keep their domain state
-        # and diagnostic instead of replacing it with a result-query failure.
-        if state.casefold() not in _SUCCESS_STATES:
+        # Failed jobs need not have a result row. Keep their domain state and
+        # diagnostic instead of replacing it with a result-query failure.
+        if state not in _SUCCESS_STATES:
             structured["state"] = state
-            structured.pop("status", None)
             return self._result(
-                run_id,
+                job_id,
                 HarnessToolResult(tool=launched.tool, ok=True, structured=structured),
             )
         if structured.get("metrics") is None:
-            run = self._harness_tools.call_tool("get_run", {"run_id": run_id})
-            if not run.ok:
+            job = self._harness_tools.call_tool("get_job_result", {"job_id": job_id})
+            if not job.ok:
                 raise BacktestRunError(
-                    run.text or f"{self._runner_label} result query failed"
+                    job.text or f"{self._runner_label} result query failed"
                 )
-            structured.update(run.structured)
+            resolved_id = _text(job.structured.get("job_id"))
+            if resolved_id is not None and resolved_id != job_id:
+                raise BacktestRunError(
+                    f"{self._runner_label} result query returned job_id "
+                    f"{resolved_id!r} for submitted job {job_id!r}"
+                )
+            structured.update(job.structured)
         if structured.get("result_artifacts", structured.get("artifacts")) is None:
             artifacts = self._harness_tools.call_tool(
-                "list_artifacts", {"run_id": run_id}
+                "list_artifacts", {"job_id": job_id}
             )
             if artifacts.ok:
                 structured["result_artifacts"] = artifacts.structured.get("artifacts")
         structured["state"] = state
-        structured.pop("status", None)
         resolved = HarnessToolResult(
             tool=launched.tool,
             ok=True,
             structured=structured,
             text=launched.text,
         )
-        return self._result(run_id, resolved)
+        return self._result(job_id, resolved)
 
     def _check_cancelled(self, request: BacktestRunRequest) -> None:
         if self._cancelled is not None and self._cancelled(request):
             raise BacktestRunError(f"{self._runner_label} polling cancelled")
 
     def _poll_terminal(
-        self, request: BacktestRunRequest, run_id: str
+        self, request: BacktestRunRequest, job_id: str
     ) -> HarnessToolResult:
         """Poll until terminal, cancellation, or the overall polling deadline."""
         interval = self._poll_interval_seconds
@@ -245,11 +257,11 @@ class McpBacktestRunner:
             self._check_cancelled(request)
             if self._monotonic() >= deadline:
                 raise BacktestRunError(
-                    f"{self._runner_label} {run_id!r} polling timed out"
+                    f"{self._runner_label} {job_id!r} polling timed out"
                 )
             try:
                 status = self._harness_tools.call_tool(
-                    "get_job_status", {"job_id": run_id}
+                    "get_job_status", {"job_id": job_id}
                 )
             except Exception as error:  # noqa: BLE001 - polling faults are terminal
                 raise BacktestRunError(
@@ -261,12 +273,23 @@ class McpBacktestRunner:
                     or (status.failure.message if status.failure else "")
                     or f"{self._runner_label} status query failed"
                 )
+            returned = _text(status.structured.get("job_id"))
+            if returned is None:
+                raise BacktestRunError(
+                    f"{self._runner_label} status query did not acknowledge "
+                    f"submitted job {job_id!r}"
+                )
+            if returned != job_id:
+                raise BacktestRunError(
+                    f"{self._runner_label} status query returned job_id "
+                    f"{returned!r} for submitted job {job_id!r}"
+                )
             self._check_cancelled(request)
             if self._monotonic() >= deadline:
                 raise BacktestRunError(
-                    f"{self._runner_label} {run_id!r} polling timed out"
+                    f"{self._runner_label} {job_id!r} polling timed out"
                 )
-            state = (_first_text(status.structured, "status", "state") or "").casefold()
+            state = (_text(status.structured.get("state")) or "").casefold()
             if state in _TERMINAL_STATES:
                 return status
             if state not in _PENDING_STATES:
@@ -277,12 +300,9 @@ class McpBacktestRunner:
             if interval > 0:
                 interval = min(interval * 2, self._poll_max_interval_seconds)
 
-    def _result(self, run_id: str, result: HarnessToolResult) -> BacktestRunResult:
+    def _result(self, job_id: str, result: HarnessToolResult) -> BacktestRunResult:
         structured = dict(result.structured)
-        job_id = _first_text(structured, "run_id", "job_id") or run_id
-        state = _first_text(structured, "status", "state") or (
-            "succeeded" if structured.get("exit_code") == 0 else "failed"
-        )
+        state = _text(structured.get("state")) or "failed"
         return BacktestRunResult(
             job_id=job_id,
             state=state,
@@ -292,9 +312,7 @@ class McpBacktestRunner:
             result_artifacts=structured.get(
                 "result_artifacts", structured.get("artifacts")
             ),
-            error=_first_text(
-                structured, "error", "error_message", "errorMessage", "reason"
-            ),
+            error=_error_text(structured),
         )
 
 
@@ -402,8 +420,12 @@ def _jsonable(value: object) -> object:
     return value
 
 
-def _first_text(values: Mapping[str, object], *keys: str) -> str | None:
-    for key in keys:
+def _text(value: object) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _error_text(values: Mapping[str, object]) -> str | None:
+    for key in ("error", "error_message", "errorMessage", "reason"):
         candidate = values.get(key)
         if isinstance(candidate, str) and candidate.strip():
             return candidate

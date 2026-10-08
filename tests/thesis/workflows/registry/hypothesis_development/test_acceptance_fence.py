@@ -28,17 +28,21 @@ from thesis.workflows.registry.hypothesis_development.spec import (
 from ._support import (
     WORKSPACE,
     FakePrograms,
+    _candidate_evaluation_envelope,
     _discovery_envelope,
+    _forward_envelope,
     _hypothesis_envelope,
     _kit,
     _node_record,
+    _null_test_envelope,
     _request,
+    _variation_envelope,
 )
 
 
 def test_declarations_are_complete_and_executor_variants_are_explicit() -> None:
     declarations = phase_declarations()
-    assert len(declarations) == 10
+    assert len(declarations) == 13
     assert len({item.spec.phase for item in declarations}) == len(declarations)
     for item in declarations:
         if isinstance(item.spec, TerminalPhase):
@@ -54,6 +58,20 @@ def test_declarations_are_complete_and_executor_variants_are_explicit() -> None:
             assert item.orchestrator and item.task and item.activity
             assert "search_knowledge" in item.tools
         assert all(callable(pipe) for pipe in item.edges.values())
+    edges = piping()
+    assert ("optimization", "null_testing") in edges
+    assert ("optimization", "completed") not in edges
+    assert ("null_testing", "variation") in edges
+    assert ("null_testing", "completed") not in edges
+    assert ("null_testing", "strategy_rca") in edges
+    assert ("null_testing", "failed") in edges
+    assert ("variation", "forward_validation") in edges
+    assert ("variation", "completed") not in edges
+    assert ("variation", "strategy_rca") in edges
+    assert ("variation", "failed") in edges
+    assert ("forward_validation", "completed") in edges
+    assert ("forward_validation", "strategy_rca") in edges
+    assert ("forward_validation", "failed") in edges
 
 
 @pytest.mark.parametrize("edge", list(piping()))
@@ -80,7 +98,28 @@ def test_every_edge_live_and_replay_use_declared_pipe_once(
             "gitCommit": "a" * 40,
             "version": "b" * 64,
         },
-        "backtest": {"jobId": "run-one", "state": "complete"},
+        "backtest": {
+            "jobId": "job-one",
+            "state": "succeeded",
+            "strategy": {
+                "workspaceId": WORKSPACE,
+                "kind": "strategy",
+                "programId": "momentum",
+                "gitCommit": "a" * 40,
+                "version": "b" * 64,
+            },
+        },
+        "diagnosis": {
+            "falsifierId": "f1",
+            "failureClass": "strategy",
+            "rationale": "the signal does not survive costs",
+            "confidence": 0.5,
+            "followUps": [],
+        },
+        "optimization": _candidate_evaluation_envelope(),
+        "nullTesting": _null_test_envelope(),
+        "variation": _variation_envelope(),
+        "forwardValidation": _forward_envelope(),
     }
     counts = []
     original = kit.workflow.spec.piping[edge]

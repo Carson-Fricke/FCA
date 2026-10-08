@@ -13,10 +13,7 @@ use api::http::configuration::ValidatedConfiguration;
 use api::http::create_app;
 use api::http::launcher::{BacktestRunner, RunOutcome};
 use api::http::state::AppConfig;
-use api::http::store::{
-    FileSystemJobRepository, FileSystemRunStore, JobRecord, JobRepository, JobState,
-    RunCatalogRecord, RunStatus, RunStore,
-};
+use api::http::store::{FileSystemJobStore, JobKind, JobRecord, JobState, JobStore};
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use axum::Router;
@@ -61,16 +58,31 @@ fn durable_app(root: &Path) -> Router {
     create_app(config).expect("app")
 }
 
-fn seed_run(store: &dyn RunStore, run_id: &str) {
-    let record = RunCatalogRecord::new(run_id, RunStatus::Complete, "momentum");
+fn seed_run(store: &dyn JobStore, job_id: &str) {
+    let now = chrono::Utc::now();
+    store
+        .admit(JobRecord::new(job_id, JobKind::Backtest, "seed-input", now))
+        .expect("seed admit");
+    let mut record = store.get(job_id).expect("seeded job");
+    record.state = JobState::Succeeded;
+    record.strategy_id = "momentum".to_string();
     let mut artifacts = BTreeMap::new();
     artifacts.insert("backtest.json".to_string(), br#"{"ok":true}"#.to_vec());
-    store.put(record, artifacts).expect("seed run");
+    store.put_result(record, artifacts).expect("seed run");
 }
 
-fn seed_job(jobs: &dyn JobRepository, job_id: &str) {
+fn seed_job(jobs: &dyn JobStore, job_id: &str) {
     let now = chrono::Utc::now();
-    jobs.upsert(JobRecord::new(job_id, JobState::Succeeded, now, now));
+    jobs.admit(JobRecord::new(job_id, JobKind::Backtest, "seed-input", now))
+        .and_then(|admission| {
+            let mut record = admission.record().clone();
+            record.state = JobState::Succeeded;
+            jobs.put_result(
+                record,
+                BTreeMap::from([("backtest.json".to_string(), b"{}".to_vec())]),
+            )
+        })
+        .expect("seed job");
 }
 
 fn get_with(path: &str, token: Option<&str>) -> Request<Body> {
@@ -136,33 +148,70 @@ async fn mcp_health_publishes_the_tool_catalog() {
 async fn mcp_tool_call_list_artifacts_reads_the_durable_store() {
     let root = temp_root("artifacts");
     let router = durable_app(&root);
-    let store = FileSystemRunStore::new(&root);
+    let store = FileSystemJobStore::new(&root);
     seed_run(&store, "run-mcp");
 
     let (status, body) = send(
         &router,
         post_mcp(
             Some(BEARER),
-            &tool_call("list_artifacts", json!({"run_id": "run-mcp"})),
+            &tool_call("list_artifacts", json!({"job_id": "run-mcp"})),
         ),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     let body = json_body(&body);
     assert_eq!(body["result"]["isError"], false);
-    assert_eq!(body["result"]["structuredContent"]["run_id"], "run-mcp");
+    assert_eq!(body["result"]["structuredContent"]["job_id"], "run-mcp");
     let artifacts = body["result"]["structuredContent"]["artifacts"]
         .as_array()
         .expect("artifacts");
     assert_eq!(artifacts.len(), 1);
     assert_eq!(artifacts[0]["name"], "backtest.json");
+    assert_eq!(artifacts[0]["uri"], "jobs/run-mcp/backtest.json");
+}
+
+#[tokio::test]
+async fn mcp_tool_call_list_artifacts_returns_empty_for_an_artifact_free_job() {
+    let root = temp_root("empty-artifacts");
+    let router = durable_app(&root);
+    let store = FileSystemJobStore::new(&root);
+    let now = chrono::Utc::now();
+    store
+        .admit(JobRecord::new(
+            "job-empty",
+            JobKind::Backtest,
+            "seed-input",
+            now,
+        ))
+        .expect("seed admit");
+    let mut record = store.get("job-empty").expect("seeded job");
+    record.state = JobState::Failed;
+    record.error_message = Some("the engine failed before producing output".to_string());
+    store
+        .put_result(record, BTreeMap::new())
+        .expect("failed result");
+
+    let (status, body) = send(
+        &router,
+        post_mcp(
+            Some(BEARER),
+            &tool_call("list_artifacts", json!({"job_id": "job-empty"})),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let body = json_body(&body);
+    assert_eq!(body["result"]["isError"], false);
+    assert_eq!(body["result"]["structuredContent"]["job_id"], "job-empty");
+    assert_eq!(body["result"]["structuredContent"]["artifacts"], json!([]));
 }
 
 #[tokio::test]
 async fn mcp_tool_call_get_job_status_reads_the_durable_jobs() {
     let root = temp_root("status");
     let router = durable_app(&root);
-    let jobs = FileSystemJobRepository::new(&root);
+    let jobs = FileSystemJobStore::new(&root);
     seed_job(&jobs, "job-mcp");
 
     let (status, body) = send(
@@ -219,7 +268,7 @@ async fn mcp_requires_a_bearer_credential() {
     let router = durable_app(&root);
     let (post_status, _) = send(
         &router,
-        post_mcp(None, &tool_call("list_artifacts", json!({"run_id": "r"}))),
+        post_mcp(None, &tool_call("list_artifacts", json!({"job_id": "r"}))),
     )
     .await;
     assert_eq!(post_status, StatusCode::UNAUTHORIZED);

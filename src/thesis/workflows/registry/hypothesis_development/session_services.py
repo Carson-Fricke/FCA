@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from thesis.agent.harness_tools import HarnessToolProvider
 from thesis.agent.hypothesis_skills import with_hypothesis_development_skills
 from thesis.agent.router import Role, RolePolicy
 from thesis.agent.runtime.context import ToolContext
 from thesis.agent.runtime.control import PhaseCompletionRejected
+from thesis.agent.runtime.program_tools import ContextJobRetention
 from thesis.agent.runtime.session import ToolExecution
 from thesis.agent.runtime.store import SubAgentStore
 from thesis.agent.tool_dispatch import with_harness_mcp
@@ -18,9 +19,18 @@ from thesis.chat.contracts import (
     RecordNotFound,
     SubAgentRecord,
     SubAgentStatus,
+    ToolJobState,
     WorkflowExecution,
 )
 from thesis.chat.service import ChatService
+from thesis.experiments.mandate import (
+    DataWindowPolicy,
+    MandateError,
+    ResearchMandate,
+    derive_launch_mandate,
+    rfc3339,
+    rfc3339_ns,
+)
 from thesis.knowledge.service import KnowledgeScope
 from thesis.strategies import WorkspaceStrategyArtifacts
 from thesis.workflows.core.state import TERMINAL_EXECUTION_STATES
@@ -30,16 +40,25 @@ from thesis.workflows.research_models import (
     StudyProgramReference,
     resolve_study_reference,
 )
-from thesis.workspaces.programs import ProgramArtifactError, ProgramKind
+from thesis.workspaces.programs import JobSettlement, ProgramArtifactError, ProgramKind
 
 from .composers.hypothesis import _compose_universe
 from .contracts.creation import HypothesisDevelopmentRequest
-from .errors import FalsificationComposeError
+from .design import frozen_design
+from .errors import FalsificationComposeError, WorkflowError
+from .exposure import record_completion_attempts, record_submission_exposure
+from .primitives import _WORKFLOW_ACTOR
+from .provenance import PROVENANCE_PHASES, verify_phase_completion
 from .spec import build_hypothesis_development_workflow
 from .state import HypothesisDevelopmentOutcome, HypothesisDevelopmentState
 
 if TYPE_CHECKING:
     from thesis.workflows.runtime import RuntimeToolActivity, WorkflowSessionBindings
+
+
+def _text_or_none(value: object) -> str | None:
+    """Return attribution text, or ``None`` when the attribution omits it."""
+    return value if isinstance(value, str) else None
 
 
 def role_policies(profile_id: str) -> dict[Role, RolePolicy]:
@@ -133,13 +152,8 @@ class HypothesisSessionServices:
                     knowledge_scope=spec.knowledge_scope, knowledge_collections=()
                 )
             phase = execution.phase
-        return WorkflowSessionBindings(
-            completion_schema=schema,
-            knowledge_scope=spec.knowledge_scope,
-            knowledge_collections=None
-            if phase is None
-            else spec.phase_knowledge.get(phase),
-            programs=self._programs
+        programs = (
+            self._programs
             if phase_executor
             and phase
             in (
@@ -148,8 +162,203 @@ class HypothesisSessionServices:
                 "strategy_design",
                 "strategy_backtesting",
                 "optimization",
+                "null_testing",
+                "variation",
+                "forward_validation",
             )
-            else None,
+            else None
+        )
+        return WorkflowSessionBindings(
+            completion_schema=schema,
+            knowledge_scope=spec.knowledge_scope,
+            knowledge_collections=None
+            if phase is None
+            else spec.phase_knowledge.get(phase),
+            programs=programs,
+            data_window=(
+                self._resolve_data_window(
+                    context.workspace_id, context.workflow_execution_id, phase
+                )
+                if programs is not None
+                else None
+            ),
+            job_retention=(
+                self._program_job_retention(phase)
+                if programs is not None and phase is not None
+                else None
+            ),
+        )
+
+    def _program_job_retention(self, phase: str) -> ContextJobRetention:
+        """Retain each program execution before dispatch, with its exposure.
+
+        Only phase executors with program capability receive this closure: they
+        own a live, steerable workflow execution, so the durable records can be
+        written before the harness observes the id.  Helper and chat-level
+        contexts keep retention absent rather than fabricating an execution.
+
+        Each submission writes its observed exposure first, then its tool job,
+        and only then dispatches.  A failure at either durable step settles the
+        job as not started, so nothing unrecorded ever reaches the harness.  The
+        record is started before dispatch so a possibly-dispatched job is never
+        left submitted, which would read as not started.  The returned settlement
+        closes the record only for definitive failures; unknown outcomes stay
+        running for reconciliation by job id.
+        """
+
+        def retain(
+            context: ToolContext,
+            job_id: str,
+            tool_name: str,
+            attribution: Mapping[str, object],
+        ) -> JobSettlement:
+            execution_id = context.workflow_execution_id
+            if execution_id is None:
+                raise RecordNotFound("program retention requires a workflow execution")
+            workflow = None if self._workflow is None else self._workflow()
+            if workflow is None:
+                raise WorkflowError("program submissions require the workflow runtime")
+            execution = self._chat.get_execution(context.workspace_id, execution_id)
+            request = HypothesisDevelopmentRequest.from_execution(self._chat, execution)
+            scoped: dict[str, object] = {**attribution, "phase": phase}
+            design_sha256: str | None = None
+            if phase == "forward_validation":
+                design_sha256 = self._forward_design_sha256(
+                    workflow, request, context.workspace_id
+                )
+                scoped["designSha256"] = design_sha256
+            job = self._chat.submit_tool_job(
+                context.workspace_id,
+                execution_id,
+                tool_name=tool_name,
+                actor_id=_WORKFLOW_ACTOR,
+                job_id=job_id,
+                attribution=scoped,
+            )
+            try:
+                record_submission_exposure(
+                    workflow,
+                    request,
+                    phase=phase,
+                    job_id=job.job_id,
+                    tool_name=tool_name,
+                    window_start=_text_or_none(attribution.get("windowStart")),
+                    window_end=_text_or_none(attribution.get("windowEnd")),
+                    parameter_sha256=_text_or_none(
+                        attribution.get("parameterAssignmentSha256")
+                    ),
+                    design_sha256=design_sha256,
+                    phase_attempt_id=context.phase_attempt_id,
+                )
+            except Exception as error:  # noqa: BLE001 - exposure precedes dispatch
+                self._chat.record_tool_result(
+                    context.workspace_id,
+                    job.job_id,
+                    result={"executionCertainty": "not_started"},
+                    actor_id=_WORKFLOW_ACTOR,
+                    success=False,
+                    error_message=f"exposure recording failed: {error}",
+                )
+                raise
+            if job.state is ToolJobState.SUBMITTED:
+                self._chat.start_tool_job(
+                    context.workspace_id, job.job_id, actor_id=_WORKFLOW_ACTOR
+                )
+
+            def settle(certainty: str, message: str | None) -> None:
+                if certainty not in ("not_started", "observed_failure"):
+                    return
+                self._chat.record_tool_result(
+                    context.workspace_id,
+                    job.job_id,
+                    result={"executionCertainty": certainty},
+                    actor_id=_WORKFLOW_ACTOR,
+                    success=False,
+                    error_message=message,
+                )
+
+            return settle
+
+        return retain
+
+    def _forward_design_sha256(
+        self,
+        workflow: Workflow[Any, Any, Any],
+        request: HypothesisDevelopmentRequest,
+        workspace_id: str,
+    ) -> str:
+        """Return the digest of the frozen design a forward submission runs under."""
+        mandate = self._resolve_mandate(workspace_id, request.execution_id)
+        if mandate is None:
+            raise WorkflowError("forward validation requires the research mandate")
+        state = workflow._reconstruct_state(request)
+        window = mandate.forward_window
+        return frozen_design(
+            state, rfc3339(window.start_ns), rfc3339(window.end_ns)
+        ).sha256()
+
+    def _resolve_mandate(
+        self, workspace_id: str, execution_id: str | None
+    ) -> ResearchMandate | None:
+        """Derive the launch-scoped research mandate from the execution document."""
+        if self._workflow is None or execution_id is None:
+            return None
+        return derive_launch_mandate(
+            getattr(self._workflow(), "execution_store", None),
+            workspace_id=workspace_id,
+            execution_id=execution_id,
+        )
+
+    def _resolve_data_window(
+        self, workspace_id: str, execution_id: str | None, phase: str | None
+    ) -> DataWindowPolicy | None:
+        """Return the phase-scoped enforceable window, when a mandate exists.
+
+        Forward validation runs on the protected holdout partition and the
+        policy rewrites the submitted window; every other program phase runs
+        inside the development window and is checked against it.
+        """
+        mandate = self._resolve_mandate(workspace_id, execution_id)
+        if mandate is None:
+            return None
+        if phase == "forward_validation":
+            return mandate.forward_window
+        return mandate.default_window
+
+    def _provenance_error(
+        self,
+        workspace_id: str,
+        record: SubAgentRecord,
+        completion: Mapping[str, object],
+    ) -> str | None:
+        """Bind every job the completion reports to the run that executed it."""
+        if (
+            record.phase not in PROVENANCE_PHASES
+            or record.workflow_execution_id is None
+            or self._workflow is None
+        ):
+            return None
+        workflow = self._workflow()
+        execution = self._chat.get_execution(workspace_id, record.workflow_execution_id)
+        request = HypothesisDevelopmentRequest.from_execution(self._chat, execution)
+        state = workflow._reconstruct_state(request)
+        mandate = self._resolve_mandate(workspace_id, record.workflow_execution_id)
+        forward_window = None
+        if mandate is not None:
+            forward_window = (
+                rfc3339(mandate.forward_window.start_ns),
+                rfc3339(mandate.forward_window.end_ns),
+            )
+        return verify_phase_completion(
+            chat=self._chat,
+            workflow=workflow,
+            request=request,
+            state=state,
+            phase=record.phase,
+            phase_attempt_id=record.phase_attempt_id,
+            completion=completion,
+            forward_window=forward_window,
+            programs=self._programs,
         )
 
     def validate_completion(
@@ -162,6 +371,9 @@ class HypothesisSessionServices:
         failure = self._acceptance_error(workspace_id, record, completion)
         if failure is not None:
             return failure
+        provenance = self._provenance_error(workspace_id, record, completion)
+        if provenance is not None:
+            return provenance
         if record.phase not in ("model_creation", "strategy_design"):
             return None
         receipt = completion.get("strategy")
@@ -178,6 +390,7 @@ class HypothesisSessionServices:
             return "completion requires a committed program reference"
         if receipt.get("workspaceId") != workspace_id or receipt.get("kind") != kind:
             return "program reference workspace or kind does not match the phase"
+        mandate = self._resolve_mandate(workspace_id, record.workflow_execution_id)
         context = ToolContext(
             workspace_id=workspace_id,
             chat_id=record.chat_id,
@@ -255,6 +468,22 @@ class HypothesisSessionServices:
                     raise ProgramArtifactError(
                         "program validation compiler identity is stale or unavailable; validate the latest ID again"
                     )
+                if mandate is not None:
+                    configuration = latest.get("configuration")
+                    if not isinstance(configuration, Mapping):
+                        raise ProgramArtifactError(
+                            "committed program configuration is unavailable"
+                        )
+                    try:
+                        start_ns = rfc3339_ns(cast(str, configuration.get("start")))
+                        end_ns = rfc3339_ns(cast(str, configuration.get("end")))
+                    except (MandateError, TypeError) as error:
+                        raise ProgramArtifactError(
+                            "committed configuration window is malformed"
+                        ) from error
+                    violation = mandate.window_violation(start_ns, end_ns)
+                    if violation is not None:
+                        raise ProgramArtifactError(violation)
                 if kind == "study":
                     model = resolve_study_reference(
                         self._programs,
@@ -373,9 +602,10 @@ class HypothesisSessionServices:
             HypothesisDevelopmentRequest.from_execution(self._chat, execution),
             intent_epoch=self._completion_epoch(completion),
         )
-        return self._workflow().apply_phase_completion(
-            request, record.sub_agent_id, completion
-        )
+        workflow = self._workflow()
+        assert record.phase is not None
+        record_completion_attempts(workflow, request, record.phase, completion)
+        return workflow.apply_phase_completion(request, record.sub_agent_id, completion)
 
     def fail(self, record: SubAgentRecord, error: Exception) -> None:
         """Fail and report the owning execution through its workflow."""

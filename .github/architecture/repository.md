@@ -77,10 +77,11 @@ guard and behavior verification. Missing modules MUST fail without optional
 bypasses; instructions do not guarantee LLM compliance/honesty, and module
 presence does not prove complete recovery coverage.
 
-The current hypothesis-development topology is version `2.0.0`: discovery,
+The current hypothesis-development topology is version `2.3.0`: discovery,
 model creation, deterministic falsification trials, verdict, and the
-strategy/backtest/RCA/optimization chain, with one-shot agent strategy backtesting
-and executor-free terminal outcomes.
+strategy/backtest/RCA/optimization/null-testing/variation/forward-validation
+chain, with one-shot agent strategy backtesting, a deterministic
+signal-destruction transform in the harness, and executor-free terminal outcomes.
 Unsupported historical topology is explicitly unavailable, not replaced with
 today's edges. Retired persisted phase values remain decodable.
 
@@ -93,8 +94,11 @@ pipe once. Acceptance checks epoch and current executor/attempt, commits with
 execution-store revision CAS, projects the phase, and closes its executor under
 the shared steering/cancellation/job guard. Events and successor entry run outside
 that guard. Deterministic executor failures fail the workflow.
-Harness runners submit mappings inline, distinguish confirmed absence from
-unavailable status, and poll with a monotonic deadline and cancellation.
+Harness submissions allocate one `job_id` that is durably registered with
+immutable program attribution before dispatch, distinguish confirmed absence
+from unavailable status, and poll with a monotonic deadline and cancellation;
+recovery reconciles the retained id instead of replaying. See the "Execution
+Job Contract" in `.github/instructions/copilot-instructions.md`.
 
 Cosmos keeps one authoritative conversation store in the workspace-partitioned
 catalog: records, messages, events, and per-chat sequence counters share the
@@ -126,7 +130,9 @@ kernel, OMS, strategy contract with CI-gated sandbox lint and the structural
 look-ahead boundary, venues,
 fees, portfolio, risk, bars/scheduler, bounded lake replay, the deterministic
 backtest runner with reproducibility manifest, the streaming run recorder, the
-backtest results store with its run catalog, standard metrics and attribution,
+backtest results store and its authoritative job store (one `JobRecord` per
+`job_id`, artifact payloads under the `jobs/` object prefix), standard metrics
+and attribution,
 the point-in-time option contract universe, the capability-scoped strategy
 boundary (read-only clock, opaque StrategyHistory data capability, one-way
 venue commands, provenance-restricted scheduling), live-feed gap healing, the
@@ -144,14 +150,13 @@ virtual book accounting, K-way replay merge, bar derivation, resting-order
 matching venue, SimpleTouch, latency-size, and trade-through fill models, the
 ported metrics modules, and the float64 batch quant kernels — the
 Cox-Ross-Rubinstein option pricer with tree greeks plus bracketed implied
-time-to-expiry and implied-underlying inversions). The pinned Zig toolchain and
-every `.zig` source were retired in T253; the shared image compiles the native
-library in a Rust build stage, and CI gates it with `cargo fmt --all --check`,
+time-to-expiry and implied-underlying inversions). The shared image compiles
+the native library in a Rust build stage, and CI gates it with
+`cargo fmt --all --check`,
 `cargo clippy`, and `cargo test`. The native-core parity suites assert
 byte-identical determinism artifacts against the pinned Python-reference
 goldens (masking the per-engine `manifest.code_fingerprint`); the Python
-oracle modules (`harness.runtime.zig_backtest`, `harness.testing.rust_oracle`)
-were deleted with the harness Python packages.
+oracle modules were deleted with the harness Python packages.
 
 The Rust migration is complete. The engine workspace lives under
 `src/harness/` and provides the authoritative engine core (clock, event
@@ -162,11 +167,11 @@ been deleted: strategies, indicators, studies, and screeners are authored in
 Rust against the `harness-strategy-sdk` crate and are JIT compiled and loaded
 through `harness-strategy-jit` when a configuration runs (see
 `rust-native-authoring-plan.md` and `screener-rust-migration.md`). The
-interpreter is no longer a harness build or test dependency. Zig was retired in T253, the Python engine paths
-were removed in the final decommission wave, and the Python authoring
+interpreter is no longer a harness build or test dependency. The Python engine
+paths were removed in the final decommission wave, and the Python authoring
 surface (host adapter, `py` extension, and the harness Python packages) was
-removed in the native-authoring deletion; only the `trader` supervision
-runner remains deferred (see below).
+removed in the native-authoring deletion; the `trader` binary now runs the
+native Rust supervision runner (see below).
 
 ## Product Boundaries
 
@@ -250,9 +255,10 @@ routes with JIT-authored programs, streaming market data through
 
 The `harness`, `api`, `mcp`, `backtest-job`, and `screen-job` processes are
 served by the Rust binaries directly; the Python console-script shims were
-deleted with the harness Python packages. `trader` is the one
-deferred process: the Rust binary runs the deterministic live-core session demo
-until the configured supervision runner is ported.
+deleted with the harness Python packages. `trader` runs the native Rust
+supervision runner: it loads the configured shell, resolves one execution job
+id, and runs one supervised paper or shadow session over an injected market
+feed and kill switch.
 
 ## Quant-Harness Rust Workspace
 
@@ -359,8 +365,7 @@ src/harness/
   the lake's ad-hoc closures and early closes. `backtest` backs the flipped
   `backtest-job` and replays exact consumer requirements for `study` shells,
   adding quote/trade execution feeds for backtests; `live` provides the
-  deterministic live core the deferred `trader` binary runs, but its configured
-  supervision runner is not yet ported.
+  deterministic live core and the supervision runner the `trader` binary drives.
 
 The workspace is gated by `cargo fmt --all --check`, `cargo clippy --workspace
 --all-targets -- -D warnings`, and `cargo test --workspace`; no Python
@@ -471,12 +476,21 @@ The implemented contract is:
   `acquired_subscriptions` union; execution feeds do not expand consumer routing
   or the configuration echo. Only one distinct bar interval is supported across
   a run, including dependencies and instances; conflicts fail before lake
-  ensure/read. Tick-only inputs need no global interval. Legacy interval-only
-  configuration documents remain readable, but old authored source must migrate
-  to `MarketConsumer` and be rebuilt for ABI v4. Mixed replay uses one causal
+   ensure/read. Tick-only inputs need no interval. Interval-only configuration
+   documents are rejected before any acquisition; authored source uses
+   `MarketConsumer` and rebuilds for ABI v4. Mixed replay uses one causal
   availability-ordered queue: at equal time, ticks precede completed frames,
   then generated execution events. Frames become available at interval end,
   never at bar start. Study artifacts remain `study.json` and `metrics.json`.
+- Signal-destruction nulls. A backtest or study configuration may carry an
+  optional strict top-level `null` block (`mode: block_permutation`,
+  `block_size`, `seed`). Before preflight and replay fingerprints, the harness
+  permutes per-symbol bar log-return blocks with a symbol-domain-separated
+  seed, rescales OHLC exactly through `checked_mul_div`, and scales
+  quote/trade ticks by the enclosing bar's factor, so manifests and
+  fingerprints describe exactly the transformed data the strategy saw. A
+  symbol with events but no bars fails the job instead of silently no-opping.
+  Absent `null` leaves configuration hashes and goldens unchanged.
 - Screening. A screening configuration declares `shell: screen` and carries
   the LF-normalized authored source and its `bundle_hash`, the `as_of` date,
   `bar_interval`, `lookback_days`, `rank_metric`, an optional
@@ -487,18 +501,21 @@ The implemented contract is:
   `harness-lakeclient` data source over the lake routes, runs the program
   once, and ranks rows by `rank_metric` descending with symbol ascending on
   ties. The result is written as `screen.json` (schema
-  `fca-harness-screen-v1`) carrying the ranked rows, bundle hash, rank
-  metric, data window, definition provenance, and the source/toolchain/run
-  digests; a failed run records its reason. The same path is published as
-  `POST /v1/screeners/jobs` / `GET /v1/screeners/jobs/{job_id}` and as the
-  `run_screener`, `get_screener_status`, and `screener_config_template` MCP
-  tools.
+  `fca-harness-screen-v2`) carrying the ranked rows, bundle hash, rank
+  metric, data window, definition provenance, and the source/toolchain/job
+  digests; its closed `status` is `succeeded` or `failed`, a failed run
+  records its reason in the artifact, and Thesis imports v2 only. The same
+  path is published as `POST /v1/screeners/jobs`, with status, results, and
+  artifacts on the neutral `/v1/jobs/{job_id}` routes, and as the
+  `run_screener` and `screener_config_template` MCP tools; `get_job_status`,
+  `get_job_result`, `list_artifacts`, and `read_artifact` consume the
+  resulting job.
 - Metrics. `MetricPublisher::publish(name, value)` accepts a finite numeric
   value under a non-reserved stable name; every rejection is recorded
   host-side and fails the run even when the author ignores the returned
   error. Repeated publication replaces the prior value; final values are
   written to `metrics.json.custom`, the canonical run artifact, the
-  recorder's `emissions.parquet`, and the local/HTTP run catalog. Metric
+  recorder's `emissions.parquet`, and the local/HTTP job store. Metric
   names are run outputs, not indicator registrations.
 - Guidance. The plan and status live in
   `.github/architecture/rust-native-authoring-plan.md`; the screener
@@ -508,8 +525,7 @@ The implemented contract is:
 
 ## Decommission Status
 
-The Zig native core was retired in T253 (`build.zig`, `build.zig.zon`, and every
-`.zig` source deleted). The engine lives entirely in Rust under `src/harness/`;
+The engine lives entirely in Rust under `src/harness/`;
 the Python engine was deleted in the final decommission wave, and the
 embedded-Python authoring surface (host adapter, `py` extension, harness
 Python packages, and the `strategies/` tree) was deleted in the
@@ -532,14 +548,16 @@ harness build or test needs a Python interpreter.
    `screen-job`) are the only serving surfaces; the Python console-script
    shims were deleted with no dangling harness imports.
 
-### Deferred: `trader`
+### Trader supervision
 
-The Rust `trader` binary composes the deterministic live core but does not yet
-load configuration or supervise a paper/shadow session, so the configured
-supervision runner is deferred. The Python supervision runtime was deleted with
-the engine; restoring full trader function requires porting the supervision
-runner (config loading, session resolution, feed supervision, boot reconciler,
-kill-switch polling, and state snapshots) into `live`.
+The Rust `trader` binary composes the deterministic live core with the native
+supervision runner: it loads the trader configuration, resolves one execution
+job id, and runs one supervised paper or shadow session through config loading,
+session resolution, feed supervision, the boot reconciler, the kill-switch
+gate, and durable state snapshots. The process composition currently injects
+the deterministic in-process market feed and an in-process kill switch;
+composing the configured Alpaca feed and the table-backed operator kill switch
+remains deployment work.
 
 ### Retained Python products
 
@@ -579,7 +597,7 @@ excluding unrelated staged and dirty files. Completion verifies the persisted
 receipt; structural checks are not compilation or a security sandbox.
 `thesis.artifacts`
 owns reproducibility-critical result imports; `thesis.backtests` imports
-completed harness runs into workspace backtest records (equity, trades, stats)
+completed harness jobs into workspace backtest records (equity, trades, stats)
 linked to the originating chat and workflow execution; `thesis.screening` owns
 content-addressed screener definitions and imports harness screening runs as
 workspace results — it launches `run_screener` through the harness MCP and
@@ -625,8 +643,11 @@ Shared workflow prompt guidance owns targeted repair and
 asking after three unsuccessful compiler repairs, not a runtime repair cap.
 
 Workspace state exposes strategy lineages, evidence, and consent/audit records.
-Planning projections and external task-tracker initialization are not part of
-workspace provisioning, knowledge exports, or the UI.
+`thesis.http.artifacts` adds a read-only durable artifact catalog (committed
+strategies, studies, and indicators) with a bounded UTF-8 file reader behind the
+Workspace artifacts page; volatile stores are excluded. Planning projections and
+external task-tracker initialization are not part of workspace provisioning,
+knowledge exports, or the UI.
 
 The implemented runtime modules and facades are:
 
@@ -634,12 +655,13 @@ The implemented runtime modules and facades are:
 | --- | --- |
 | `thesis.agent.messages` | Immutable neutral session/content/request/correlation contracts and canonical-only transcript decoding. No execution or provider projection. |
 | `thesis.agent.runtime` | Public conversation, child, session, lifecycle, control, delivery, and store facade. `conversation.py` composes admission, execution, and outgoing persistence; `incoming.py` is the singular incoming writer; `inbox.py` owns injected delivery and success-bound consumption; `turns.py` owns locked worker intake. `session_reply.py` is removed. |
-| `thesis.agent.runtime.activity` | Immutable discriminated runtime activity, generated metadata/message schemas, and canonical activity decoding. |
+| `thesis.agent.runtime.activity` | Immutable discriminated runtime activity (anchor, stage, timing, delivery key), generated metadata/message schemas, and canonical activity decoding. Tool requests and correlations live only in the canonical session message. |
 | `thesis.providers.session_adapter` | Pure `project_native_messages` and versioned `NativeSessionAdapter.request_snapshot` shared by live/replay; completion calls only injected `provider.complete` and returns neutral output. |
 | `thesis.http.schema`, `wire`, `errors` | Source-derived OpenAPI/runtime schemas, typed response envelopes, and explicit error/service-resolution boundaries. |
 | `thesis.workflows.runtime` | Composition plus exported `WorkflowSessionServices`, `WorkflowSessionBindings`, `RuntimeToolActivity`, and `bind_workflow_session_services` ports. |
 | `thesis.workflows.registry.hypothesis_development` | Concrete workflow facade over spec/doctrine, phases, contracts, prompts, services, artifacts, piping, and state/rebuild; exports `fold_transition` and `rebuild_state`. |
 | `hypothesis_development/session_services.py` | Role policy, scoped schema/knowledge/authoring bindings, completion validation/application, and workflow failure callback. |
+| `hypothesis_development/exposure.py`, `design.py`, `provenance.py` | Submission-time exposure ledger (one durable record per job, before dispatch), the frozen research design derived from accepted development evidence, and completion provenance checks that bind each reported job to its executing run. |
 | `thesis.workspaces.programs` | Committed program source/manifests, content/dependency versions, harness validation receipts, ID-based execution, pinned loads, and matching SDK references/templates. The workspace facade exports `WorkspacePrograms`, `ProgramArtifactError`, and `ProgramPublicationError`. |
 | `thesis.agent.runtime.program_tools` | Trusted-context program author/update/read/validate/run and SDK-reference bindings on the existing session registry. |
 | `thesis.workflows.research_models` | `ProgramSnapshots` port and accepted study-reference resolution for deterministic research execution. |
@@ -691,8 +713,7 @@ operational drift:
   builds the `native` C ABI core and the harness interface binaries. CI
   enforces `cargo fmt --all --check`,
   `cargo clippy --workspace --all-targets -- -D warnings`, and
-  `cargo test --workspace` alongside the Python gates. The pinned Zig toolchain
-  from the earlier native-core effort was retired in T253.
+  `cargo test --workspace` alongside the Python gates.
 - `Dockerfile` builds one immutable image with distinct runtime commands. A
   Rust build stage compiles and tests the workspace and produces the native
   core library plus the `harness`, `api`, `backtest-job`, `mcp`, and `trader`

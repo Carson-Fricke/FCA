@@ -105,7 +105,7 @@
 						<p class="mt-0.5 font-mono text-[11px] text-slate-500">{strategy.symbol} · {strategy.versions.at(-1)?.version ?? '—'}</p>
 						<p class="mt-2 truncate text-xs text-slate-500">{strategy.description}</p>
 						<div class="mt-3 flex items-baseline gap-4 font-mono text-xs">
-							<span class={strategy.pnl >= 0 ? 'text-profit' : 'text-loss'}>{signedPct(strategy.return_pct)}</span>
+							<span class={strategy.return_pct == null ? 'text-slate-500' : strategy.return_pct >= 0 ? 'text-profit' : 'text-loss'}>{signedPct(strategy.return_pct)}</span>
 							<span class="text-slate-500">win {pct(strategy.win_rate, 0)}</span>
 							<span class="ml-auto text-slate-500">{money(strategy.capital)}</span>
 						</div>
@@ -140,7 +140,7 @@
 									{strategy.status}
 								</span>
 							</td>
-							<td class="px-4 py-2 text-right font-mono text-xs {strategy.return_pct >= 0 ? 'text-profit' : 'text-loss'}">
+							<td class="px-4 py-2 text-right font-mono text-xs {strategy.return_pct == null ? 'text-slate-500' : strategy.return_pct >= 0 ? 'text-profit' : 'text-loss'}">
 								{signedPct(strategy.return_pct)}
 							</td>
 							<td class="px-4 py-2 text-right font-mono text-xs text-slate-500">{pct(strategy.win_rate, 0)}</td>

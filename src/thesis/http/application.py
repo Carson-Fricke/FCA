@@ -38,6 +38,7 @@ from thesis.auth.session import OperatorSessionService
 from thesis.auth.workspace_access import WorkspaceAuthorizer
 from thesis.chat import ChatService
 from thesis.chat.responder import ToolResultChunk, ToolResultObserver
+from thesis.http.artifacts import ArtifactCatalogService, create_artifact_router
 from thesis.http.auth import (
     CsrfTokenGuard,
     OidcVerifier,
@@ -250,7 +251,12 @@ def _environment_value(name: str) -> str | None:
 def _backtest_tool_observer(
     coordinator: BacktestRunCoordinator,
 ) -> ToolResultObserver:
-    """Build the tool-result observer that imports finished harness runs."""
+    """Build the tool-result observer that imports finished harness jobs.
+
+    The coordinator owns harness-versus-tracking classification, so this
+    observer forwards every successful tool result and never duplicates the
+    harness tool-name filter.
+    """
 
     def observe(
         workspace_id: str,
@@ -258,7 +264,7 @@ def _backtest_tool_observer(
         execution_id: str | None,
         chunk: ToolResultChunk,
     ) -> ToolResultChunk:
-        if chunk.tool not in ("run_backtest", "get_run") or not chunk.ok:
+        if not chunk.ok:
             return chunk
         result = HarnessToolResult(
             tool=chunk.tool,
@@ -468,7 +474,9 @@ def create_app(
         from thesis.backtests import BacktestRunCoordinator
 
         backtest_coordinator = BacktestRunCoordinator(
-            workspace_data.backtests, harness_tool_provider
+            workspace_data.backtests,
+            harness_tool_provider,
+            tracking=None if chat_service is None else chat_service.find_tool_job,
         )
         application.state.backtest_run_coordinator = backtest_coordinator
     tool_result_observer = (
@@ -506,6 +514,9 @@ def create_app(
         application.state.dashboard_service = workspace_data.dashboards
         application.state.workspace_state_service = workspace_data.state
         application.state.strategy_service = workspace_data.strategies
+        application.state.artifact_catalog_service = ArtifactCatalogService(
+            workspace_data.strategy_artifacts, workspace_data.programs
+        )
         screener_service = workspace_data.screeners
         if (
             screener_service is not None
@@ -638,6 +649,7 @@ def create_app(
         create_dashboard_router(),
         create_workspace_state_router(),
         create_strategy_router(),
+        create_artifact_router(),
         create_screener_router(),
         create_knowledge_router(),
         create_workflow_router(workflow_registry),
@@ -674,39 +686,6 @@ def create_app(
     if timeline is not None:
         application.state.timeline = timeline
     return application
-
-
-def durable_chat_service(*, workspace_root: str | Path | None = None) -> ChatService:
-    """Compose the one durable chat service shared by local and serve runs.
-
-    When ``THESIS_STORAGE_ACCOUNT_NAME`` is configured, records are written to
-    each workspace's provisioned blob container with a managed identity;
-    otherwise they persist as atomic JSON documents under the workspace root's
-    ``chat`` directory.  Both stores consume the same record format, so the
-    local and workspace run modes share one persistence contract.
-    """
-    account = _environment_value("THESIS_STORAGE_ACCOUNT_NAME")
-    if account is not None:
-        from azure.identity import DefaultAzureCredential
-        from azure.storage.blob import BlobServiceClient
-
-        from thesis.chat.azure import AzureBlobChatPersistence
-
-        prefix = _environment_value("THESIS_WORKSPACE_CONTAINER_PREFIX") or "thesis-ws-"
-        blob_service = BlobServiceClient(
-            account_url=f"https://{account}.blob.core.windows.net",
-            credential=DefaultAzureCredential(),
-        )
-        return ChatService(
-            persistence=AzureBlobChatPersistence(blob_service, container_prefix=prefix)
-        )
-    from thesis.chat.persistence import FileChatPersistence
-    from thesis.workspaces.local import default_workspace_root
-
-    root = (
-        Path(workspace_root) if workspace_root is not None else default_workspace_root()
-    )
-    return ChatService(persistence=FileChatPersistence(root / "chat"))
 
 
 def serving_workspace_store() -> WorkspaceStore | None:

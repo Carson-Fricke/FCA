@@ -104,7 +104,7 @@ pub struct SweepPoint {
     /// Canonical configuration digest of the derived configuration.
     pub configuration_digest: String,
     /// Digest-derived launched run identifier.
-    pub run_id: String,
+    pub job_id: String,
 }
 
 /// Reproducible parameter sweep over one strategy instance.
@@ -235,12 +235,12 @@ impl SweepSpec {
             if !seen.insert(digest.clone()) {
                 continue;
             }
-            let run_id = derive_run_id(&self.base.run_id, &digest);
+            let job_id = derive_job_id(&self.base.job_id, &digest);
             points.push(SweepPoint {
                 index: points.len(),
                 parameters,
                 configuration_digest: digest,
-                run_id,
+                job_id,
             });
         }
         points
@@ -376,7 +376,7 @@ pub fn configuration_json(
         ]));
     }
     JsonValue::object([
-        ("run_id", JsonValue::String(base.run_id.clone())),
+        ("job_id", JsonValue::String(base.job_id.clone())),
         ("shell", JsonValue::String(base.shell.clone())),
         ("schema_version", JsonValue::UInt(base.schema_version)),
         ("seed", JsonValue::UInt(base.seed)),
@@ -415,11 +415,11 @@ pub fn configuration_digest(
 
 /// Derive one run identity from the base run ID and configuration digest.
 #[must_use]
-pub fn derive_run_id(base_run_id: &str, digest: &str) -> String {
+pub fn derive_job_id(base_job_id: &str, digest: &str) -> String {
     let stem_len = IDENTIFIER_MAX
         .saturating_sub(RUN_ID_DIGEST)
         .saturating_sub(1);
-    let stem: String = base_run_id.chars().take(stem_len).collect();
+    let stem: String = base_job_id.chars().take(stem_len).collect();
     let digest_prefix: String = digest.chars().take(RUN_ID_DIGEST).collect();
     format!("{stem}-{digest_prefix}")
 }

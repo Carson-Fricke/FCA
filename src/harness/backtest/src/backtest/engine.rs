@@ -239,6 +239,9 @@ pub fn run_backtest(
         data_source,
         options.synthetic_options.as_ref(),
     )?;
+    // The null transform is a data boundary: it runs before preflight and the
+    // manifest so both describe the transformed events it fingerprints.
+    let fixture = super::null::apply_null_transform(configuration, &fixture)?;
     let preflight = preflight_data(configuration, &fixture)?;
     let plugin: FillPlugin = build_fill_model(options.fill_model, options.fill_options.as_ref());
     let identity = fill_model_identity(&plugin);

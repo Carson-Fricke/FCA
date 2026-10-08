@@ -122,6 +122,9 @@ fn backtest_job_binary_runs_the_native_engine() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("status: completed"), "{stdout}");
-    assert!(stdout.contains("run_id: momentum-spy-2024-01"), "{stdout}");
+    assert!(
+        stdout.contains("job_id: job-momentum-msft-2024-01"),
+        "{stdout}"
+    );
     let _ = std::fs::remove_dir_all(&output_dir);
 }

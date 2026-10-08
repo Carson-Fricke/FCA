@@ -104,24 +104,22 @@ pub fn normalize_subscriptions(
     Ok(output)
 }
 
-/// Legacy native runtimes use shell defaults; authored runtimes declare inputs.
-pub fn default_subscriptions(configuration: &BacktestConfig) -> Vec<MarketSubscription> {
-    if configuration.shell == "study" {
-        vec![MarketSubscription {
-            data_type: "bars".into(),
-            symbols: configuration.symbols.clone(),
-            interval: Some(configuration.data_bar_interval.clone()),
-        }]
-    } else {
-        ["quote", "trade"]
-            .into_iter()
-            .map(|kind| MarketSubscription {
-                data_type: kind.into(),
-                symbols: configuration.symbols.clone(),
-                interval: None,
-            })
-            .collect()
-    }
+/// Backtest execution feeds: quote and trade for every declared input symbol.
+pub fn execution_subscriptions(requirements: &[MarketSubscription]) -> Vec<MarketSubscription> {
+    let mut symbols: Vec<String> = requirements
+        .iter()
+        .flat_map(|input| input.symbols.clone())
+        .collect();
+    symbols.sort();
+    symbols.dedup();
+    ["quote", "trade"]
+        .into_iter()
+        .map(|kind| MarketSubscription {
+            data_type: kind.into(),
+            symbols: symbols.clone(),
+            interval: None,
+        })
+        .collect()
 }
 
 /// Resolve consumer requirements before acquisition, validating the optional echo.
@@ -132,32 +130,18 @@ pub fn runtime_subscriptions(
     configuration: &BacktestConfig,
     strategies: &[StrategyInstance],
 ) -> Result<Vec<MarketSubscription>, BacktestError> {
-    let inputs: Vec<_> = strategies
-        .iter()
-        .flat_map(|instance| {
-            instance
-                .runtime
-                .subscriptions()
-                .unwrap_or_else(|| default_subscriptions(configuration))
-        })
-        .collect();
+    let mut inputs = Vec::new();
+    for instance in strategies {
+        inputs.extend(instance.runtime.subscriptions().ok_or_else(|| {
+            BacktestError::Configuration("runtime must declare its subscriptions".into())
+        })?);
+    }
     let union = normalize_subscriptions(&inputs)?;
     if configuration.has_subscription_echo()
         && normalize_subscriptions(&configuration.data_subscriptions)? != union
     {
         return Err(BacktestError::Configuration(
             "data.subscriptions does not match runtime subscription union".into(),
-        ));
-    }
-    if configuration.shell == "study"
-        && !configuration.has_subscription_echo()
-        && strategies
-            .iter()
-            .any(|instance| instance.runtime.subscriptions().is_some())
-        && union != normalize_subscriptions(&default_subscriptions(configuration))?
-    {
-        return Err(BacktestError::Configuration(
-            "legacy study runtime subscriptions must match data.symbols/data.bar_interval; declare data.subscriptions for exact mixed inputs".into(),
         ));
     }
     Ok(union)
@@ -1471,7 +1455,7 @@ fn fees_json(assessments: &[FeeAssessment], totals: &FeeAggregation) -> JsonValu
                                 JsonValue::String(assessment.schedule_id.clone()),
                             ),
                             ("currency", JsonValue::String(assessment.currency.clone())),
-                            ("run_id", JsonValue::String(assessment.run_id.clone())),
+                            ("job_id", JsonValue::String(assessment.job_id.clone())),
                             (
                                 "strategy_id",
                                 JsonValue::String(assessment.strategy_id.clone()),
@@ -1731,31 +1715,17 @@ pub fn run_native_engine(
     synthetic_options: &SyntheticDataOptions,
 ) -> Result<BacktestOutcome, BacktestError> {
     let requirements = runtime_subscriptions(configuration, &strategies)?;
-    let explicit: Vec<_> = strategies
-        .iter()
-        .filter_map(|s| s.runtime.subscriptions())
-        .flatten()
-        .collect();
-    super::preflight::validate_subscription_coverage(
-        fixture,
-        &normalize_subscriptions(&explicit)?,
-    )?;
-    if strategies
-        .iter()
-        .any(|s| s.runtime.subscriptions().is_some())
-        || configuration.has_subscription_echo()
-    {
-        manifest.effective_subscriptions = Some(requirements.clone());
-        let execution = if configuration.shell == "study" {
-            Vec::new()
-        } else {
-            normalize_subscriptions(&default_subscriptions(configuration))?
-        };
-        let mut acquired = requirements.clone();
-        acquired.extend(execution.iter().cloned());
-        manifest.acquired_subscriptions = Some(normalize_subscriptions(&acquired)?);
-        manifest.execution_subscriptions = Some(execution);
-    }
+    super::preflight::validate_subscription_coverage(fixture, &requirements)?;
+    manifest.effective_subscriptions = Some(requirements.clone());
+    let execution = if configuration.shell == "study" {
+        Vec::new()
+    } else {
+        normalize_subscriptions(&execution_subscriptions(&requirements))?
+    };
+    let mut acquired = requirements.clone();
+    acquired.extend(execution.iter().cloned());
+    manifest.acquired_subscriptions = Some(normalize_subscriptions(&acquired)?);
+    manifest.execution_subscriptions = Some(execution);
     let mut frame_config = configuration.clone();
     let bars = requirements.iter().find(|s| s.data_type == "bars");
     let frames = if let Some(bars) = bars {
@@ -1765,7 +1735,7 @@ pub fn run_native_engine(
     } else {
         Vec::new()
     };
-    super::preflight::validate_completed_bar_coverage(&explicit, &frames)?;
+    super::preflight::validate_completed_bar_coverage(&requirements, &frames)?;
     let bar_frame_count = frames.len() as u64;
     let schedule = fee_schedule_from_config(
         &configuration.fees,
@@ -1773,7 +1743,7 @@ pub fn run_native_engine(
         "harness-config",
     )?;
     let rules = resolve_risk_rules(configuration)?;
-    let mut hub = PortfolioHub::new(&configuration.run_id);
+    let mut hub = PortfolioHub::new(&configuration.job_id);
     for instance in &strategies {
         let capital_fraction = capital_fraction(configuration, &instance.instance_id);
         let initial_cash = configuration
@@ -1792,7 +1762,7 @@ pub fn run_native_engine(
             .unwrap_or(configuration.initial_cash_decimal);
         let start = StrategyStart {
             instance_id: instance.instance_id.clone(),
-            account_id: configuration.run_id.clone(),
+            account_id: configuration.job_id.clone(),
             symbols: configuration.symbols.clone(),
             seed: configuration.seed,
             initial_cash,
@@ -1937,11 +1907,13 @@ fn dispatch_event(
                 hub.mark(&bar.symbol, bar.close);
             }
             for instance in strategies.iter_mut() {
-                let inputs = instance
-                    .runtime
-                    .subscriptions()
-                    .unwrap_or_else(|| default_subscriptions(configuration));
-                let inputs = normalize_subscriptions(&inputs)?;
+                let inputs = normalize_subscriptions(
+                    &instance.runtime.subscriptions().ok_or_else(|| {
+                        BacktestError::Configuration(
+                            "runtime must declare its subscriptions".into(),
+                        )
+                    })?,
+                )?;
                 let Some(input) = inputs.iter().find(|s| {
                     s.data_type == "bars" && s.interval.as_deref() == Some(frame.interval.as_str())
                 }) else {
@@ -1992,10 +1964,9 @@ fn dispatch_event(
             prices.insert(market.symbol().to_string(), mark);
             hub.mark(market.symbol(), mark);
             for instance in strategies.iter_mut() {
-                let inputs = instance
-                    .runtime
-                    .subscriptions()
-                    .unwrap_or_else(|| default_subscriptions(configuration));
+                let inputs = instance.runtime.subscriptions().ok_or_else(|| {
+                    BacktestError::Configuration("runtime must declare its subscriptions".into())
+                })?;
                 let kind = match market {
                     EngineMarket::Quote { .. } => "quote",
                     EngineMarket::Trade { .. } => "trade",
@@ -2054,7 +2025,7 @@ fn dispatch_event(
             };
             let assessment = schedule.calculate(
                 &fee_fill,
-                &configuration.run_id,
+                &configuration.job_id,
                 &strategy_id,
                 &options.asset_class,
             );

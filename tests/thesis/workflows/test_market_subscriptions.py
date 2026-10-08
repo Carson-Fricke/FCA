@@ -6,7 +6,7 @@ import hashlib
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import pytest
 
@@ -20,8 +20,6 @@ from thesis.strategies.bundles import StrategyBundleError
 from thesis.strategies.contracts import StrategyDesign
 from thesis.workflows.backtests import BacktestRunRequest, BacktestRunResult
 from thesis.workflows.registry.hypothesis_development.composers.hypothesis import (
-    _compose_research_model,
-    _compose_universe,
     decode_persisted_model,
 )
 from thesis.workflows.registry.hypothesis_development.contracts.validation import (
@@ -29,12 +27,6 @@ from thesis.workflows.registry.hypothesis_development.contracts.validation impor
 )
 from thesis.workflows.registry.hypothesis_development.errors import (
     FalsificationComposeError,
-)
-from thesis.workflows.registry.hypothesis_development.prompts.model_creation import (
-    _model_creation_instructions,
-)
-from thesis.workflows.registry.hypothesis_development.prompts.strategy_design import (
-    _strategy_design_instructions,
 )
 from thesis.workflows.research_models import (
     BacktestResearchModelRunner,
@@ -149,7 +141,7 @@ def test_stored_model_and_runner_preserve_exact_subscriptions(
     assert "subscriptions" not in configuration
     assert configuration["start"] == _WINDOW["start"]
     assert configuration["end"] == _WINDOW["end"]
-    assert "UNREQUESTED" not in configuration["symbols"]
+    assert "UNREQUESTED" not in configuration["data"]["symbols"]
     assert configuration["strategy_instances"][0]["parameters"]["source"] == _SOURCE
 
 
@@ -226,6 +218,9 @@ def _resolve(
     configuration: Mapping[str, object] | None = None,
 ) -> ResearchModel:
     class Snapshots:
+        def job_result(self, job_id: str) -> Mapping[str, object]:
+            return {"job_id": job_id, "state": "succeeded", "metrics": {}}
+
         def load(self, workspace_id, kind, program_id, commit=None):
             return {
                 "workspaceId": workspace_id,
@@ -244,7 +239,10 @@ def _resolve(
     return resolve_study_reference(
         Snapshots(),
         "workspace-market",
-        reference or _compose_research_model(_payload(model)["model"]),
+        reference
+        or StudyProgramReference.from_document(
+            cast(Mapping[str, object], _payload(model)["model"])
+        ),
     )
 
 
@@ -253,7 +251,9 @@ def test_tick_only_contract_and_separate_impl_publications() -> None:
     assert model.bar_interval is None
     payload = _payload(model)
     assert hypothesis_payload_errors(payload) == []
-    reference = _compose_research_model(payload["model"])
+    reference = StudyProgramReference.from_document(
+        cast(Mapping[str, object], payload["model"])
+    )
     composed = _resolve(model, reference)
     assert composed.source == model.source
     assert composed.harness_configuration == model.harness_configuration
@@ -261,34 +261,36 @@ def test_tick_only_contract_and_separate_impl_publications() -> None:
     persisted = decode_persisted_model(model.canonical_document)
     assert isinstance(persisted, ResearchModel)
     assert persisted.canonical_document == model.canonical_document
-    assert _compose_universe(None, composed) == ("SPY",)
 
 
 def test_subscription_symbols_must_belong_to_universe() -> None:
     model = _model([{"data_type": "quote", "symbols": ["QQQ"]}])
     assert hypothesis_payload_errors(_payload(model)) == []
     resolved = _resolve(model)
-    with pytest.raises(FalsificationComposeError, match="universe"):
-        _compose_universe(["SPY"], resolved)
     with pytest.raises(ResearchModelError, match="universe"):
-        study_configuration(resolved, run_id="test", universe=("SPY",))
+        study_configuration(resolved, job_id="test", universe=("SPY",))
 
 
-def test_legacy_persisted_bar_model_remains_readable(tmp_path: Path) -> None:
-    model = ResearchModel(
-        "legacy",
-        "1.0.0",
-        "Legacy bars",
-        _SOURCE,
-        ("data_ok",),
-        {**_WINDOW, "interval": "1d", "symbols": ["SPY"]},
-        {"tests/model.rs": "#[test] fn publication() {}"},
-    )
+def test_persisted_bar_model_round_trips_its_subscriptions(tmp_path: Path) -> None:
+    subscriptions = [{"data_type": "bars", "symbols": ["SPY"], "interval": "1d"}]
+    model = _model(subscriptions)
     store = WorkspaceResearchModelStore(_WorkspacePaths(tmp_path))
     loaded = store.load("workspace-market", store.publish("workspace-market", model))
     assert loaded.bar_interval == "1d"
-    configuration = study_configuration(loaded, run_id="legacy")
-    assert cast(Mapping[str, object], configuration["data"])["bar_interval"] == "1d"
+    configuration = study_configuration(loaded, job_id="persisted")
+    assert cast(Mapping[str, object], configuration["data"])["subscriptions"] == (
+        subscriptions
+    )
+    with pytest.raises(ResearchModelError, match="subscriptions"):
+        ResearchModel(
+            "interval-only",
+            "1.0.0",
+            "Interval only",
+            _SOURCE,
+            ("data_ok",),
+            {**_WINDOW, "interval": "1d", "symbols": ["SPY"]},
+            {"tests/model.rs": "#[test] fn publication() {}"},
+        )
 
 
 @pytest.mark.parametrize(
@@ -332,11 +334,11 @@ def test_model_and_contract_reject_contradictory_fetch_fields(
 )
 def test_tick_only_rejects_unused_interval(fields: dict[str, object]) -> None:
     model = _model([{"data_type": "quote", "symbols": ["SPY"]}])
-    with pytest.raises(ResearchModelError, match="tick-only"):
+    with pytest.raises(ResearchModelError, match="interval"):
         replace(model, harness_configuration={**model.harness_configuration, **fields})
 
 
-def test_matching_legacy_fields_preserve_exact_echo_and_broader_universe() -> None:
+def test_global_symbols_preserve_exact_echo_and_broader_universe() -> None:
     subscriptions = [
         {"data_type": "bars", "symbols": ["SPY"], "interval": "1min"},
         {"data_type": "quote", "symbols": ["BTC-USD", "BTC/USD"]},
@@ -346,22 +348,19 @@ def test_matching_legacy_fields_preserve_exact_echo_and_broader_universe() -> No
         model,
         harness_configuration={
             **model.harness_configuration,
-            "interval": "1min",
             "symbols": ["BTC/USD", "SPY", "BTC-USD"],
-            "data": {"bar_interval": "1min", "symbols": ["SPY", "BTC-USD", "BTC/USD"]},
+            "data": {"symbols": ["SPY", "BTC-USD", "BTC/USD"]},
         },
     )
     universe = ["SPY", "BTC-USD", "BTC/USD", "QQQ"]
     payload = {**_payload(model), "universe": universe}
     assert hypothesis_payload_errors(payload) == []
-    assert _compose_universe(universe, model) == tuple(universe)
     resolved = _resolve(model)
     assert resolved.harness_configuration == model.harness_configuration
-    assert _compose_universe(universe, resolved) == tuple(universe)
-    configuration = study_configuration(model, run_id="mixed", universe=universe)
+    configuration = study_configuration(model, job_id="mixed", universe=universe)
     data = cast(Mapping[str, object], configuration["data"])
     assert data["subscriptions"] == subscriptions
-    assert configuration["symbols"] == ["SPY", "BTC-USD", "BTC/USD"]
+    assert data["symbols"] == ["SPY", "BTC-USD", "BTC/USD"]
     assert "bar_interval" not in data
     assert configuration["start"] == _WINDOW["start"]
     assert configuration["end"] == _WINDOW["end"]
@@ -389,7 +388,7 @@ def test_compiler_revalidates_mutated_nested_fetch_fields() -> None:
     )
     data["symbols"] = ["SPY", "QQQ"]
     with pytest.raises(ResearchModelError, match="exact subscription symbol union"):
-        study_configuration(model, run_id="mutated")
+        study_configuration(model, job_id="mutated")
 
 
 def test_crlf_runtime_source_hash_and_fractional_window_parity(tmp_path: Path) -> None:
@@ -433,22 +432,25 @@ def test_crlf_runtime_source_hash_and_fractional_window_parity(tmp_path: Path) -
     assert configuration["end"] == window["end"]
 
 
-def test_legacy_nested_symbols_remain_exact_without_spy_widening() -> None:
+def test_nested_subscriptions_remain_exact_without_spy_widening() -> None:
+    subscriptions = [
+        {"data_type": "bars", "symbols": ["QQQ"], "interval": "1d"},
+        {"data_type": "quote", "symbols": ["QQQ", "BTC-USD"]},
+    ]
     model = replace(
-        _model([{"data_type": "quote", "symbols": ["SPY"]}]),
+        _model(subscriptions),
         harness_configuration={
             **_WINDOW,
-            "interval": "1d",
-            "data": {"symbols": ["QQQ", "BTC-USD"]},
+            "data": {"subscriptions": subscriptions},
         },
     )
     configuration = study_configuration(
-        model, run_id="legacy-nested", universe=("SPY", "QQQ", "BTC-USD")
+        model, job_id="nested", universe=("SPY", "QQQ", "BTC-USD")
     )
     data = cast(Mapping[str, object], configuration["data"])
+    assert data["subscriptions"] == subscriptions
     assert data["symbols"] == ["QQQ", "BTC-USD"]
-    assert data["bar_interval"] == "1d"
-    assert configuration["symbols"] == ["QQQ", "BTC-USD"]
+    assert "bar_interval" not in data
     instances = cast(list[dict[str, object]], configuration["strategy_instances"])
     assert instances[0]["symbols"] == ["QQQ", "BTC-USD"]
 
@@ -467,19 +469,14 @@ def test_nested_subscription_echo_is_supported_without_legacy_interval(
     assert model.bar_interval == ("1min" if kind == "bars" else None)
     payload = {**_payload(model), "universe": ["QQQ"]}
     assert hypothesis_payload_errors(payload) == []
-    resolved = _resolve(model, _compose_research_model(payload["model"]))
-    assert resolved.harness_configuration == model.harness_configuration
     persisted = decode_persisted_model(model.canonical_document)
     assert isinstance(persisted, ResearchModel)
     assert persisted.canonical_document == model.canonical_document
-    assert _compose_universe(None, model) == ("QQQ",)
-    with pytest.raises(FalsificationComposeError, match="universe"):
-        _compose_universe(["SPY"], model)
-    configuration = study_configuration(model, run_id="nested", universe=("SPY", "QQQ"))
+    configuration = study_configuration(model, job_id="nested", universe=("SPY", "QQQ"))
     data = cast(Mapping[str, object], configuration["data"])
     assert data["subscriptions"] == [subscription]
     assert "bar_interval" not in data
-    assert configuration["symbols"] == ["QQQ"]
+    assert data["symbols"] == ["QQQ"]
 
 
 def _strategy(configuration: Mapping[str, object]) -> dict[str, object]:
@@ -552,23 +549,3 @@ def test_strategy_rejects_contradictory_fetch_fields(fields: dict[str, object]) 
                 }
             )
         )
-
-
-def test_prompts_use_unified_callbacks_and_explicit_mixed_inputs() -> None:
-    for prompt in (_model_creation_instructions(), _strategy_design_instructions()):
-        assert "read_sdk_reference" in prompt
-        assert "consumer, program, events, exports or indicator_api" in prompt
-        assert "never guess compiler APIs, callback signatures" in prompt
-        assert "configuration.subscriptions" in prompt
-        assert "indicator_ids" in prompt
-        assert "on_bar_frame" not in prompt
-    from thesis.workspaces.programs import WorkspacePrograms
-
-    programs = WorkspacePrograms(cast(Any, None))
-    consumer = programs.read_sdk_reference("consumer")["source"]
-    assert isinstance(consumer, str)
-    assert "MarketConsumer" in consumer
-    assert "on_bar" in consumer
-    strategy = programs.read_sdk_reference("strategy")["source"]
-    assert isinstance(strategy, str)
-    assert "Subscription::Bars" in strategy

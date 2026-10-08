@@ -23,7 +23,7 @@
 		{ id: 'deployments', label: 'Deployments' },
 		{ id: 'dashboards', label: 'Dashboards' },
 		{ id: 'screener', label: 'Screener' },
-		{ id: 'workspace-state', label: 'Workspace state' }
+		{ id: 'artifacts', label: 'Workspace artifacts' }
 	];
 
 	let query = $state('');

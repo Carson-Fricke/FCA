@@ -22,6 +22,8 @@ links:
   - time-series-momentum-and-trend
   - roll-bid-ask-bounce
   - single-security-price-regularity-tests
+  - directional-change-events
+  - time-to-crossover-statistics
 relationships:
   - type: relates
     target: model-selection-by-hypothesis-shape
@@ -33,6 +35,10 @@ relationships:
     target: roll-bid-ask-bounce
   - type: relates
     target: single-security-price-regularity-tests
+  - type: relates
+    target: directional-change-events
+  - type: relates
+    target: time-to-crossover-statistics
 trust:
   tier: curated
   state: published
@@ -46,6 +52,9 @@ disappear, the bridge from a reversion test to a holding period.
 ## In brief
 
 - What it tests: the speed of reversion, not merely the presence of it.
+- The AR(1) half-life is the simplest linear baseline for reversion speed,
+  not the only model of how a deviation fades; event-time and duration
+  framings are alternatives.
 - Intake: one clean contiguous series; midquotes or adjusted closes, with
   overnight moves handled explicitly.
 - Key robustness: the AR(1) estimate is biased in small samples; correct
@@ -85,6 +94,13 @@ half-life, and report a confidence interval from a bootstrap or the delta
 method. Repeat on two disjoint sub-periods. A candidate requires a narrow
 interval, agreeing sub-period estimates, and a deviation larger than the
 spread.
+
+This AR(1) test is the simplest baseline. Two alternatives frame the same
+question without assuming a linear clock-time decay: [Directional change
+events](directional-change-events) segment the path at confirmed threshold
+moves, and [Time-to-crossover
+statistics](time-to-crossover-statistics) measure the waiting time to a
+named event such as a moving-average crossover or a drawdown recovery.
 
 ## False explanations
 
@@ -128,3 +144,13 @@ year implied by \(H\), and the capacity at which impact changes the reversion.
 AR(1) is a linear model of a nonlinear phenomenon; asymmetric or state-
 dependent reversion needs another falsifier. Half-life says nothing about
 the deviation's cause, and costs truncate the usable part of any reversion.
+
+## Related
+
+- [Model selection by hypothesis shape](model-selection-by-hypothesis-shape)
+- [Cointegration and spread stationarity](cointegration-and-spread-stationarity)
+- [Time-series momentum and trend](time-series-momentum-and-trend)
+- [Roll bid-ask bounce](roll-bid-ask-bounce)
+- [Single-security price-regularity tests](single-security-price-regularity-tests)
+- [Directional change events](directional-change-events)
+- [Time-to-crossover statistics](time-to-crossover-statistics)

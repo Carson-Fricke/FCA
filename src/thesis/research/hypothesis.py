@@ -117,6 +117,14 @@ class HypothesisStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+class FalsifierRole(StrEnum):
+    """The research role one falsifier plays in the approved suite."""
+
+    CLAIM = "claim"
+    ASSUMPTION = "assumption"
+    CONTROL = "control"
+
+
 class HypothesisFalsifier(StrictHypothesisModel):
     """One observable condition whose satisfaction falsifies the claim.
 
@@ -130,6 +138,7 @@ class HypothesisFalsifier(StrictHypothesisModel):
     threshold: Annotated[float, BeforeValidator(_finite_threshold)]
     test: NonEmptyText
     falsifier_id: Identifier | None = None
+    role: FalsifierRole = FalsifierRole.CLAIM
 
     def falsifies(self, observed: float) -> bool:
         """Return whether one observed value satisfies the falsifier."""
@@ -625,6 +634,7 @@ __all__ = [
     "FALSIFIER_CONDITIONS",
     "FRONT_MATTER_DELIMITER",
     "HYPOTHESIS_DIRECTORY",
+    "FalsifierRole",
     "HypothesisArtifactError",
     "HypothesisDocument",
     "HypothesisFalsifier",

@@ -27,6 +27,10 @@ links:
   - exploratory-search-and-multiple-attempts
   - simple-trading-economics
   - robust-autocorrelation-inference
+  - directional-change-events
+  - perceptually-important-points
+  - time-to-crossover-statistics
+  - autoencoder-anomaly-detection
 relationships:
   - type: relates
     target: discovery-study-design
@@ -48,6 +52,14 @@ relationships:
     target: simple-trading-economics
   - type: relates
     target: robust-autocorrelation-inference
+  - type: relates
+    target: directional-change-events
+  - type: relates
+    target: perceptually-important-points
+  - type: relates
+    target: time-to-crossover-statistics
+  - type: relates
+    target: autoencoder-anomaly-detection
 trust:
   tier: curated
   state: published
@@ -60,6 +72,9 @@ move. Continuation repeats the move; reversal undoes it.
 ## In brief
 
 - Measure the later return as a function of the prior return.
+- This fixed-window regression is the simplest baseline, not the limit of
+  the search space; event-time, path-shape, duration, and learned-
+  representation framings are alternatives to try.
 - Use a few predeclared buckets, not a search over thresholds.
 - Report effect, count, uncertainty, and spread for every bucket.
 - A clean reversal is often a spread bounce, not a real forecast.
@@ -74,6 +89,17 @@ return over the next window. Estimate
 A positive \(\beta\) is continuation; a negative \(\beta\) is reversal.
 Report \(\beta\) with a robust standard error and the residual spread.
 Declare the windows and horizon before looking.
+
+This clock-time regression is the simplest baseline. The conditioning
+variable does not have to be a fixed prior-window return: event-time moves
+([Directional change events](directional-change-events)), path-shape
+summaries ([Perceptually important
+points](perceptually-important-points)), waiting-time or duration states
+([Time-to-crossover statistics](time-to-crossover-statistics)), and learned
+representations of a window
+([Autoencoder anomaly detection](autoencoder-anomaly-detection)) are
+alternative building blocks. Try them as additional baselines rather than
+treating one clock slicing as the only measurement.
 
 ## Buckets make the shape visible
 
@@ -114,3 +140,7 @@ effect vanishes, it was a friction artifact. See [Cost and delay sensitivity](co
 - [Exploratory search and multiple attempts](exploratory-search-and-multiple-attempts)
 - [Simple trading economics](simple-trading-economics)
 - [Robust autocorrelation and variance-ratio inference](robust-autocorrelation-inference)
+- [Directional change events](directional-change-events)
+- [Perceptually important points](perceptually-important-points)
+- [Time-to-crossover statistics](time-to-crossover-statistics)
+- [Autoencoder anomaly detection](autoencoder-anomaly-detection)

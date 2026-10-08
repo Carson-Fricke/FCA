@@ -8,6 +8,51 @@ applyTo: "**"
 
 Use Python 3.12 with uv, Ruff, ty, and pytest. Do not use MyPy.
 
+## Remove Superseded Behavior
+
+- Remove superseded behavior within the approved scope unless the user explicitly
+  requests preservation. There is no implicit "legacy" compatibility requirement.
+- Old documentation, persisted formats, existing callers, and tests do not authorize
+  preservation. Update affected callers and active documentation instead of adding
+  compatibility adapters, aliases, fallbacks, or migration paths.
+- Tests must verify the approved current contract. Remove or replace tests whose
+  requirements are superseded; do not introduce production interfaces solely to
+  satisfy their setup. Retain coverage of current behavior and genuine regressions.
+- If removal exposes a scope or data-impact decision that needs authorization,
+  surface it to the user rather than silently preserving behavior or deleting data.
+
+## Execution Job Contract
+
+Applies to harness-backed work: backtests, studies, screening, paper, and live
+sessions. One execution has exactly one `job_id`; do not reintroduce `run_id`,
+execution `study_id`, `tool_job_id`, report/backtest ids, or operation-level
+correlation ids for the same operation.
+
+- Submission composition allocates the ID once and durably retains the
+  recoverable submission reference, with immutable input/program-version
+  attribution, before any external mutation. Engines, workers, importers, and
+  renderers never allocate a replacement.
+- Harness admission owns uniqueness: the same ID with the same accepted input
+  joins; the same ID with different input conflicts; terminal results are never
+  overwritten. A client-side lookup may optimize a join but is not admission
+  authority.
+- Client adapters own acknowledgement validation; missing or mismatched ids are
+  protocol failures. Never adopt another id or infer one from aliases or prose.
+- Transport interruption after possible dispatch is unknown outcome, not
+  absence: inspect and reconcile the retained ID. Never auto-replay or allocate
+  a replacement.
+- Resume reuses the durable submission reference even before result or trial
+  evidence exists. An intentional new execution allocates a fresh ID.
+- Waiting is caller-specific: HTTP returns acceptance, deterministic code may
+  wait, agents inspect conversationally. Do not add a universal
+  submission/polling service or move polling policy into the workflow engine.
+- Thesis tracking and harness execution share the `job_id`; non-harness tool
+  jobs are explicitly distinguishable from harness executions. Job events may
+  be correlated by the same ID; provider tool-call/message correlations remain
+  separate.
+- New submission paths require interruption, mismatch, and duplicate-admission
+  behavior tests. Instructions and prompts are not proof of compliance.
+
 ## Required Tooling
 
 - Lint and format with `ruff` only. Do not introduce or use `flake8`,
@@ -16,11 +61,6 @@ Use Python 3.12 with uv, Ruff, ty, and pytest. Do not use MyPy.
   - Format check: `uv run --extra dev ruff format --check <paths>`
 - Type-check with `ty` only. Do not use `mypy`, `pyright`, or `pyre`.
   - Type check: `uv run --extra dev ty check <paths>`
-- Build and test the native core with the pinned Zig toolchain (0.16.0).
-  Zig gates run in CI alongside Ruff and ty and fail on violations exactly
-  like the Python gates do.
-  - Format check: `zig fmt --check .`
-  - Build and test: `zig build test`
 - Do not add a parallel MyPy configuration, lint configuration, or type-check
   configuration to `pyproject.toml`.
 - If a check appears to require another tool, stop and surface it as an
@@ -44,8 +84,6 @@ environment setup.
 | Focused Ruff format check | `uv run --extra dev ruff format --check <paths>` |
 | Type check | `uv run --extra dev ty check` |
 | Focused type check | `uv run --extra dev ty check <paths>` |
-| Zig format check | `zig fmt --check .` |
-| Zig build and native core tests | `zig build test` |
 | Full test suite (integration owner) | `uv run --extra dev pytest -p no:cacheprovider` |
 | Focused tests | `uv run --extra dev pytest -p no:cacheprovider <paths>` |
 | Build a wheel for packaging checks | See the wheel build command below |
@@ -62,6 +100,16 @@ Use repository-relative paths in every command and recorded command string.
 Prefer `uv run --extra dev` for verification after `uv sync --locked --extra
 dev`; use `uv run --python 3.12 --extra dev` only when explicitly installing
 or bootstrapping the environment.
+
+## Testing Strategy
+
+Read and follow `.github/instructions/testing-strategy.instructions.md` for
+every test change. Behavior tests at the highest practical boundary are the
+default; unit tests are limited to the documented pure-logic categories. The
+full suite MUST finish in under 3 minutes; expensive tests that cannot fit are
+deleted or converted, not retained behind a marker. Markers `slow` and `e2e`
+remain for local filtering. Focused runs:
+`uv run --extra dev pytest -p no:cacheprovider -m "not slow" <paths>`.
 
 ## Architecture Documentation
 

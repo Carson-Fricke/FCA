@@ -1,7 +1,8 @@
 <script lang="ts">
 	import FalsificationReportCard from './FalsificationReportCard.svelte';
+	import VariationReportCard from './VariationReportCard.svelte';
 	import type { PhaseAttemptRun } from '$lib/subagent';
-	import type { FalsificationReportData } from '$lib/transcript';
+	import { decodeVariationReport, type FalsificationReportData } from '$lib/transcript';
 
 	/**
 	 * The phase run view (REQ-D2): the surface a deterministic phase's scope
@@ -48,6 +49,9 @@
 			? (result.artifact as unknown as FalsificationReportData)
 			: null
 	);
+
+	/** The decoded parameter-variation report when this phase result is one. */
+	const variation = $derived(result ? decodeVariationReport(result.artifact) : null);
 
 	/**
 	 * The operator-visible failure message. A failed computation record takes
@@ -98,12 +102,12 @@
 				<span
 					class="rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase {failureMessage
 						? 'border-loss/40 bg-loss/10 text-loss'
-						: report
+						: report || variation
 							? 'border-profit/40 bg-profit/10 text-profit'
 							: 'border-accent/40 bg-accent/10 text-accent'}"
 					data-testid="phase-run-status"
 				>
-					{failureMessage ? 'Failed' : report ? 'Completed' : 'Running'}
+					{failureMessage ? 'Failed' : report || variation ? 'Completed' : 'Running'}
 				</span>
 			</div>
 		</div>
@@ -144,6 +148,10 @@
 	{:else if report}
 		<div class="mx-3.5 mb-3.5" data-testid="phase-run-result">
 			<FalsificationReportCard data={report} />
+		</div>
+	{:else if variation}
+		<div class="mx-3.5 mb-3.5" data-testid="phase-run-result">
+			<VariationReportCard data={variation} />
 		</div>
 	{:else if result}
 		<div

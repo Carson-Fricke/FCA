@@ -1,11 +1,12 @@
 """Harness MCP-backed HTTP surface for the Thesis UI.
 
-The harness publishes its backtest operations (launch, job status, run, and
-artifact queries) as MCP tools over either a local transport or the remote
-``POST /mcp`` endpoint.  This router fronts those operations for the UI so the
-same routes work for all four Thesis/harness topologies, and it exposes
-``GET /v1/harness/status`` reporting the resolved topology, reachability, the
-published tool catalog, and the remote MCP health document.
+The harness publishes its backtest operations (launch, job status, job result,
+and artifact queries) as MCP tools over either a local transport or the remote
+``POST /mcp`` endpoint.  This router fronts those operations for the UI on
+neutral ``/v1/jobs`` read routes so the same routes work for all four
+Thesis/harness topologies, and it exposes ``GET /v1/harness/status`` reporting
+the resolved topology, reachability, the published tool catalog, and the remote
+MCP health document.
 
 Every call goes through :func:`thesis.integrations.mcp.open_harness_mcp_client`
 so local and remote deployments are indistinguishable to the UI.  A status
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -25,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from thesis.integrations.mcp import (
     HarnessMcpClient,
     HarnessMcpError,
+    HarnessMcpProtocolError,
     HarnessMcpToolError,
     HarnessMcpTopology,
     McpToolResult,
@@ -113,26 +116,44 @@ class HarnessDataService:
     def launch_backtest(
         self, request: LaunchHarnessBacktestRequest
     ) -> dict[str, object]:
-        """Invoke the ``run_backtest`` tool for the configuration document."""
+        """Invoke the ``run_backtest`` tool for the configuration document.
+
+        The execution identity is allocated before dispatch and retained on
+        every failure path, so an unknown outcome is inspectable by its
+        original id and is never replayed under another one.
+        """
         config_path = request.config_path
         workspace = request.workspace
-        result = self._tool_result(
-            lambda client: client.run_backtest(
-                config_path=config_path, workspace=workspace
+        job_id = f"job-{uuid4().hex}"
+        try:
+            result = self._tool_result(
+                lambda client: client.run_backtest(
+                    config_path=config_path, workspace=workspace, job_id=job_id
+                )
             )
-        )
+        except HarnessMcpError as error:
+            error.job_id = job_id
+            raise
         payload = _object(result.structured)
+        returned = _text(payload.get("job_id"))
+        if returned is None or returned != job_id:
+            error = HarnessMcpProtocolError(
+                "run_backtest acknowledged job_id "
+                f"{returned!r} for submitted job_id {job_id!r}"
+            )
+            error.job_id = job_id
+            raise error
         exit_code = _optional_int(payload.get("exit_code"))
         return {
             "action": "backtest",
+            "kind": "backtest",
             "config_path": config_path,
             "workspace": workspace,
             "boundary": _text(payload.get("boundary")),
-            "job_id": _text(payload.get("job_id")),
+            "job_id": job_id,
             "state": _text(payload.get("state")) or _exit_state(exit_code),
             "exit_code": exit_code,
             "location": _text(payload.get("location")),
-            "result": payload,
         }
 
     def job_status(self, job_id: str) -> dict[str, object]:
@@ -140,14 +161,14 @@ class HarnessDataService:
         result = self._tool_result(lambda client: client.get_job_status(job_id=job_id))
         return _object(result.structured)
 
-    def get_run(self, run_id: str) -> dict[str, object]:
-        """Return one stored run row from the ``get_run`` tool."""
-        result = self._tool_result(lambda client: client.get_run(run_id=run_id))
+    def get_job_result(self, job_id: str) -> dict[str, object]:
+        """Return one job result row from the ``get_job_result`` tool."""
+        result = self._tool_result(lambda client: client.get_job_result(job_id=job_id))
         return _object(result.structured)
 
-    def list_artifacts(self, run_id: str) -> dict[str, object]:
-        """Return the run's artifact manifest, normalized for the UI contract."""
-        result = self._tool_result(lambda client: client.list_artifacts(run_id=run_id))
+    def list_artifacts(self, job_id: str) -> dict[str, object]:
+        """Return the job's artifact manifest, normalized for the UI contract."""
+        result = self._tool_result(lambda client: client.list_artifacts(job_id=job_id))
         payload = _object(result.structured)
         entries = payload.get("artifacts")
         artifacts: list[dict[str, object]] = []
@@ -165,7 +186,7 @@ class HarnessDataService:
                     }
                 )
         return {
-            "run_id": _text(payload.get("run_id")) or run_id,
+            "job_id": _text(payload.get("job_id")) or job_id,
             "artifacts": artifacts,
         }
 
@@ -228,7 +249,7 @@ def _non_negative_int(value: object) -> int:
 def _exit_state(exit_code: int | None) -> str | None:
     if exit_code is None:
         return None
-    return "completed" if exit_code == 0 else "failed"
+    return "succeeded" if exit_code == 0 else "failed"
 
 
 def get_harness_service(request: Request) -> HarnessDataService:
@@ -264,7 +285,7 @@ def create_harness_router() -> APIRouter:
         except Exception as error:
             raise _service_error(error) from error
 
-    @router.get("/v1/backtests/jobs/{job_id}")
+    @router.get("/v1/jobs/{job_id}")
     async def backtest_job_status(
         job_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[HarnessDataService, Depends(get_harness_service)],
@@ -274,23 +295,23 @@ def create_harness_router() -> APIRouter:
         except Exception as error:
             raise _service_error(error) from error
 
-    @router.get("/v1/backtests/runs/{run_id}")
-    async def backtest_run(
-        run_id: Annotated[str, Path(min_length=1, max_length=128)],
+    @router.get("/v1/jobs/{job_id}/result")
+    async def backtest_job_result(
+        job_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[HarnessDataService, Depends(get_harness_service)],
     ) -> dict[str, object]:
         try:
-            return service.get_run(run_id)
+            return service.get_job_result(job_id)
         except Exception as error:
             raise _service_error(error) from error
 
-    @router.get("/v1/backtests/runs/{run_id}/artifacts")
-    async def backtest_run_artifacts(
-        run_id: Annotated[str, Path(min_length=1, max_length=128)],
+    @router.get("/v1/jobs/{job_id}/artifacts")
+    async def backtest_job_artifacts(
+        job_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[HarnessDataService, Depends(get_harness_service)],
     ) -> dict[str, object]:
         try:
-            return service.list_artifacts(run_id)
+            return service.list_artifacts(job_id)
         except Exception as error:
             raise _service_error(error) from error
 

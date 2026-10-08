@@ -1,5 +1,5 @@
 //! Pinned scale-18 fixed-point decimal kernel shared by the OMS, books, and
-//! market modules (previously ``oms.dec`` in the Zig core).
+//! market modules.
 //!
 //! Unscaled values are `i128` at scale 18 (`decimal128(38, 18)`, the
 //! repository's binary decimal convention); every operation is range-checked
@@ -8,8 +8,7 @@
 //! representable.
 //!
 //! This kernel is the free-function view of the same semantics as the
-//! [`num::Decimal18`] type. It mirrors `src/harness/native/decimal.zig`
-//! line-for-line so the ported kernel and the Zig golden vectors agree.
+//! [`num::Decimal18`] type and agrees with the pinned golden vectors.
 
 use crate::wide::U256;
 

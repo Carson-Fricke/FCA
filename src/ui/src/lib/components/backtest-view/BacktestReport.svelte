@@ -233,11 +233,27 @@
 
 	const tiles = $derived.by(() => {
 		const out = [];
-		const pnl = stats?.totalPnl ?? summary.realized;
-		out.push({ label: 'PnL', text: `${pnl >= 0 ? '+' : ''}${pnl.toLocaleString('en-US', { maximumFractionDigits: 0 })}`, cls: pnl >= 0 ? 'pos' : 'neg' });
-		const ret = stats?.totalReturn != null ? stats.totalReturn * 100 : summary.returnPct;
-		out.push({ label: 'Return', text: `${ret >= 0 ? '+' : ''}${ret.toFixed(1)}%`, cls: ret >= 0 ? 'pos' : 'neg' });
-		out.push({ label: 'Trades', text: `${summary.trades} (${summary.wins}W/${summary.losses}L)`, cls: '' });
+		const pnl = stats?.totalPnl ?? null;
+		out.push({
+			label: 'PnL',
+			text:
+				pnl == null
+					? '—'
+					: `${pnl >= 0 ? '+' : ''}${pnl.toLocaleString('en-US', { maximumFractionDigits: 0 })}`,
+			cls: pnl == null ? '' : pnl >= 0 ? 'pos' : 'neg'
+		});
+		const ret = stats?.totalReturn ?? null;
+		out.push({
+			label: 'Return',
+			text: ret == null ? '—' : `${ret * 100 >= 0 ? '+' : ''}${(ret * 100).toFixed(1)}%`,
+			cls: ret == null ? '' : ret >= 0 ? 'pos' : 'neg'
+		});
+		const count = stats?.tradeCount ?? null;
+		out.push({
+			label: 'Trades',
+			text: count == null ? '—' : `${count} (${stats?.winCount ?? '—'}W/${stats?.lossCount ?? '—'}L)`,
+			cls: ''
+		});
 		if (stats?.sharpe != null) {
 			out.push({ label: 'Sharpe', text: stats.sharpe.toFixed(2), cls: '' });
 		}

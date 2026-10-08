@@ -112,7 +112,7 @@ pub enum TimeInForce {
 /// A checked failure from the market/order domain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
-    /// Allocation failure (kept for parity with the Zig error set).
+    /// Allocation failure.
     OutOfMemory,
     /// A required argument was empty or otherwise invalid.
     InvalidArgument,

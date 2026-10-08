@@ -25,6 +25,7 @@ from ._support import (
     _kit,
     _phase_node_id,
     _request,
+    _research_envelope,
 )
 
 
@@ -185,16 +186,20 @@ def test_live_accepted_contract_sequence_matches_replay(
     trial = {
         "testId": "t1",
         "falsifierId": "f1",
-        "runId": "run-1",
+        "jobId": "job-1",
         "digest": "a" * 64,
-        "runState": "complete",
+        "runState": "succeeded",
         "observed": 1.0,
         "falsified": False,
     }
     completions = [
         {"target": "model_creation", "discovery": _discovery_envelope()},
         {"target": "falsification_trials", "hypothesis": _hypothesis_envelope()},
-        {"target": "verdict", "trials": [trial]},
+        {
+            "target": "verdict",
+            "trials": [trial],
+            "research": _research_envelope(),
+        },
         {
             "target": target,
             "verdict": {"outcome": "supported", "reason": "review accepted"},

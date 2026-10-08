@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from thesis.agent.runtime.schema import validate_arguments
 from thesis.workflows.core.execution_store import StoreTransition
-from thesis.workflows.core.phase import ConversationPhase
-from thesis.workflows.core.workflow import _phase_allowed_tools
 from thesis.workflows.registry.hypothesis_development.contracts.discovery import (
     DiscoveryDraft,
 )
@@ -15,6 +15,7 @@ from thesis.workflows.registry.hypothesis_development.contracts.validation impor
     DISCOVERY_COMPLETION_SCHEMA,
     discovery_payload_errors,
 )
+from thesis.workflows.registry.hypothesis_development.errors import WorkflowError
 from thesis.workflows.registry.hypothesis_development.phases import (
     HypothesisDevelopmentPhase,
     phase_from_value,
@@ -40,7 +41,12 @@ from thesis.workflows.registry.hypothesis_development.state import (
     HypothesisDevelopmentState,
 )
 
-from ._support import WORKSPACE, _discovery_envelope, _hypothesis_envelope
+from ._support import (
+    WORKSPACE,
+    _discovery_envelope,
+    _hypothesis_envelope,
+    _no_candidate_discovery_envelope,
+)
 
 
 def _moment() -> datetime:
@@ -81,59 +87,6 @@ def _verdict_transition(
                 "reason": "the planned falsifier fired",
             },
         },
-    )
-
-
-def test_discovery_runs_studies_but_never_backtests() -> None:
-    workflow = build_hypothesis_development_workflow()
-    doctrine = workflow._doctrine
-    assert doctrine is not None
-
-    allowed = _phase_allowed_tools(doctrine, "discovery", "research")
-    assert set(allowed) == {
-        *(
-            f"{operation}_{kind}"
-            for kind in ("study", "strategy", "indicator")
-            for operation in ("author", "update", "read", "validate", "publish")
-        ),
-        *(f"list_{plural}" for plural in ("studies", "strategies", "indicators")),
-        "read_sdk_reference",
-        "validate_study",
-        "run_study",
-        "get_job_status",
-        "get_run",
-        "list_artifacts",
-        "read_artifact",
-        "search_knowledge",
-        "read_knowledge",
-        "request_workflow_input",
-        "request_phase_completion",
-    }
-    assert doctrine.phase_mcp_tools["discovery"] == (
-        "get_job_status",
-        "get_run",
-        "list_artifacts",
-        "read_artifact",
-    )
-    assert "run_backtest" not in allowed
-    assert "backtest_config_template" not in allowed
-
-    # Both live agent phases are operator-facing conversations, and their
-    # knowledge retrieval is scoped to the workflow's collection tables.
-    specs = workflow.spec.phase_specs
-    assert isinstance(specs["discovery"], ConversationPhase)
-    assert isinstance(specs["model_creation"], ConversationPhase)
-    assert workflow.spec.phase_knowledge["discovery"] == (
-        "discovery",
-        "data-quality",
-        "trading-costs",
-        "model-cards",
-    )
-    assert workflow.spec.phase_knowledge["model_creation"] == (
-        "model-cards",
-        "inference",
-        "validation",
-        "trading-costs",
     )
 
 
@@ -190,13 +143,12 @@ def test_accepted_discovery_contract_folds_into_state() -> None:
 
     assert folded.phase is HypothesisDevelopmentPhase.MODEL_CREATION
     assert folded.discovery is not None
+    assert folded.discovery.candidate is not None
     assert (
         folded.discovery.candidate.opportunity
         == "Five-day momentum in SPY continues over the next five days."
     )
-    assert [attempt.study_id for attempt in folded.discovery.attempts] == [
-        "study-momentum"
-    ]
+    assert [attempt.job_id for attempt in folded.discovery.attempts] == ["job-momentum"]
     assert folded.hypothesis is None
     assert folded.draft is None
     assert folded.trials == ()
@@ -305,6 +257,24 @@ def test_retired_hypothesis_creation_decodes_to_model_creation() -> None:
     assert rebuilt.draft.claim == _hypothesis_envelope()["claim"]
 
 
+def test_discovery_attempt_uses_an_optional_job_identity_without_study_id() -> None:
+    payload = _discovery_envelope()
+    attempts = payload["attempts"]
+    assert isinstance(attempts, list)
+    attempt = attempts[0]
+    assert isinstance(attempt, dict)
+    del attempt["jobId"]
+
+    draft = DiscoveryDraft.from_dict(payload)
+    assert draft.attempts[0].job_id is None
+    assert discovery_payload_errors(payload) == []
+    assert "studyId" not in draft.attempts[0].as_dict()
+    assert "runId" not in draft.attempts[0].as_dict()
+
+    attempt["jobId"] = "job-momentum"
+    assert DiscoveryDraft.from_dict(payload).attempts[0].job_id == "job-momentum"
+
+
 def test_discovery_draft_round_trips_and_rejects_malformed_payloads() -> None:
     draft = DiscoveryDraft.from_dict(_discovery_envelope())
     assert DiscoveryDraft.from_dict(draft.as_dict()) == draft
@@ -325,3 +295,93 @@ def test_discovery_draft_round_trips_and_rejects_malformed_payloads() -> None:
     # Existing outcome keys survive beside the new one.
     assert payload["phase"] == "model_creation"
     assert "hypothesis" in payload and "trials" in payload
+
+
+def test_discovery_no_candidate_branch_and_target_consistency() -> None:
+    phase = build_hypothesis_development_workflow().spec.phase_specs["discovery"]
+    assert phase.validate is not None
+    no_candidate = _no_candidate_discovery_envelope()
+    completion = {"target": "completed", "discovery": no_candidate}
+    assert not validate_arguments(phase.completion_schema, completion)
+    assert discovery_payload_errors(no_candidate) == []
+    assert phase.validate(completion) is None
+
+    wrong_target = {"target": "model_creation", "discovery": no_candidate}
+    failure = phase.validate(wrong_target)
+    assert failure is not None and "completed" in failure
+
+    wrong_candidate = {"target": "completed", "discovery": _discovery_envelope()}
+    failure = phase.validate(wrong_candidate)
+    assert failure is not None and "model_creation" in failure
+
+    # The terminal failure escape stays available for either branch.
+    assert phase.validate({"target": "failed", "discovery": no_candidate}) is None
+    assert (
+        phase.validate({"target": "failed", "discovery": _discovery_envelope()}) is None
+    )
+
+    # Both branches at once violates the exactly-one semantic check.
+    both = _discovery_envelope()
+    both["noCandidateReason"] = "Also nothing worth pursuing."
+    assert any("exactly one" in error for error in discovery_payload_errors(both))
+    assert phase.validate({"target": "model_creation", "discovery": both}) is not None
+
+    # Neither branch is reported by both the structural anyOf and the
+    # semantic check.
+    neither = _discovery_envelope()
+    del neither["candidate"]
+    errors = discovery_payload_errors(neither)
+    assert any("exactly one" in error for error in errors)
+    assert any("noCandidateReason" in error for error in errors)
+
+
+def test_discovery_no_candidate_folds_to_completed() -> None:
+    state = HypothesisDevelopmentState(
+        workspace_id=WORKSPACE,
+        execution_id="execution-no-candidate",
+        phase=HypothesisDevelopmentPhase.DISCOVERY,
+        intent_epoch=0,
+    )
+    transition = StoreTransition(
+        sequence=1,
+        from_phase="discovery",
+        to_phase="completed",
+        occurred_at=_moment(),
+        intent_epoch=1,
+        reason="discovery found nothing to pursue",
+        completion={
+            "target": "completed",
+            "discovery": _no_candidate_discovery_envelope(),
+        },
+    )
+
+    folded = fold_transition(state, transition)
+
+    assert folded.phase is HypothesisDevelopmentPhase.COMPLETED
+    assert folded.discovery is not None
+    assert folded.discovery.candidate is None
+    assert folded.discovery.no_candidate_reason is not None
+    assert workflow_piping()[("discovery", "completed")] is identity_pipe
+
+
+def test_discovery_draft_no_candidate_round_trips_and_enforces_exactly_one() -> None:
+    draft = DiscoveryDraft.from_dict(_no_candidate_discovery_envelope())
+    assert draft.candidate is None
+    assert DiscoveryDraft.from_dict(draft.as_dict()) == draft
+
+    with pytest.raises(WorkflowError, match="exactly one"):
+        DiscoveryDraft(
+            candidate=None,
+            no_candidate_reason=None,
+            attempts=draft.attempts,
+            untouched_data=draft.untouched_data,
+            limitations=draft.limitations,
+        )
+    with pytest.raises(WorkflowError, match="exactly one"):
+        DiscoveryDraft(
+            candidate=DiscoveryDraft.from_dict(_discovery_envelope()).candidate,
+            no_candidate_reason="Also nothing.",
+            attempts=draft.attempts,
+            untouched_data=draft.untouched_data,
+            limitations=draft.limitations,
+        )

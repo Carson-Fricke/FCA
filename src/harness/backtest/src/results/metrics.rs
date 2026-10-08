@@ -9,9 +9,7 @@
 //! Undefined values are represented as `None` rather than a sentinel: fewer
 //! than two equity points for `total_return`/CAGR, a zero start equity, a zero
 //! standard deviation for Sharpe, a zero downside deviation for Sortino, and a
-//! zero gross loss for the profit factor.
-
-use std::collections::BTreeMap;
+//! zero net loss for the profit factor.
 
 use num::Decimal18;
 
@@ -33,15 +31,43 @@ pub struct EquityPoint {
     pub equity: Decimal18,
 }
 
-/// One realized trade.
+/// One closed-trade slice: a FIFO lot slice matched against one closing fill.
+///
+/// Fees follow `fill_quantity_share.v1`: the entry fee is the slice's share of
+/// the opening lot's remaining fee, and the exit fee is its share of the closing
+/// fill's remaining fee, each rounded half-even at scale 18.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TradeRow {
-    /// Trade identifier.
+    /// Trade identifier in exit order, `trade-0001` onward.
     pub trade_id: String,
-    /// Strategy identifier.
-    pub strategy_id: String,
-    /// Signed realized PnL.
-    pub realized_pnl: Decimal18,
+    /// Instrument symbol.
+    pub symbol: String,
+    /// `long` when the opening fill bought, `short` when it sold.
+    pub side: String,
+    /// Matched quantity, positive.
+    pub quantity: Decimal18,
+    /// Sequence of the fill that opened the matched lot.
+    pub entry_sequence: u64,
+    /// Sequence of the fill that closed the slice.
+    pub exit_sequence: u64,
+    /// Epoch nanoseconds of the opening fill.
+    pub entry_timestamp_ns: i64,
+    /// Epoch nanoseconds of the closing fill.
+    pub exit_timestamp_ns: i64,
+    /// Entry price.
+    pub entry_price: Decimal18,
+    /// Exit price.
+    pub exit_price: Decimal18,
+    /// Price PnL before fees.
+    pub gross_pnl: Decimal18,
+    /// Allocated entry fee.
+    pub entry_fee: Decimal18,
+    /// Allocated exit fee.
+    pub exit_fee: Decimal18,
+    /// `entry_fee + exit_fee`.
+    pub fees: Decimal18,
+    /// `gross_pnl - fees`.
+    pub net_pnl: Decimal18,
 }
 
 /// One fill ledger row.
@@ -98,33 +124,50 @@ pub struct EquityMetrics {
     pub drawdown: DrawdownSpan,
 }
 
-/// Aggregates over realized trade PnL values.
+/// Aggregates over closed trades. Win, loss, hit rate, and profit factor classify
+/// on net PnL; the gross fields bridge to fees.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TradeStats {
-    /// Number of trades.
+    /// Number of closed trade slices.
     pub trade_count: usize,
-    /// Number of winning trades.
+    /// Slices with positive net PnL.
     pub win_count: usize,
-    /// Number of losing trades.
+    /// Slices with negative net PnL.
     pub loss_count: usize,
-    /// Win share, if there are trades.
-    pub hit_rate: Option<Decimal18>,
-    /// Sum of PnL.
-    pub total_pnl: Decimal18,
-    /// Sum of positive PnL.
+    /// Slices with zero net PnL.
+    pub zero_count: usize,
+    /// Sum of gross PnL.
+    pub gross_pnl: Decimal18,
+    /// Sum of allocated fees over closed slices.
+    pub fees: Decimal18,
+    /// Sum of net PnL.
+    pub net_pnl: Decimal18,
+    /// Fees still attached to open lots at run end.
+    pub open_fees: Decimal18,
+    /// Sum of positive gross PnL.
     pub gross_profit: Decimal18,
-    /// Loss magnitude.
+    /// Magnitude of negative gross PnL.
     pub gross_loss: Decimal18,
-    /// Profit factor, if there are losses.
+    /// Sum of positive net PnL.
+    pub net_profit: Decimal18,
+    /// Magnitude of negative net PnL.
+    pub net_loss: Decimal18,
+    /// `net_profit / net_loss`, if defined.
     pub profit_factor: Option<Decimal18>,
-    /// Mean win, if any.
-    pub average_win: Option<Decimal18>,
-    /// Mean loss, if any.
-    pub average_loss: Option<Decimal18>,
-    /// Largest win, if any.
-    pub largest_win: Option<Decimal18>,
-    /// Largest loss, if any.
-    pub largest_loss: Option<Decimal18>,
+    /// Why `profit_factor` is null: `no_closed_trades` or `no_net_losses`.
+    pub profit_factor_reason: Option<&'static str>,
+    /// Share of slices with positive net PnL, if there are trades.
+    pub hit_rate: Option<Decimal18>,
+    /// Why `hit_rate` is null: `no_closed_trades`.
+    pub hit_rate_reason: Option<&'static str>,
+    /// Mean positive net PnL, if any.
+    pub average_net_win: Option<Decimal18>,
+    /// Mean negative net PnL (signed), if any.
+    pub average_net_loss: Option<Decimal18>,
+    /// Largest positive net PnL, if any.
+    pub largest_net_win: Option<Decimal18>,
+    /// Most negative net PnL (signed), if any.
+    pub largest_net_loss: Option<Decimal18>,
 }
 
 /// Latency aggregates over fills carrying a non-`None` latency.
@@ -166,17 +209,6 @@ pub struct ExecutionStats {
     pub latency: LatencyStats,
     /// Order outcome counts.
     pub outcomes: OrderOutcomeCounts,
-}
-
-/// Per-strategy view of trade and execution aggregates.
-#[derive(Clone, Debug, PartialEq)]
-pub struct StrategyAttribution {
-    /// Strategy identifier.
-    pub strategy_id: String,
-    /// Trade aggregates.
-    pub trades: TradeStats,
-    /// Execution aggregates.
-    pub execution: ExecutionStats,
 }
 
 /// Return the signed slippage of one fill against its reference price.
@@ -317,54 +349,91 @@ pub fn equity_curve_metrics(points: &[EquityPoint]) -> EquityMetrics {
     }
 }
 
-/// Aggregate realized trade PnL values.
+/// Aggregate closed trade slices and the fees still attached to open lots.
 #[must_use]
-pub fn trade_stats(trades: &[TradeRow]) -> TradeStats {
-    let mut total = Decimal18::ZERO;
-    let mut gross_profit = Decimal18::ZERO;
-    let mut gross_loss = Decimal18::ZERO;
+pub fn trade_stats(trades: &[TradeRow], open_fees: Decimal18) -> TradeStats {
+    let zero = Decimal18::ZERO;
+    let mut stats = TradeStats {
+        trade_count: trades.len(),
+        win_count: 0,
+        loss_count: 0,
+        zero_count: 0,
+        gross_pnl: zero,
+        fees: zero,
+        net_pnl: zero,
+        open_fees,
+        gross_profit: zero,
+        gross_loss: zero,
+        net_profit: zero,
+        net_loss: zero,
+        profit_factor: None,
+        profit_factor_reason: None,
+        hit_rate: None,
+        hit_rate_reason: None,
+        average_net_win: None,
+        average_net_loss: None,
+        largest_net_win: None,
+        largest_net_loss: None,
+    };
     let mut wins: Vec<Decimal18> = Vec::new();
     let mut losses: Vec<Decimal18> = Vec::new();
     for row in trades {
-        let pnl = row.realized_pnl;
-        total = total.checked_add(pnl).unwrap_or(total);
-        if pnl.is_positive() {
-            wins.push(pnl);
-            gross_profit = gross_profit.checked_add(pnl).unwrap_or(gross_profit);
-        } else if pnl.is_negative() {
-            losses.push(pnl);
-            gross_loss = gross_loss.checked_sub(pnl).unwrap_or(gross_loss);
+        stats.gross_pnl = stats
+            .gross_pnl
+            .checked_add(row.gross_pnl)
+            .unwrap_or(stats.gross_pnl);
+        stats.fees = stats.fees.checked_add(row.fees).unwrap_or(stats.fees);
+        stats.net_pnl = stats
+            .net_pnl
+            .checked_add(row.net_pnl)
+            .unwrap_or(stats.net_pnl);
+        if row.gross_pnl.is_positive() {
+            stats.gross_profit = stats
+                .gross_profit
+                .checked_add(row.gross_pnl)
+                .unwrap_or(stats.gross_profit);
+        } else if row.gross_pnl.is_negative() {
+            stats.gross_loss = stats
+                .gross_loss
+                .checked_sub(row.gross_pnl)
+                .unwrap_or(stats.gross_loss);
+        }
+        if row.net_pnl.is_positive() {
+            stats.net_profit = stats
+                .net_profit
+                .checked_add(row.net_pnl)
+                .unwrap_or(stats.net_profit);
+            wins.push(row.net_pnl);
+        } else if row.net_pnl.is_negative() {
+            stats.net_loss = stats
+                .net_loss
+                .checked_sub(row.net_pnl)
+                .unwrap_or(stats.net_loss);
+            losses.push(row.net_pnl);
+        } else {
+            stats.zero_count += 1;
         }
     }
-    let win_count = wins.len();
-    let loss_count = losses.len();
-    let count = trades.len();
-    let average_win = mean(&wins);
-    let average_loss = mean(&losses);
-    TradeStats {
-        trade_count: count,
-        win_count,
-        loss_count,
-        hit_rate: if count == 0 {
-            None
+    stats.win_count = wins.len();
+    stats.loss_count = losses.len();
+    if trades.is_empty() {
+        stats.hit_rate_reason = Some("no_closed_trades");
+        stats.profit_factor_reason = Some("no_closed_trades");
+    } else {
+        stats.hit_rate = Decimal18::from_i64(stats.win_count as i64)
+            .checked_div(Decimal18::from_i64(trades.len() as i64))
+            .ok();
+        if stats.net_loss.is_zero() {
+            stats.profit_factor_reason = Some("no_net_losses");
         } else {
-            Decimal18::from_i64(win_count as i64)
-                .checked_div(Decimal18::from_i64(count as i64))
-                .ok()
-        },
-        total_pnl: total,
-        gross_profit,
-        gross_loss,
-        profit_factor: if gross_loss.is_positive() {
-            gross_profit.checked_div(gross_loss).ok()
-        } else {
-            None
-        },
-        average_win,
-        average_loss,
-        largest_win: wins.iter().copied().max(),
-        largest_loss: losses.iter().copied().min(),
+            stats.profit_factor = stats.net_profit.checked_div(stats.net_loss).ok();
+        }
     }
+    stats.average_net_win = mean(&wins);
+    stats.average_net_loss = mean(&losses);
+    stats.largest_net_win = wins.iter().copied().max();
+    stats.largest_net_loss = losses.iter().copied().min();
+    stats
 }
 
 fn mean(values: &[Decimal18]) -> Option<Decimal18> {
@@ -380,13 +449,17 @@ fn mean(values: &[Decimal18]) -> Option<Decimal18> {
         .ok()
 }
 
-/// Return the annualized Sharpe ratio, or `None` if undefined.
+/// Return the Sharpe ratio over per-sample returns, annualized by
+/// `sqrt(periods_per_year)`, using the sample (n - 1) standard deviation.
+///
+/// Returns `None` when there are fewer than two returns or zero volatility.
 #[must_use]
 pub fn sharpe(returns: &[Decimal18], periods_per_year: i64) -> Option<f64> {
     if returns.len() < 2 || periods_per_year <= 0 {
         return None;
     }
     let count = Decimal18::from_i64(returns.len() as i64);
+    let degrees = Decimal18::from_i64((returns.len() - 1) as i64);
     let mut sum = Decimal18::ZERO;
     for value in returns {
         sum = sum.checked_add(*value).unwrap_or(sum);
@@ -398,12 +471,45 @@ pub fn sharpe(returns: &[Decimal18], periods_per_year: i64) -> Option<f64> {
         let square = deviation.checked_mul(deviation).ok()?;
         variance = variance.checked_add(square).unwrap_or(variance);
     }
-    variance = variance.checked_div(count).ok()?;
+    variance = variance.checked_div(degrees).ok()?;
     if variance.is_zero() {
         return None;
     }
     let ratio = mean.to_f64() / variance.to_f64().sqrt();
     Some(ratio * (periods_per_year as f64).sqrt())
+}
+
+/// Trading samples per year assumed when annualizing equity-curve Sharpe.
+pub const SHARPE_PERIODS_PER_YEAR: i64 = 252;
+
+/// Equity-curve Sharpe with the reason it is null.
+///
+/// Per-sample returns are `equity[i] / equity[i - 1] - 1` for every non-zero
+/// predecessor. Null reasons are `fewer_than_three_samples`,
+/// `fewer_than_two_returns`, and `zero_volatility`.
+#[must_use]
+pub fn equity_sharpe(points: &[EquityPoint]) -> (Option<f64>, Option<&'static str>) {
+    if points.len() < 3 {
+        return (None, Some("fewer_than_three_samples"));
+    }
+    let mut returns: Vec<Decimal18> = Vec::new();
+    for pair in points.windows(2) {
+        if pair[0].equity.is_zero() {
+            continue;
+        }
+        if let Ok(ratio) = pair[1].equity.checked_div(pair[0].equity) {
+            if let Ok(value) = ratio.checked_sub(Decimal18::ONE) {
+                returns.push(value);
+            }
+        }
+    }
+    if returns.len() < 2 {
+        return (None, Some("fewer_than_two_returns"));
+    }
+    match sharpe(&returns, SHARPE_PERIODS_PER_YEAR) {
+        Some(value) => (Some(value), None),
+        None => (None, Some("zero_volatility")),
+    }
 }
 
 /// Return the annualized Sortino ratio, or `None` if undefined.
@@ -499,69 +605,6 @@ pub fn execution_stats(fills: &[FillRow], orders: &[OrderRow]) -> ExecutionStats
         latency: latency_stats(fills),
         outcomes: order_outcome_counts(orders),
     }
-}
-
-/// Return the trade and execution aggregates for each strategy.
-#[must_use]
-pub fn per_strategy_attribution(
-    fills: &[FillRow],
-    orders: &[OrderRow],
-    trades: &[TradeRow],
-) -> BTreeMap<String, StrategyAttribution> {
-    let mut grouped_fills: BTreeMap<&str, Vec<FillRow>> = BTreeMap::new();
-    for fill in fills {
-        grouped_fills
-            .entry(fill.strategy_id.as_str())
-            .or_default()
-            .push(fill.clone());
-    }
-    let mut grouped_orders: BTreeMap<&str, Vec<OrderRow>> = BTreeMap::new();
-    for order in orders {
-        grouped_orders
-            .entry(order.strategy_id.as_str())
-            .or_default()
-            .push(order.clone());
-    }
-    let mut grouped_trades: BTreeMap<&str, Vec<TradeRow>> = BTreeMap::new();
-    for trade in trades {
-        grouped_trades
-            .entry(trade.strategy_id.as_str())
-            .or_default()
-            .push(trade.clone());
-    }
-    let mut strategies: Vec<&str> = grouped_fills
-        .keys()
-        .chain(grouped_orders.keys())
-        .chain(grouped_trades.keys())
-        .copied()
-        .collect();
-    strategies.sort_unstable();
-    strategies.dedup();
-    strategies
-        .into_iter()
-        .map(|strategy_id| {
-            let empty_fills: &[FillRow] = &[];
-            let empty_orders: &[OrderRow] = &[];
-            let empty_trades: &[TradeRow] = &[];
-            let attribution = StrategyAttribution {
-                strategy_id: strategy_id.to_string(),
-                trades: trade_stats(
-                    grouped_trades
-                        .get(strategy_id)
-                        .map_or(empty_trades, Vec::as_slice),
-                ),
-                execution: execution_stats(
-                    grouped_fills
-                        .get(strategy_id)
-                        .map_or(empty_fills, Vec::as_slice),
-                    grouped_orders
-                        .get(strategy_id)
-                        .map_or(empty_orders, Vec::as_slice),
-                ),
-            };
-            (strategy_id.to_string(), attribution)
-        })
-        .collect()
 }
 
 /// Parse a string-exact decimal for callers building metric rows.

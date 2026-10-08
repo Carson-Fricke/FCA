@@ -42,20 +42,23 @@
 
 	const overall = $derived.by(() => {
 		const stats = backtest.stats ?? {};
-		const first = backtest.equity[0]?.v ?? backtest.initial_capital;
-		const last = backtest.equity.at(-1)?.v ?? backtest.final_capital;
+		const published = (key: string): number | null => {
+			const value = stats[key];
+			return typeof value === 'number' ? value : null;
+		};
+		const totalReturn = published('totalReturn');
 		return {
-			returnPct: first ? ((last - first) / first) * 100 : 0,
-			sharpe: (stats['sharpe'] as number | undefined) ?? null,
-			maxDrawdown: (stats['maxDrawdown'] as number | undefined) ?? 0,
-			trades: backtest.trades.length
+			returnPct: totalReturn == null ? null : totalReturn * 100,
+			sharpe: published('sharpe'),
+			maxDrawdown: published('maxDrawdown'),
+			trades: published('tradeCount')
 		};
 	});
 
 	function segmentTiles(label: string, metrics: SegmentMetrics) {
 		return [
 			{ label: `${label} return`, value: metrics.returnPct, format: 'signedPct' as const },
-			{ label: `${label} Sharpe`, value: metrics.sharpe ?? 0, format: 'ratio' as const },
+			{ label: `${label} Sharpe`, value: metrics.sharpe ?? '—', format: 'ratio' as const },
 			{ label: `${label} max DD`, value: metrics.maxDrawdown, format: 'pct' as const },
 			{ label: `${label} trades`, value: metrics.trades, format: 'text' as const }
 		];
@@ -114,10 +117,10 @@
 			</span>
 		</div>
 		<div class="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
-			<MetricCard label="Return" value={overall.returnPct} format="signedPct" />
-			<MetricCard label="Sharpe" value={overall.sharpe ?? 0} format="ratio" />
-			<MetricCard label="Max drawdown" value={overall.maxDrawdown} format="pct" />
-			<MetricCard label="Trades" value={overall.trades} />
+			<MetricCard label="Return" value={overall.returnPct ?? '—'} format="signedPct" />
+			<MetricCard label="Sharpe" value={overall.sharpe ?? '—'} format="ratio" />
+			<MetricCard label="Max drawdown" value={overall.maxDrawdown ?? '—'} format="pct" />
+			<MetricCard label="Trades" value={overall.trades ?? '—'} />
 		</div>
 	</div>
 {/if}
@@ -164,5 +167,5 @@
 {/if}
 
 <p class="mt-2 font-mono text-[10px] text-slate-500">
-	run {backtest.manifest.run_id} · digest {backtest.manifest.run_digest?.slice(0, 16) ?? '—'}…
+	job {backtest.job_id} · digest {backtest.manifest.run_digest?.slice(0, 16) ?? '—'}…
 </p>

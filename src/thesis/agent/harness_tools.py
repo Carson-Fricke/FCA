@@ -36,9 +36,8 @@ from thesis.integrations.mcp import (
     DEFAULT_PROBE_ATTEMPTS,
     DEFAULT_PROBE_BACKOFF_SECONDS,
     TOOL_BACKTEST_CONFIG_TEMPLATE,
+    TOOL_GET_JOB_RESULT,
     TOOL_GET_JOB_STATUS,
-    TOOL_GET_RUN,
-    TOOL_GET_SCREENER_STATUS,
     TOOL_LAUNCH_TRADER,
     TOOL_LIST_ARTIFACTS,
     TOOL_READ_ARTIFACT,
@@ -75,8 +74,7 @@ HARNESS_TOOL_NAMES: tuple[str, ...] = (
     TOOL_BACKTEST_CONFIG_TEMPLATE,
     TOOL_SCREENER_CONFIG_TEMPLATE,
     TOOL_GET_JOB_STATUS,
-    TOOL_GET_SCREENER_STATUS,
-    TOOL_GET_RUN,
+    TOOL_GET_JOB_RESULT,
     TOOL_LIST_ARTIFACTS,
     TOOL_READ_ARTIFACT,
     TOOL_LAUNCH_TRADER,
@@ -96,8 +94,8 @@ HARNESS_MCP_SKILL_INSTRUCTIONS = (
     "backtest_config_template and screener_config_template return starter "
     "configurations to adapt when no config file exists, and run_backtest and "
     "run_screener accept those configurations inline as the `config` argument; "
-    "get_job_status, get_screener_status, and get_run report job and run "
-    "state; list_artifacts enumerates a run's immutable outputs and read_artifact "
+    "get_job_status and get_job_result report job "
+    "state; list_artifacts enumerates a job's immutable outputs and read_artifact "
     "reads one artifact's text or hex-encoded bytes; and launch_trader "
     "starts a supervised trader session. Pass typed arguments, rely on the "
     "structured result content as evidence, and surface any returned failure "
@@ -234,17 +232,22 @@ class RunBacktestArgs:
 
     config_path: str
     workspace: str | None = None
+    job_id: str | None = None
 
     def __post_init__(self) -> None:
         _required_text(self.config_path, "config_path")
         if self.workspace is not None:
             _required_text(self.workspace, "workspace")
+        if self.job_id is not None:
+            _required_text(self.job_id, "job_id")
 
     def to_arguments(self) -> dict[str, object]:
         """Return the MCP ``tools/call`` arguments for this request."""
         arguments: dict[str, object] = {"config_path": self.config_path}
         if self.workspace is not None:
             arguments["workspace"] = self.workspace
+        if self.job_id is not None:
+            arguments["job_id"] = self.job_id
         return arguments
 
 
@@ -254,17 +257,22 @@ class RunStudyArgs:
 
     config_path: str
     workspace: str | None = None
+    job_id: str | None = None
 
     def __post_init__(self) -> None:
         _required_text(self.config_path, "config_path")
         if self.workspace is not None:
             _required_text(self.workspace, "workspace")
+        if self.job_id is not None:
+            _required_text(self.job_id, "job_id")
 
     def to_arguments(self) -> dict[str, object]:
         """Return the MCP ``tools/call`` arguments for this request."""
         arguments: dict[str, object] = {"config_path": self.config_path}
         if self.workspace is not None:
             arguments["workspace"] = self.workspace
+        if self.job_id is not None:
+            arguments["job_id"] = self.job_id
         return arguments
 
 
@@ -274,17 +282,22 @@ class RunScreenerArgs:
 
     config_path: str
     workspace: str | None = None
+    job_id: str | None = None
 
     def __post_init__(self) -> None:
         _required_text(self.config_path, "config_path")
         if self.workspace is not None:
             _required_text(self.workspace, "workspace")
+        if self.job_id is not None:
+            _required_text(self.job_id, "job_id")
 
     def to_arguments(self) -> dict[str, object]:
         """Return the MCP ``tools/call`` arguments for this request."""
         arguments: dict[str, object] = {"config_path": self.config_path}
         if self.workspace is not None:
             arguments["workspace"] = self.workspace
+        if self.job_id is not None:
+            arguments["job_id"] = self.job_id
         return arguments
 
 
@@ -303,8 +316,8 @@ class GetJobStatusArgs:
 
 
 @dataclass(frozen=True, slots=True)
-class GetScreenerStatusArgs:
-    """Typed arguments for ``get_screener_status``."""
+class GetJobResultArgs:
+    """Typed arguments for ``get_job_result``."""
 
     job_id: str
 
@@ -317,47 +330,33 @@ class GetScreenerStatusArgs:
 
 
 @dataclass(frozen=True, slots=True)
-class GetRunArgs:
-    """Typed arguments for ``get_run``."""
-
-    run_id: str
-
-    def __post_init__(self) -> None:
-        _required_text(self.run_id, "run_id")
-
-    def to_arguments(self) -> dict[str, object]:
-        """Return the MCP ``tools/call`` arguments for this request."""
-        return {"run_id": self.run_id}
-
-
-@dataclass(frozen=True, slots=True)
 class ListArtifactsArgs:
     """Typed arguments for ``list_artifacts``."""
 
-    run_id: str
+    job_id: str
 
     def __post_init__(self) -> None:
-        _required_text(self.run_id, "run_id")
+        _required_text(self.job_id, "job_id")
 
     def to_arguments(self) -> dict[str, object]:
         """Return the MCP ``tools/call`` arguments for this request."""
-        return {"run_id": self.run_id}
+        return {"job_id": self.job_id}
 
 
 @dataclass(frozen=True, slots=True)
 class ReadArtifactArgs:
     """Typed arguments for ``read_artifact``."""
 
-    run_id: str
+    job_id: str
     name: str
 
     def __post_init__(self) -> None:
-        _required_text(self.run_id, "run_id")
+        _required_text(self.job_id, "job_id")
         _required_text(self.name, "name")
 
     def to_arguments(self) -> dict[str, object]:
         """Return the MCP ``tools/call`` arguments for this request."""
-        return {"run_id": self.run_id, "name": self.name}
+        return {"job_id": self.job_id, "name": self.name}
 
 
 @dataclass(frozen=True, slots=True)
@@ -451,13 +450,54 @@ class HarnessToolProvider:
                 ),
             )
         try:
-            return _result_from_mcp(name, self._client.call_tool(name, arguments))
+            result = _result_from_mcp(name, self._client.call_tool(name, arguments))
         except HarnessMcpError as error:
             return HarnessToolResult(
                 tool=name,
                 ok=False,
                 failure=_failure_from_error(error, tool=name),
             )
+        if result.ok:
+            submitted = None if arguments is None else arguments.get("job_id")
+            returned = result.structured.get("job_id")
+            if isinstance(submitted, str) and submitted:
+                acknowledged = returned if isinstance(returned, str) else ""
+                if not acknowledged:
+                    return HarnessToolResult(
+                        tool=name,
+                        ok=False,
+                        structured=result.structured,
+                        text=result.text,
+                        failure=HarnessToolFailure(
+                            kind="protocol",
+                            message=(
+                                f"harness MCP tool {name!r} did not acknowledge "
+                                f"submitted job_id {submitted!r}"
+                            ),
+                            tool=name,
+                            payload=result.structured,
+                            execution_certainty="unknown_outcome",
+                        ),
+                    )
+                if acknowledged != submitted:
+                    return HarnessToolResult(
+                        tool=name,
+                        ok=False,
+                        structured=result.structured,
+                        text=result.text,
+                        failure=HarnessToolFailure(
+                            kind="protocol",
+                            message=(
+                                f"harness MCP tool {name!r} returned job_id "
+                                f"{acknowledged!r} for submitted job_id "
+                                f"{submitted!r}"
+                            ),
+                            tool=name,
+                            payload=result.structured,
+                            execution_certainty="unknown_outcome",
+                        ),
+                    )
+        return result
 
     def run_backtest(self, args: RunBacktestArgs) -> HarnessToolResult:
         """Call ``run_backtest`` with typed arguments."""
@@ -503,13 +543,9 @@ class HarnessToolProvider:
         """Call ``get_job_status`` with typed arguments."""
         return self.call_tool(TOOL_GET_JOB_STATUS, args.to_arguments())
 
-    def get_screener_status(self, args: GetScreenerStatusArgs) -> HarnessToolResult:
-        """Call ``get_screener_status`` with typed arguments."""
-        return self.call_tool(TOOL_GET_SCREENER_STATUS, args.to_arguments())
-
-    def get_run(self, args: GetRunArgs) -> HarnessToolResult:
-        """Call ``get_run`` with typed arguments."""
-        return self.call_tool(TOOL_GET_RUN, args.to_arguments())
+    def get_job_result(self, args: GetJobResultArgs) -> HarnessToolResult:
+        """Call ``get_job_result`` with typed arguments."""
+        return self.call_tool(TOOL_GET_JOB_RESULT, args.to_arguments())
 
     def list_artifacts(self, args: ListArtifactsArgs) -> HarnessToolResult:
         """Call ``list_artifacts`` with typed arguments."""
@@ -737,9 +773,8 @@ __all__ = [
     "HARNESS_MCP_SKILL_VERSION",
     "HARNESS_TOOL_NAMES",
     "FailureKind",
+    "GetJobResultArgs",
     "GetJobStatusArgs",
-    "GetRunArgs",
-    "GetScreenerStatusArgs",
     "HarnessToolCatalog",
     "HarnessToolError",
     "HarnessToolFailure",

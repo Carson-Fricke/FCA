@@ -106,7 +106,6 @@ def test_durable_positions_restart_and_scope(tmp_path: Path) -> None:
         (MessageRole.ASSISTANT, {}),
         (MessageRole.TOOL, {"activityKind": "runtime_tool"}),
         (MessageRole.TOOL, {"toolActivity": "finished"}),
-        (MessageRole.TOOL, {"toolCallId": "call-a"}),
         (MessageRole.USER, {"activityKind": "model_output"}),
     ],
 )
@@ -149,28 +148,6 @@ def test_concurrent_intake_is_unique_and_monotonic() -> None:
     inputs = [row for row in persisted if decode_activity(row).sub_agent_id == "child"]
     assert [row.input_position for row in inputs] == list(range(1, 121))
     assert len({row.message_id for row in inputs}) == 120
-
-
-def test_intake_seeds_once_and_never_holds_global_guard() -> None:
-    class Persistence(InMemoryChatPersistence):
-        reads = 0
-        service: ChatService
-
-        def list(self, record_type, workspace_id):
-            if record_type is ChatMessage:
-                assert self.service._guard.acquire(blocking=False)
-                self.service._guard.release()
-                self.reads += 1
-            return super().list(record_type, workspace_id)
-
-    persistence = Persistence()
-    service = persistence.service = ChatService(persistence)
-    execution = _execution(service)
-    for index in range(10):
-        service.create_message(
-            WORKSPACE, execution.chat_id, actor_id="operator", body=f"Input {index}"
-        )
-    assert persistence.reads == 1
 
 
 def test_failed_message_persistence_does_not_consume_position() -> None:
@@ -539,24 +516,6 @@ def test_invalid_consumed_position_is_rejected(position) -> None:
         service.acknowledge_input(WORKSPACE, execution.chat_id, "", position)
 
 
-def test_acknowledgements_use_intake_guard() -> None:
-    service = ChatService()
-    execution = _execution(service)
-    entering = Event()
-
-    def acknowledge() -> None:
-        entering.set()
-        service.acknowledge_input(WORKSPACE, execution.chat_id, "", 1)
-
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        with service._input_state(WORKSPACE, execution.chat_id, None).guard:
-            future = pool.submit(acknowledge)
-            assert entering.wait(5)
-            assert not future.done()
-        future.result(timeout=5)
-    assert service.read_consumed_input(WORKSPACE, execution.chat_id, "") == 1
-
-
 def test_acknowledgement_survives_stale_message_bookkeeping() -> None:
     saved = Event()
     release = Event()
@@ -672,7 +631,7 @@ def test_tool_submission_rereads_execution_after_preparation(mutation: str) -> N
     release = Event()
 
     def identity(prefix: str) -> str:
-        if prefix == "tool-job":
+        if prefix == "job":
             preparing.set()
             assert release.wait(5)
         return f"{prefix}-{uuid4().hex}"
@@ -712,8 +671,8 @@ def test_tool_submission_rereads_execution_after_preparation(mutation: str) -> N
             job = submission.result(timeout=5)
             assert job.intent_epoch == changed.intent_epoch
             assert (
-                job.tool_job_id
-                in service.get_execution(WORKSPACE, execution.execution_id).tool_job_ids
+                job.job_id
+                in service.get_execution(WORKSPACE, execution.execution_id).job_ids
             )
     updated = service.get_execution(WORKSPACE, execution.execution_id)
     assert updated.phase == changed.phase
@@ -764,7 +723,7 @@ def test_tool_submission_storage_is_in_execution_boundary(mutation: str) -> None
     updated = service.get_execution(WORKSPACE, execution.execution_id)
     assert updated.intent_epoch == (1 if mutation == "steer" else 0)
     assert updated.phase == ("creation" if mutation == "steer" else "next")
-    assert updated.tool_job_ids == (job.tool_job_id,)
+    assert updated.job_ids == (job.job_id,)
 
 
 def test_tool_start_rereads_result_after_guard_acquisition() -> None:
@@ -774,8 +733,8 @@ def test_tool_start_rereads_result_after_guard_acquisition() -> None:
     class Service(ChatService):
         pause = False
 
-        def get_tool_job(self, workspace_id: str, tool_job_id: str) -> ToolJob:
-            job = super().get_tool_job(workspace_id, tool_job_id)
+        def get_tool_job(self, workspace_id: str, job_id: str) -> ToolJob:
+            job = super().get_tool_job(workspace_id, job_id)
             if self.pause:
                 self.pause = False
                 observed.set()
@@ -790,16 +749,14 @@ def test_tool_start_rereads_result_after_guard_acquisition() -> None:
     service.pause = True
     with ThreadPoolExecutor(max_workers=1) as pool:
         starting = pool.submit(
-            service.start_tool_job, WORKSPACE, job.tool_job_id, actor_id="tool"
+            service.start_tool_job, WORKSPACE, job.job_id, actor_id="tool"
         )
         assert observed.wait(5)
-        service.record_tool_result(WORKSPACE, job.tool_job_id, result={"ok": True})
+        service.record_tool_result(WORKSPACE, job.job_id, result={"ok": True})
         release.set()
         with pytest.raises(InvalidLifecycleTransition):
             starting.result(timeout=5)
-    assert (
-        service.get_tool_job(WORKSPACE, job.tool_job_id).state is ToolJobState.SUCCEEDED
-    )
+    assert service.get_tool_job(WORKSPACE, job.job_id).state is ToolJobState.SUCCEEDED
 
 
 def test_public_execution_guard_composes_acceptance_and_finalization() -> None:

@@ -17,7 +17,7 @@ use super::schemas::{Artifact, SCHEMA_VERSION, STREAM_ARTIFACTS};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunManifest {
     /// Run identifier.
-    pub run_id: String,
+    pub job_id: String,
     /// Directory holding the run artifacts.
     pub directory: PathBuf,
     /// Rows recorded per artifact.
@@ -113,7 +113,7 @@ pub fn run_fingerprint(
 #[derive(Clone, Debug)]
 pub struct ManifestRowsInput<'a> {
     /// Run identifier.
-    pub run_id: &'a str,
+    pub job_id: &'a str,
     /// Seed text (`_seed_text` output).
     pub seed: &'a str,
     /// Per-artifact batch size.
@@ -149,7 +149,7 @@ pub struct ManifestRowsInput<'a> {
 #[must_use]
 pub fn manifest_rows(input: &ManifestRowsInput<'_>) -> Vec<(String, String)> {
     let mut entries: Vec<(String, String)> = vec![
-        ("run_id".to_string(), input.run_id.to_string()),
+        ("job_id".to_string(), input.job_id.to_string()),
         ("schema_version".to_string(), SCHEMA_VERSION.to_string()),
         ("seed".to_string(), input.seed.to_string()),
         ("batch_size".to_string(), input.batch_size.to_string()),

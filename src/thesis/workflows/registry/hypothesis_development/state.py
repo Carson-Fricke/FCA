@@ -1,7 +1,8 @@
 """Workflow state and outcome records.
 
 Extracted from the original single-module hypothesis-development
-implementation; behavior is unchanged.
+implementation; behavior is unchanged except for the strategy chain, whose
+legacy placeholders are replaced by typed accepted handoffs.
 """
 
 from __future__ import annotations
@@ -11,24 +12,32 @@ from dataclasses import dataclass
 
 from thesis.research.hypothesis import HypothesisDocument
 from thesis.research.models import FittedModelRef, ResearchModelRef
-from thesis.strategies.bundles import StrategyBundle
-from thesis.workflows.backtests import BacktestRunResult
 
 from .contracts import (
+    CandidateEvaluation,
     DiscoveryDraft,
-    ExitCriterion,
     FalsificationPlan,
     FalsificationTrial,
     FalsificationVerdict,
+    ForwardEvaluation,
     HypothesisDraft,
+    NullTestEvaluation,
     RcaDiagnosis,
+    ResearchEvidence,
+    StrategyBacktest,
+    VariationEvaluation,
 )
 from .phases import HypothesisDevelopmentPhase, PhaseTransition
 
 
 @dataclass(frozen=True, slots=True)
 class HypothesisDevelopmentState:
-    """The immutable state snapshot after each workflow transition."""
+    """The immutable state snapshot after each workflow transition.
+
+    ``strategy`` is the frozen program reference accepted at strategy design;
+    ``strategy_backtest`` is the accepted backtest handoff.  Both are folded from
+    stored completions, so replay reproduces them exactly.
+    """
 
     workspace_id: str
     execution_id: str
@@ -45,14 +54,16 @@ class HypothesisDevelopmentState:
     research_model_runtime_configuration: Mapping[str, object] | None = None
     plan: FalsificationPlan | None = None
     trials: tuple[FalsificationTrial, ...] = ()
+    research_evidence: ResearchEvidence | None = None
     hypothesis_cycles: int = 0
     rca: tuple[RcaDiagnosis, ...] = ()
     verdict: FalsificationVerdict | None = None
-    strategy_bundle: StrategyBundle | None = None
-    exit_criteria: tuple[ExitCriterion, ...] = ()
-    strategy_cycles: int = 0
-    strategy_backtest: BacktestRunResult | None = None
-    optimization_backtest: BacktestRunResult | None = None
+    strategy: Mapping[str, object] | None = None
+    strategy_backtest: StrategyBacktest | None = None
+    candidate_evaluation: CandidateEvaluation | None = None
+    null_testing: NullTestEvaluation | None = None
+    variation: VariationEvaluation | None = None
+    forward_validation: ForwardEvaluation | None = None
     model_provenance: Mapping[str, object] | None = None
     journal_id: str | None = None
     error_message: str | None = None
@@ -78,14 +89,16 @@ class HypothesisDevelopmentOutcome:
     research_model_runtime_configuration: Mapping[str, object] | None = None
     plan: FalsificationPlan | None = None
     trials: tuple[FalsificationTrial, ...] = ()
+    research_evidence: ResearchEvidence | None = None
     rca: tuple[RcaDiagnosis, ...] = ()
     verdict: FalsificationVerdict | None = None
-    strategy_bundle: StrategyBundle | None = None
-    exit_criteria: tuple[ExitCriterion, ...] = ()
+    strategy: Mapping[str, object] | None = None
     hypothesis_cycles: int = 0
-    strategy_cycles: int = 0
-    strategy_backtest: BacktestRunResult | None = None
-    optimization_backtest: BacktestRunResult | None = None
+    strategy_backtest: StrategyBacktest | None = None
+    candidate_evaluation: CandidateEvaluation | None = None
+    null_testing: NullTestEvaluation | None = None
+    variation: VariationEvaluation | None = None
+    forward_validation: ForwardEvaluation | None = None
     journal_id: str | None = None
     detail: str | None = None
 
@@ -93,7 +106,6 @@ class HypothesisDevelopmentOutcome:
         """Return the transport representation of the outcome."""
         return {
             "executionId": self.execution_id,
-            "exitCriteria": [item.as_dict() for item in self.exit_criteria],
             "fenced": self.fenced,
             "discovery": (None if self.discovery is None else self.discovery.as_dict()),
             "hypothesis": (
@@ -133,17 +145,26 @@ class HypothesisDevelopmentOutcome:
                     "reference": self.research_model_reference.key,
                 }
             ),
-            "optimizationBacktest": (
+            "candidateEvaluation": (
                 None
-                if self.optimization_backtest is None
-                else self.optimization_backtest.as_dict()
+                if self.candidate_evaluation is None
+                else self.candidate_evaluation.as_dict()
             ),
+            "nullTesting": (
+                None if self.null_testing is None else self.null_testing.as_dict()
+            ),
+            "variation": (None if self.variation is None else self.variation.as_dict()),
+            "forwardValidation": (
+                None
+                if self.forward_validation is None
+                else self.forward_validation.as_dict()
+            ),
+            "strategy": None if self.strategy is None else dict(self.strategy),
             "strategyBacktest": (
                 None
                 if self.strategy_backtest is None
                 else self.strategy_backtest.as_dict()
             ),
-            "strategyCycles": self.strategy_cycles,
             "phase": self.phase.value,
             "plan": (
                 None
@@ -171,10 +192,10 @@ class HypothesisDevelopmentOutcome:
                 }
             ),
             "rca": [item.as_dict() for item in self.rca],
-            "strategyManifest": (
+            "researchEvidence": (
                 None
-                if self.strategy_bundle is None
-                else self.strategy_bundle.manifest()
+                if self.research_evidence is None
+                else self.research_evidence.as_dict()
             ),
             "transitions": [item.as_dict() for item in self.transitions],
             "trials": [item.as_dict() for item in self.trials],

@@ -4,6 +4,7 @@
 @.github/instructions/market-lake-local.instructions.md
 @.github/instructions/thesis-workflow-development.instructions.md
 @.github/instructions/agent-session-delivery.instructions.md
+@.github/instructions/testing-strategy.instructions.md
 
 ## Agent Session Delivery Contract
 
@@ -30,6 +31,31 @@ no hidden optional bypass. `REQ-DEL` in the runtime architecture names the
 delivery assertions and verification paths; the coordinator owns test edits and
 integration verification.
 
+## Testing Strategy Contract
+
+Every coding agent adding, changing, or deleting tests MUST follow
+`.github/instructions/testing-strategy.instructions.md`. The repository is
+behavior-first: verify behavior at the highest practical boundary, and allow a
+unit test only for pure low-level logic in the documented categories. The full
+suite MUST finish in under 3 minutes; correct-but-expensive tests that cannot
+fit are deleted or converted off their expensive boundary, not kept behind a
+marker. Mandated guards and named behavior suites in the other instruction
+files remain required and take precedence over any pruning rule.
+
+## Harness Job Identity Contract
+
+Every coding agent changing harness, Thesis submission, job tracking, or job
+report code MUST follow the "Execution Job Contract" in
+`.github/instructions/copilot-instructions.md` and, for workflow code, item 11
+of `.github/instructions/thesis-workflow-development.instructions.md`. One
+execution has exactly one `job_id`; submission composition allocates and
+durably retains it before dispatch, harness admission owns join/conflict,
+client adapters own acknowledgement validation, and callers own waiting.
+Unknown outcomes are reconciled by the retained ID, never auto-replayed.
+Instructions and prompts are not proof of compliance: the integration owner
+MUST retain and run interruption, acknowledgement-mismatch, and
+duplicate-admission behavior tests.
+
 ## FCA Execution Policy
 
 - Never assign the same file to concurrent agents. Treat shared entrypoints,
@@ -41,6 +67,12 @@ integration verification.
   the first integration run. If a suite hangs or times out, isolate the test
   with a hard timeout instead of rerunning the unchanged suite.
 - Do not start work beyond the scope the user approved.
+- Treat superseded behavior as something to remove, not preserve, unless the
+  user explicitly requests preservation. Do not infer a compatibility requirement
+  from old documents, persisted formats, existing callers, or tests. Within the
+  approved scope, remove obsolete paths and update affected callers, tests, and
+  active documentation; do not invent adapters, aliases, fallbacks, migrations,
+  or interfaces solely to keep superseded behavior or an outdated test working.
 - Do not rewrite historical verification records solely because later tasks
   change the repository-wide test count.
 - Use `ruff` for all lint and format checks and `ty` for all type checks. Do not

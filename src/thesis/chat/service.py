@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from queue import Queue
 from threading import Lock, RLock, Thread
-from typing import TYPE_CHECKING, Protocol, TypeVar, cast
+from typing import Protocol, TypeVar, cast
 
 from thesis.chat.contracts import (
     WORKFLOW_NODE_ROLE,
@@ -33,6 +33,7 @@ from thesis.chat.contracts import (
     SubAgentRecord,
     SubAgentStatus,
     ToolJob,
+    ToolJobConflictError,
     ToolJobState,
     TranscriptItemKind,
     WorkflowDefinition,
@@ -48,9 +49,6 @@ from thesis.execution.events import (
     ExecutionEventType,
     InMemoryExecutionEventStore,
 )
-
-if TYPE_CHECKING:
-    from thesis.agent.messages import ToolCorrelation, ToolRequest
 
 Record = (
     ChatThread
@@ -259,7 +257,7 @@ def _record_id(record: Record) -> str:
         Attachment: "attachment_id",
         Investigation: "investigation_id",
         WorkflowExecution: "execution_id",
-        ToolJob: "tool_job_id",
+        ToolJob: "job_id",
         SubAgentRecord: "sub_agent_id",
         AgentInvocation: "invocation_id",
     }.get(type(record))
@@ -276,37 +274,6 @@ def _utc_now() -> datetime:
 
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex}"
-
-
-def _legacy_tool_requests(
-    data: Mapping[str, object] | None,
-) -> tuple[ToolRequest, ...]:
-    """Decode retired native tool-call metadata into neutral requests."""
-    from thesis.agent.messages import ToolRequest
-
-    raw = (data or {}).get("toolCalls")
-    if not isinstance(raw, list | tuple):
-        return ()
-    requests: list[ToolRequest] = []
-    for item in raw:
-        if not isinstance(item, Mapping):
-            continue
-        call_id = item.get("id")
-        function = item.get("function")
-        if (
-            not isinstance(call_id, str)
-            or not call_id
-            or not isinstance(function, Mapping)
-        ):
-            continue
-        name = function.get("name")
-        if not isinstance(name, str) or not name:
-            continue
-        arguments = function.get("arguments")
-        requests.append(
-            ToolRequest(call_id, name, arguments if isinstance(arguments, str) else "")
-        )
-    return tuple(requests)
 
 
 class ChatService:
@@ -735,13 +702,6 @@ class ChatService:
                 raise CrossWorkspaceLinkError(
                     "attachment does not belong to the selected chat"
                 )
-        if (
-            role is MessageRole.ASSISTANT
-            and not body.strip()
-            and data
-            and data.get("toolCalls")
-        ):
-            body = "Tool calls requested"
         now = self._now()
         anchor = (data or {}).get("subAgentId")
         parent_conversation_id = None
@@ -776,12 +736,7 @@ class ChatService:
             updated_at=now,
         )
         # Import locally: runtime consumers themselves depend on ChatService.
-        from thesis.agent.runtime.activity import (
-            Delivery,
-            activity_data,
-            decode_activity,
-            is_external_input,
-        )
+        from thesis.agent.runtime.activity import decode_activity, is_external_input
 
         if not isinstance(canonical, Mapping) and role is MessageRole.ASSISTANT:
             from thesis.agent.messages import MessageContent, SessionMessage
@@ -795,45 +750,11 @@ class ChatService:
                     result={"reasoning": message.reasoning}
                     if message.reasoning
                     else None,
-                    requests=_legacy_tool_requests(data),
                 ),
             ).as_dict()
             message = replace_record(
                 message,
                 data={**dict(message.data or {}), "sessionMessage": canonical},
-            )
-        elif (
-            not isinstance(canonical, Mapping)
-            and role is MessageRole.TOOL
-            and tool_result is not None
-        ):
-            from thesis.agent.messages import MessageContent, SessionMessage
-
-            datum_type = tool_result.get("datumType")
-            canonical = SessionMessage(
-                message.message_id,
-                "incoming",
-                MessageContent(
-                    message.body,
-                    datum_type
-                    if isinstance(datum_type, str) and datum_type
-                    else "tool_result",
-                    correlation=self._legacy_tool_correlation(message, tool_result),
-                    result=tool_result,
-                ),
-            ).as_dict()
-            message = replace_record(
-                message,
-                data={
-                    **dict(message.data or {}),
-                    **activity_data(
-                        Delivery(
-                            anchor if isinstance(anchor, str) and anchor else None,
-                            message.message_id,
-                        )
-                    ),
-                    "sessionMessage": canonical,
-                },
             )
 
         if is_external_input(message):
@@ -927,31 +848,6 @@ class ChatService:
                 )
             )
         return message
-
-    def _legacy_tool_correlation(
-        self, message: ChatMessage, tool_result: Mapping[str, object]
-    ) -> ToolCorrelation | None:
-        """Join a retired tool-result shape to its durable model request."""
-        from thesis.agent.messages import ToolCorrelation, from_record
-
-        call_id = tool_result.get("callId")
-        if not isinstance(call_id, str) or not call_id:
-            return None
-        conversation_id = message.conversation_id or message.chat_id
-        for record in reversed(
-            self.list_conversation_messages(
-                message.workspace_id, message.chat_id, conversation_id
-            )
-        ):
-            if not isinstance((record.data or {}).get("sessionMessage"), Mapping):
-                continue
-            canonical = from_record(record)
-            if canonical.direction != "outgoing":
-                continue
-            for request in canonical.content.requests:
-                if request.id == call_id:
-                    return ToolCorrelation(record.message_id, call_id, request.name)
-        return None
 
     def send_message(
         self,
@@ -1837,21 +1733,41 @@ class ChatService:
         *,
         tool_name: str,
         actor_id: str,
-        correlation_id: str | None = None,
+        job_id: str | None = None,
         investigation_id: str | None = None,
         strategy_ids: tuple[str, ...] = (),
         experiment_ids: tuple[str, ...] = (),
+        attribution: Mapping[str, object] | None = None,
     ) -> ToolJob:
-        """Submit a tool job while preserving its execution correlation."""
+        """Submit a tool job under one stable job identity.
+
+        The record is Thesis's tracking attribution, submission certainty, and
+        late-result observation boundary.  For a harness-backed operation the
+        harness job record under the same ``job_id`` remains the execution-state
+        and result authority.
+
+        An explicit job id that is already registered joins the existing record
+        only when its execution, operation, and attribution match; registration
+        never resets timestamps, duplicates links, or overwrites a prior
+        result.  Any mismatch fails as an explicit conflict.
+        """
         if investigation_id is not None:
             self.get_investigation(workspace_id, investigation_id)
         now = self._now()
-        tool_job_id = self._id_factory("tool-job")
-        correlation_id = (
-            self._id_factory("correlation")
-            if correlation_id is None
-            else correlation_id
+        submitted_job_id = self._id_factory("job") if job_id is None else job_id
+        resolved_attribution: Mapping[str, object] = (
+            {} if attribution is None else attribution
         )
+        if job_id is not None:
+            existing = self.find_tool_job(workspace_id, job_id)
+            if existing is not None:
+                return _join_tool_job(
+                    existing,
+                    execution_id=execution_id,
+                    tool_name=tool_name,
+                    attribution=resolved_attribution,
+                    investigation_id=investigation_id,
+                )
         with self.execution_guard(workspace_id, execution_id):
             execution = self.get_execution(workspace_id, execution_id)
             if execution.state not in _STEERABLE_EXECUTION_STATES:
@@ -1869,14 +1785,14 @@ class ChatService:
                 workspace_id=workspace_id,
                 created_at=now,
                 created_by=actor_id,
-                tool_job_id=tool_job_id,
+                job_id=submitted_job_id,
                 execution_id=execution_id,
                 chat_id=execution.chat_id,
                 conversation_id=execution.conversation_id,
                 parent_conversation_id=execution.parent_conversation_id,
-                correlation_id=correlation_id,
                 tool_name=tool_name,
                 submitted_by=actor_id,
+                attribution=resolved_attribution,
                 investigation_id=investigation_id or execution.investigation_id,
                 strategy_ids=strategy_ids,
                 experiment_ids=experiment_ids,
@@ -1889,7 +1805,7 @@ class ChatService:
                     execution,
                     strategy_ids=(*execution.strategy_ids, *strategy_ids),
                     experiment_ids=(*execution.experiment_ids, *experiment_ids),
-                    tool_job_ids=(*execution.tool_job_ids, job.tool_job_id),
+                    job_ids=(*execution.job_ids, job.job_id),
                     updated_at=now,
                 )
             )
@@ -1901,7 +1817,7 @@ class ChatService:
                 replace_record(
                     investigation,
                     links=investigation.links.add(
-                        tool_job_ids=(job.tool_job_id,),
+                        job_ids=(job.job_id,),
                         strategy_ids=strategy_ids,
                         experiment_ids=experiment_ids,
                     ),
@@ -1916,7 +1832,7 @@ class ChatService:
                 links=current.links.add(
                     strategy_ids=strategy_ids,
                     experiment_ids=experiment_ids,
-                    tool_job_ids=(job.tool_job_id,),
+                    job_ids=(job.job_id,),
                 ),
                 updated_at=now,
             ),
@@ -1924,23 +1840,69 @@ class ChatService:
         self._append_event(
             updated,
             ExecutionEventType.TOOL_SUBMITTED,
-            correlation_id=job.correlation_id,
+            correlation_id=job.job_id,
             actor_id=actor_id,
             actor_scope=ActorScope.WORKFLOW,
-            payload={"toolJobId": job.tool_job_id, "toolName": tool_name},
+            payload={"jobId": job.job_id, "toolName": tool_name},
             intent_epoch=job.intent_epoch,
         )
         return job
 
-    def get_tool_job(self, workspace_id: str, tool_job_id: str) -> ToolJob:
-        return self._require(ToolJob, workspace_id, tool_job_id)
+    def get_tool_job(self, workspace_id: str, job_id: str) -> ToolJob:
+        return self._require(ToolJob, workspace_id, job_id)
+
+    def find_tool_job(self, workspace_id: str, job_id: str) -> ToolJob | None:
+        """Return the tracking record for one job id, or ``None`` when untracked.
+
+        Report and status readers use this boundary to distinguish a non-harness
+        tool job, which must never be presented as a harness execution, from an
+        untracked job the harness may still own.
+        """
+        record = self._persistence.get(ToolJob, workspace_id, job_id)
+        if record is None:
+            return None
+        if record.workspace_id != workspace_id:
+            raise CrossWorkspaceLinkError("record belongs to another workspace")
+        return record
+
+    def find_execution_tool_job(
+        self,
+        workspace_id: str,
+        execution_id: str,
+        *,
+        tool_name: str,
+        attribution: Mapping[str, object] | None = None,
+    ) -> ToolJob | None:
+        """Return the execution's tracked job matching operation and attribution.
+
+        The execution's durable job links are the submission reference: resume
+        and recovery rejoin the matching tracked job instead of allocating a
+        replacement.  A stale job from another revision does not match and is
+        left untouched.  More than one match is an ambiguous prior reference
+        and fails closed rather than being guessed.
+        """
+        execution = self.get_execution(workspace_id, execution_id)
+        expected = {} if attribution is None else dict(attribution)
+        matches = [
+            job
+            for job in self._existing_many(ToolJob, workspace_id, execution.job_ids)
+            if job.execution_id == execution_id
+            and job.tool_name == tool_name
+            and dict(job.attribution) == expected
+        ]
+        if len(matches) > 1:
+            raise ToolJobConflictError(
+                f"execution {execution_id!r} has {len(matches)} tracked "
+                f"{tool_name!r} jobs with identical attribution"
+            )
+        return matches[0] if matches else None
 
     def start_tool_job(
-        self, workspace_id: str, tool_job_id: str, *, actor_id: str
+        self, workspace_id: str, job_id: str, *, actor_id: str
     ) -> ToolJob:
-        job = self.get_tool_job(workspace_id, tool_job_id)
+        job = self.get_tool_job(workspace_id, job_id)
         with self.execution_guard(workspace_id, job.execution_id):
-            job = self.get_tool_job(workspace_id, tool_job_id)
+            job = self.get_tool_job(workspace_id, job_id)
             if job.state is ToolJobState.RUNNING:
                 return job
             if job.state is not ToolJobState.SUBMITTED:
@@ -1954,10 +1916,10 @@ class ChatService:
         self._append_event(
             execution,
             ExecutionEventType.TOOL_STARTED,
-            correlation_id=job.correlation_id,
+            correlation_id=job.job_id,
             actor_id=actor_id,
             actor_scope=ActorScope.TOOL,
-            payload={"toolJobId": job.tool_job_id, "toolName": job.tool_name},
+            payload={"jobId": job.job_id, "toolName": job.tool_name},
             intent_epoch=job.intent_epoch,
         )
         return updated
@@ -1965,7 +1927,7 @@ class ChatService:
     def record_tool_result(
         self,
         workspace_id: str,
-        tool_job_id: str,
+        job_id: str,
         *,
         result: Mapping[str, object] | None = None,
         actor_id: str | None = None,
@@ -1974,9 +1936,9 @@ class ChatService:
         intent_epoch: int | None = None,
     ) -> ToolJob:
         """Attach a result even when steering, stop, or cancel happened first."""
-        job = self.get_tool_job(workspace_id, tool_job_id)
+        job = self.get_tool_job(workspace_id, job_id)
         with self.execution_guard(workspace_id, job.execution_id):
-            job = self.get_tool_job(workspace_id, tool_job_id)
+            job = self.get_tool_job(workspace_id, job_id)
             execution = self.get_execution(workspace_id, job.execution_id)
             if job.state is ToolJobState.SUCCEEDED:
                 return job
@@ -2005,11 +1967,11 @@ class ChatService:
             ExecutionEventType.TOOL_RESULT
             if success
             else ExecutionEventType.TOOL_FAILED,
-            correlation_id=job.correlation_id,
+            correlation_id=job.job_id,
             actor_id=actor_id or job.tool_name,
             actor_scope=ActorScope.TOOL,
             payload={
-                "toolJobId": job.tool_job_id,
+                "jobId": job.job_id,
                 "result": None if result is None else dict(result),
                 "errorMessage": error_message,
             },
@@ -2191,6 +2153,31 @@ class ChatService:
             self._require(record_type, workspace_id, record_id)
             for record_id in record_ids
         )
+
+
+def _join_tool_job(
+    existing: ToolJob,
+    *,
+    execution_id: str,
+    tool_name: str,
+    attribution: Mapping[str, object],
+    investigation_id: str | None,
+) -> ToolJob:
+    """Return an already-registered job, or fail closed on any mismatch."""
+    if (
+        existing.execution_id != execution_id
+        or existing.tool_name != tool_name
+        or dict(existing.attribution) != dict(attribution)
+        or (
+            investigation_id is not None
+            and existing.investigation_id != investigation_id
+        )
+    ):
+        raise ToolJobConflictError(
+            f"tool job {existing.job_id!r} is already registered with a different "
+            "execution, operation, attribution, or investigation"
+        )
+    return existing
 
 
 __all__ = [

@@ -65,6 +65,7 @@ def test_serving_authors_template_validates_and_runs_by_id(tmp_path: Path) -> No
                     "validate_study",
                     "run_study",
                     "run_backtest",
+                    "run_backtest_batch",
                     "validate_strategy",
                 )
             )
@@ -73,9 +74,11 @@ def test_serving_authors_template_validates_and_runs_by_id(tmp_path: Path) -> No
             self, name: str, arguments: Mapping[str, object] | None = None
         ) -> HarnessToolResult:
             calls.append((name, arguments or {}))
-            return HarnessToolResult(
-                name, True, {"valid": True, "run_id": "fake-study-run"}
-            )
+            structured: dict[str, object] = {"valid": True}
+            config = (arguments or {}).get("config")
+            job_id = config.get("job_id") if isinstance(config, Mapping) else None
+            structured["job_id"] = job_id if isinstance(job_id, str) else "job-one"
+            return HarnessToolResult(name, True, structured)
 
     class Provider:
         def complete(
@@ -145,14 +148,31 @@ def test_serving_authors_template_validates_and_runs_by_id(tmp_path: Path) -> No
             schema = cast(dict[str, object], functions[name]["parameters"])
             assert schema["required"] == ["program_id"]
             assert schema["additionalProperties"] is False
-            assert "source" not in cast(dict[str, object], schema["properties"])
+            properties = cast(dict[str, object], schema["properties"])
+            assert "source" not in properties
+            if name == "run_backtest":
+                assert set(properties) == {"program_id", "parameters"}
+            else:
+                assert set(properties) == {"program_id"}
+        batch = cast(dict[str, object], functions["run_backtest_batch"]["parameters"])
+        assert batch["required"] == ["program_id", "assignments"]
+        assert batch["additionalProperties"] is False
+        batch_properties = cast(dict[str, object], batch["properties"])
+        assert set(batch_properties) == {"program_id", "assignments", "label"}
+        assignments = cast(dict[str, object], batch_properties["assignments"])
+        assert assignments["minItems"] == 1 and assignments["maxItems"] == 16
+        assert "source" not in batch_properties
     validated = cast(dict[str, object], calls[0][1]["model"])
     document = cast(dict[str, object], calls[1][1]["config"])
     instance = cast(list[dict[str, object]], document["strategy_instances"])[0]
     assert (
         cast(dict[str, object], instance["parameters"])["source"] == validated["source"]
     )
-    assert document["symbols"] == instance["symbols"] == ["MSFT"]
+    assert (
+        cast(dict[str, object], document["data"])["symbols"]
+        == instance["symbols"]
+        == ["MSFT"]
+    )
     assert '"MSFT".into()' in str(validated["source"])
     assert document["data"] == {
         "subscriptions": cast(dict[str, object], validated["harnessConfiguration"])[

@@ -28,7 +28,8 @@ HARNESS_URL = "http://harness.test:9000"
 BEARER = "harness-secret"
 
 _TOOL_NAMES = {
-    name: {"type": "object"} for name in ("run_backtest", "launch_trader", "get_run")
+    name: {"type": "object"}
+    for name in ("run_backtest", "launch_trader", "get_job_result")
 }
 
 
@@ -60,12 +61,14 @@ class CatalogHandler:
             params = message.get("params")
             assert isinstance(params, dict)
             self.calls.append(dict(params))
+            arguments = params.get("arguments")
+            job_id = arguments.get("job_id") if isinstance(arguments, Mapping) else None
             result = {
                 "isError": False,
                 "content": [{"type": "text", "text": "ok"}],
                 "structuredContent": {
                     "exit_code": 0,
-                    "job_id": "job-1",
+                    "job_id": job_id if isinstance(job_id, str) else "job-1",
                     "state": "queued",
                     "tool": params.get("name"),
                 },
@@ -95,7 +98,10 @@ def _local_topology() -> HarnessMcpTopology:
 
 def _request() -> HarnessActivationRequest:
     return HarnessActivationRequest(
-        bundle_ref="b" * 64, config_path="cfg/bt.yaml", action="backtest"
+        bundle_ref="b" * 64,
+        config_path="cfg/bt.yaml",
+        action="backtest",
+        job_id="job-submitted",
     )
 
 
@@ -112,13 +118,16 @@ def test_mcp_boundary_derives_capabilities_and_routes_backtest() -> None:
     outcome = boundary.run_backtest(_request())
 
     assert outcome.exit_code == 0
-    assert outcome.job_id == "job-1"
+    assert outcome.job_id == "job-submitted"
     assert handler.calls[-1]["name"] == "run_backtest"
-    assert handler.calls[-1]["arguments"] == {"config_path": "cfg/bt.yaml"}
+    assert handler.calls[-1]["arguments"] == {
+        "config_path": "cfg/bt.yaml",
+        "job_id": "job-submitted",
+    }
 
 
 def test_mcp_boundary_capabilities_follow_the_catalog() -> None:
-    handler = CatalogHandler(tools=("get_run",))
+    handler = CatalogHandler(tools=("get_job_result",))
     boundary = open_harness_mcp_boundary(_local_topology(), in_process_handler=handler)
 
     assert boundary.capabilities.backtest is False

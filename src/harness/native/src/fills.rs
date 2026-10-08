@@ -3,9 +3,8 @@
 //!
 //! This is the stable facade of the fills package: [`crate::simple_touch`]
 //! (`SimpleTouch` + the shared `FillDecision`), [`crate::latency_size`]
-//! (`LatencySize`), and [`crate::trade_through`] (`TradeThrough`) mirror their
-//! Zig counterparts. Every decision is an exact `i128` fixed-point value at
-//! scale 18.
+//! (`LatencySize`), and [`crate::trade_through`] (`TradeThrough`). Every
+//! decision is an exact `i128` fixed-point value at scale 18.
 
 use crate::market::{Error, MarketEvent, MarketOrder};
 use crate::simple_touch::{DecideOptions, FillDecision, SimpleTouch};

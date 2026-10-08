@@ -13,10 +13,7 @@ use super::launcher::{
 use super::mcp::compose_local_server;
 use super::native::{NativeBacktestRunner, NativeScreenRunner};
 use super::screener::{InProcessScreenLauncher, ScreenLauncher};
-use super::store::{
-    FileSystemJobRepository, FileSystemRunStore, InMemoryJobRepository, InMemoryRunStore,
-    JobRepository, RunStore, SasIssuer,
-};
+use super::store::{FileSystemJobStore, InMemoryJobStore, JobStore, SasIssuer};
 
 /// Environment variable overriding the durable results root.
 pub const RESULTS_ROOT_VARIABLE: &str = "HARNESS_RESULTS_ROOT";
@@ -39,10 +36,8 @@ pub fn results_root_from_env() -> PathBuf {
 pub struct AppState {
     /// Static bearer token, or `None` to fail closed.
     pub bearer_token: Option<String>,
-    /// Results store.
-    pub run_store: Arc<dyn RunStore>,
-    /// Launch-job repository.
-    pub job_repository: Arc<dyn JobRepository>,
+    /// Authoritative job store.
+    pub job_store: Arc<dyn JobStore>,
     /// Backtest launcher.
     pub launcher: Arc<dyn BacktestLauncher>,
     /// Screening launcher.
@@ -61,10 +56,8 @@ pub struct AppState {
 pub struct AppConfig {
     /// Explicit bearer token; when `None` the runtime environment is read.
     pub bearer_token: Option<String>,
-    /// Results store.
-    pub run_store: Arc<dyn RunStore>,
-    /// Launch-job repository.
-    pub job_repository: Arc<dyn JobRepository>,
+    /// Authoritative job store.
+    pub job_store: Arc<dyn JobStore>,
     /// Backtest launcher.
     pub launcher: Arc<dyn BacktestLauncher>,
     /// Screening launcher.
@@ -87,25 +80,21 @@ impl AppConfig {
     /// composed.
     #[must_use]
     pub fn in_memory() -> Self {
-        let run_store = Arc::new(InMemoryRunStore::new());
-        let job_repository = Arc::new(InMemoryJobRepository::new());
+        let job_store = Arc::new(InMemoryJobStore::new());
         let clock = Arc::new(SystemClock);
         let launcher = Arc::new(InProcessLauncher::new(
-            run_store.clone(),
-            job_repository.clone(),
+            job_store.clone(),
             Arc::new(UnportedBacktestRunner),
             clock.clone(),
         ));
         let screener_launcher = Arc::new(InProcessScreenLauncher::new(
-            run_store.clone(),
-            job_repository.clone(),
+            job_store.clone(),
             Arc::new(NativeScreenRunner::default()),
             clock.clone(),
         ));
         Self {
             bearer_token: None,
-            run_store,
-            job_repository,
+            job_store,
             launcher,
             screener_launcher,
             sas_issuer: None,
@@ -117,7 +106,7 @@ impl AppConfig {
 
     /// Build a durable app config rooted at `root` driving the native engine.
     ///
-    /// Runs, jobs, and artifacts persist under `root` and remain queryable by a
+    /// Jobs and artifacts persist under `root` and remain queryable by a
     /// fresh process composed from the same root.
     #[must_use]
     pub fn durable(root: impl Into<PathBuf>) -> Self {
@@ -128,25 +117,21 @@ impl AppConfig {
     #[must_use]
     pub fn durable_with_runner(root: impl Into<PathBuf>, runner: Arc<dyn BacktestRunner>) -> Self {
         let root = root.into();
-        let run_store: Arc<dyn RunStore> = Arc::new(FileSystemRunStore::new(&root));
-        let job_repository: Arc<dyn JobRepository> = Arc::new(FileSystemJobRepository::new(&root));
+        let job_store: Arc<dyn JobStore> = Arc::new(FileSystemJobStore::new(&root));
         let clock = Arc::new(SystemClock);
         let launcher = Arc::new(InProcessLauncher::new(
-            run_store.clone(),
-            job_repository.clone(),
+            job_store.clone(),
             runner,
             clock.clone(),
         ));
         let screener_launcher = Arc::new(InProcessScreenLauncher::new(
-            run_store.clone(),
-            job_repository.clone(),
+            job_store.clone(),
             Arc::new(NativeScreenRunner::default()),
             clock.clone(),
         ));
         Self {
             bearer_token: None,
-            run_store,
-            job_repository,
+            job_store,
             launcher,
             screener_launcher,
             sas_issuer: None,
@@ -165,12 +150,11 @@ impl AppConfig {
     pub(crate) fn into_state(self, bearer_token: Option<String>) -> AppState {
         let mcp_server = match self.mcp_server {
             Some(server) => Some(server),
-            None => compose_local_server(self.run_store.clone(), self.job_repository.clone()).ok(),
+            None => compose_local_server(self.job_store.clone()).ok(),
         };
         AppState {
             bearer_token,
-            run_store: self.run_store,
-            job_repository: self.job_repository,
+            job_store: self.job_store,
             launcher: self.launcher,
             screener_launcher: self.screener_launcher,
             sas_issuer: self.sas_issuer,

@@ -21,6 +21,10 @@ it does not own agent turns, provider projection, or workflow transitions.
 - `programs.py` owns committed study/strategy/indicator authoring, targeted
   updates, bounded reads, ID listing, harness validation receipts, ID-based
   execution, pinned dependency snapshots, and matching SDK references/templates.
+  Strategies declare tunable parameters in the committed manifest; single runs
+  and bounded candidate/null/variation batches validate assignments against the
+  declaration, and the workflow-scoped data-window policy gates, or for the
+  forward holdout rewrites, the committed window before submission.
 - `repository.py` defines the structural create/open/resolve/publish/locator port
   shared by local and Gitea providers.
 

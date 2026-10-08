@@ -45,7 +45,7 @@ WORKSPACE_DIRECTORIES = (
     "indicators",
     "models",
     "knowledge",
-    "backtests",
+    "jobs",
     "uploads",
     "activations",
 )
@@ -168,7 +168,7 @@ written to this repository.
 - `indicators/`: workspace-authored, content-addressed indicator definitions
 - `models/`: workspace-authored statistical research models
 - `knowledge/`: workspace-local reference pages queried alongside shared Thesis knowledge
-- `backtests/`: manifests, metrics, traces, and reports
+- `jobs/`: imported job manifests, metrics, traces, and reports
 - `uploads/`: hashed user evidence and provenance metadata
 - `activations/`: bundles, consent references, and outcomes
 """

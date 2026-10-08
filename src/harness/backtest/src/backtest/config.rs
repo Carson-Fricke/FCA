@@ -131,6 +131,20 @@ impl Default for RiskPipelineConfig {
     }
 }
 
+/// Optional signal-destruction null transform for a replay run.
+///
+/// Only emitted into the canonical configuration when it was supplied, so
+/// absent-null documents keep their shipped identities and hashes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NullTransformConfig {
+    /// Transform mode; only `block_permutation` is defined.
+    pub mode: String,
+    /// Consecutive log-return block size, `1..=10000`.
+    pub block_size: u32,
+    /// Permutation seed, non-negative.
+    pub seed: u64,
+}
+
 /// Resource limits for a deployment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResourceLimitsConfig {
@@ -182,8 +196,8 @@ impl Default for DeploymentConfig {
 /// The resolved fields the backtest kernel reads from configuration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BacktestConfig {
-    /// Run identifier.
-    pub run_id: String,
+    /// Job identifier.
+    pub job_id: String,
     /// Configuration shell (`backtest`).
     pub shell: String,
     /// Schema version.
@@ -224,6 +238,8 @@ pub struct BacktestConfig {
     pub deployment: DeploymentConfig,
     /// Configured strategy instances.
     pub strategy_instances: Vec<StrategyInstanceConfig>,
+    /// Optional signal-destruction null transform.
+    pub null_transform: Option<NullTransformConfig>,
 }
 
 impl BacktestConfig {
@@ -233,15 +249,15 @@ impl BacktestConfig {
     ///
     /// Returns [`BacktestError::Configuration`] when the window is empty.
     pub fn new(
-        run_id: impl Into<String>,
+        job_id: impl Into<String>,
         start_ns: i64,
         end_ns: i64,
         seed: u64,
     ) -> Result<Self, BacktestError> {
-        let run_id = run_id.into();
-        if run_id.trim().is_empty() {
+        let job_id = job_id.into();
+        if job_id.trim().is_empty() {
             return Err(BacktestError::Configuration(
-                "run_id must be a non-empty string".to_string(),
+                "job_id must be a non-empty string".to_string(),
             ));
         }
         if end_ns <= start_ns {
@@ -250,7 +266,7 @@ impl BacktestConfig {
             ));
         }
         Ok(Self {
-            run_id,
+            job_id,
             shell: "backtest".to_string(),
             schema_version: 1,
             clock: "event_time".to_string(),
@@ -271,6 +287,7 @@ impl BacktestConfig {
             risk_pipeline: RiskPipelineConfig::default(),
             deployment: DeploymentConfig::default(),
             strategy_instances: Vec::new(),
+            null_transform: None,
         })
     }
 
@@ -304,10 +321,10 @@ impl BacktestConfig {
     /// Return the canonical, JSON-ready configuration value.
     #[must_use]
     pub fn canonical_json(&self) -> JsonValue {
-        JsonValue::object([
+        let mut value = JsonValue::object([
             ("schema_version", JsonValue::UInt(self.schema_version)),
             ("shell", JsonValue::String(self.shell.clone())),
-            ("run_id", JsonValue::String(self.run_id.clone())),
+            ("job_id", JsonValue::String(self.job_id.clone())),
             (
                 "start",
                 JsonValue::object([(
@@ -397,7 +414,23 @@ impl BacktestConfig {
                 ]),
             ),
             ("deployment", deployment_json(&self.deployment)),
-        ])
+        ]);
+        if let Some(null_transform) = &self.null_transform {
+            if let JsonValue::Object(entries) = &mut value {
+                entries.insert(
+                    "null".to_string(),
+                    JsonValue::object([
+                        ("mode", JsonValue::String(null_transform.mode.clone())),
+                        (
+                            "block_size",
+                            JsonValue::UInt(u64::from(null_transform.block_size)),
+                        ),
+                        ("seed", JsonValue::UInt(null_transform.seed)),
+                    ]),
+                );
+            }
+        }
+        value
     }
 
     fn data_json(&self) -> JsonValue {
@@ -419,11 +452,17 @@ impl BacktestConfig {
                         .collect(),
                 ),
             ),
-            (
+        ]);
+        if self
+            .data_subscriptions
+            .iter()
+            .any(|input| input.data_type == "bars")
+        {
+            data.insert(
                 "bar_interval",
                 JsonValue::String(self.data_bar_interval.clone()),
-            ),
-        ]);
+            );
+        }
         if self.has_subscription_echo() {
             data.insert(
                 "subscriptions",
@@ -469,7 +508,7 @@ impl BacktestConfig {
                 "configuration shell must be 'backtest' or 'study', not '{shell}'"
             )));
         }
-        let run_id = string_field(root, "run_id")?;
+        let job_id = string_field(root, "job_id")?;
         let start_ns =
             datetime_field(root, "start")?.unwrap_or(crate::backtest::job::DEFAULT_START_NS);
         let end_ns = datetime_field(root, "end")?.unwrap_or(crate::backtest::job::DEFAULT_END_NS);
@@ -479,7 +518,7 @@ impl BacktestConfig {
                 "seed must be non-negative".to_string(),
             ));
         }
-        let mut config = Self::new(run_id, start_ns, end_ns, seed as u64)?;
+        let mut config = Self::new(job_id, start_ns, end_ns, seed as u64)?;
         config.shell = shell;
         config.schema_version = int_field(root, "schema_version").unwrap_or(1) as u64;
         if let Some(clock) = root.get("clock").and_then(YamlValue::as_str) {
@@ -568,12 +607,10 @@ impl BacktestConfig {
         config.risk_pipeline = parse_risk(root.get("risk_pipeline"))?;
         config.deployment = parse_deployment(root.get("deployment"))?;
         config.strategy_instances = parse_strategy_instances(root.get("strategy_instances"))?;
-        if config.shell == "study"
-            && !config.has_subscription_echo()
-            && !matches!(config.data_bar_interval.as_str(), "1min" | "1d")
-        {
+        config.null_transform = parse_null_transform(root.get("null"))?;
+        if config.is_replay() && !config.data_subscriptions_declared {
             return Err(BacktestError::Configuration(
-                "study replay interval must be 1min or 1d".into(),
+                "replay configurations must declare data.subscriptions".into(),
             ));
         }
         Ok(config)
@@ -901,6 +938,49 @@ fn parse_strategy_instances(
         });
     }
     Ok(instances)
+}
+
+fn parse_null_transform(
+    value: Option<&YamlValue>,
+) -> Result<Option<NullTransformConfig>, BacktestError> {
+    let Some(mapping) = value.and_then(YamlValue::as_mapping) else {
+        return Ok(None);
+    };
+    let mode = mapping
+        .get("mode")
+        .and_then(YamlValue::as_str)
+        .unwrap_or("block_permutation")
+        .to_string();
+    if mode != "block_permutation" {
+        return Err(BacktestError::Configuration(format!(
+            "null.mode must be \"block_permutation\", got {mode:?}"
+        )));
+    }
+    let block_size = mapping
+        .get("block_size")
+        .and_then(YamlValue::as_int)
+        .ok_or_else(|| {
+            BacktestError::Configuration("null.block_size must be an integer".to_string())
+        })?;
+    if !(1..=10_000).contains(&block_size) {
+        return Err(BacktestError::Configuration(
+            "null.block_size must be between 1 and 10000".to_string(),
+        ));
+    }
+    let seed = mapping
+        .get("seed")
+        .and_then(YamlValue::as_int)
+        .ok_or_else(|| BacktestError::Configuration("null.seed must be an integer".to_string()))?;
+    if seed < 0 {
+        return Err(BacktestError::Configuration(
+            "null.seed must not be negative".to_string(),
+        ));
+    }
+    Ok(Some(NullTransformConfig {
+        mode,
+        block_size: block_size as u32,
+        seed: seed as u64,
+    }))
 }
 
 fn parse_deployment(value: Option<&YamlValue>) -> Result<DeploymentConfig, BacktestError> {

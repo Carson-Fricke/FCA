@@ -1,24 +1,29 @@
 """Committed artifacts, content-fenced edits, and compiler input identity."""
 
-import json
-import os
+import re
 import shutil
-import subprocess
-import sys
-import tomllib
-import zipfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
 import pytest
+from tests.thesis.workspaces._support import MemoryGitFactory, Repositories
 
-from thesis.integrations.mcp import McpToolResult
-from thesis.persistence.git import GitCoordinator
+from thesis.experiments.mandate import (
+    DataWindowPolicy,
+    default_launch_partition,
+    derive_mandate,
+    rfc3339,
+)
+from thesis.integrations.mcp import HarnessMcpTransportError, McpToolResult
 from thesis.workspaces.local import LocalWorkspaceProvider
 from thesis.workspaces.manifest import WorkspaceManifest, load_workspace_manifest
 from thesis.workspaces.programs import (
     INDICATOR_TEMPLATE,
+    MAX_BATCH_POINTS,
+    MAX_NULL_BLOCK_SIZE,
+    MAX_NULL_SEEDS,
     PROGRAM_TEMPLATES,
     STUDY_TEMPLATE,
     ProgramArtifactError,
@@ -32,6 +37,54 @@ CONFIG: dict[str, object] = {
     "end": "2024-01-02T00:00:00Z",
     "subscriptions": [{"data_type": "bars", "symbols": ["SPY"], "interval": "1min"}],
 }
+
+DECLARATION: dict[str, object] = {
+    "lookback": {"type": "integer", "default": 20, "minimum": 1, "maximum": 200},
+    "threshold": {"type": "number", "default": 0.5, "minimum": 0.0, "maximum": 1.0},
+    "enabled": {"type": "boolean", "default": True},
+    "mode": {
+        "type": "string",
+        "default": "fast",
+        "levels": ["fast", "slow"],
+        "description": "execution mode",
+    },
+}
+
+DEFAULTS: dict[str, object] = {
+    "lookback": 20,
+    "threshold": 0.5,
+    "enabled": True,
+    "mode": "fast",
+}
+
+
+def _author_strategy(
+    service: WorkspacePrograms,
+    program_id: str = "alpha",
+    declaration: Mapping[str, object] | None = DECLARATION,
+) -> dict[str, object]:
+    return service.author(
+        "workspace-one",
+        "strategy",
+        program_id,
+        PROGRAM_TEMPLATES["strategy"],
+        configuration=CONFIG,
+        parameter_declaration=declaration,
+    )
+
+
+def _run_points(
+    harness: "Harness", tool: str = "run_backtest"
+) -> list[tuple[str, Mapping[str, object]]]:
+    return [call for call in harness.calls if call[0] == tool]
+
+
+def _point_parameters(
+    call: tuple[str, Mapping[str, object]],
+) -> dict[str, object]:
+    config = cast(dict[str, object], call[1]["config"])
+    instances = cast(list[dict[str, object]], config["strategy_instances"])
+    return cast(dict[str, object], instances[0]["parameters"])
 
 
 class Harness:
@@ -78,21 +131,38 @@ class Harness:
         self.calls.append((name, arguments or {}))
         if self.during:
             self.during()
+        structured: dict[str, object] = {
+            "valid": not self.reject,
+            "diagnostics": [{"message": "check", "rendered": STUDY_TEMPLATE}],
+        }
+        config = (arguments or {}).get("config")
+        job_id = config.get("job_id") if isinstance(config, Mapping) else None
+        structured["job_id"] = job_id if isinstance(job_id, str) else "job-one"
         return McpToolResult(
             tool=name,
             is_error=self.reject,
-            structured={
-                "job_id": "job-one",
-                "valid": not self.reject,
-                "diagnostics": [{"message": "check", "rendered": STUDY_TEMPLATE}],
-            },
+            structured=structured,
         )
+
+
+Programs = tuple[WorkspacePrograms, Repositories, Harness]
+GitPrograms = tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness]
 
 
 @pytest.fixture
 def programs(
     tmp_path: Path,
-) -> tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness]:
+) -> Programs:
+    factory = MemoryGitFactory()
+    provider = Repositories(tmp_path / "workspaces", factory)
+    harness = Harness()
+    return WorkspacePrograms(provider, harness, git_factory=factory), provider, harness
+
+
+@pytest.fixture
+def git_programs(
+    tmp_path: Path,
+) -> GitPrograms:
     provider = LocalWorkspaceProvider(tmp_path / "workspaces")
     template = load_workspace_manifest("config/thesis/workspace.yaml").model_dump(
         mode="json"
@@ -112,53 +182,19 @@ def programs(
     return WorkspacePrograms(provider, harness), provider, harness
 
 
-def test_commits_only_artifacts_and_preserves_index(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
-) -> None:
-    service, provider, _ = programs
-    root = provider.open("workspace-one").root
-    git = GitCoordinator(root)
-    (root / "unrelated.txt").write_text("staged", encoding="utf-8")
-    git._run("add", "--", "unrelated.txt")
-    before = git.head()
-    receipt = service.author(
-        "workspace-one", "study", "alpha", STUDY_TEMPLATE, configuration=CONFIG
-    )
-    assert receipt["gitCommit"] != before
-    assert "source" not in receipt
-    assert set(
-        git._run(
-            "diff-tree",
-            "--no-commit-id",
-            "--name-only",
-            "-r",
-            cast(str, receipt["gitCommit"]),
-        ).stdout.splitlines()
-    ) == {"studies/alpha/program.rs", "studies/alpha/manifest.json"}
-    assert git._run("diff", "--cached", "--name-only").stdout.strip() == "unrelated.txt"
-    assert service.read("workspace-one", "study", "alpha")["source"] == STUDY_TEMPLATE
-    with pytest.raises(ProgramArtifactError, match="does not exist"):
-        service.read("workspace-two", "study", "alpha")
-    assert (
-        GitCoordinator(provider.open("workspace-two").root).head()
-        != receipt["gitCommit"]
-    )
-
-
 @pytest.mark.parametrize(
     "program_id", ["../escape", "A", "a/b", "a\\b", "C:foo", "a.rs", "", "a\n"]
 )
-def test_unsafe_ids_rejected(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness], program_id: str
-) -> None:
+def test_unsafe_ids_rejected(programs: Programs, program_id: str) -> None:
     with pytest.raises(ProgramArtifactError):
         programs[0].author("workspace-one", "study", program_id, STUDY_TEMPLATE)
 
 
+@pytest.mark.slow
 def test_targeted_updates_and_read_ranges(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    git_programs: GitPrograms,
 ) -> None:
-    service, provider, _ = programs
+    service, provider, _ = git_programs
     first = service.author(
         "workspace-one", "study", "alpha", STUDY_TEMPLATE, configuration=CONFIG
     )
@@ -215,7 +251,7 @@ def test_targeted_updates_and_read_ranges(
 
 
 def test_listing_reports_committed_ids_versions_and_compact_configuration(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, _ = programs
     first = service.author(
@@ -243,9 +279,10 @@ def test_listing_reports_committed_ids_versions_and_compact_configuration(
     assert alpha["bundleSha256"] == first["version"]
     assert alpha["sourceSha256"] == first["sourceSha256"]
     assert alpha["gitCommit"] == listing["gitCommit"]
-    assert alpha["interval"] is None
+    assert alpha["interval"] == "1min"
     assert alpha["symbols"] == ["SPY"]
     assert alpha["indicatorIds"] == []
+    assert alpha["parameters"] is None
     indicators = cast(
         list[dict[str, object]],
         service.list("workspace-one", "indicator")["programs"],
@@ -255,7 +292,7 @@ def test_listing_reports_committed_ids_versions_and_compact_configuration(
 
 
 def test_listing_bounds_empty_workspaces_and_unsafe_entries(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, provider, _ = programs
     empty = service.list("workspace-two", "study")
@@ -304,7 +341,7 @@ def test_listing_bounds_empty_workspaces_and_unsafe_entries(
 
 
 def test_validation_dependencies_and_unrelated_commits(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, provider, harness = programs
     dep = service.author(
@@ -319,7 +356,6 @@ def test_validation_dependencies_and_unrelated_commits(
         configuration={
             "start": "2024-01-01T00:00:00Z",
             "end": "2024-01-02T00:00:00Z",
-            "interval": "1min",
             "subscriptions": CONFIG["subscriptions"],
         },
     )
@@ -335,7 +371,7 @@ def test_validation_dependencies_and_unrelated_commits(
     )
     assert service.run("workspace-one", "study", "alpha")["ok"] is True
     config = cast(dict[str, object], harness.calls[-1][1]["config"])
-    assert str(config["run_id"]).startswith("study-alpha-")
+    assert str(config["job_id"]).startswith("job-")
     assert config["shell"] == "study"
     instance = cast(list[dict[str, object]], config["strategy_instances"])[0]
     source = cast(dict[str, object], instance["parameters"])["source"]
@@ -353,7 +389,7 @@ def test_validation_dependencies_and_unrelated_commits(
 
 
 def test_validation_race_and_rejections(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, harness = programs
     receipt = service.author(
@@ -377,7 +413,7 @@ def test_validation_race_and_rejections(
 
 
 def test_indicator_wrapper_transitive_dependencies_and_cycles(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, harness = programs
     first = service.author(
@@ -392,7 +428,6 @@ def test_indicator_wrapper_transitive_dependencies_and_cycles(
         configuration={
             "start": "2024-01-01T00:00:00Z",
             "end": "2024-01-02T00:00:00Z",
-            "interval": "1min",
             "subscriptions": CONFIG["subscriptions"],
         },
     )
@@ -414,7 +449,7 @@ def test_indicator_wrapper_transitive_dependencies_and_cycles(
 
 
 def test_sdk_templates_match_actual_source_signatures(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service = programs[0]
     consumer = (service.sdk_root / "src/consumer.rs").read_text(encoding="utf-8")
@@ -441,10 +476,10 @@ def test_sdk_templates_match_actual_source_signatures(
 
 
 def test_missing_harness_fails_closed(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     _, provider, _ = programs
-    service = WorkspacePrograms(provider)
+    service = WorkspacePrograms(provider, git_factory=provider.git_factory)
     service.author(
         "workspace-one", "study", "alpha", STUDY_TEMPLATE, configuration=CONFIG
     )
@@ -452,60 +487,8 @@ def test_missing_harness_fails_closed(
         service.validate("workspace-one", "study", "alpha")
 
 
-def test_templates_compile_against_actual_sdk(
-    tmp_path: Path, programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness]
-) -> None:
-    service = programs[0]
-    crate = tmp_path / "templates"
-    (crate / "src/bin").mkdir(parents=True)
-    (crate / "Cargo.toml").write_text(
-        '[package]\nname = "program-template-check"\nversion = "0.0.0"\nedition = "2021"\n'
-        '[dependencies]\nharness-strategy-sdk = { path = "'
-        + service.sdk_root.as_posix()
-        + '" }\n',
-        encoding="utf-8",
-    )
-    for kind, source in PROGRAM_TEMPLATES.items():
-        configuration = {
-            **CONFIG,
-            "subscriptions": [
-                {"data_type": "bars", "symbols": ["MSFT", "AAPL"], "interval": "1d"},
-                {"data_type": "quote", "symbols": ["MSFT"]},
-                {"data_type": "trade", "symbols": ["AAPL"]},
-            ],
-        }
-        source = service.template_source(cast(ProgramKind, kind), configuration)
-        if kind == "indicator":
-            source = service._assembled_source(
-                {
-                    "source": source,
-                    "dependencies": {},
-                    "manifest": {"indicatorType": "AuthoredIndicator"},
-                },
-                "indicator",
-            )
-        (crate / "src/bin" / f"{kind}.rs").write_text(
-            source + "\nfn main() {}\n", encoding="utf-8"
-        )
-    result = subprocess.run(
-        [
-            "cargo",
-            "check",
-            "--offline",
-            "--bins",
-            "--manifest-path",
-            str(crate / "Cargo.toml"),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=90,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-
-
 def test_configuration_cannot_override_committed_source(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service = programs[0]
     for configuration in (
@@ -524,32 +507,8 @@ def test_configuration_cannot_override_committed_source(
             )
 
 
-def test_staged_artifact_changes_are_not_overwritten(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
-) -> None:
-    service, provider, _ = programs
-    receipt = service.author(
-        "workspace-one", "study", "alpha", STUDY_TEMPLATE, configuration=CONFIG
-    )
-    root = provider.open("workspace-one").root
-    git = GitCoordinator(root)
-    path = provider.resolve_path("workspace-one", "studies/alpha/program.rs")
-    path.write_text("staged change", encoding="utf-8")
-    git._run("add", "--", "studies/alpha/program.rs")
-    path.write_bytes(STUDY_TEMPLATE.encode())
-    with pytest.raises(ProgramArtifactError, match="staged"):
-        service.update(
-            "workspace-one",
-            "study",
-            "alpha",
-            expected_version=cast(str, receipt["version"]),
-            expected="self.frames += 1",
-            replacement="self.frames += 2",
-        )
-
-
 def test_strategy_dispatch_and_indicator_dependency_validation(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, harness = programs
     service.author(
@@ -561,7 +520,8 @@ def test_strategy_dispatch_and_indicator_dependency_validation(
     )
     assert service.validate("workspace-one", "strategy", "alpha")["accepted"] is True
     assert harness.calls[-1][0] == "validate_strategy"
-    assert service.run("workspace-one", "strategy", "alpha")["ok"] is True
+    receipt = service.run("workspace-one", "strategy", "alpha")
+    assert receipt["ok"] is True and receipt["parameterAssignment"] == {}
     assert harness.calls[-1][0] == "run_backtest"
     assert (
         cast(dict[str, object], harness.calls[-1][1]["config"])["shell"] == "backtest"
@@ -577,7 +537,7 @@ def test_strategy_dispatch_and_indicator_dependency_validation(
 
 
 def test_missing_validation_and_nonaccepting_compiler_fail_closed(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, harness = programs
     service.author(
@@ -597,61 +557,8 @@ def test_missing_validation_and_nonaccepting_compiler_fail_closed(
     service.harness = harness
 
 
-def test_pinned_load_and_completion_verification(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
-) -> None:
-    service, _, _ = programs
-    dep = service.author(
-        "workspace-one", "indicator", "last", INDICATOR_TEMPLATE, configuration=CONFIG
-    )
-    first = service.author(
-        "workspace-one",
-        "study",
-        "alpha",
-        STUDY_TEMPLATE,
-        configuration=CONFIG,
-        indicator_ids=["last"],
-    )
-    pinned = service.load(
-        "workspace-one", "study", "alpha", cast(str, first["gitCommit"])
-    )
-    assert (
-        pinned["source"]
-        == "mod r#last {\n" + INDICATOR_TEMPLATE + "\n}\n" + STUDY_TEMPLATE
-    )
-    assert pinned["configuration"] == CONFIG
-    assert (
-        cast(list[dict[str, object]], pinned["dependencies"])[0]["sourceSha256"]
-        == dep["sourceSha256"]
-    )
-    service.update(
-        "workspace-one",
-        "indicator",
-        "last",
-        expected_version=cast(str, dep["version"]),
-        expected="bar.close",
-        replacement="bar.open",
-    )
-    assert (
-        service.load("workspace-one", "study", "alpha")["version"] != first["version"]
-    )
-    assert service.verify_completion("workspace-one", "study", "alpha", first) == pinned
-    assert (
-        service.load("workspace-one", "study", "alpha", cast(str, first["gitCommit"]))
-        == pinned
-    )
-    with pytest.raises(ProgramArtifactError, match="does not match"):
-        service.verify_completion(
-            "workspace-one", "study", "alpha", {**first, "version": "0" * 64}
-        )
-    with pytest.raises(ProgramArtifactError, match="reachable"):
-        service.load("workspace-two", "study", "alpha", cast(str, first["gitCommit"]))
-    with pytest.raises(ProgramArtifactError, match="object ID"):
-        service.load("workspace-one", "study", "alpha", "HEAD")
-
-
 def test_basic_template_defaults_follow_declared_inputs(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, _ = programs
     config = {
@@ -679,7 +586,7 @@ def test_basic_template_defaults_follow_declared_inputs(
 
 
 def test_configuration_only_update_and_stale_validation(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, _ = programs
     first = service.author(
@@ -734,11 +641,11 @@ def test_configuration_only_update_and_stale_validation(
     ],
 )
 def test_invalid_configurations_rejected_before_commit(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
     change: dict[str, object],
 ) -> None:
     service, provider, _ = programs
-    before = GitCoordinator(provider.open("workspace-one").root).head()
+    before = provider.store("workspace-one").head
     with pytest.raises(ProgramArtifactError):
         service.author(
             "workspace-one",
@@ -747,16 +654,21 @@ def test_invalid_configurations_rejected_before_commit(
             STUDY_TEMPLATE,
             configuration={**CONFIG, **change},
         )
-    assert GitCoordinator(provider.open("workspace-one").root).head() == before
+    assert provider.store("workspace-one").head == before
 
 
 def test_sdk_root_deployment_and_version_mismatch(
     tmp_path: Path,
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, provider, harness = programs
     assert service.sdk_root.resolve() == Path("src/harness/strategy-sdk").resolve()
-    missing = WorkspacePrograms(provider, harness, sdk_root=tmp_path / "not-deployed")
+    missing = WorkspacePrograms(
+        provider,
+        harness,
+        sdk_root=tmp_path / "not-deployed",
+        git_factory=provider.git_factory,
+    )
     with pytest.raises(ProgramArtifactError, match="supply sdk_root"):
         missing.read_sdk_reference("study")
     # A remote transport is still injected independently of local reference assets.
@@ -772,7 +684,12 @@ def test_sdk_root_deployment_and_version_mismatch(
     shutil.copytree(service.sdk_root, deployed)
     for crate in ("contracts", "num"):
         shutil.copytree(service.sdk_root.parent / crate, tmp_path / crate)
-    matched = WorkspacePrograms(provider, harness, sdk_root=deployed)
+    matched = WorkspacePrograms(
+        provider,
+        harness,
+        sdk_root=deployed,
+        git_factory=provider.git_factory,
+    )
     assert (
         matched.read_sdk_reference("consumer")["sdkIdentity"]
         == service.read_sdk_reference("consumer")["sdkIdentity"]
@@ -789,7 +706,7 @@ def test_sdk_root_deployment_and_version_mismatch(
 
 
 def test_reads_bound_characters_not_only_lines(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, _ = programs
     source = "// " + "x" * 20000 + "\n"
@@ -807,7 +724,7 @@ def test_reads_bound_characters_not_only_lines(
 
 
 def test_configuration_diagnostics_are_actionable(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, _ = programs
 
@@ -833,7 +750,7 @@ def test_configuration_diagnostics_are_actionable(
 
 
 def test_publication_failure_retains_commit_and_explicit_recovery(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service, provider, _ = programs
@@ -861,91 +778,8 @@ def test_publication_failure_retains_commit_and_explicit_recovery(
     )
 
 
-def test_service_uses_no_private_git_methods() -> None:
-    source = Path("src/thesis/workspaces/programs.py").read_text(encoding="utf-8")
-    assert "git._run" not in source
-
-
-def test_sdk_wheel_assets_are_canonical_and_portable(tmp_path: Path) -> None:
-    """Build from a fresh tree so stale local build/lib cannot mask missing data."""
-    project = tmp_path / "project"
-    project.mkdir()
-    for filename in ("pyproject.toml", "MANIFEST.in"):
-        shutil.copyfile(filename, project / filename)
-    for package in ("thesis", "lake"):
-        shutil.copytree(
-            Path("src") / package,
-            project / "src" / package,
-            ignore=shutil.ignore_patterns("target", "__pycache__"),
-        )
-    for crate in ("strategy-sdk", "contracts", "num"):
-        source = Path("src/harness") / crate
-        destination = project / "src/harness" / crate
-        shutil.copytree(source / "src", destination / "src")
-        shutil.copyfile(source / "Cargo.toml", destination / "Cargo.toml")
-    output = tmp_path / "dist"
-    result = subprocess.run(
-        [
-            "uv",
-            "build",
-            "--python",
-            "3.12",
-            "--wheel",
-            "--force-pep517",
-            "--out-dir",
-            str(output),
-            "--clear",
-            "--no-create-gitignore",
-            str(project),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    installed = tmp_path / "installed"
-    with zipfile.ZipFile(next(output.glob("*.whl"))) as wheel:
-        names = wheel.namelist()
-        assert not any("/target/" in name for name in names)
-        for crate in ("strategy-sdk", "contracts", "num"):
-            root = Path("src/harness") / crate
-            for source in [root / "Cargo.toml", *sorted((root / "src").glob("*.rs"))]:
-                assert (
-                    wheel.read(source.relative_to("src").as_posix())
-                    == source.read_bytes()
-                )
-        wheel.extractall(installed)
-    sdk = installed / "harness/strategy-sdk"
-    manifest = tomllib.loads((sdk / "Cargo.toml").read_text(encoding="utf-8"))
-    for dependency in ("num", "harness-contracts"):
-        path = manifest["dependencies"][dependency]["path"]
-        assert not Path(path).is_absolute()
-        assert (sdk / path / "Cargo.toml").is_file()
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); "
-            "from thesis.workspaces.programs import WorkspacePrograms; "
-            "service = WorkspacePrograms(None); "
-            "assert service.sdk_root == Path(sys.argv[1]) / 'harness/strategy-sdk'; "
-            "assert service.read_sdk_reference('consumer')['sdkIdentity']; "
-            "assert service.read_sdk_reference('study')['sdkVersion'] == sys.argv[2]",
-            str(installed),
-            manifest["package"]["version"],
-        ],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-
-
 def test_publish_leaves_missing_checkout_without_new_commit(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, provider, _ = programs
     receipt = service.author("workspace-one", "study", "alpha", configuration=CONFIG)
@@ -953,100 +787,22 @@ def test_publish_leaves_missing_checkout_without_new_commit(
     source.unlink()
     assert service.publish("workspace-one", "study", "alpha") == receipt
     assert not source.exists()
-    git = GitCoordinator(provider.open("workspace-one").root)
-    assert git.head() == receipt["gitCommit"]
-    assert not git._run("diff", "--cached", "--name-only").stdout.strip()
-
-
-def test_publish_preserves_staged_operator_edits(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
-) -> None:
-    service, provider, _ = programs
-    receipt = service.author("workspace-one", "study", "alpha", configuration=CONFIG)
-    source = provider.resolve_path("workspace-one", "studies/alpha/program.rs")
-    source.write_text("operator edit", encoding="utf-8")
-    git = GitCoordinator(provider.open("workspace-one").root)
-    git._run("add", "--", "studies/alpha/program.rs")
-    source.write_text(service.template_source("study", CONFIG), encoding="utf-8")
-    assert service.publish("workspace-one", "study", "alpha") == receipt
-    assert git.head() == receipt["gitCommit"]
-    assert git._run("show", ":studies/alpha/program.rs").stdout == "operator edit"
-
-
-def test_publish_preserves_deliberately_staged_parent_commit(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
-) -> None:
-    service, provider, _ = programs
-    first = service.author("workspace-one", "study", "alpha", configuration=CONFIG)
-    source = provider.resolve_path("workspace-one", "studies/alpha/program.rs")
-    old = source.read_bytes()
-    latest = service.update(
-        "workspace-one",
-        "study",
-        "alpha",
-        expected_version=cast(str, first["version"]),
-        expected="self.frames += 1",
-        replacement="self.frames += 2",
-    )
-    source.write_bytes(old)
-    git = GitCoordinator(provider.open("workspace-one").root)
-    git._run("add", "--", "studies/alpha/program.rs")
-    index = (git.repository / ".git/index").read_bytes()
-    assert service.publish("workspace-one", "study", "alpha") == latest
-    assert source.read_bytes() == old
-    assert (git.repository / ".git/index").read_bytes() == index
-
-
-def test_publish_does_not_repair_interrupted_update_materialization(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    service, provider, _ = programs
-    first = service.author("workspace-one", "study", "alpha", configuration=CONFIG)
-    replace = os.replace
-    root = provider.open("workspace-one").root
-
-    def fail(source: str | Path, destination: str | Path) -> None:
-        if Path(destination) == root / "studies/alpha/program.rs":
-            raise OSError("injected checkout failure")
-        replace(source, destination)
-
-    monkeypatch.setattr(os, "replace", fail)
-    with pytest.raises(ProgramPublicationError) as error:
-        service.update(
-            "workspace-one",
-            "study",
-            "alpha",
-            expected_version=cast(str, first["version"]),
-            expected="self.frames += 1",
-            replacement="self.frames += 2",
-        )
-    receipt = error.value.receipt
-    assert receipt["gitCommit"] != first["gitCommit"]
-    assert "self.frames += 2" in str(
-        service.read("workspace-one", "study", "alpha")["source"]
-    )
-    monkeypatch.setattr(os, "replace", replace)
-    assert service.publish("workspace-one", "study", "alpha") == receipt
-    assert "self.frames += 1" in (root / "studies/alpha/program.rs").read_text(
-        encoding="utf-8"
-    )
-    git = GitCoordinator(root)
-    assert (
-        git._run("diff", "--cached", "--name-only").stdout.strip()
-        == "studies/alpha/program.rs"
-    )
-    assert not git._run("diff", "--name-only").stdout.strip()
+    assert provider.store("workspace-one").head == receipt["gitCommit"]
 
 
 def test_sdk_dependency_change_invalidates_validation(
     tmp_path: Path,
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, provider, harness = programs
     for crate in ("strategy-sdk", "contracts", "num"):
         shutil.copytree(service.sdk_root.parent / crate, tmp_path / crate)
-    deployed = WorkspacePrograms(provider, harness, sdk_root=tmp_path / "strategy-sdk")
+    deployed = WorkspacePrograms(
+        provider,
+        harness,
+        sdk_root=tmp_path / "strategy-sdk",
+        git_factory=provider.git_factory,
+    )
     deployed.author("workspace-one", "study", "alpha", configuration=CONFIG)
     deployed.validate("workspace-one", "study", "alpha")
     dependency = tmp_path / "contracts/src/lib.rs"
@@ -1058,7 +814,7 @@ def test_sdk_dependency_change_invalidates_validation(
 
 
 def test_latest_committed_source_configuration_and_both_symbol_scopes(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, provider, harness = programs
     first = service.author("workspace-one", "study", "alpha", configuration=CONFIG)
@@ -1068,7 +824,7 @@ def test_latest_committed_source_configuration_and_both_symbol_scopes(
             {"data_type": "bars", "symbols": ["MSFT", "AAPL"], "interval": "1d"},
             {"data_type": "quote", "symbols": ["MSFT"]},
         ],
-        "data": {"requiredSymbols": ["MSFT", "AAPL"], "interval": "1d"},
+        "data": {"requiredSymbols": ["MSFT", "AAPL"]},
     }
     updated_source = service.template_source("study", config)
     updated = service.update(
@@ -1088,7 +844,11 @@ def test_latest_committed_source_configuration_and_both_symbol_scopes(
     document = cast(dict[str, object], harness.calls[-1][1]["config"])
     instance = cast(list[dict[str, object]], document["strategy_instances"])[0]
     assert receipt["version"] == validated["version"] == updated["version"]
-    assert document["symbols"] == instance["symbols"] == ["AAPL", "MSFT"]
+    assert (
+        cast(dict[str, object], document["data"])["symbols"]
+        == instance["symbols"]
+        == ["AAPL", "MSFT"]
+    )
     assert cast(dict[str, object], instance["parameters"])["source"] == updated_source
     assert document["data"] == {
         "symbols": ["AAPL", "MSFT"],
@@ -1097,7 +857,7 @@ def test_latest_committed_source_configuration_and_both_symbol_scopes(
 
 
 def test_load_stored_validation_at_selected_commit(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, provider, _ = programs
     authored = service.author(
@@ -1139,7 +899,7 @@ def test_load_stored_validation_at_selected_commit(
 
 @pytest.mark.parametrize("compiler", ["compiler-two", None])
 def test_historical_load_reports_fresh_compiler_without_rewriting_validation(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
     compiler: str | None,
 ) -> None:
     service, provider, harness = programs
@@ -1147,7 +907,7 @@ def test_historical_load_reports_fresh_compiler_without_rewriting_validation(
     validated = service.validate("workspace-one", "study", "alpha")
     pinned = service.load("workspace-one", "study", "alpha")
     assert pinned["validationIdentity"] == "compiler-one"
-    head = GitCoordinator(provider.open("workspace-one").root).head()
+    head = provider.store("workspace-one").head
     harness.validation_identity = compiler
     historical = service.load(
         "workspace-one", "study", "alpha", cast(str, pinned["gitCommit"])
@@ -1169,11 +929,11 @@ def test_historical_load_reports_fresh_compiler_without_rewriting_validation(
     with pytest.raises(ProgramArtifactError, match="validation identity"):
         service.run("workspace-one", "study", "alpha")
     assert len(harness.calls) == count
-    assert GitCoordinator(provider.open("workspace-one").root).head() == head
+    assert provider.store("workspace-one").head == head
 
 
 def test_run_configuration_matches_native_authored_document_semantics(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, harness = programs
     config = {
@@ -1185,16 +945,17 @@ def test_run_configuration_matches_native_authored_document_semantics(
     service.author("workspace-one", "study", "alpha", configuration=config)
     service.validate("workspace-one", "study", "alpha")
     validated = cast(dict[str, object], harness.calls[-1][1]["model"])
-    service.run("workspace-one", "study", "alpha")
+    receipt = service.run("workspace-one", "study", "alpha")
+    assert receipt["parameterAssignment"] == {}
     document = cast(dict[str, object], harness.calls[-1][1]["config"])
     assert document["start"] == CONFIG["start"] and document["end"] == CONFIG["end"]
     assert not {
         "subscriptions",
         "interval",
+        "symbols",
         "requiredSymbols",
         "required_symbols",
     }.intersection(document)
-    assert document["symbols"] == ["SPY"]
     assert document["data"] == {
         "snapshot_id": "pinned-data",
         "fingerprint": "b" * 64,
@@ -1213,11 +974,11 @@ def test_run_configuration_matches_native_authored_document_semantics(
     service.run("workspace-one", "study", "ticks")
     tick_document = cast(dict[str, object], harness.calls[-1][1]["config"])
     assert "bar_interval" not in cast(dict[str, object], tick_document["data"])
-    assert tick_document["symbols"] == ["MSFT"]
+    assert cast(dict[str, object], tick_document["data"])["symbols"] == ["MSFT"]
 
 
 def test_existing_provider_and_raw_client_injection(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     from thesis.agent.harness_tools import HarnessToolProvider
     from thesis.integrations.mcp import HarnessMcpClient, HarnessMcpTransportError
@@ -1230,6 +991,13 @@ def test_existing_provider_and_raw_client_injection(
                 raise HarnessMcpTransportError(
                     "response lost", execution_certainty="unknown_outcome"
                 )
+            params = request.get("params")
+            arguments = params.get("arguments") if isinstance(params, Mapping) else None
+            config = arguments.get("config") if isinstance(arguments, Mapping) else None
+            job_id = config.get("job_id") if isinstance(config, Mapping) else None
+            structured: dict[str, object] = {"valid": True}
+            if isinstance(job_id, str):
+                structured["job_id"] = job_id
             return {
                 "jsonrpc": "2.0",
                 "id": request["id"],
@@ -1244,7 +1012,7 @@ def test_existing_provider_and_raw_client_injection(
                     },
                     "isError": False,
                     "content": [],
-                    "structuredContent": {"valid": True, "run_id": "run-one"},
+                    "structuredContent": structured,
                 },
             }
 
@@ -1271,35 +1039,72 @@ def test_existing_provider_and_raw_client_injection(
     assert "never automatically replay" in cast(str, result["retryGuidance"])
 
 
-def test_run_ids_are_workspace_scoped_and_unique_per_explicit_invocation(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+def test_job_ids_are_allocated_once_per_explicit_invocation(
+    programs: Programs,
 ) -> None:
     service, _, harness = programs
     ids = []
     for workspace in ("workspace-one", "workspace-two"):
-        service.author(
-            workspace,
-            "study",
-            "alpha",
-            configuration={**CONFIG, "run_id": "caller-fixed"},
-        )
+        service.author(workspace, "study", "alpha", configuration=CONFIG)
         service.validate(workspace, "study", "alpha")
         for _ in range(2):
             receipt = service.run(workspace, "study", "alpha")
             submitted = cast(dict[str, object], harness.calls[-1][1]["config"])[
-                "run_id"
+                "job_id"
             ]
-            assert receipt["submittedRunId"] == submitted
-            assert cast(dict[str, object], receipt["result"])["run_id"] == submitted
-            ids.append(cast(str, submitted))
+            assert isinstance(submitted, str)
+            assert re.fullmatch(r"job-[0-9a-f]{32}", submitted)
+            assert receipt["job_id"] == submitted
+            assert "submittedRunId" not in receipt
+            nested = cast(dict[str, object], receipt["result"])
+            assert "job_id" not in nested and "run_id" not in nested
+            ids.append(submitted)
     assert len(set(ids)) == 4
-    assert ids[0].rsplit("-", 1)[0] == ids[1].rsplit("-", 1)[0]
-    assert ids[0].rsplit("-", 1)[0] != ids[2].rsplit("-", 1)[0]
+
+
+def test_authored_run_id_fails_harness_validation_instead_of_being_stripped(
+    programs: Programs,
+) -> None:
+    service, _, _ = programs
+
+    class StrictHarness(Harness):
+        """A harness whose strict configuration validation rejects ``run_id``."""
+
+        def call_tool(
+            self, name: str, arguments: Mapping[str, object] | None = None
+        ) -> McpToolResult:
+            config = (arguments or {}).get("config")
+            if isinstance(config, Mapping) and "run_id" in config:
+                self.calls.append((name, arguments or {}))
+                return McpToolResult(
+                    tool=name,
+                    is_error=True,
+                    structured={"error": "configuration.run_id is obsolete"},
+                )
+            return super().call_tool(name, arguments)
+
+    harness = StrictHarness()
+    service.harness = harness
+    service.author(
+        "workspace-one",
+        "study",
+        "alpha",
+        STUDY_TEMPLATE,
+        configuration={**CONFIG, "run_id": "legacy-fixed"},
+    )
+    assert service.validate("workspace-one", "study", "alpha")["accepted"] is True
+    receipt = service.run("workspace-one", "study", "alpha")
+
+    submitted = cast(dict[str, object], harness.calls[-1][1]["config"])
+    assert submitted["run_id"] == "legacy-fixed"
+    assert receipt["ok"] is False
+    assert receipt["executionCertainty"] == "unknown_outcome"
+    assert "did not acknowledge" in cast(str, receipt["message"])
 
 
 @pytest.mark.parametrize("identity", [None, "compiler-two"])
 def test_remote_compiler_identity_changes_fail_closed_before_run(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
     identity: str | None,
 ) -> None:
     service, _, harness = programs
@@ -1314,7 +1119,7 @@ def test_remote_compiler_identity_changes_fail_closed_before_run(
 
 
 def test_validation_without_compiler_identity_cannot_authorize_run(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, harness = programs
     harness.validation_identity = None
@@ -1325,7 +1130,7 @@ def test_validation_without_compiler_identity_cannot_authorize_run(
 
 
 def test_raw_transport_unknown_run_outcome_retains_submitted_id(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     from thesis.integrations.mcp import HarnessMcpTransportError
 
@@ -1346,15 +1151,16 @@ def test_raw_transport_unknown_run_outcome_retains_submitted_id(
     service.author("workspace-one", "study", "alpha", configuration=CONFIG)
     service.validate("workspace-one", "study", "alpha")
     receipt = service.run("workspace-one", "study", "alpha")
-    submitted = cast(dict[str, object], harness.calls[-1][1]["config"])["run_id"]
+    submitted = cast(dict[str, object], harness.calls[-1][1]["config"])["job_id"]
     assert receipt["ok"] is False and receipt["executionCertainty"] == "unknown_outcome"
-    assert receipt["submittedRunId"] == submitted
-    assert cast(dict[str, object], receipt["result"])["run_id"] == submitted
+    assert receipt["job_id"] == submitted
+    nested = cast(dict[str, object], receipt["result"])
+    assert "job_id" not in nested and "run_id" not in nested
     assert "never automatically replay" in cast(str, receipt["retryGuidance"])
 
 
 def test_fresh_public_facade_identity_blocks_remote_changes(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     from thesis.agent.harness_tools import HarnessToolProvider
     from thesis.integrations.mcp import HarnessMcpClient, HarnessMcpTransportError
@@ -1423,53 +1229,68 @@ def test_fresh_public_facade_identity_blocks_remote_changes(
     )
 
 
-def test_compact_diagnostics_keep_repair_spans_and_children_without_excerpts() -> None:
-    outcome = WorkspacePrograms._outcome(
-        McpToolResult(
-            tool="validate_study",
-            is_error=True,
-            structured={
-                "diagnostics": [
-                    {
-                        "message": "missing method",
-                        "level": "error",
-                        "code": {"code": "E0599", "explanation": "large explanation"},
-                        "rendered": STUDY_TEMPLATE,
-                        "spans": [
-                            {
-                                "file_name": "src/lib.rs",
-                                "line_start": 12,
-                                "line_end": 12,
-                                "column_start": 4,
-                                "column_end": 8,
-                                "is_primary": True,
-                                "label": "not found",
-                                "text": [{"text": STUDY_TEMPLATE}],
-                                "expansion": {"source": STUDY_TEMPLATE},
-                            }
-                        ],
-                        "children": [
-                            {
-                                "message": "replace method",
-                                "level": "help",
-                                "rendered": STUDY_TEMPLATE,
-                                "spans": [
-                                    {
-                                        "line_start": 12,
-                                        "column_start": 4,
-                                        "suggested_replacement": "on_bar",
-                                        "suggestion_applicability": "MachineApplicable",
-                                    }
-                                ],
-                            }
-                        ],
-                    }
-                ]
-            },
-        ),
-        validation=True,
-    )
-    detail = cast(list[dict[str, object]], outcome["diagnostics"])[0]
+def test_compact_diagnostics_keep_repair_spans_and_children_without_excerpts(
+    programs: Programs,
+) -> None:
+    service, _, _ = programs
+
+    class Diagnostics(Harness):
+        def call_tool(
+            self, name: str, arguments: Mapping[str, object] | None = None
+        ) -> McpToolResult:
+            return McpToolResult(
+                tool=name,
+                is_error=True,
+                structured={
+                    "error": "compile failed",
+                    "diagnostics": [
+                        {
+                            "message": "missing method",
+                            "level": "error",
+                            "code": {
+                                "code": "E0599",
+                                "explanation": "large explanation",
+                            },
+                            "rendered": STUDY_TEMPLATE,
+                            "spans": [
+                                {
+                                    "file_name": "src/lib.rs",
+                                    "line_start": 12,
+                                    "line_end": 12,
+                                    "column_start": 4,
+                                    "column_end": 8,
+                                    "is_primary": True,
+                                    "label": "not found",
+                                    "text": [{"text": STUDY_TEMPLATE}],
+                                    "expansion": {"source": STUDY_TEMPLATE},
+                                }
+                            ],
+                            "children": [
+                                {
+                                    "message": "replace method",
+                                    "level": "help",
+                                    "rendered": STUDY_TEMPLATE,
+                                    "spans": [
+                                        {
+                                            "line_start": 12,
+                                            "column_start": 4,
+                                            "suggested_replacement": "on_bar",
+                                            "suggestion_applicability": (
+                                                "MachineApplicable"
+                                            ),
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+
+    service.harness = Diagnostics()
+    service.author("workspace-one", "study", "alpha", configuration=CONFIG)
+    receipt = service.validate("workspace-one", "study", "alpha")
+    detail = cast(list[dict[str, object]], receipt["diagnostics"])[0]
     assert detail["code"] == "E0599"
     span = cast(list[dict[str, object]], detail["spans"])[0]
     assert (
@@ -1482,12 +1303,12 @@ def test_compact_diagnostics_keep_repair_spans_and_children_without_excerpts() -
         cast(list[dict[str, object]], child["spans"])[0]["suggested_replacement"]
         == "on_bar"
     )
-    assert STUDY_TEMPLATE not in str(outcome)
-    assert "explanation" not in str(outcome) and "rendered" not in str(outcome)
+    assert STUDY_TEMPLATE not in str(receipt)
+    assert "explanation" not in str(receipt) and "rendered" not in str(receipt)
 
 
 def test_serving_sdk_mismatch_blocks_templates_validation_run_and_completion(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, harness = programs
     authored = service.author("workspace-one", "study", "alpha", configuration=CONFIG)
@@ -1520,7 +1341,7 @@ def test_serving_sdk_mismatch_blocks_templates_validation_run_and_completion(
 
 
 def test_sdk_reference_uses_exact_remote_source_and_metadata_fallback(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, _ = programs
 
@@ -1569,7 +1390,7 @@ def test_sdk_reference_uses_exact_remote_source_and_metadata_fallback(
 
 
 def test_serving_sdk_reference_change_during_read_fails_closed(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, _ = programs
 
@@ -1588,24 +1409,24 @@ def test_serving_sdk_reference_change_during_read_fails_closed(
 
 
 def test_sdk_change_during_validation_is_not_committed(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, provider, harness = programs
     service.author("workspace-one", "study", "alpha", configuration=CONFIG)
-    before = GitCoordinator(provider.open("workspace-one").root).head()
+    before = provider.store("workspace-one").head
     harness.during = lambda: setattr(harness, "validation_identity", "compiler-two")
     with pytest.raises(
         ProgramArtifactError, match="compiler changed during validation"
     ):
         service.validate("workspace-one", "study", "alpha")
-    assert GitCoordinator(provider.open("workspace-one").root).head() == before
+    assert provider.store("workspace-one").head == before
 
 
 def test_local_sdk_guidance_and_artifact_reads_work_without_harness(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     _, provider, _ = programs
-    local = WorkspacePrograms(provider)
+    local = WorkspacePrograms(provider, git_factory=provider.git_factory)
     authored = local.author("workspace-one", "study", "alpha", configuration=CONFIG)
     assert local.read_sdk_reference("study")["source"] == STUDY_TEMPLATE
     assert (
@@ -1619,116 +1440,1023 @@ def test_local_sdk_guidance_and_artifact_reads_work_without_harness(
         local.validate("workspace-one", "study", "alpha")
 
 
-def test_native_study_validation_and_run_document_compile(
-    tmp_path: Path,
+def test_strategy_parameter_declaration_round_trips_in_load_and_list(
     programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
 ) -> None:
-    """Optional built-binary smoke: real JIT compile, load, and subscriptions.
+    service, _, _ = programs
+    _author_strategy(service)
+    loaded = service.load("workspace-one", "strategy", "alpha")
+    assert loaded["parameters"] == DECLARATION
+    assert cast(dict[str, object], loaded["manifest"])["parameters"] == DECLARATION
+    listing = service.list("workspace-one", "strategy")
+    entry = cast(list[dict[str, object]], listing["programs"])[0]
+    assert entry["parameters"] == DECLARATION
+    service.author("workspace-one", "study", "plain", configuration=CONFIG)
+    plain = service.load("workspace-one", "study", "plain")
+    assert plain["parameters"] is None
+    plain_entry = cast(
+        list[dict[str, object]], service.list("workspace-one", "study")["programs"]
+    )[0]
+    assert plain_entry["parameters"] is None
 
-    No replay/data fetch is attempted. Validate the run document's exact assembled
-    source and data echo through the native parser, JIT compiler, and ABI loader.
-    """
-    binary = Path(
-        "src/harness/target/debug/mcp.exe"
-        if os.name == "nt"
-        else "src/harness/target/debug/mcp"
-    )
-    if not binary.is_file():
-        pytest.skip(
-            "native MCP binary not built; template compilation is covered separately"
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        {"BadName": {"type": "integer", "default": 1}},
+        {"1bad": {"type": "integer", "default": 1}},
+        {"a" * 65: {"type": "integer", "default": 1}},
+        {"source": {"type": "string", "default": "x"}},
+        {"source_path": {"type": "string", "default": "x"}},
+        {"symbols": {"type": "string", "default": "x"}},
+        {"lookback_path": {"type": "integer", "default": 1}},
+        {"lookbackPath": {"type": "integer", "default": 1}},
+        {"lookback": 5},
+        {"lookback": {"default": 20}},
+        {"lookback": {"type": "float", "default": 20}},
+        {"lookback": {"type": "integer"}},
+        {"lookback": {"type": "integer", "default": True}},
+        {"lookback": {"type": "integer", "default": 1.5}},
+        {"lookback": {"type": "integer", "default": "20"}},
+        {"ratio": {"type": "number", "default": "0.5"}},
+        {"flag": {"type": "boolean", "default": 1}},
+        {"mode": {"type": "string", "default": "medium", "levels": ["fast", "slow"]}},
+        {"ratio": {"type": "number", "default": 0.5, "minimum": "low"}},
+        {"ratio": {"type": "number", "default": 0.5, "minimum": 2.0, "maximum": 1.0}},
+        {"ratio": {"type": "number", "default": 0.5, "minimum": float("nan")}},
+        {"ratio": {"type": "number", "default": float("inf")}},
+        {"mode": {"type": "string", "default": "fast", "minimum": 0}},
+        {"lookback": {"type": "integer", "default": 1, "levels": ["a"]}},
+        {"mode": {"type": "string", "default": "fast", "levels": []}},
+        {"mode": {"type": "string", "default": "fast", "levels": ["fast", "fast"]}},
+        {"mode": {"type": "string", "default": "fast", "levels": [1]}},
+        {"lookback": {"type": "integer", "default": 1, "min": 0}},
+        {"lookback": {"type": "integer", "default": 1, "description": 5}},
+        5,
+        ["lookback"],
+    ],
+)
+def test_invalid_parameter_declarations_rejected_before_commit(
+    programs: Programs,
+    declaration: object,
+) -> None:
+    service, provider, _ = programs
+    before = provider.store("workspace-one").head
+    with pytest.raises(ProgramArtifactError):
+        service.author(
+            "workspace-one",
+            "strategy",
+            "alpha",
+            PROGRAM_TEMPLATES["strategy"],
+            configuration=CONFIG,
+            parameter_declaration=cast(Mapping[str, object], declaration),
         )
-    service, _, harness = programs
-    config = {
-        **CONFIG,
-        "subscriptions": [{"data_type": "bars", "symbols": ["MSFT"], "interval": "1d"}],
-    }
-    service.author("workspace-one", "indicator", "last", configuration=config)
-    source = service.template_source("study", config).replace(
-        "struct AuthoredStudy { frames: u64 }",
-        "struct AuthoredStudy { frames: u64, last: crate::last::AuthoredIndicator }",
-    )
-    source = source.replace(
-        "type Context = ObservationContext;",
-        "type Context = ObservationContext;\n"
-        "    fn indicators(&mut self) -> Vec<&mut dyn harness_strategy_sdk::Indicator> { vec![&mut self.last] }",
-    )
+    assert provider.store("workspace-one").head == before
+
+
+def test_non_strategy_kinds_reject_nonempty_parameter_declarations(
+    programs: Programs,
+) -> None:
+    service, provider, _ = programs
+    before = provider.store("workspace-one").head
+    for kind in ("study", "indicator"):
+        with pytest.raises(ProgramArtifactError, match="only strateg"):
+            service.author(
+                "workspace-one",
+                cast(ProgramKind, kind),
+                "alpha",
+                configuration=CONFIG,
+                parameter_declaration=DECLARATION,
+            )
+    assert provider.store("workspace-one").head == before
     service.author(
         "workspace-one",
         "study",
-        "native",
-        source,
-        configuration=config,
-        indicator_ids=["last"],
+        "plain",
+        configuration=CONFIG,
+        parameter_declaration={},
     )
-    service.validate("workspace-one", "study", "native")
-    service.run("workspace-one", "study", "native")
-    run_document = cast(dict[str, object], harness.calls[-1][1]["config"])
-    instance = cast(list[dict[str, object]], run_document["strategy_instances"])[0]
-    source = cast(dict[str, object], instance["parameters"])["source"]
-    data = cast(dict[str, object], run_document["data"])
-    model = {
-        "source": source,
-        "harnessConfiguration": {
-            "start": run_document["start"],
-            "end": run_document["end"],
-            "subscriptions": data["subscriptions"],
-            "symbols": run_document["symbols"],
-        },
+    assert service.load("workspace-one", "study", "plain")["parameters"] is None
+
+
+def test_parameter_declaration_update_clear_and_unchanged(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, _ = programs
+    first = _author_strategy(service)
+    unchanged = service.update(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        expected_version=cast(str, first["version"]),
+        expected="struct AuthoredStrategy;",
+        replacement="struct AuthoredStrategy { }",
+    )
+    assert (
+        service.load("workspace-one", "strategy", "alpha")["parameters"] == DECLARATION
+    )
+    cleared = service.update(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        expected_version=cast(str, unchanged["version"]),
+        configuration={**CONFIG, "end": "2024-01-03T00:00:00Z"},
+        parameter_declaration={},
+    )
+    loaded = service.load("workspace-one", "strategy", "alpha")
+    assert loaded["parameters"] is None
+    assert "parameters" not in cast(dict[str, object], loaded["manifest"])
+    replacement = {"lookback": {"type": "integer", "default": 5}}
+    restored = service.update(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        expected_version=cast(str, cleared["version"]),
+        configuration=CONFIG,
+        parameter_declaration=replacement,
+    )
+    loaded = service.load("workspace-one", "strategy", "alpha")
+    assert loaded["parameters"] == replacement
+    assert cast(dict[str, object], loaded["manifest"])["parameters"] == replacement
+    service.author("workspace-one", "study", "plain", configuration=CONFIG)
+    study = service.load("workspace-one", "study", "plain")
+    with pytest.raises(ProgramArtifactError, match="only strateg"):
+        service.update(
+            "workspace-one",
+            "study",
+            "plain",
+            expected_version=cast(str, study["version"]),
+            parameter_declaration=DECLARATION,
+        )
+    service.update(
+        "workspace-one",
+        "study",
+        "plain",
+        expected_version=cast(str, study["version"]),
+        configuration={**CONFIG, "end": "2024-01-03T00:00:00Z"},
+        parameter_declaration={},
+    )
+    assert service.load("workspace-one", "study", "plain")["parameters"] is None
+    assert restored["version"] != first["version"]
+
+
+def test_run_assignment_defaults_and_exact_instance_parameters(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, harness = programs
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    receipt = service.run("workspace-one", "strategy", "alpha")
+    assert receipt["ok"] is True
+    assert receipt["parameterAssignment"] == DEFAULTS
+    source = cast(str, service.load("workspace-one", "strategy", "alpha")["source"])
+    assert _point_parameters(harness.calls[-1]) == {"source": source, **DEFAULTS}
+    explicit = service.run(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        parameters={"lookback": 25.0, "mode": "slow"},
+    )
+    assert explicit["parameterAssignment"] == {
+        **DEFAULTS,
+        "lookback": 25,
+        "mode": "slow",
     }
-    requests = [
-        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
-        {
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "tools/call",
-            "params": {
-                "name": "read_sdk_reference",
-                "arguments": {"topic": "consumer", "start_line": 19, "end_line": 22},
-            },
-        },
-        {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {"name": "validate_study", "arguments": {"model": model}},
-        },
+    assert cast(dict[str, object], explicit["parameterAssignment"])["lookback"] == 25
+    service.author("workspace-one", "study", "plain", configuration=CONFIG)
+    service.validate("workspace-one", "study", "plain")
+    plain = service.run("workspace-one", "study", "plain")
+    assert plain["parameterAssignment"] == {}
+    plain_source = cast(str, service.load("workspace-one", "study", "plain")["source"])
+    assert _point_parameters(harness.calls[-1]) == {"source": plain_source}
+
+
+def test_run_assignment_rejections_before_submission(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, harness = programs
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    for parameters, message in (
+        ({"lookback": "20"}, "integer"),
+        ({"lookback": True}, "integer"),
+        ({"lookback": 1.5}, "integer"),
+        ({"threshold": True}, "number"),
+        ({"threshold": "0.5"}, "number"),
+        ({"threshold": float("nan")}, "finite"),
+        ({"enabled": "yes"}, "true or false"),
+        ({"mode": 5}, "string"),
+        ({"mode": "medium"}, "one of"),
+        ({"lookback": 0}, "at least"),
+        ({"lookback": 201}, "at most"),
+        ({"threshold": 1.5}, "at most"),
+        ({"unknown": 1}, "unknown parameter"),
+        ({"source": "override"}, "reserved"),
+        ({"source_path": "x"}, "reserved"),
+        ({"symbols": ["SPY"]}, "reserved"),
+        ({"extra_path": "x"}, "reserved"),
+        ({"extraPath": "x"}, "reserved"),
+        ([("lookback", 20)], "assignment object"),
+    ):
+        count = len(harness.calls)
+        with pytest.raises(ProgramArtifactError, match=message):
+            service.run(
+                "workspace-one",
+                "strategy",
+                "alpha",
+                parameters=cast(Mapping[str, object], parameters),
+            )
+        assert len(harness.calls) == count
+    service.author("workspace-one", "study", "plain", configuration=CONFIG)
+    service.validate("workspace-one", "study", "plain")
+    count = len(harness.calls)
+    with pytest.raises(ProgramArtifactError, match="unknown parameter"):
+        service.run("workspace-one", "study", "plain", parameters={"lookback": 5})
+    assert len(harness.calls) == count
+
+
+def test_run_batch_submits_sequentially_with_fresh_ids_and_stable_provenance(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, harness = programs
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    version = cast(str, service.load("workspace-one", "strategy", "alpha")["version"])
+    submitted = [{"lookback": 10}, {"lookback": 30, "mode": "slow"}]
+    result = service.run_batch("workspace-one", "strategy", "alpha", submitted)
+    assert result["ok"] is True
+    assert result["programId"] == "alpha" and result["version"] == version
+    batch_id = cast(str, result["batchId"])
+    assert batch_id.startswith("batch-alpha-")
+    assert len(batch_id) == len("batch-alpha-") + 12
+    points = cast(list[dict[str, object]], result["points"])
+    assert [point["parameters"] for point in points] == [
+        {**DEFAULTS, "lookback": 10},
+        {**DEFAULTS, "lookback": 30, "mode": "slow"},
     ]
-    environment = {
-        **os.environ,
-        "HARNESS_JIT_DIR": str(tmp_path / "jit"),
-        "HARNESS_SDK_DIR": str(service.sdk_root.resolve()),
+    job_ids = [
+        cast(dict[str, object], call[1]["config"])["job_id"]
+        for call in _run_points(harness)
+    ]
+    assert [point["jobId"] for point in points] == job_ids
+    assert all(
+        re.fullmatch(r"job-[0-9a-f]{32}", cast(str, job_id)) for job_id in job_ids
+    )
+    assert len(set(job_ids)) == 2
+    assert all(point["state"] == "succeeded" for point in points)
+    assert all("error" not in point for point in points)
+    reversed_result = service.run_batch(
+        "workspace-one", "strategy", "alpha", list(reversed(submitted))
+    )
+    assert reversed_result["batchId"] == batch_id
+    reversed_points = cast(list[dict[str, object]], reversed_result["points"])
+    reversed_ids = {cast(str, point["jobId"]) for point in reversed_points}
+    assert len(reversed_ids) == 2
+    assert reversed_ids.isdisjoint({cast(str, job_id) for job_id in job_ids})
+    other = service.run_batch("workspace-one", "strategy", "alpha", [{"lookback": 99}])
+    assert other["batchId"] != batch_id
+
+
+def test_run_batch_pins_one_snapshot_for_every_point(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, harness = programs
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    mutated = {"done": False}
+
+    def mutate() -> None:
+        if mutated["done"] or not _run_points(harness):
+            return
+        mutated["done"] = True
+        latest = service.load("workspace-one", "strategy", "alpha")
+        service.update(
+            "workspace-one",
+            "strategy",
+            "alpha",
+            expected_version=cast(str, latest["version"]),
+            expected="struct AuthoredStrategy;",
+            replacement="struct AuthoredStrategy; // changed mid-batch",
+        )
+
+    harness.during = mutate
+    result = service.run_batch(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        [{"lookback": 10}, {"lookback": 30}],
+    )
+    assert result["ok"] is True
+    run_calls = _run_points(harness)
+    assert len(run_calls) == 2
+    sources = [cast(str, _point_parameters(call)["source"]) for call in run_calls]
+    assert sources == [sources[0]] * 2
+    assert "changed mid-batch" not in sources[0]
+    assert mutated["done"] is True
+
+
+class _Refused(Harness):
+    """Refuses every study launch before admission, with a definitive certainty."""
+
+    def call_tool(
+        self, name: str, arguments: Mapping[str, object] | None = None
+    ) -> McpToolResult:
+        if name == "run_study":
+            self.calls.append((name, arguments or {}))
+            raise HarnessMcpTransportError(
+                "refused before admission", execution_certainty="not_started"
+            )
+        return super().call_tool(name, arguments)
+
+
+def _ignore_settlement(_certainty: str, _message: str | None) -> None:
+    """Retention fakes that only observe dispatch order ignore settlements."""
+
+
+def test_run_batch_retains_every_job_before_its_dispatch(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, harness = programs
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    order: list[tuple[str, str]] = []
+
+    def retain(
+        job_id: str, tool_name: str, attribution: Mapping[str, object]
+    ) -> Callable[[str, str | None], None]:
+        order.append(("retain", job_id))
+        assert tool_name == "run_backtest"
+        assert attribution["programId"] == "alpha"
+        assert attribution["kind"] == "strategy"
+        assert attribution["batchKind"] == "batch"
+        assert isinstance(attribution["batchId"], str)
+        assert isinstance(attribution["parameterAssignmentSha256"], str)
+        return _ignore_settlement
+
+    harness.during = lambda: order.append(("dispatch", ""))
+    result = service.run_batch(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        [{"lookback": 10}, {"lookback": 30}],
+        retain=retain,
+    )
+    assert result["ok"] is True
+    assert [kind for kind, _ in order] == ["retain", "dispatch", "retain", "dispatch"]
+    run_calls = _run_points(harness)
+    assert [job_id for kind, job_id in order if kind == "retain"] == [
+        cast(dict[str, object], call[1]["config"])["job_id"] for call in run_calls
+    ]
+
+
+def test_run_batch_retention_failure_never_dispatches_that_point(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, harness = programs
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    retained: list[str] = []
+
+    def retain(
+        job_id: str, tool_name: str, attribution: Mapping[str, object]
+    ) -> Callable[[str, str | None], None]:
+        retained.append(job_id)
+        if len(retained) == 2:
+            raise RuntimeError("tracking unavailable")
+        return _ignore_settlement
+
+    result = service.run_batch(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        [{"lookback": 10}, {"lookback": 30}],
+        retain=retain,
+    )
+    assert result["ok"] is False
+    points = cast(list[dict[str, object]], result["points"])
+    assert [point["state"] for point in points] == ["succeeded", "failed"]
+    assert [point["executionCertainty"] for point in points] == [
+        "observed_success",
+        "not_started",
+    ]
+    assert points[1]["jobId"] == retained[1]
+    error = cast(str, points[1]["error"])
+    assert "retention failed" in error and "tracking unavailable" in error
+    assert len(_run_points(harness)) == 1
+
+
+def test_run_retention_failure_is_not_started_and_never_dispatches(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, harness = programs
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    retained: list[str] = []
+
+    def retain(
+        job_id: str, tool_name: str, attribution: Mapping[str, object]
+    ) -> Callable[[str, str | None], None]:
+        retained.append(job_id)
+        raise RuntimeError("tracking unavailable")
+
+    receipt = service.run("workspace-one", "strategy", "alpha", retain=retain)
+    assert receipt["ok"] is False
+    assert receipt["executionCertainty"] == "not_started"
+    assert receipt["job_id"] == retained[0]
+    assert "retention failed" in cast(str, receipt["message"])
+    assert not _run_points(harness)
+
+
+def test_dispatch_refused_before_admission_settles_the_job_as_not_started(
+    programs: Programs,
+) -> None:
+    service, _, _ = programs
+    service.harness = _Refused()
+    service.author("workspace-one", "study", "alpha", configuration=CONFIG)
+    service.validate("workspace-one", "study", "alpha")
+    settled: list[tuple[str, str | None]] = []
+
+    def retain(
+        job_id: str, tool_name: str, attribution: Mapping[str, object]
+    ) -> Callable[[str, str | None], None]:
+        return lambda certainty, message: settled.append((certainty, message))
+
+    receipt = service.run("workspace-one", "study", "alpha", retain=retain)
+    assert receipt["ok"] is False
+    assert receipt["executionCertainty"] == "not_started"
+    assert settled == [("not_started", "Harness program request failed.")]
+
+
+def test_failure_after_dispatch_settles_as_unknown_never_not_started(
+    programs: Programs,
+) -> None:
+    service, _, _ = programs
+    service.harness = _Refused()
+    service.author("workspace-one", "study", "alpha", configuration=CONFIG)
+    service.validate("workspace-one", "study", "alpha")
+
+    def retain(
+        job_id: str, tool_name: str, attribution: Mapping[str, object]
+    ) -> Callable[[str, str | None], None]:
+        def settle(_certainty: str, _message: str | None) -> None:
+            raise OSError("tracking store unavailable")
+
+        return settle
+
+    receipt = service.run("workspace-one", "study", "alpha", retain=retain)
+    assert receipt["ok"] is False
+    assert receipt["executionCertainty"] == "unknown_outcome"
+    assert "tracking store unavailable" in cast(str, receipt["message"])
+
+
+def test_missing_job_acknowledgement_is_unknown_outcome(
+    programs: Programs,
+) -> None:
+    service, _, _ = programs
+
+    class Silent(Harness):
+        def call_tool(
+            self, name: str, arguments: Mapping[str, object] | None = None
+        ) -> McpToolResult:
+            if name == "run_study":
+                self.calls.append((name, arguments or {}))
+                return McpToolResult(tool=name, is_error=False, structured={})
+            return super().call_tool(name, arguments)
+
+    harness = Silent()
+    service.harness = harness
+    service.author("workspace-one", "study", "alpha", configuration=CONFIG)
+    service.validate("workspace-one", "study", "alpha")
+    receipt = service.run("workspace-one", "study", "alpha")
+    submitted = cast(dict[str, object], harness.calls[-1][1]["config"])["job_id"]
+    assert receipt["ok"] is False
+    assert receipt["executionCertainty"] == "unknown_outcome"
+    assert "did not acknowledge" in cast(str, receipt["message"])
+    assert receipt["job_id"] == submitted
+
+
+def test_mismatched_job_acknowledgement_is_unknown_outcome(
+    programs: Programs,
+) -> None:
+    service, _, _ = programs
+
+    class Wrong(Harness):
+        def call_tool(
+            self, name: str, arguments: Mapping[str, object] | None = None
+        ) -> McpToolResult:
+            if name == "run_study":
+                self.calls.append((name, arguments or {}))
+                return McpToolResult(
+                    tool=name,
+                    is_error=False,
+                    structured={"job_id": "job-other", "state": "succeeded"},
+                )
+            return super().call_tool(name, arguments)
+
+    harness = Wrong()
+    service.harness = harness
+    service.author("workspace-one", "study", "alpha", configuration=CONFIG)
+    service.validate("workspace-one", "study", "alpha")
+    receipt = service.run("workspace-one", "study", "alpha")
+    submitted = cast(dict[str, object], harness.calls[-1][1]["config"])["job_id"]
+    assert receipt["ok"] is False
+    assert receipt["executionCertainty"] == "unknown_outcome"
+    assert "different job_id" in cast(str, receipt["message"])
+    assert receipt["job_id"] == submitted
+    assert submitted != "job-other"
+
+
+def test_run_batch_validates_every_point_before_any_submission(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, harness = programs
+    assert MAX_BATCH_POINTS == 16
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    count = len(harness.calls)
+    for assignments, message in (
+        ([{"lookback": 10}, {"unknown": 1}], "unknown parameter"),
+        ([{"lookback": 10}, {"lookback": 10}], "duplicat"),
+        ([{"lookback": 10}, {"lookback": 10.0}], "duplicat"),
+        (
+            [{"lookback": 10, "mode": "fast"}, {"mode": "fast", "lookback": 10}],
+            "duplicat",
+        ),
+        ([{"lookback": 10}] * (MAX_BATCH_POINTS + 1), "1 to 16"),
+        ([], "1 to 16"),
+        ("nope", "array"),
+        ([{"lookback": 10}, "nope"], "assignment object"),
+        ([{"lookback": 10}, {"lookback": 0}], "at least"),
+    ):
+        with pytest.raises(ProgramArtifactError, match=message):
+            service.run_batch(
+                "workspace-one",
+                "strategy",
+                "alpha",
+                cast(Sequence[Mapping[str, object]], assignments),
+            )
+        assert len(harness.calls) == count
+    with pytest.raises(ProgramArtifactError, match="indicators execute"):
+        service.run_batch("workspace-one", "indicator", "alpha", [{"lookback": 10}])
+    assert len(harness.calls) == count
+
+
+def test_run_batch_records_unknown_points_without_replay(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, _ = programs
+
+    class Flaky(Harness):
+        def call_tool(
+            self, name: str, arguments: Mapping[str, object] | None = None
+        ) -> McpToolResult:
+            if (
+                name == "run_backtest"
+                and _point_parameters((name, arguments or {})).get("lookback") == 40
+            ):
+                self.calls.append((name, arguments or {}))
+                raise HarnessMcpTransportError(
+                    "response lost", execution_certainty="unknown_outcome"
+                )
+            return super().call_tool(name, arguments)
+
+    harness = Flaky()
+    service.harness = harness
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    result = service.run_batch(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        [{"lookback": 20}, {"lookback": 40}, {"lookback": 60}],
+    )
+    points = cast(list[dict[str, object]], result["points"])
+    assert result["ok"] is False
+    assert [point["state"] for point in points] == ["succeeded", "unknown", "succeeded"]
+    unknown = points[1]
+    assert isinstance(unknown["jobId"], str)
+    assert "Harness program request failed" in cast(str, unknown["error"])
+    assert len(_run_points(harness)) == 3
+    harness.reject = True
+    failed = service.run_batch("workspace-one", "strategy", "alpha", [{"lookback": 20}])
+    failed_points = cast(list[dict[str, object]], failed["points"])
+    assert failed["ok"] is False and failed_points[0]["state"] == "failed"
+
+
+def test_configuration_guard_still_rejects_nested_parameters(
+    programs: Programs,
+) -> None:
+    service, provider, _ = programs
+    before = provider.store("workspace-one").head
+    for configuration in (
+        {"parameters": {"source": "alternate"}},
+        {"data": {"parameters": {"lookback": 1}}},
+        {"data": {"nested": [{"parameters": {}}]}},
+    ):
+        with pytest.raises(ProgramArtifactError, match="override"):
+            service.author(
+                "workspace-one",
+                "strategy",
+                "guard",
+                PROGRAM_TEMPLATES["strategy"],
+                configuration={**CONFIG, **configuration},
+                parameter_declaration=DECLARATION,
+            )
+    assert provider.store("workspace-one").head == before
+
+
+def _launch_request(cutoff: datetime) -> dict[str, object]:
+    """The launch request persisted for a cutoff with the default partition."""
+    return {
+        "createdAt": cutoff.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "partition": default_launch_partition().as_dict(),
     }
-    result = subprocess.run(
-        [str(binary.resolve())],
-        input="\n".join(json.dumps(item) for item in requests) + "\n",
-        capture_output=True,
-        text=True,
-        env=environment,
-        timeout=120,
-        check=False,
+
+
+def _policy(cutoff: datetime) -> DataWindowPolicy:
+    mandate = derive_mandate("workspace-one", "execution-1", _launch_request(cutoff))
+    assert mandate is not None
+    return mandate.default_window
+
+
+def _forward_policy(cutoff: datetime) -> DataWindowPolicy:
+    mandate = derive_mandate("workspace-one", "execution-1", _launch_request(cutoff))
+    assert mandate is not None
+    return mandate.forward_window
+
+
+def test_run_enforces_research_mandate_window(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, harness = programs
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    count = len(harness.calls)
+    allowed = _policy(datetime(2025, 6, 1, tzinfo=UTC))
+    assert (
+        service.run("workspace-one", "strategy", "alpha", data_window=allowed)["ok"]
+        is True
     )
-    assert result.returncode == 0, result.stderr
-    responses = [
-        json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")
-    ]
-    response = next(item for item in responses if item.get("id") == 2)
-    server = next(item for item in responses if item.get("id") == 1)["result"][
-        "serverInfo"
-    ]
-    reference = next(item for item in responses if item.get("id") == 3)["result"][
-        "structuredContent"
-    ]
-    assert server["sdkIdentity"] == reference["sdkIdentity"] == service._sdk_identity()
-    assert (server["sdkVersion"], server["sdkAbiVersion"]) == service._sdk_metadata(
-        service.sdk_root
+    assert len(_run_points(harness)) == 1
+    rejected = _policy(datetime(2024, 1, 1, tzinfo=UTC))
+    with pytest.raises(ProgramArtifactError) as error:
+        service.run("workspace-one", "strategy", "alpha", data_window=rejected)
+    assert "at or before 2023-10-02T00:00:00Z (exclusive)" in str(error.value)
+    assert "allowed development window" in str(error.value)
+    assert len(harness.calls) == count + 1
+    assert len(_run_points(harness)) == 1
+
+
+def test_run_batch_fails_fast_before_any_submission_when_window_crosses(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, harness = programs
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    allowed = _policy(datetime(2025, 6, 1, tzinfo=UTC))
+    result = service.run_batch(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        [{"lookback": 10}, {"lookback": 30}],
+        data_window=allowed,
     )
-    assert reference["content"] == "\n".join(
-        (service.sdk_root / "src/consumer.rs")
-        .read_text(encoding="utf-8")
-        .splitlines()[18:22]
+    assert result["ok"] is True
+    submitted = len(_run_points(harness))
+    assert submitted == 2
+    rejected = _policy(datetime(2024, 1, 1, tzinfo=UTC))
+    with pytest.raises(ProgramArtifactError, match="outside the allowed development window"):
+        service.run_batch(
+            "workspace-one",
+            "strategy",
+            "alpha",
+            [{"lookback": 10}],
+            data_window=rejected,
+        )
+    assert len(_run_points(harness)) == submitted
+
+
+def test_batch_identities_include_the_effective_window(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, _ = programs
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    baseline = service.run_batch(
+        "workspace-one", "strategy", "alpha", [{"lookback": 10}]
     )
-    assert "error" not in response, response
-    payload = response["result"]
-    assert not payload.get("isError"), payload
-    assert payload["structuredContent"]["valid"] is True
-    assert payload["structuredContent"]["subscriptions"] == data["subscriptions"]
+    development = _policy(datetime(2025, 6, 1, tzinfo=UTC))
+    same_window = service.run_batch(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        [{"lookback": 10}],
+        data_window=development,
+    )
+    assert same_window["batchId"] == baseline["batchId"]
+    forward = _forward_policy(datetime(2025, 6, 1, tzinfo=UTC))
+    overridden = service.run_batch(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        [{"lookback": 10}],
+        data_window=forward,
+    )
+    assert overridden["batchId"] != baseline["batchId"]
+    null_baseline = service.run_null_batch(
+        "workspace-one", "strategy", "alpha", block_size=5, seeds=[1]
+    )
+    null_overridden = service.run_null_batch(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        block_size=5,
+        seeds=[1],
+        data_window=forward,
+    )
+    assert null_overridden["batchId"] != null_baseline["batchId"]
+
+
+def test_run_and_batch_stay_unrestricted_without_a_policy(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, harness = programs
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    assert service.run("workspace-one", "strategy", "alpha")["ok"] is True
+    result = service.run_batch("workspace-one", "strategy", "alpha", [{"lookback": 10}])
+    assert result["ok"] is True
+    assert len(_run_points(harness)) == 2
+
+
+def test_forward_override_policy_rewrites_start_and_end_on_run(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, harness = programs
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    policy = _forward_policy(datetime(2025, 6, 1, tzinfo=UTC))
+    assert policy.override is True
+    receipt = service.run("workspace-one", "strategy", "alpha", data_window=policy)
+    assert receipt["ok"] is True
+    document = cast(dict[str, object], harness.calls[-1][1]["config"])
+    assert document["start"] == rfc3339(policy.start_ns)
+    assert document["end"] == rfc3339(policy.end_ns)
+    assert document["start"] != CONFIG["start"] and document["end"] != CONFIG["end"]
+
+
+def test_development_policy_keeps_the_committed_window_on_run(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, harness = programs
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    policy = _policy(datetime(2025, 6, 1, tzinfo=UTC))
+    assert policy.override is False
+    receipt = service.run("workspace-one", "strategy", "alpha", data_window=policy)
+    assert receipt["ok"] is True
+    document = cast(dict[str, object], harness.calls[-1][1]["config"])
+    assert document["start"] == CONFIG["start"]
+    assert document["end"] == CONFIG["end"]
+
+
+def test_forward_override_policy_rewrites_every_batch_and_null_point(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, harness = programs
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    policy = _forward_policy(datetime(2025, 6, 1, tzinfo=UTC))
+    batch = service.run_batch(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        [{"lookback": 10}, {"lookback": 30}],
+        data_window=policy,
+    )
+    assert batch["ok"] is True
+    assert len(_run_points(harness)) == 2
+    null_batch = service.run_null_batch(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        {"lookback": 10},
+        block_size=5,
+        seeds=[1, 2],
+        data_window=policy,
+    )
+    assert null_batch["ok"] is True
+    run_calls = _run_points(harness)
+    assert len(run_calls) == 4
+    for call in run_calls:
+        document = cast(dict[str, object], call[1]["config"])
+        assert document["start"] == rfc3339(policy.start_ns)
+        assert document["end"] == rfc3339(policy.end_ns)
+
+
+def _null_config(
+    call: tuple[str, Mapping[str, object]],
+) -> dict[str, object]:
+    config = cast(dict[str, object], call[1]["config"])
+    return cast(dict[str, object], config["null"])
+
+
+def test_run_null_batch_uses_fresh_opaque_ids_with_stable_provenance(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, harness = programs
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    version = cast(str, service.load("workspace-one", "strategy", "alpha")["version"])
+    result = service.run_null_batch(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        {"lookback": 10},
+        block_size=7,
+        seeds=[3, 1, 2],
+    )
+    assert result["ok"] is True
+    assert result["programId"] == "alpha" and result["version"] == version
+    batch_id = cast(str, result["batchId"])
+    assert batch_id.startswith("null-alpha-")
+    assert len(batch_id) == len("null-alpha-") + 12
+    points = cast(list[dict[str, object]], result["points"])
+    assert [point["seed"] for point in points] == [3, 1, 2]
+    assert [point["state"] for point in points] == ["succeeded"] * 3
+    assert all("error" not in point for point in points)
+    for point, expected in zip(points, (3, 1, 2), strict=True):
+        assert point["parameters"] == {**DEFAULTS, "lookback": 10}
+        assert re.fullmatch(r"job-[0-9a-f]{32}", cast(str, point["jobId"]))
+        assert not cast(str, point["jobId"]).endswith(f"null-{expected}")
+    run_calls = _run_points(harness)
+    assert len(run_calls) == 3
+    assert [cast(str, point["jobId"]) for point in points] == [
+        cast(dict[str, object], call[1]["config"])["job_id"] for call in run_calls
+    ]
+    assert len({cast(str, point["jobId"]) for point in points}) == 3
+    for call, expected in zip(run_calls, (3, 1, 2), strict=True):
+        assert _null_config(call) == {
+            "mode": "block_permutation",
+            "block_size": 7,
+            "seed": expected,
+        }
+    reordered = service.run_null_batch(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        {"lookback": 10},
+        block_size=7,
+        seeds=[2, 3, 1],
+    )
+    assert reordered["batchId"] == batch_id
+    reordered_points = cast(list[dict[str, object]], reordered["points"])
+    reordered_ids = [cast(str, point["jobId"]) for point in reordered_points]
+    assert [point["seed"] for point in reordered_points] == [2, 3, 1]
+    assert len(set(reordered_ids)) == 3
+    assert set(reordered_ids).isdisjoint(
+        {cast(str, point["jobId"]) for point in points}
+    )
+    changed_block = service.run_null_batch(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        {"lookback": 10},
+        block_size=8,
+        seeds=[1, 2, 3],
+    )
+    assert changed_block["batchId"] != batch_id
+    assert {
+        cast(str, point["jobId"])
+        for point in cast(list[dict[str, object]], changed_block["points"])
+    }.isdisjoint({cast(str, point["jobId"]) for point in points})
+    changed_parameters = service.run_null_batch(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        {"lookback": 11},
+        block_size=7,
+        seeds=[1, 2, 3],
+    )
+    assert changed_parameters["batchId"] != batch_id
+
+
+def test_run_null_batch_validates_before_any_submission(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, harness = programs
+    assert MAX_NULL_SEEDS == 16 and MAX_NULL_BLOCK_SIZE == 10_000
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    count = len(harness.calls)
+    for block_size, seeds, message in (
+        (0, [1], "1 to 10000"),
+        (10001, [1], "1 to 10000"),
+        (True, [1], "1 to 10000"),
+        (1.5, [1], "1 to 10000"),
+        (5, [], "1 to 16"),
+        (5, list(range(MAX_NULL_SEEDS + 1)), "1 to 16"),
+        (5, [1, 1], "unique"),
+        (5, [-1], "at least 0"),
+        (5, [1.5], "integer"),
+        (5, [True], "integer"),
+        (5, "1", "array"),
+    ):
+        with pytest.raises(ProgramArtifactError, match=message):
+            service.run_null_batch(
+                "workspace-one",
+                "strategy",
+                "alpha",
+                block_size=cast(int, block_size),
+                seeds=cast(Sequence[int], seeds),
+            )
+        assert len(harness.calls) == count
+    with pytest.raises(ProgramArtifactError, match="unknown parameter"):
+        service.run_null_batch(
+            "workspace-one",
+            "strategy",
+            "alpha",
+            {"unknown": 1},
+            block_size=5,
+            seeds=[1],
+        )
+    assert len(harness.calls) == count
+    with pytest.raises(ProgramArtifactError, match="indicators execute"):
+        service.run_null_batch(
+            "workspace-one", "indicator", "alpha", block_size=5, seeds=[1]
+        )
+    assert len(harness.calls) == count
+
+
+def test_run_null_batch_records_unknown_points_without_replay(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, _ = programs
+
+    class Flaky(Harness):
+        def call_tool(
+            self, name: str, arguments: Mapping[str, object] | None = None
+        ) -> McpToolResult:
+            call = (name, arguments or {})
+            if name == "run_backtest" and _null_config(call)["seed"] == 2:
+                self.calls.append(call)
+                raise HarnessMcpTransportError(
+                    "response lost", execution_certainty="unknown_outcome"
+                )
+            return super().call_tool(name, arguments)
+
+    harness = Flaky()
+    service.harness = harness
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    result = service.run_null_batch(
+        "workspace-one", "strategy", "alpha", block_size=5, seeds=[1, 2, 3]
+    )
+    points = cast(list[dict[str, object]], result["points"])
+    assert result["ok"] is False
+    assert [point["state"] for point in points] == [
+        "succeeded",
+        "unknown",
+        "succeeded",
+    ]
+    unknown = points[1]
+    assert isinstance(unknown["jobId"], str)
+    assert "Harness program request failed" in cast(str, unknown["error"])
+    assert len(_run_points(harness)) == 3
+    harness.reject = True
+    failed = service.run_null_batch(
+        "workspace-one", "strategy", "alpha", block_size=5, seeds=[1]
+    )
+    failed_points = cast(list[dict[str, object]], failed["points"])
+    assert failed["ok"] is False and failed_points[0]["state"] == "failed"
+
+
+def test_run_null_batch_fails_fast_before_any_submission_when_window_crosses(
+    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+) -> None:
+    service, _, harness = programs
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    rejected = _policy(datetime(2024, 1, 1, tzinfo=UTC))
+    count = len(harness.calls)
+    with pytest.raises(ProgramArtifactError, match="outside the allowed development window"):
+        service.run_null_batch(
+            "workspace-one",
+            "strategy",
+            "alpha",
+            block_size=5,
+            seeds=[1, 2],
+            data_window=rejected,
+        )
+    assert len(harness.calls) == count
+    allowed = _policy(datetime(2025, 6, 1, tzinfo=UTC))
+    result = service.run_null_batch(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        block_size=5,
+        seeds=[1, 2],
+        data_window=allowed,
+    )
+    assert result["ok"] is True
+    assert len(_run_points(harness)) == 2

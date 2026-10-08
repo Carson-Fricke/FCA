@@ -1,14 +1,15 @@
 """Backtest data HTTP surface delegating launch to the harness adapter.
 
-Listing and detail read the workspace backtest records persisted locally; the
-launch route delegates to the harness activation adapter interface
-(:class:`HarnessBoundary`) exactly like every other Thesis activation call.
-The router resolves its services from app state.
+Listing and detail read the workspace backtest records persisted locally and
+keyed by the harness ``job_id``; the launch route delegates to the harness
+activation adapter interface (:class:`HarnessBoundary`) exactly like every
+other Thesis activation call.  The router resolves its services from app state.
 """
 
 from __future__ import annotations
 
 import pathlib
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -28,9 +29,12 @@ from thesis.integrations.harness_activation import (
     ActivationEnvironment,
     ActivationOutcome,
     CapabilityUnavailableError,
+    HarnessActivationError,
+    HarnessActivationProtocolError,
     HarnessActivationRequest,
     HarnessBoundary,
 )
+from thesis.integrations.mcp import HarnessMcpError
 
 
 def _utc_now() -> datetime:
@@ -43,31 +47,36 @@ def _iso_z(moment: datetime) -> str:
 
 @dataclass(frozen=True, slots=True)
 class BacktestRecord:
-    """One workspace backtest row with its detail, split, and series."""
+    """One workspace backtest row keyed by its harness job.
 
-    id: str
+    ``job_id`` is the single execution identity allocated at submission and
+    reused unchanged by tracking, artifacts, and reports.  A statistic the
+    harness did not publish is ``None``; the record never carries a zero in its
+    place.
+    """
+
+    job_id: str
     workspace_id: str
     strategy_id: str
     name: str
     period_start: str
     period_end: str
     created_at: str
-    initial_capital: float
-    final_capital: float
-    total_return: float
-    sharpe: float
-    max_drawdown: float
-    win_rate: float
-    trades: int
+    initial_capital: float | None
+    final_capital: float | None
+    total_return: float | None
+    sharpe: float | None
+    max_drawdown: float | None
+    win_rate: float | None
+    trades: int | None
     split: Mapping[str, object] | None = None
     manifest: Mapping[str, object] = field(default_factory=dict)
     equity: tuple[Mapping[str, float | int], ...] = ()
     trade_log: tuple[Mapping[str, object], ...] = ()
-    stats: Mapping[str, float] = field(default_factory=dict)
-    status: str = "completed"
+    stats: Mapping[str, object] = field(default_factory=dict)
+    status: str = "succeeded"
     bundle_ref: str | None = None
     config_path: str | None = None
-    run_id: str | None = None
     chat_id: str | None = None
     execution_id: str | None = None
 
@@ -75,10 +84,17 @@ class BacktestRecord:
     def split_declared(self) -> bool:
         return self.split is not None
 
+    @property
+    def capital_change(self) -> float | None:
+        """Final minus initial capital, or ``None`` until both ends are published."""
+        if self.initial_capital is None or self.final_capital is None:
+            return None
+        return round(self.final_capital - self.initial_capital, 2)
+
     def summary_row(self) -> dict[str, object]:
         """Return the BacktestSummaryRow projection."""
         return {
-            "id": self.id,
+            "job_id": self.job_id,
             "workspace_id": self.workspace_id,
             "strategy_id": self.strategy_id,
             "name": self.name,
@@ -92,7 +108,6 @@ class BacktestRecord:
             "trades": self.trades,
             "split_declared": self.split is not None,
             "created_at": self.created_at,
-            "run_id": self.run_id,
             "chat_id": self.chat_id,
             "execution_id": self.execution_id,
         }
@@ -106,7 +121,7 @@ class BacktestRecord:
     def detail(self) -> dict[str, object]:
         """Return the BacktestDetail projection."""
         return {
-            "id": self.id,
+            "job_id": self.job_id,
             "workspace_id": self.workspace_id,
             "strategy_id": self.strategy_id,
             "name": self.name,
@@ -114,7 +129,7 @@ class BacktestRecord:
             "period_end": self.period_end,
             "initial_capital": self.initial_capital,
             "final_capital": self.final_capital,
-            "net_pnl": round(self.final_capital - self.initial_capital, 2),
+            "capital_change": self.capital_change,
             "equity": [dict(point) for point in self.equity],
             "trades": [dict(trade) for trade in self.trade_log],
             "stats": self._stats_document(),
@@ -123,12 +138,11 @@ class BacktestRecord:
             "status": self.status,
             "bundle_ref": self.bundle_ref,
             "config_path": self.config_path,
-            "run_id": self.run_id,
             "chat_id": self.chat_id,
             "execution_id": self.execution_id,
         }
 
-    def _default_stats(self) -> dict[str, float]:
+    def _default_stats(self) -> dict[str, object]:
         return {
             "sharpe": self.sharpe,
             "max_drawdown": self.max_drawdown,
@@ -143,33 +157,43 @@ class BacktestStore(Protocol):
         """Return every record for the workspace, newest first."""
         ...
 
-    def get(self, workspace_id: str, backtest_id: str) -> BacktestRecord | None:
-        """Return one record, or ``None`` when absent."""
+    def get(self, workspace_id: str, job_id: str) -> BacktestRecord | None:
+        """Return one record by its direct ``(workspace_id, job_id)`` key."""
         ...
 
     def add(self, record: BacktestRecord) -> BacktestRecord:
-        """Persist and return one record."""
+        """Atomically persist and return one record.
+
+        Materialization is add-if-absent: a repeated or concurrent import for
+        the same ``(workspace_id, job_id)`` returns the existing projection
+        instead of creating another one.
+        """
         ...
 
 
 class InMemoryBacktestStore:
-    """Local in-memory backtest store."""
+    """Local in-memory backtest store with atomic add-if-absent semantics."""
 
     def __init__(self) -> None:
-        self._records: dict[str, list[BacktestRecord]] = {}
+        self._records: dict[str, dict[str, BacktestRecord]] = {}
+        self._lock = threading.Lock()
 
     def list(self, workspace_id: str) -> tuple[BacktestRecord, ...]:
-        return tuple(self._records.get(workspace_id, ()))
+        with self._lock:
+            return tuple(reversed(tuple(self._records.get(workspace_id, {}).values())))
 
-    def get(self, workspace_id: str, backtest_id: str) -> BacktestRecord | None:
-        for record in self._records.get(workspace_id, ()):
-            if record.id == backtest_id:
-                return record
-        return None
+    def get(self, workspace_id: str, job_id: str) -> BacktestRecord | None:
+        with self._lock:
+            return self._records.get(workspace_id, {}).get(job_id)
 
     def add(self, record: BacktestRecord) -> BacktestRecord:
-        self._records.setdefault(record.workspace_id, []).insert(0, record)
-        return record
+        with self._lock:
+            bucket = self._records.setdefault(record.workspace_id, {})
+            existing = bucket.get(record.job_id)
+            if existing is not None:
+                return existing
+            bucket[record.job_id] = record
+            return record
 
 
 class LaunchBacktestRequest(BaseModel):
@@ -188,8 +212,9 @@ class BacktestDataService:
     """Backtest reads over local records and launch via the adapter seam.
 
     A launch persists a :class:`BacktestRecord` derived from the harness
-    outcome, so the run immediately appears in the list and detail reads.  When
-    the outcome carries a harness reproducibility manifest and an
+    outcome under the submitted ``job_id``, so the job immediately appears in
+    the list and detail reads.  When the outcome carries a harness
+    reproducibility manifest and an
     :class:`~thesis.artifacts.importer.ArtifactImporter` is injected, the
     reproducibility-critical artifacts are imported and referenced by content
     hash; without a manifest the import step is skipped cleanly.
@@ -202,13 +227,11 @@ class BacktestDataService:
         harness: HarnessBoundary | None = None,
         importer: ArtifactImporter | None = None,
         clock: Callable[[], datetime] | None = None,
-        id_factory: Callable[[str], str] | None = None,
     ) -> None:
         self._store = store if store is not None else InMemoryBacktestStore()
         self._harness = harness
         self._importer = importer
         self._clock = clock if clock is not None else _utc_now
-        self._id_factory = id_factory
 
     @property
     def store(self) -> BacktestStore:
@@ -225,56 +248,71 @@ class BacktestDataService:
     def list_backtests(self, workspace_id: str) -> tuple[dict[str, object], ...]:
         return tuple(record.summary_row() for record in self._store.list(workspace_id))
 
-    def get_backtest(self, workspace_id: str, backtest_id: str) -> dict[str, object]:
-        record = self._store.get(workspace_id, backtest_id)
+    def get_backtest(self, workspace_id: str, job_id: str) -> dict[str, object]:
+        record = self._store.get(workspace_id, job_id)
         if record is None:
-            raise KeyError(backtest_id)
+            raise KeyError(job_id)
         return record.detail()
 
     def launch(
         self, workspace_id: str, request: LaunchBacktestRequest
     ) -> dict[str, object]:
-        """Delegate one backtest activation, then persist the outcome record."""
+        """Delegate one backtest activation and return its launch card.
+
+        The job id is allocated before dispatch and retained on every failure
+        path so an unknown outcome stays inspectable by its original id.  Only
+        terminal outcomes are persisted; a non-terminal launch is projected by
+        the materialize endpoint once the harness reports a terminal state.
+        """
         if self._harness is None:
             raise CapabilityUnavailableError(
                 "backtest", "no harness adapter configured"
             )
+        job_id = f"job-{uuid4().hex}"
         activation = HarnessActivationRequest(
             bundle_ref=request.bundle_ref,
             config_path=request.config_path,
             action="backtest",
             environment=request.environment,
+            job_id=job_id,
         )
-        outcome = self._harness.run_backtest(activation)
-        record = self._record_for_outcome(workspace_id, request, outcome)
+        try:
+            outcome = self._harness.run_backtest(activation)
+        except (HarnessActivationError, HarnessMcpError) as error:
+            error.job_id = job_id
+            raise
+        returned = _text(outcome.job_id)
+        if returned is None or returned != job_id:
+            error = HarnessActivationProtocolError(
+                "harness launch outcome requires the submitted job_id "
+                f"{job_id!r}, got {returned!r}"
+            )
+            error.job_id = job_id
+            raise error
+        record = self._record_for_outcome(workspace_id, request, outcome, job_id)
         record = self._import_artifacts(record, outcome)
-        self._store.add(record)
+        if record.status in _TERMINAL_JOB_STATES:
+            record = self._store.add(record)
         document = _outcome_document(outcome)
         document["backtest"] = record.detail()
-        document["backtest_id"] = record.id
         return document
-
-    def _new_backtest_id(self) -> str:
-        if self._id_factory is not None:
-            return self._id_factory("bt")
-        return f"bt-{uuid4().hex}"
 
     def _record_for_outcome(
         self,
         workspace_id: str,
         request: LaunchBacktestRequest,
         outcome: ActivationOutcome,
+        job_id: str,
     ) -> BacktestRecord:
-        backtest_id = self._new_backtest_id()
         raw = outcome.raw
         metrics = _mapping(raw.get("metrics"))
         manifest = _mapping(raw.get("manifest"))
         strategy_id = (
             request.strategy_id
             or _text(metrics.get("strategy_id"))
-            or (f"strategy-{backtest_id}")
+            or f"strategy-{job_id}"
         )
-        name = request.name or _text(metrics.get("name")) or f"Backtest {backtest_id}"
+        name = request.name or _text(metrics.get("name")) or f"Backtest {job_id}"
         period_start = _first_text(
             metrics, "period_start", "periodStart", "data_start", "dataStart"
         )
@@ -288,8 +326,7 @@ class BacktestDataService:
         }
         manifest_document = dict(manifest)
         manifest_document["launch"] = launch_document
-        if outcome.job_id is not None:
-            launch_document["job_id"] = outcome.job_id
+        launch_document["job_id"] = job_id
         if outcome.state is not None:
             launch_document["state"] = outcome.state
         if outcome.exit_code is not None:
@@ -297,22 +334,20 @@ class BacktestDataService:
         if metrics:
             manifest_document["metrics"] = metrics
         return BacktestRecord(
-            id=backtest_id,
+            job_id=job_id,
             workspace_id=workspace_id,
             strategy_id=strategy_id,
             name=name,
             period_start=period_start,
             period_end=period_end,
             created_at=_iso_z(self._clock()),
-            initial_capital=_number(metrics.get("initial_capital"), 0.0),
-            final_capital=_number(metrics.get("final_capital"), 0.0),
-            total_return=_number(
-                _first(metrics, "total_return", "totalReturn", "return_pct"), 0.0
-            ),
-            sharpe=_number(metrics.get("sharpe"), 0.0),
-            max_drawdown=_number(_first(metrics, "max_drawdown", "maxDrawdown"), 0.0),
-            win_rate=_number(_first(metrics, "win_rate", "winRate"), 0.0),
-            trades=_count(metrics.get("trades"), 0),
+            initial_capital=_optional_number(metrics.get("initial_capital")),
+            final_capital=_optional_number(metrics.get("final_capital")),
+            total_return=_optional_number(metrics.get("total_return")),
+            sharpe=_optional_number(metrics.get("sharpe")),
+            max_drawdown=_optional_number(metrics.get("max_drawdown")),
+            win_rate=_optional_number(metrics.get("win_rate")),
+            trades=_optional_count(metrics.get("trades")),
             split=_optional_mapping(metrics.get("split")),
             manifest=manifest_document,
             status=_launch_status(outcome),
@@ -331,8 +366,8 @@ class BacktestDataService:
         receipt = self._importer.import_manifest(
             manifest,
             strategy_version=manifest.strategy_version or "0.0.0",
-            experiment_id=manifest.experiment_id or record.id,
-            workflow_execution_id=manifest.workflow_execution_id or record.id,
+            experiment_id=manifest.experiment_id or record.job_id,
+            workflow_execution_id=manifest.workflow_execution_id or record.job_id,
             source_root=_source_root(raw),
         )
         manifest_document = dict(record.manifest)
@@ -381,22 +416,22 @@ def _first_text(source: Mapping[str, object], *names: str) -> str:
     return _text(_first(source, *names)) or ""
 
 
-def _number(value: object, default: float) -> float:
+def _optional_number(value: object) -> float | None:
     if isinstance(value, bool):
-        return default
+        return None
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, str):
         try:
             return float(value)
         except ValueError:
-            return default
-    return default
+            return None
+    return None
 
 
-def _count(value: object, default: int) -> int:
+def _optional_count(value: object) -> int | None:
     if isinstance(value, bool):
-        return default
+        return None
     if isinstance(value, int):
         return value
     if isinstance(value, float):
@@ -405,8 +440,11 @@ def _count(value: object, default: int) -> int:
         try:
             return int(float(value))
         except ValueError:
-            return default
-    return default
+            return None
+    return None
+
+
+_TERMINAL_JOB_STATES = frozenset({"succeeded", "failed", "cancelled"})
 
 
 def _launch_status(outcome: ActivationOutcome) -> str:
@@ -414,8 +452,8 @@ def _launch_status(outcome: ActivationOutcome) -> str:
     if state is not None:
         return state
     if outcome.exit_code is None:
-        return "launched"
-    return "completed" if outcome.exit_code == 0 else "failed"
+        return "queued"
+    return "succeeded" if outcome.exit_code == 0 else "failed"
 
 
 def _harness_manifest(value: object) -> HarnessManifest:
@@ -475,17 +513,17 @@ def create_backtest_router() -> APIRouter:
     ) -> dict[str, object]:
         return {"items": list(service.list_backtests(workspace_id))}
 
-    @router.get("/backtests/runs/{run_id}")
-    async def materialize_backtest_run(
+    @router.get("/backtests/jobs/{job_id}")
+    async def materialize_backtest_job(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
-        run_id: Annotated[str, Path(min_length=1, max_length=128)],
+        job_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: Request,
         chat_id: Annotated[str | None, Query(max_length=128)] = None,
         execution_id: Annotated[str | None, Query(max_length=128)] = None,
     ) -> dict[str, object]:
-        """Materialize one harness run into workspace card data.
+        """Materialize one harness job into workspace card data.
 
-        The UI calls this once the harness MCP tool returns a run id.  The
+        The UI calls this once the harness MCP tool returns a job id.  The
         harness boundary (local or remote) is owned here, so the same call
         yields the report for local and Azure execution.
         """
@@ -500,19 +538,19 @@ def create_backtest_router() -> APIRouter:
             )
         try:
             return coordinator.materialize(
-                workspace_id, run_id, chat_id=chat_id, execution_id=execution_id
+                workspace_id, job_id, chat_id=chat_id, execution_id=execution_id
             )
         except Exception as error:
             raise _service_error(error) from error
 
-    @router.get("/backtests/{backtest_id}")
+    @router.get("/backtests/{job_id}")
     async def get_backtest(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
-        backtest_id: Annotated[str, Path(min_length=1, max_length=128)],
+        job_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[BacktestDataService, Depends(get_backtest_service)],
     ) -> dict[str, object]:
         try:
-            return service.get_backtest(workspace_id, backtest_id)
+            return service.get_backtest(workspace_id, job_id)
         except Exception as error:
             raise _service_error(error) from error
 

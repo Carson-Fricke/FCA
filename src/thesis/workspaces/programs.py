@@ -4,19 +4,23 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
+import math
 import re
-import subprocess
-import tempfile
 import tomllib
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Protocol, cast
 from uuid import uuid4
 
+from thesis.experiments.mandate import DataWindowPolicy, datetime_ns, rfc3339
 from thesis.integrations.mcp import HarnessMcpError, McpToolResult
-from thesis.persistence.git import GitCoordinator, GitPublicationError
+from thesis.persistence.git import (
+    GitCoordinator,
+    GitMaterializationError,
+    GitPublicationError,
+)
 from thesis.research.models import (
     MARKET_SUBSCRIPTIONS_SCHEMA,
     ResearchModelError,
@@ -27,6 +31,57 @@ from thesis.workspaces.local import WorkspaceRepositoryError
 from thesis.workspaces.repository import WorkspaceRepositoryProvider
 
 ProgramKind = Literal["study", "strategy", "indicator"]
+
+#: Settle one dispatched execution's definitive non-success outcome, given the
+#: execution certainty and an optional message.
+JobSettlement = Callable[[str, str | None], None]
+#: Retain one execution job id before dispatch and return its outcome settlement.
+JobRetention = Callable[[str, str, Mapping[str, object]], JobSettlement]
+
+
+class ProgramGit(Protocol):
+    """The Git surface program operations require, as an injected storage port."""
+
+    @property
+    def repository(self) -> Path: ...
+
+    def head(self) -> str | None: ...
+
+    def publication_lock(self) -> AbstractContextManager[None]: ...
+
+    def tracked_paths(self, prefix: str) -> tuple[str, ...]: ...
+
+    def file_matches(self, commit_hash: str, path: str, payload: bytes) -> bool: ...
+
+    def is_ancestor(self, commit_hash: str) -> bool: ...
+
+    def read_blobs(
+        self, commit_hash: str, paths: Sequence[str]
+    ) -> dict[str, bytes]: ...
+
+    def read_file(self, commit_hash: str, path: str) -> bytes: ...
+
+    def path_revisions(self, prefix: str) -> tuple[tuple[str, str], ...]: ...
+
+    def path_revisions_many(
+        self, prefixes: Sequence[str]
+    ) -> dict[str, tuple[tuple[str, str], ...]]: ...
+
+    def has_staged_changes(self, paths: Sequence[str]) -> bool: ...
+
+    def commit_exact_files(
+        self,
+        head: str | None,
+        files: Mapping[str, bytes],
+        destinations: Mapping[str, Path],
+        message: str,
+    ) -> str: ...
+
+
+def _default_git_factory(root: Path) -> ProgramGit:
+    return GitCoordinator(root)
+
+
 _DIRECTORIES = {"study": "studies", "strategy": "strategies", "indicator": "indicators"}
 _RESERVED_IDS = {"con", "prn", "aux", "nul"} | {
     f"{prefix}{i}" for prefix in ("com", "lpt") for i in range(1, 10)
@@ -34,6 +89,16 @@ _RESERVED_IDS = {"con", "prn", "aux", "nul"} | {
 PROGRAM_ID_PATTERN = r"^[a-z][a-z0-9_-]{0,63}$"
 MAX_READ_CHARS = 16000
 MAX_LIST_RESULTS = 200
+MAX_BATCH_POINTS = 16
+MAX_NULL_SEEDS = 16
+MAX_NULL_BLOCK_SIZE = 10_000
+NULL_TRANSFORM_MODE = "block_permutation"
+PARAMETER_NAME_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
+_PARAMETER_TYPES = ("integer", "number", "boolean", "string")
+_PARAMETER_KEYS = frozenset(
+    {"type", "default", "minimum", "maximum", "levels", "description"}
+)
+_RESERVED_PARAMETER_NAMES = frozenset({"source", "source_path", "symbols"})
 _DATE_PATTERN = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
 PROGRAM_CONFIGURATION_SCHEMA: dict[str, object] = {
     "type": "object",
@@ -42,7 +107,6 @@ PROGRAM_CONFIGURATION_SCHEMA: dict[str, object] = {
         "start": {"type": "string", "pattern": _DATE_PATTERN},
         "end": {"type": "string", "pattern": _DATE_PATTERN},
         "subscriptions": MARKET_SUBSCRIPTIONS_SCHEMA,
-        "interval": {"type": "string", "enum": ["1min", "1d"]},
     },
 }
 
@@ -165,6 +229,100 @@ def _hash(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def parameter_assignment_sha256(assignment: Mapping[str, object]) -> str:
+    """Return the canonical digest of one resolved parameter assignment.
+
+    Job attribution records this digest at submission; the research evidence
+    chain recomputes it from reported parameters to prove which configuration a
+    job actually ran.
+    """
+    return _hash(_bytes(dict(assignment)))
+
+
+_HistoryEntries = list[dict[str, object]]
+
+
+def _file_entry(path: str, sha256: str, size_bytes: int) -> dict[str, object]:
+    return {
+        "path": path,
+        "sha256": sha256,
+        "size_bytes": size_bytes,
+        "viewer": _viewer_for(path),
+    }
+
+
+def _viewer_for(path: str) -> str:
+    suffix = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+    if suffix == "json":
+        return "json"
+    if suffix in {"md", "markdown"}:
+        return "markdown"
+    if suffix in {"rs", "toml", "yaml", "yml", "lock"}:
+        return "code"
+    return "text"
+
+
+def _program_inputs(configuration: object) -> list[dict[str, object]]:
+    if not isinstance(configuration, Mapping):
+        return []
+    subscriptions = configuration.get("subscriptions")
+    if not isinstance(subscriptions, list):
+        return []
+    inputs: list[dict[str, object]] = []
+    for item in subscriptions:
+        if not isinstance(item, Mapping):
+            continue
+        data_type = item.get("data_type")
+        symbols = item.get("symbols")
+        interval = item.get("interval")
+        inputs.append(
+            {
+                "data_type": data_type if isinstance(data_type, str) else "unknown",
+                "symbols": (
+                    [symbol for symbol in symbols if isinstance(symbol, str)]
+                    if isinstance(symbols, list)
+                    else []
+                ),
+                "interval": interval if isinstance(interval, str) else None,
+            }
+        )
+    return inputs
+
+
+def _program_preview(
+    kind: ProgramKind, manifest: Mapping[str, object], configuration: object
+) -> dict[str, object]:
+    if kind == "study":
+        start = None
+        end = None
+        if isinstance(configuration, Mapping):
+            raw_start = configuration.get("start")
+            raw_end = configuration.get("end")
+            start = raw_start if isinstance(raw_start, str) else None
+            end = raw_end if isinstance(raw_end, str) else None
+        dependencies = manifest.get("indicatorIds")
+        return {
+            "type": "study",
+            "window": {"start": start, "end": end},
+            "indicator_ids": (
+                [item for item in dependencies if isinstance(item, str)]
+                if isinstance(dependencies, list)
+                else []
+            ),
+            "metrics": [],
+        }
+    if kind == "indicator":
+        return {"type": "indicator", "value_series": None, "used_by": []}
+    return {
+        "type": "strategy",
+        "entrypoint": "program.rs",
+        "symbol": "",
+        "exit_criteria": [],
+        "limitations": [],
+        "signals": None,
+    }
+
+
 class WorkspacePrograms:
     """Own author/update/read/validate/run by kind and ID, never caller paths.
 
@@ -179,14 +337,28 @@ class WorkspacePrograms:
         harness: ProgramHarness | None = None,
         *,
         sdk_root: Path | None = None,
+        git_factory: Callable[[Path], ProgramGit] = _default_git_factory,
     ) -> None:
         self.repositories = repositories
         self.harness = harness
         self.sdk_root = (
             sdk_root or Path(__file__).resolve().parents[2] / "harness" / "strategy-sdk"
         )
+        self._git_factory = git_factory
+        self._catalog_cache: dict[
+            tuple[str, str], tuple[str, tuple[dict[str, object], ...]]
+        ] = {}
 
-    def _path(self, workspace_id: str, kind: str, program_id: str) -> str:
+    def _git(self, root: Path) -> ProgramGit:
+        return self._git_factory(root)
+
+    def _path(
+        self,
+        workspace_id: str,
+        kind: str,
+        program_id: str,
+        root: Path | None = None,
+    ) -> str:
         if (
             kind not in _DIRECTORIES
             or re.fullmatch(PROGRAM_ID_PATTERN, program_id) is None
@@ -200,8 +372,9 @@ class WorkspacePrograms:
                 "kind and program_id must be safe program identifiers"
             )
         relative = f"{_DIRECTORIES[kind]}/{program_id}"
-        root = self.repositories.open(workspace_id).root
-        self.repositories.resolve_path(workspace_id, relative)
+        if root is None:
+            root = self.repositories.open(workspace_id).root
+            self.repositories.resolve_path(workspace_id, relative)
         current = root
         for part in relative.split("/"):
             if current.is_dir() and any(
@@ -237,10 +410,11 @@ class WorkspacePrograms:
         indicator_ids: Sequence[str] = (),
         indicator_type: str = "AuthoredIndicator",
         template: str | None = None,
+        parameter_declaration: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         relative = self._path(workspace_id, kind, program_id)
         root = self.repositories.open(workspace_id).root
-        git = GitCoordinator(root)
+        git = self._git(root)
         with git.publication_lock():
             head = git.head()
             if any(
@@ -258,6 +432,11 @@ class WorkspacePrograms:
                 "indicatorIds": list(indicator_ids),
                 "indicatorType": indicator_type,
             }
+            declaration = self._validate_parameter_declaration(
+                kind, parameter_declaration
+            )
+            if declaration:
+                manifest["parameters"] = declaration
             self._check_manifest(workspace_id, manifest)
             if source is not None and template is not None:
                 raise ProgramArtifactError("provide source or template, not both")
@@ -284,9 +463,10 @@ class WorkspacePrograms:
         replacement: str | None = None,
         configuration: Mapping[str, object] | None = None,
         indicator_ids: Sequence[str] | None = None,
+        parameter_declaration: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         relative = self._path(workspace_id, kind, program_id)
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        git = self._git(self.repositories.open(workspace_id).root)
         with git.publication_lock():
             head = self._head(git)
             snapshot = self._snapshot(workspace_id, kind, program_id, head)
@@ -311,6 +491,14 @@ class WorkspacePrograms:
                 manifest["configuration"] = dict(configuration)
             if indicator_ids is not None:
                 manifest["indicatorIds"] = list(indicator_ids)
+            if parameter_declaration is not None:
+                declaration = self._validate_parameter_declaration(
+                    kind, parameter_declaration
+                )
+                if declaration:
+                    manifest["parameters"] = declaration
+                else:
+                    manifest.pop("parameters", None)
             self._check_manifest(workspace_id, manifest)
             files = {
                 f"{relative}/program.rs": self._source_bytes(updated),
@@ -336,7 +524,7 @@ class WorkspacePrograms:
         studies/strategies. Every dependency is read from the same commit, never
         from the working tree or a newer dependency revision.
         """
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        git = self._git(self.repositories.open(workspace_id).root)
         selected = self._head(git) if commit is None else commit
         if (
             not isinstance(selected, str)
@@ -385,6 +573,7 @@ class WorkspacePrograms:
             if kind != "indicator"
             else snapshot["source"],
             "configuration": manifest["configuration"],
+            "parameters": self._declaration(manifest),
             "manifest": manifest,
             "validation": validation,
             "sdkIdentity": serving["sdkIdentity"],
@@ -442,7 +631,7 @@ class WorkspacePrograms:
         commit: str | None = None,
     ) -> dict[str, object]:
         """Explicitly retry repository publication after a known local commit."""
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        git = self._git(self.repositories.open(workspace_id).root)
         with git.publication_lock():
             selected = self._head(git) if commit is None else commit
             if (
@@ -473,7 +662,7 @@ class WorkspacePrograms:
         end_line: int | None = None,
         max_chars: int = MAX_READ_CHARS,
     ) -> dict[str, object]:
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        git = self._git(self.repositories.open(workspace_id).root)
         head = self._head(git)
         snapshot = self._snapshot(workspace_id, kind, program_id, head)
         result = self._receipt(workspace_id, kind, program_id, head)
@@ -483,6 +672,9 @@ class WorkspacePrograms:
         result["configuration"] = cast(dict[str, object], snapshot["manifest"])[
             "configuration"
         ]
+        result["parameters"] = self._declaration(
+            cast(Mapping[str, object], snapshot["manifest"])
+        )
         return result
 
     def list(
@@ -514,7 +706,7 @@ class WorkspacePrograms:
             raise ProgramArtifactError(
                 f"limit must be an integer from 1 to {MAX_LIST_RESULTS}"
             )
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        git = self._git(self.repositories.open(workspace_id).root)
         head = git.head()
         response: dict[str, object] = {
             "workspaceId": workspace_id,
@@ -552,10 +744,218 @@ class WorkspacePrograms:
         response["count"] = len(programs)
         return response
 
+    def catalog(
+        self, workspace_id: str, kind: ProgramKind
+    ) -> tuple[dict[str, object], ...]:
+        """Project committed programs with configuration, files and revisions.
+
+        The projection is cached per workspace, kind, and HEAD: repeated page
+        loads avoid re-reading every program while any new commit invalidates
+        the entry. Discovery does not call ``list`` first, so each program is
+        snapshotted exactly once per request.
+        """
+        if kind not in _DIRECTORIES:
+            raise ProgramArtifactError("kind must be study, strategy, or indicator")
+        git = self._git(self.repositories.open(workspace_id).root)
+        commit = git.head()
+        if commit is None:
+            return ()
+        cache_key = (workspace_id, kind)
+        cached = self._catalog_cache.get(cache_key)
+        if cached is not None and cached[0] == commit:
+            return cached[1]
+        directory = _DIRECTORIES[kind]
+        discovered: dict[str, set[str]] = {}
+        for path in git.tracked_paths(directory):
+            rest = path.removeprefix(directory + "/")
+            parts = rest.split("/")
+            if len(parts) != 2 or parts[1] not in ("program.rs", "manifest.json"):
+                continue
+            program_id, filename = parts
+            if not self._valid_program_id(kind, program_id):
+                continue
+            discovered.setdefault(program_id, set()).add(filename)
+        complete = {
+            program_id: files
+            for program_id, files in discovered.items()
+            if files == {"program.rs", "manifest.json"}
+        }
+        # Filter on manifests first: legacy or malformed programs are rejected
+        # from one batched read without reading their sources.
+        manifest_paths = {
+            program_id: f"{directory}/{program_id}/manifest.json"
+            for program_id in complete
+        }
+        manifests: dict[str, bytes] = {}
+        try:
+            manifests.update(git.read_blobs(commit, sorted(manifest_paths.values())))
+        except GitPublicationError:
+            for path in sorted(manifest_paths.values()):
+                try:
+                    manifests.update(git.read_blobs(commit, [path]))
+                except GitPublicationError:
+                    continue
+        candidates: list[str] = []
+        for program_id, path in manifest_paths.items():
+            manifest_bytes = manifests.get(path)
+            if manifest_bytes is None:
+                continue
+            try:
+                manifest = json.loads(manifest_bytes)
+            except ValueError:
+                continue
+            if (
+                not isinstance(manifest, dict)
+                or manifest.get("kind") != kind
+                or manifest.get("id") != program_id
+            ):
+                continue
+            try:
+                self._check_configuration(manifest.get("configuration"))
+            except ProgramArtifactError:
+                continue
+            declared = manifest.get("indicatorIds")
+            if not isinstance(declared, list) or any(
+                not isinstance(item, str) for item in declared
+            ):
+                continue
+            candidates.append(program_id)
+        entries: list[dict[str, object]] = []
+        selected = sorted(candidates)[:MAX_LIST_RESULTS]
+        preloaded = dict(manifests)
+        if selected:
+            try:
+                preloaded.update(
+                    git.read_blobs(
+                        commit,
+                        [
+                            f"{directory}/{program_id}/program.rs"
+                            for program_id in selected
+                        ],
+                    )
+                )
+            except GitPublicationError:
+                # Individual snapshots fall back to their own verified reads.
+                pass
+        revisions = git.path_revisions_many(
+            [f"{directory}/{program_id}" for program_id in selected]
+        )
+        for program_id in selected:
+            try:
+                snapshot = self._snapshot(
+                    workspace_id, kind, program_id, commit, git, preloaded
+                )
+            except (ProgramArtifactError, WorkspaceRepositoryError):
+                continue
+            entries.append(
+                self._catalog_entry(
+                    workspace_id,
+                    kind,
+                    program_id,
+                    commit,
+                    snapshot,
+                    git,
+                    self._history_entries(revisions.get(f"{directory}/{program_id}")),
+                )
+            )
+        result = tuple(entries)
+        if len(self._catalog_cache) > 16:
+            self._catalog_cache.clear()
+        self._catalog_cache[cache_key] = (commit, result)
+        return result
+
+    def file_content(
+        self,
+        workspace_id: str,
+        kind: ProgramKind,
+        program_id: str,
+        relative_path: str,
+    ) -> bytes:
+        """Read one committed program file by its declared name."""
+        if relative_path not in ("program.rs", "manifest.json"):
+            raise KeyError(relative_path)
+        git = self._git(self.repositories.open(workspace_id).root)
+        head = self._head(git)
+        relative = self._path(workspace_id, kind, program_id)
+        if f"{relative}/{relative_path}" not in git.tracked_paths(relative):
+            raise KeyError(relative_path)
+        return git.read_file(head, f"{relative}/{relative_path}")
+
+    def _catalog_entry(
+        self,
+        workspace_id: str,
+        kind: ProgramKind,
+        program_id: str,
+        commit: str,
+        snapshot: Mapping[str, object],
+        git: ProgramGit,
+        history: _HistoryEntries | None = None,
+    ) -> dict[str, object]:
+        manifest = cast(dict[str, object], snapshot["manifest"])
+        relative = f"{_DIRECTORIES[kind]}/{program_id}"
+        sizes = cast(dict[str, int], snapshot["sizes"])
+        files = sorted(
+            (
+                _file_entry(
+                    path.removeprefix(relative + "/"),
+                    sha256,
+                    sizes.get(path, 0),
+                )
+                for path, sha256 in cast(dict[str, str], snapshot["files"]).items()
+                if path.startswith(relative + "/")
+            ),
+            key=lambda item: cast(str, item["path"]),
+        )
+        configuration = manifest.get("configuration")
+        revisions = (
+            history if history is not None else self._revision_history(git, relative)
+        )[:20]
+        return {
+            "id": program_id,
+            "workspace_id": workspace_id,
+            "kind": kind,
+            "title": program_id,
+            "subtitle": relative,
+            "description": "",
+            "status": "committed",
+            "version": snapshot["version"],
+            "artifact_path": relative,
+            "created_at": revisions[-1]["created_at"] if revisions else None,
+            "updated_at": revisions[0]["created_at"] if revisions else None,
+            "git_commit": commit,
+            "digests": {
+                "source_sha256": _hash(cast(str, snapshot["source"]).encode()),
+                "bundle_sha256": snapshot["version"],
+                "manifest_sha256": _hash(_bytes(manifest)),
+            },
+            "inputs": _program_inputs(configuration),
+            "files": files,
+            "file_count": len(files),
+            "size_bytes": sum(cast(int, item["size_bytes"]) for item in files),
+            "history": revisions,
+            "preview": _program_preview(kind, manifest, configuration),
+        }
+
+    def _revision_history(self, git: ProgramGit, relative: str) -> _HistoryEntries:
+        return self._history_entries(git.path_revisions(relative))
+
+    @staticmethod
+    def _history_entries(
+        revisions: Sequence[tuple[str, str]] | None,
+    ) -> _HistoryEntries:
+        return [
+            {
+                "label": commit[:10],
+                "created_at": committed_at,
+                "note": "revision",
+            }
+            for commit, committed_at in (revisions or ())
+        ]
+
     def validate(
         self, workspace_id: str, kind: ProgramKind, program_id: str
     ) -> dict[str, object]:
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        git = self._git(self.repositories.open(workspace_id).root)
         head = self._head(git)
         snapshot = self._snapshot(workspace_id, kind, program_id, head)
         source = self._assembled_source(snapshot, kind)
@@ -622,14 +1022,16 @@ class WorkspacePrograms:
             )
         return receipt
 
-    def run(
+    def _prepare(
         self, workspace_id: str, kind: ProgramKind, program_id: str
     ) -> dict[str, object]:
-        if kind == "indicator":
-            raise ProgramArtifactError(
-                "indicators execute only as owned study/strategy dependencies"
-            )
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        """Pin one immutable execution bundle before any batch dispatch.
+
+        Head, snapshot, validation receipt, and manifest are read once and
+        reused for every point, so an interleaved workspace update can never
+        change an in-flight batch's source, window, or identity.
+        """
+        git = self._git(self.repositories.open(workspace_id).root)
         head = self._head(git)
         snapshot = self._snapshot(workspace_id, kind, program_id, head)
         relative = self._path(workspace_id, kind, program_id)
@@ -653,41 +1055,112 @@ class WorkspacePrograms:
             raise ProgramArtifactError(
                 "harness validation identity is unavailable or changed; validate before running"
             )
-        manifest = cast(dict[str, object], snapshot["manifest"])
+        return {
+            "git": git,
+            "head": head,
+            "snapshot": snapshot,
+            "relative": relative,
+            "validation": validation,
+            "manifest": cast(dict[str, object], snapshot["manifest"]),
+        }
+
+    def run(
+        self,
+        workspace_id: str,
+        kind: ProgramKind,
+        program_id: str,
+        parameters: Mapping[str, object] | None = None,
+        *,
+        data_window: DataWindowPolicy | None = None,
+        null_transform: Mapping[str, object] | None = None,
+        job_id: str | None = None,
+        retain: JobRetention | None = None,
+    ) -> dict[str, object]:
+        if kind == "indicator":
+            raise ProgramArtifactError(
+                "indicators execute only as owned study/strategy dependencies"
+            )
+        prepared = self._prepare(workspace_id, kind, program_id)
+        return self._execute_prepared(
+            prepared,
+            workspace_id,
+            kind,
+            program_id,
+            parameters,
+            data_window=data_window,
+            null_transform=null_transform,
+            job_id=f"job-{uuid4().hex}" if job_id is None else job_id,
+            retain=retain,
+        )
+
+    def _execute_prepared(
+        self,
+        prepared: Mapping[str, object],
+        workspace_id: str,
+        kind: ProgramKind,
+        program_id: str,
+        parameters: Mapping[str, object] | None,
+        *,
+        data_window: DataWindowPolicy | None,
+        null_transform: Mapping[str, object] | None,
+        job_id: str,
+        retain: JobRetention | None,
+        batch_id: str | None = None,
+        batch_kind: str | None = None,
+    ) -> dict[str, object]:
+        """Execute one point against a prepared pinned bundle.
+
+        Retention runs after every local check and receipt is built and
+        immediately before dispatch, so the job id is durably retained before
+        the harness can observe it. A retention failure returns a
+        ``not_started`` receipt and never dispatches. Once retained, a definitive
+        failure is settled through the returned callback, and any other failure
+        is reported as an unknown outcome.
+        """
+        snapshot = cast(dict[str, object], prepared["snapshot"])
+        head = cast(str, prepared["head"])
+        manifest = cast(dict[str, object], prepared["manifest"])
         configuration = dict(cast(dict[str, object], manifest["configuration"]))
+        if data_window is not None:
+            if data_window.override:
+                configuration["start"] = rfc3339(data_window.start_ns)
+                configuration["end"] = rfc3339(data_window.end_ns)
+            else:
+                start, end = self._configuration_window(configuration)
+                violation = data_window.window_violation(
+                    datetime_ns(start), datetime_ns(end)
+                )
+                if violation is not None:
+                    raise ProgramArtifactError(violation)
         source = self._assembled_source(snapshot, kind)
-        parameters = {"source": source}
+        assignment = self._resolve_parameters(self._declaration(manifest), parameters)
+        instance_parameters = {"source": source, **assignment}
         data = dict(cast(dict[str, object], configuration.get("data", {})))
         subscriptions = configuration.pop("subscriptions", None)
-        interval = configuration.pop("interval", None)
-        bar_interval = configuration.pop("bar_interval", None)
+        if subscriptions is None:
+            subscriptions = data.pop("subscriptions", None)
         configuration.pop("requiredSymbols", None)
         configuration.pop("required_symbols", None)
-        if subscriptions is not None:
-            data["subscriptions"] = subscriptions
-            symbols = sorted(
-                {
-                    symbol
-                    for item in cast(list[dict[str, object]], subscriptions)
-                    for symbol in cast(list[str], item["symbols"])
-                }
+        configuration.pop("symbols", None)
+        if not isinstance(subscriptions, list) or not subscriptions:
+            raise ProgramArtifactError(
+                "program configuration must declare subscriptions"
             )
-            data["symbols"] = symbols
-        else:
-            symbols = cast(
-                list[str], configuration.get("symbols", data.get("symbols", ["SPY"]))
-            )
-        for key in ("requiredSymbols", "required_symbols", "interval"):
+        symbols = sorted(
+            {
+                symbol
+                for item in cast(list[dict[str, object]], subscriptions)
+                for symbol in cast(list[str], item["symbols"])
+            }
+        )
+        data["subscriptions"] = subscriptions
+        data["symbols"] = symbols
+        for key in ("requiredSymbols", "required_symbols", "interval", "bar_interval"):
             data.pop(key, None)
-        if interval is not None or bar_interval is not None:
-            data["bar_interval"] = interval or bar_interval
         configuration["data"] = data
-        configuration["symbols"] = symbols
-        scope = _hash(_bytes([workspace_id, kind, program_id, snapshot["version"]]))[
-            :16
-        ]
-        run_id = f"{kind}-{program_id}-{scope}-{uuid4().hex}"
-        configuration["run_id"] = run_id
+        configuration["job_id"] = job_id
+        if null_transform is not None:
+            configuration["null"] = dict(null_transform)
         configuration.update(
             {
                 "shell": "study" if kind == "study" else "backtest",
@@ -697,51 +1170,410 @@ class WorkspacePrograms:
                         "implementation": "jit",
                         "bundle_hash": _hash(source.encode()),
                         "capital_fraction": "1.0",
-                        "parameters": parameters,
+                        "parameters": instance_parameters,
                         "symbols": symbols,
                     }
                 ],
             }
         )
-        receipt = self._receipt(workspace_id, kind, program_id, head)
+        receipt = self._receipt(workspace_id, kind, program_id, head, snapshot=snapshot)
         tool = "run_study" if kind == "study" else "run_backtest"
-        try:
-            result = self._call(tool, {"config": configuration})
-        except HarnessMcpError as error:
-            result = McpToolResult(
-                tool=tool,
-                is_error=True,
-                structured={
-                    "error": "Harness program request failed.",
-                    "executionCertainty": getattr(
-                        error, "execution_certainty", "unknown_outcome"
+        if self.harness is None:
+            raise ProgramArtifactError("harness is not configured")
+        settle: JobSettlement | None = None
+        if retain is not None:
+            try:
+                settle = retain(
+                    job_id,
+                    tool,
+                    self._retention_attribution(
+                        kind,
+                        program_id,
+                        snapshot,
+                        head,
+                        assignment,
+                        configuration,
+                        batch_id=batch_id,
+                        batch_kind=batch_kind,
+                        null_transform=null_transform,
                     ),
-                },
-            )
-        receipt.update(
-            {
-                "ok": not result.is_error,
-                "submittedRunId": run_id,
-                "result": {
-                    "run_id": run_id,
-                    **{
+                )
+            except Exception as error:  # noqa: BLE001 - fail closed, never dispatch
+                message = f"Job retention failed before dispatch: {error}"
+                receipt.update(
+                    {
+                        "ok": False,
+                        "job_id": job_id,
+                        "parameterAssignment": assignment,
+                        "error": message,
+                        "message": message,
+                        "executionCertainty": "not_started",
+                        "retryGuidance": (
+                            "Resolve the tracking failure and explicitly retry; "
+                            "execution did not start."
+                        ),
+                    }
+                )
+                return receipt
+        # Past retention a dispatch may already have reached the harness, so every
+        # failure from here on is an unknown outcome, never a not-started claim.
+        try:
+            try:
+                result = self._call(tool, {"config": configuration})
+            except HarnessMcpError as error:
+                result = McpToolResult(
+                    tool=tool,
+                    is_error=True,
+                    structured={
+                        "error": "Harness program request failed.",
+                        "executionCertainty": getattr(
+                            error, "execution_certainty", "unknown_outcome"
+                        ),
+                    },
+                )
+            else:
+                result = self._acknowledge(result, tool, job_id)
+            outcome = self._outcome(result)
+            receipt.update(
+                {
+                    "ok": not result.is_error,
+                    "job_id": job_id,
+                    "parameterAssignment": assignment,
+                    "result": {
                         key: result.structured[key]
-                        for key in (
-                            "job_id",
-                            "run_id",
-                            "study_id",
-                            "state",
-                            "status",
-                            "metrics",
-                            "artifacts",
-                        )
+                        for key in ("state", "status", "metrics", "artifacts")
                         if key in result.structured
                     },
-                },
-                **self._outcome(result),
-            }
-        )
+                    **outcome,
+                }
+            )
+            if settle is not None and result.is_error:
+                settle(
+                    str(outcome["executionCertainty"]), str(outcome["message"]) or None
+                )
+        except Exception as error:  # noqa: BLE001 - dispatch may have happened
+            message = f"Harness program outcome is unknown: {error}"
+            receipt.update(
+                {
+                    "ok": False,
+                    "job_id": job_id,
+                    "parameterAssignment": assignment,
+                    "error": message,
+                    "message": message,
+                    "executionCertainty": "unknown_outcome",
+                    "retryGuidance": (
+                        "Inspect job state before an explicit retry; "
+                        "never automatically replay execution."
+                    ),
+                }
+            )
         return receipt
+
+    @staticmethod
+    def _acknowledge(result: McpToolResult, tool: str, job_id: str) -> McpToolResult:
+        """Require the harness to echo the submitted execution id.
+
+        A missing or different acknowledgement leaves the execution outcome
+        unknown, and the submitted id is preserved by the caller's receipt. The
+        one exception is an explicit pre-admission refusal: an error the harness
+        labels ``not_started`` states that nothing was admitted, so it is kept.
+        """
+        acknowledged = result.structured.get("job_id")
+        if isinstance(acknowledged, str) and acknowledged:
+            if acknowledged == job_id:
+                return result
+            message = (
+                "Harness acknowledged a different job_id than the submitted execution."
+            )
+        else:
+            refused = result.structured.get("executionCertainty") == "not_started"
+            if result.is_error and refused:
+                return result
+            message = "Harness did not acknowledge the submitted job_id."
+        return McpToolResult(
+            tool=tool,
+            is_error=True,
+            structured={"error": message, "executionCertainty": "unknown_outcome"},
+        )
+
+    @staticmethod
+    def _retention_attribution(
+        kind: ProgramKind,
+        program_id: str,
+        snapshot: Mapping[str, object],
+        commit: str,
+        assignment: Mapping[str, object],
+        configuration: Mapping[str, object],
+        *,
+        batch_id: str | None,
+        batch_kind: str | None,
+        null_transform: Mapping[str, object] | None,
+    ) -> dict[str, object]:
+        """Build the scalar-only tracking attribution for one execution id."""
+        attribution: dict[str, object] = {
+            "programId": program_id,
+            "kind": kind,
+            "version": cast(str, snapshot["version"]),
+            "gitCommit": commit,
+            "parameterAssignmentSha256": parameter_assignment_sha256(assignment),
+        }
+        if batch_id is not None:
+            attribution["batchId"] = batch_id
+        if batch_kind is not None:
+            attribution["batchKind"] = batch_kind
+        if null_transform is not None and type(null_transform.get("seed")) is int:
+            attribution["seed"] = null_transform["seed"]
+        if null_transform is not None:
+            if type(null_transform.get("block_size")) is int:
+                attribution["blockSize"] = null_transform["block_size"]
+            if isinstance(null_transform.get("mode"), str):
+                attribution["nullMode"] = null_transform["mode"]
+        start = configuration.get("start")
+        end = configuration.get("end")
+        if isinstance(start, str):
+            attribution["windowStart"] = start
+        if isinstance(end, str):
+            attribution["windowEnd"] = end
+        return attribution
+
+    def run_batch(
+        self,
+        workspace_id: str,
+        kind: ProgramKind,
+        program_id: str,
+        assignments: Sequence[Mapping[str, object]],
+        label: str | None = None,
+        *,
+        data_window: DataWindowPolicy | None = None,
+        retain: JobRetention | None = None,
+    ) -> dict[str, object]:
+        if kind == "indicator":
+            raise ProgramArtifactError(
+                "indicators execute only as owned study/strategy dependencies"
+            )
+        if isinstance(assignments, (str, bytes)) or not isinstance(
+            assignments, Sequence
+        ):
+            raise ProgramArtifactError(
+                "assignments must be an array of parameter assignment objects"
+            )
+        if not 1 <= len(assignments) <= MAX_BATCH_POINTS:
+            raise ProgramArtifactError(
+                f"assignments must contain 1 to {MAX_BATCH_POINTS} parameter points"
+            )
+        prepared = self._prepare(workspace_id, kind, program_id)
+        manifest = cast(dict[str, object], prepared["manifest"])
+        configuration = cast(Mapping[str, object], manifest["configuration"])
+        if data_window is not None and not data_window.override:
+            start, end = self._configuration_window(configuration)
+            violation = data_window.window_violation(
+                datetime_ns(start), datetime_ns(end)
+            )
+            if violation is not None:
+                raise ProgramArtifactError(violation)
+        declaration = self._declaration(manifest)
+        version = cast(str, cast(dict[str, object], prepared["snapshot"])["version"])
+        resolved_points: list[dict[str, object]] = []
+        seen: set[str] = set()
+        for index, assignment in enumerate(assignments):
+            if not isinstance(assignment, Mapping):
+                raise ProgramArtifactError(
+                    f"assignments[{index}] must be a parameter assignment object"
+                )
+            resolved = self._resolve_parameters(declaration, assignment)
+            key = _hash(_bytes(resolved))
+            if key in seen:
+                raise ProgramArtifactError(
+                    f"assignments[{index}] duplicates an earlier parameter assignment"
+                )
+            seen.add(key)
+            resolved_points.append(resolved)
+        batch_id = self._batch_identity(
+            program_id,
+            resolved_points,
+            version,
+            self._effective_window(configuration, data_window),
+        )
+        points: list[dict[str, object]] = []
+        ok = True
+        for resolved in resolved_points:
+            submitted = dict(resolved)
+            try:
+                receipt = self._execute_prepared(
+                    prepared,
+                    workspace_id,
+                    kind,
+                    program_id,
+                    submitted,
+                    data_window=data_window,
+                    null_transform=None,
+                    job_id=f"job-{uuid4().hex}",
+                    retain=retain,
+                    batch_id=batch_id,
+                    batch_kind="batch",
+                )
+            except (ProgramArtifactError, OSError) as error:
+                # Raised before retention: nothing was recorded or dispatched.
+                ok = False
+                points.append(
+                    {
+                        "parameters": submitted,
+                        "jobId": None,
+                        "state": "failed",
+                        "executionCertainty": "not_started",
+                        "error": str(error),
+                    }
+                )
+                continue
+            point: dict[str, object] = {
+                "parameters": submitted,
+                "jobId": receipt.get("job_id"),
+                "state": self._point_state(receipt),
+                "executionCertainty": receipt.get("executionCertainty"),
+            }
+            if receipt.get("ok") is not True:
+                ok = False
+                message = receipt.get("message")
+                if isinstance(message, str) and message:
+                    point["error"] = message
+            points.append(point)
+        return {
+            "ok": ok,
+            "batchId": batch_id,
+            "programId": program_id,
+            "version": version,
+            "points": points,
+        }
+
+    def run_null_batch(
+        self,
+        workspace_id: str,
+        kind: ProgramKind,
+        program_id: str,
+        parameters: Mapping[str, object] | None = None,
+        *,
+        block_size: int,
+        seeds: Sequence[int],
+        label: str | None = None,
+        data_window: DataWindowPolicy | None = None,
+        retain: JobRetention | None = None,
+    ) -> dict[str, object]:
+        """Submit one block-permutation null per seed through the run boundary.
+
+        The assignment, the seed set, and the block size are validated once
+        against one pinned snapshot before any submission; every point merges
+        the frozen null configuration and a fresh opaque job id, so distinct
+        seeds never collide. The deterministic batch id is provenance only and
+        includes the effective data window. Unknown outcomes are recorded
+        truthfully and never replayed.
+        """
+        if kind == "indicator":
+            raise ProgramArtifactError(
+                "indicators execute only as owned study/strategy dependencies"
+            )
+        if type(block_size) is not int or not 1 <= block_size <= MAX_NULL_BLOCK_SIZE:
+            raise ProgramArtifactError(
+                f"block_size must be an integer from 1 to {MAX_NULL_BLOCK_SIZE}"
+            )
+        if isinstance(seeds, (str, bytes)) or not isinstance(seeds, Sequence):
+            raise ProgramArtifactError(
+                "seeds must be an array of distinct non-negative integers"
+            )
+        if not 1 <= len(seeds) <= MAX_NULL_SEEDS:
+            raise ProgramArtifactError(
+                f"seeds must contain 1 to {MAX_NULL_SEEDS} values"
+            )
+        checked_seeds: list[int] = []
+        for index, seed in enumerate(seeds):
+            if type(seed) is not int or seed < 0:
+                raise ProgramArtifactError(
+                    f"seeds[{index}] must be an integer of at least 0"
+                )
+            checked_seeds.append(seed)
+        if len(set(checked_seeds)) != len(checked_seeds):
+            raise ProgramArtifactError("seeds must be unique")
+        prepared = self._prepare(workspace_id, kind, program_id)
+        manifest = cast(dict[str, object], prepared["manifest"])
+        configuration = cast(Mapping[str, object], manifest["configuration"])
+        if data_window is not None and not data_window.override:
+            start, end = self._configuration_window(configuration)
+            violation = data_window.window_violation(
+                datetime_ns(start), datetime_ns(end)
+            )
+            if violation is not None:
+                raise ProgramArtifactError(violation)
+        assignment = self._resolve_parameters(self._declaration(manifest), parameters)
+        version = cast(str, cast(dict[str, object], prepared["snapshot"])["version"])
+        batch_id = self._null_batch_identity(
+            program_id,
+            assignment,
+            block_size,
+            checked_seeds,
+            version,
+            self._effective_window(configuration, data_window),
+        )
+        points: list[dict[str, object]] = []
+        ok = True
+        for seed in checked_seeds:
+            try:
+                receipt = self._execute_prepared(
+                    prepared,
+                    workspace_id,
+                    kind,
+                    program_id,
+                    assignment,
+                    data_window=data_window,
+                    null_transform={
+                        "mode": NULL_TRANSFORM_MODE,
+                        "block_size": block_size,
+                        "seed": seed,
+                    },
+                    job_id=f"job-{uuid4().hex}",
+                    retain=retain,
+                    batch_id=batch_id,
+                    batch_kind="null",
+                )
+            except (ProgramArtifactError, OSError) as error:
+                # Raised before retention: nothing was recorded or dispatched.
+                ok = False
+                points.append(
+                    {
+                        "parameters": assignment,
+                        "seed": seed,
+                        "jobId": None,
+                        "state": "failed",
+                        "executionCertainty": "not_started",
+                        "error": str(error),
+                    }
+                )
+                continue
+            point: dict[str, object] = {
+                "parameters": assignment,
+                "seed": seed,
+                "jobId": receipt.get("job_id"),
+                "state": self._point_state(receipt),
+                "executionCertainty": receipt.get("executionCertainty"),
+            }
+            if receipt.get("ok") is not True:
+                ok = False
+                message = receipt.get("message")
+                if isinstance(message, str) and message:
+                    point["error"] = message
+            points.append(point)
+        return {
+            "ok": ok,
+            "batchId": batch_id,
+            "programId": program_id,
+            "version": version,
+            "points": points,
+        }
+
+    def job_result(self, job_id: str) -> dict[str, object]:
+        """Return the harness's authoritative result payload for one job id."""
+        result = self._call("get_job_result", {"job_id": job_id})
+        if result.is_error:
+            raise ProgramArtifactError("harness job result is unavailable")
+        return dict(result.structured)
 
     def _serving_sdk(self) -> dict[str, object]:
         """Read fresh SDK/compiler metadata through the public harness ports."""
@@ -958,27 +1790,48 @@ class WorkspacePrograms:
         return package["version"], int(matched[1])
 
     def _snapshot(
-        self, workspace_id: str, kind: ProgramKind, program_id: str, commit: str
+        self,
+        workspace_id: str,
+        kind: ProgramKind,
+        program_id: str,
+        commit: str,
+        git: ProgramGit | None = None,
+        fetched: Mapping[str, bytes] | None = None,
     ) -> dict[str, object]:
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        if git is None:
+            git = self._git(self.repositories.open(workspace_id).root)
         dependencies: dict[str, str] = {}
         files: dict[str, str] = {}
+        sizes: dict[str, int] = {}
         visiting: set[str] = set()
 
         def load(
             selected_kind: ProgramKind, selected_id: str
         ) -> tuple[str, dict[str, object]]:
-            relative = self._path(workspace_id, selected_kind, selected_id)
+            relative = self._path(
+                workspace_id, selected_kind, selected_id, git.repository
+            )
             if relative in visiting:
                 raise ProgramArtifactError("indicator dependency cycle")
             visiting.add(relative)
-            try:
-                source_bytes = git.read_file(commit, f"{relative}/program.rs")
-                manifest_bytes = git.read_file(commit, f"{relative}/manifest.json")
-            except GitPublicationError as error:
-                raise ProgramArtifactError(
-                    "committed program does not exist"
-                ) from error
+            source_key = f"{relative}/program.rs"
+            manifest_key = f"{relative}/manifest.json"
+            if (
+                fetched is not None
+                and source_key in fetched
+                and manifest_key in fetched
+            ):
+                source_bytes = fetched[source_key]
+                manifest_bytes = fetched[manifest_key]
+            else:
+                try:
+                    revision = git.read_blobs(commit, [source_key, manifest_key])
+                except GitPublicationError as error:
+                    raise ProgramArtifactError(
+                        "committed program does not exist"
+                    ) from error
+                source_bytes = revision[source_key]
+                manifest_bytes = revision[manifest_key]
             try:
                 manifest = json.loads(manifest_bytes)
             except ValueError as error:
@@ -993,6 +1846,8 @@ class WorkspacePrograms:
                 raise ProgramArtifactError("committed program identity mismatch")
             files[f"{relative}/program.rs"] = _hash(source_bytes)
             files[f"{relative}/manifest.json"] = _hash(manifest_bytes)
+            sizes[f"{relative}/program.rs"] = len(source_bytes)
+            sizes[f"{relative}/manifest.json"] = len(manifest_bytes)
             self._check_configuration(manifest.get("configuration"))
             declared = manifest.get("indicatorIds")
             if not isinstance(declared, list) or any(
@@ -1013,13 +1868,21 @@ class WorkspacePrograms:
             "manifest": manifest,
             "dependencies": dependencies,
             "files": files,
+            "sizes": sizes,
             "version": _hash(_bytes(files)),
         }
 
     def _receipt(
-        self, workspace_id: str, kind: ProgramKind, program_id: str, commit: str
+        self,
+        workspace_id: str,
+        kind: ProgramKind,
+        program_id: str,
+        commit: str,
+        *,
+        snapshot: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
-        snapshot = self._snapshot(workspace_id, kind, program_id, commit)
+        if snapshot is None:
+            snapshot = self._snapshot(workspace_id, kind, program_id, commit)
         return {
             "workspaceId": workspace_id,
             "kind": kind,
@@ -1058,6 +1921,7 @@ class WorkspacePrograms:
         configuration = manifest.get("configuration")
         configuration = configuration if isinstance(configuration, Mapping) else {}
         symbols: set[str] = set()
+        intervals: set[str] = set()
         subscriptions = configuration.get("subscriptions")
         if isinstance(subscriptions, list):
             for item in subscriptions:
@@ -1067,17 +1931,343 @@ class WorkspacePrograms:
                         symbols.update(
                             symbol for symbol in declared if isinstance(symbol, str)
                         )
-        interval = configuration.get("interval")
+                    interval = item.get("interval")
+                    if item.get("data_type") == "bars" and isinstance(interval, str):
+                        intervals.add(interval)
         dependencies = manifest.get("indicatorIds")
         return {
-            "interval": interval if isinstance(interval, str) else None,
+            "interval": next(iter(intervals)) if len(intervals) == 1 else None,
             "symbols": sorted(symbols),
             "indicatorIds": (
                 [item for item in dependencies if isinstance(item, str)]
                 if isinstance(dependencies, list)
                 else []
             ),
+            "parameters": WorkspacePrograms._declaration(manifest),
         }
+
+    @staticmethod
+    def _declaration(manifest: Mapping[str, object]) -> dict[str, object] | None:
+        declaration = manifest.get("parameters")
+        if not isinstance(declaration, Mapping) or not declaration:
+            return None
+        return {str(name): spec for name, spec in declaration.items()}
+
+    @staticmethod
+    def _value_kind(value: object) -> str:
+        if value is None:
+            return "null"
+        if isinstance(value, bool):
+            return "a boolean"
+        if isinstance(value, int):
+            return "an integer"
+        if isinstance(value, float):
+            return "a number"
+        if isinstance(value, str):
+            return "a string"
+        if isinstance(value, Mapping):
+            return "an object"
+        if isinstance(value, (list, tuple)):
+            return "an array"
+        return type(value).__name__
+
+    @staticmethod
+    def _finite_number(value: object) -> int | float | None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        return value
+
+    @staticmethod
+    def _validate_parameter_value(
+        name: str, spec: Mapping[str, object], value: object
+    ) -> object:
+        value_type = spec.get("type")
+        if value_type == "integer":
+            if isinstance(value, bool):
+                raise ProgramArtifactError(
+                    f"parameter {name!r} must be an integer, got a boolean"
+                )
+            if isinstance(value, float):
+                if not math.isfinite(value) or not value.is_integer():
+                    raise ProgramArtifactError(
+                        f"parameter {name!r} must be an integer, got {value!r}"
+                    )
+                value = int(value)
+            elif not isinstance(value, int):
+                raise ProgramArtifactError(
+                    f"parameter {name!r} must be an integer, got {WorkspacePrograms._value_kind(value)}"
+                )
+        elif value_type == "number":
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ProgramArtifactError(
+                    f"parameter {name!r} must be a number, got {WorkspacePrograms._value_kind(value)}"
+                )
+            if isinstance(value, float) and not math.isfinite(value):
+                raise ProgramArtifactError(
+                    f"parameter {name!r} must be a finite number, got {value!r}"
+                )
+        elif value_type == "boolean":
+            if not isinstance(value, bool):
+                raise ProgramArtifactError(
+                    f"parameter {name!r} must be true or false, got {WorkspacePrograms._value_kind(value)}"
+                )
+        elif value_type == "string":
+            if not isinstance(value, str):
+                raise ProgramArtifactError(
+                    f"parameter {name!r} must be a string, got {WorkspacePrograms._value_kind(value)}"
+                )
+            levels = spec.get("levels")
+            if isinstance(levels, (list, tuple)) and value not in levels:
+                raise ProgramArtifactError(
+                    f"parameter {name!r} must be one of {list(levels)!r}, got {value!r}"
+                )
+        else:
+            raise ProgramArtifactError(
+                f"parameter {name!r} has an unsupported type declaration"
+            )
+        if value_type in ("integer", "number"):
+            minimum = WorkspacePrograms._finite_number(spec.get("minimum"))
+            maximum = WorkspacePrograms._finite_number(spec.get("maximum"))
+            numeric = cast(int | float, value)
+            if minimum is not None and numeric < minimum:
+                raise ProgramArtifactError(
+                    f"parameter {name!r} must be at least {minimum!r}, got {numeric!r}"
+                )
+            if maximum is not None and numeric > maximum:
+                raise ProgramArtifactError(
+                    f"parameter {name!r} must be at most {maximum!r}, got {numeric!r}"
+                )
+        return value
+
+    @staticmethod
+    def _validate_parameter_declaration(
+        kind: str, declaration: object
+    ) -> dict[str, dict[str, object]]:
+        if declaration is None:
+            return {}
+        if not isinstance(declaration, Mapping):
+            raise ProgramArtifactError("parameters must be a declaration object")
+        if not declaration:
+            return {}
+        if kind != "strategy":
+            raise ProgramArtifactError("only strategies declare parameters")
+        normalized: dict[str, dict[str, object]] = {}
+        for raw_name, raw_spec in declaration.items():
+            if not isinstance(raw_name, str):
+                raise ProgramArtifactError("parameter names must be strings")
+            if re.fullmatch(PARAMETER_NAME_PATTERN, raw_name) is None:
+                raise ProgramArtifactError(
+                    f"parameter name {raw_name!r} must match {PARAMETER_NAME_PATTERN}"
+                )
+            if raw_name in _RESERVED_PARAMETER_NAMES or raw_name.endswith(
+                ("_path", "Path")
+            ):
+                raise ProgramArtifactError(
+                    f"parameter name {raw_name!r} is reserved; never declare source, source_path, symbols, or *_path/Path names"
+                )
+            if not isinstance(raw_spec, Mapping):
+                raise ProgramArtifactError(
+                    f"parameter {raw_name!r} declaration must be an object"
+                )
+            unsupported = [
+                key
+                for key in raw_spec
+                if not isinstance(key, str) or key not in _PARAMETER_KEYS
+            ]
+            if unsupported:
+                raise ProgramArtifactError(
+                    f"parameter {raw_name!r} has unsupported declaration keys: {unsupported[0]!r}"
+                )
+            value_type = raw_spec.get("type")
+            if value_type not in _PARAMETER_TYPES:
+                raise ProgramArtifactError(
+                    f"parameter {raw_name!r} type must be one of integer, number, boolean, string"
+                )
+            if "default" not in raw_spec:
+                raise ProgramArtifactError(f"parameter {raw_name!r} requires a default")
+            if ("minimum" in raw_spec or "maximum" in raw_spec) and value_type not in (
+                "integer",
+                "number",
+            ):
+                raise ProgramArtifactError(
+                    f"parameter {raw_name!r} bounds apply only to integer or number parameters"
+                )
+            minimum = None
+            maximum = None
+            for bound_name in ("minimum", "maximum"):
+                if bound_name not in raw_spec:
+                    continue
+                bound = WorkspacePrograms._finite_number(raw_spec[bound_name])
+                if bound is None:
+                    raise ProgramArtifactError(
+                        f"parameter {raw_name!r} {bound_name} must be a finite number"
+                    )
+                if bound_name == "minimum":
+                    minimum = bound
+                else:
+                    maximum = bound
+            if minimum is not None and maximum is not None and minimum > maximum:
+                raise ProgramArtifactError(
+                    f"parameter {raw_name!r} minimum must not exceed maximum"
+                )
+            levels = raw_spec.get("levels")
+            if "levels" in raw_spec:
+                if value_type != "string":
+                    raise ProgramArtifactError(
+                        f"parameter {raw_name!r} levels apply only to string parameters"
+                    )
+                if minimum is not None or maximum is not None:
+                    raise ProgramArtifactError(
+                        f"parameter {raw_name!r} levels are mutually exclusive with bounds"
+                    )
+                if not isinstance(levels, (list, tuple)) or not levels:
+                    raise ProgramArtifactError(
+                        f"parameter {raw_name!r} levels must be a non-empty array of unique strings"
+                    )
+                seen_levels: set[str] = set()
+                for level in levels:
+                    if not isinstance(level, str) or not level:
+                        raise ProgramArtifactError(
+                            f"parameter {raw_name!r} levels must be non-empty strings"
+                        )
+                    if level in seen_levels:
+                        raise ProgramArtifactError(
+                            f"parameter {raw_name!r} levels must be unique"
+                        )
+                    seen_levels.add(level)
+            if "description" in raw_spec and not isinstance(
+                raw_spec["description"], str
+            ):
+                raise ProgramArtifactError(
+                    f"parameter {raw_name!r} description must be a string"
+                )
+            normalized_spec: dict[str, object] = {
+                "type": value_type,
+                "default": WorkspacePrograms._validate_parameter_value(
+                    raw_name, raw_spec, raw_spec["default"]
+                ),
+            }
+            if minimum is not None:
+                normalized_spec["minimum"] = minimum
+            if maximum is not None:
+                normalized_spec["maximum"] = maximum
+            if "levels" in raw_spec:
+                normalized_spec["levels"] = list(cast(Sequence[str], levels))
+            if "description" in raw_spec:
+                normalized_spec["description"] = raw_spec["description"]
+            normalized[raw_name] = normalized_spec
+        return normalized
+
+    @staticmethod
+    def _resolve_parameters(
+        declaration: Mapping[str, object] | None, parameters: object
+    ) -> dict[str, object]:
+        if parameters is None:
+            parameters = {}
+        if not isinstance(parameters, Mapping):
+            raise ProgramArtifactError(
+                "parameters must be an assignment object mapping declared names to values"
+            )
+        declared = declaration if isinstance(declaration, Mapping) else {}
+        for name in parameters:
+            if not isinstance(name, str):
+                raise ProgramArtifactError("parameter names must be strings")
+            if name in _RESERVED_PARAMETER_NAMES or name.endswith(("_path", "Path")):
+                raise ProgramArtifactError(
+                    f"parameter name {name!r} is reserved; source, source_path, symbols, and *_path/Path names cannot be assigned"
+                )
+            if name not in declared:
+                names = ", ".join(sorted(declared)) or "none"
+                raise ProgramArtifactError(
+                    f"unknown parameter {name!r}; declared parameters: {names}. Remove it or declare it in parameter_declaration."
+                )
+        resolved: dict[str, object] = {}
+        for name, spec in declared.items():
+            if not isinstance(name, str) or not isinstance(spec, Mapping):
+                raise ProgramArtifactError(
+                    "committed parameter declaration is malformed"
+                )
+            value = parameters[name] if name in parameters else spec.get("default")
+            resolved[name] = WorkspacePrograms._validate_parameter_value(
+                name, spec, value
+            )
+        return resolved
+
+    @staticmethod
+    def _batch_identity(
+        program_id: str,
+        points: Sequence[Mapping[str, object]],
+        version: str,
+        window: tuple[str, str],
+    ) -> str:
+        canonical = sorted(
+            json.dumps(
+                dict(point), sort_keys=True, separators=(",", ":"), allow_nan=False
+            )
+            for point in points
+        )
+        material = _bytes(
+            {
+                "points": canonical,
+                "version": version,
+                "window": {"start": window[0], "end": window[1]},
+            }
+        )
+        return f"batch-{program_id}-{hashlib.sha256(material).hexdigest()[:12]}"
+
+    @staticmethod
+    def _null_batch_identity(
+        program_id: str,
+        parameters: Mapping[str, object],
+        block_size: int,
+        seeds: Sequence[int],
+        version: str,
+        window: tuple[str, str],
+    ) -> str:
+        """Return the deterministic provenance identity of one null batch."""
+        material = _bytes(
+            {
+                "parameters": dict(parameters),
+                "block_size": block_size,
+                "seeds": sorted(seeds),
+                "version": version,
+                "window": {"start": window[0], "end": window[1]},
+            }
+        )
+        return f"null-{program_id}-{hashlib.sha256(material).hexdigest()[:12]}"
+
+    @staticmethod
+    def _effective_window(
+        configuration: Mapping[str, object],
+        data_window: DataWindowPolicy | None,
+    ) -> tuple[str, str]:
+        """Return the RFC3339 window one batch actually executes against."""
+        if data_window is not None and data_window.override:
+            return rfc3339(data_window.start_ns), rfc3339(data_window.end_ns)
+        WorkspacePrograms._configuration_window(configuration)
+        return cast(str, configuration["start"]), cast(str, configuration["end"])
+
+    @staticmethod
+    def _point_state(receipt: Mapping[str, object]) -> str:
+        result = receipt.get("result")
+        if isinstance(result, Mapping):
+            for key in ("state", "status"):
+                state = result.get(key)
+                if isinstance(state, str) and state:
+                    return {
+                        "queued": "running",
+                        "running": "running",
+                        "succeeded": "succeeded",
+                        "failed": "failed",
+                        "cancelled": "cancelled",
+                    }.get(state, "unknown")
+        if receipt.get("ok") is not True:
+            if receipt.get("executionCertainty") == "unknown_outcome":
+                return "unknown"
+            return "failed"
+        return "succeeded"
 
     def _check_manifest(
         self, workspace_id: str, manifest: Mapping[str, object]
@@ -1093,7 +2283,7 @@ class WorkspacePrograms:
             self._path(workspace_id, "indicator", dependency)
             if manifest["kind"] == "indicator" and dependency == manifest["id"]:
                 raise ProgramArtifactError("indicator cannot depend on itself")
-            git = GitCoordinator(self.repositories.open(workspace_id).root)
+            git = self._git(self.repositories.open(workspace_id).root)
             snapshot = self._snapshot(
                 workspace_id, "indicator", dependency, self._head(git)
             )
@@ -1106,6 +2296,9 @@ class WorkspacePrograms:
             re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", manifest["indicatorType"]) is None
         ):
             raise ProgramArtifactError("indicator_type must be a Rust type identifier")
+        WorkspacePrograms._validate_parameter_declaration(
+            cast(str, manifest["kind"]), manifest.get("parameters")
+        )
         _bytes(manifest)
 
         def check_configuration(value: object) -> None:
@@ -1142,13 +2335,10 @@ class WorkspacePrograms:
         self._check_configuration(manifest["configuration"])
 
     @staticmethod
-    def _check_configuration(value: object) -> None:
-        if not isinstance(value, Mapping):
-            raise ProgramArtifactError("configuration must be an object")
-        if any(not isinstance(key, str) for key in value):
-            raise ProgramArtifactError("configuration must have string keys")
-        _bytes(value)
-        dates = []
+    def _configuration_window(
+        value: Mapping[str, object],
+    ) -> tuple[datetime, datetime]:
+        dates: list[datetime] = []
         for key in ("start", "end"):
             bound = value.get(key)
             if not isinstance(bound, str) or re.fullmatch(_DATE_PATTERN, bound) is None:
@@ -1163,6 +2353,16 @@ class WorkspacePrograms:
                 ) from error
         if dates[0] >= dates[1]:
             raise ProgramArtifactError("configuration.start must be before end")
+        return dates[0], dates[1]
+
+    @staticmethod
+    def _check_configuration(value: object) -> None:
+        if not isinstance(value, Mapping):
+            raise ProgramArtifactError("configuration must be an object")
+        if any(not isinstance(key, str) for key in value):
+            raise ProgramArtifactError("configuration must have string keys")
+        _bytes(value)
+        WorkspacePrograms._configuration_window(value)
         try:
             validate_market_subscriptions(value.get("subscriptions"))
             validate_market_configuration(value)
@@ -1180,7 +2380,7 @@ class WorkspacePrograms:
         return source.encode()
 
     @staticmethod
-    def _head(git: GitCoordinator) -> str:
+    def _head(git: ProgramGit) -> str:
         head = git.head()
         if head is None:
             raise ProgramArtifactError("workspace has no committed artifacts")
@@ -1345,14 +2545,14 @@ export_study_program!(IndicatorValidation);
             or (
                 "Fix the committed source/configuration and validate again."
                 if validation
-                else "Inspect job/run state before an explicit retry; never automatically replay execution."
+                else "Inspect job state before an explicit retry; never automatically replay execution."
             ),
         }
 
     def _commit(
         self,
         workspace_id: str,
-        git: GitCoordinator,
+        git: ProgramGit,
         head: str | None,
         files: Mapping[str, bytes],
         message: str,
@@ -1376,103 +2576,10 @@ export_study_program!(IndicatorValidation);
                         "artifact has uncommitted changes; refusing to overwrite"
                     )
             destinations[relative] = path
-        environment = {
-            key: value
-            for key, value in os.environ.items()
-            if not key.upper().startswith(("GIT_", "GCM_"))
-        }
-        environment.update(
-            {
-                "GIT_CONFIG_GLOBAL": os.devnull,
-                "GIT_CONFIG_NOSYSTEM": "1",
-                "GIT_AUTHOR_NAME": "FCA Thesis",
-                "GIT_AUTHOR_EMAIL": "thesis@localhost",
-                "GIT_COMMITTER_NAME": "FCA Thesis",
-                "GIT_COMMITTER_EMAIL": "thesis@localhost",
-                "GIT_LITERAL_PATHSPECS": "1",
-                "GIT_TERMINAL_PROMPT": "0",
-            }
-        )
-
-        def run(*args: str, payload: bytes | None = None) -> str:
-            try:
-                result = subprocess.run(
-                    ["git", *args],
-                    cwd=root,
-                    env=environment,
-                    input=payload,
-                    capture_output=True,
-                    timeout=30,
-                    check=False,
-                )
-            except (OSError, subprocess.TimeoutExpired) as error:
-                raise GitPublicationError(
-                    "program Git publication outcome is unknown"
-                ) from error
-            if result.returncode:
-                raise GitPublicationError("program Git publication failed")
-            return result.stdout.decode().strip()
-
-        for relative in files:
-            if run("diff", "--cached", "--name-only", "--", relative):
-                raise ProgramArtifactError(
-                    "artifact has staged changes; refusing to overwrite"
-                )
-
-        git_dir = Path(run("rev-parse", "--absolute-git-dir"))
-        with tempfile.TemporaryDirectory(
-            prefix="program-index-", dir=git_dir
-        ) as temporary:
-            environment["GIT_INDEX_FILE"] = str(Path(temporary) / "index")
-            run("read-tree", head or "--empty")
-            blobs = {}
-            for relative, payload in files.items():
-                blob = run("hash-object", "-w", "--stdin", payload=payload)
-                blobs[relative] = blob
-                run("update-index", "--add", "--cacheinfo", "100644", blob, relative)
-            tree = run("write-tree")
-            commit = run(
-                "commit-tree",
-                tree,
-                *(["-p", head] if head else []),
-                "-m",
-                "thesis: " + message,
+        if git.has_staged_changes(tuple(files)):
+            raise ProgramArtifactError(
+                "artifact has staged changes; refusing to overwrite"
             )
-            run("update-ref", "HEAD", commit, head or "0" * len(commit))
-            environment.pop("GIT_INDEX_FILE")
-            try:
-                for relative, path in destinations.items():
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    descriptor, name = tempfile.mkstemp(
-                        prefix=".program-", dir=path.parent
-                    )
-                    staged = Path(name)
-                    try:
-                        with os.fdopen(descriptor, "wb") as stream:
-                            stream.write(files[relative])
-                            stream.flush()
-                            os.fsync(stream.fileno())
-                        os.replace(staged, path)
-                    finally:
-                        staged.unlink(missing_ok=True)
-                run(
-                    "update-index",
-                    "--index-info",
-                    payload="".join(
-                        f"100644 {blobs[relative]}\t{relative}\n" for relative in files
-                    ).encode(),
-                )
-            except (OSError, GitPublicationError) as error:
-                parts = next(iter(files)).split("/")
-                kind = cast(
-                    ProgramKind,
-                    next(
-                        key for key, value in _DIRECTORIES.items() if value == parts[0]
-                    ),
-                )
-                raise ProgramPublicationError(
-                    self._receipt(workspace_id, kind, parts[1], commit)
-                ) from error
         # Publication failure must retain the known local commit for explicit
         # reconciliation, not report a mutation as if nothing happened.
         parts = next(iter(files)).split("/")
@@ -1480,6 +2587,12 @@ export_study_program!(IndicatorValidation);
             ProgramKind,
             next(key for key, value in _DIRECTORIES.items() if value == parts[0]),
         )
+        try:
+            commit = git.commit_exact_files(head, files, destinations, message)
+        except GitMaterializationError as error:
+            raise ProgramPublicationError(
+                self._receipt(workspace_id, kind, parts[1], error.commit_hash)
+            ) from error
         receipt = self._receipt(workspace_id, kind, parts[1], commit)
         try:
             self.repositories.publish(workspace_id)
@@ -1494,10 +2607,17 @@ __all__ = [
     "ProgramHarness",
     "ProgramHarnessResult",
     "ProgramKind",
+    "JobRetention",
+    "JobSettlement",
+    "parameter_assignment_sha256",
     "WorkspacePrograms",
     "PROGRAM_TEMPLATES",
     "PROGRAM_ID_PATTERN",
     "PROGRAM_CONFIGURATION_SCHEMA",
     "MAX_READ_CHARS",
     "MAX_LIST_RESULTS",
+    "MAX_BATCH_POINTS",
+    "MAX_NULL_SEEDS",
+    "MAX_NULL_BLOCK_SIZE",
+    "NULL_TRANSFORM_MODE",
 ]

@@ -187,7 +187,7 @@ pub struct IntentComparison {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShadowReport {
     /// Run identifier.
-    pub run_id: String,
+    pub job_id: String,
     /// Deployment mode the session was built from.
     pub deployment_mode: String,
     /// Would-be session result.
@@ -254,7 +254,7 @@ impl ShadowReport {
         if self.parity_clean() {
             return format!(
                 "shadow parity clean ({}): {} intents, {} matched, {} without live prints, {} unfilled",
-                self.run_id,
+                self.job_id,
                 self.intents.len(),
                 self.matched_count(),
                 self.would_be_only_count(),
@@ -275,7 +275,7 @@ impl ShadowReport {
         }
         format!(
             "shadow parity diverged ({}): {}",
-            self.run_id,
+            self.job_id,
             failures.join("; ")
         )
     }
@@ -285,7 +285,7 @@ impl ShadowReport {
     pub fn artifacts(&self) -> JsonValue {
         JsonValue::object([
             ("schema", JsonValue::string("fca-shadow-report-v1")),
-            ("run_id", JsonValue::String(self.run_id.clone())),
+            ("job_id", JsonValue::String(self.job_id.clone())),
             (
                 "deployment_mode",
                 JsonValue::String(self.deployment_mode.clone()),
@@ -406,7 +406,7 @@ fn parse_decimal(value: &str) -> Decimal18 {
 /// Build the complete shadow report from an intent trail and live prints.
 #[must_use]
 pub fn build_report(
-    run_id: impl Into<String>,
+    job_id: impl Into<String>,
     deployment_mode: impl Into<String>,
     session: PaperSessionResult,
     intents: &[BrokerIntent],
@@ -446,7 +446,7 @@ pub fn build_report(
         .collect();
     live_only.sort_by(|left, right| left.order_id.cmp(&right.order_id));
     ShadowReport {
-        run_id: run_id.into(),
+        job_id: job_id.into(),
         deployment_mode: deployment_mode.into(),
         session,
         intents: intents.to_vec(),

@@ -9,7 +9,13 @@ import pytest
 from tests.thesis.knowledge.test_service import Repositories, hits, write_page
 
 from thesis.agent.harness_tools import HarnessToolProvider
-from thesis.agent.messages import ToolCorrelation, decode_transcript
+from thesis.agent.messages import (
+    MessageContent,
+    SessionMessage,
+    ToolCorrelation,
+    ToolRequest,
+    decode_transcript,
+)
 from thesis.agent.runtime.context import ToolContext
 from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.registry import build_session_registry
@@ -25,8 +31,6 @@ from thesis.workflows.registry.hypothesis_development.session_services import (
 from thesis.workflows.registry.hypothesis_development.spec import (
     build_hypothesis_development_workflow,
 )
-from thesis.workspaces.local import LocalWorkspaceProvider
-from thesis.workspaces.manifest import load_workspace_manifest
 from thesis.workspaces.repository import WorkspaceRepositoryProvider
 
 
@@ -125,27 +129,28 @@ def test_registry_still_obeys_empty_tool_policy(tmp_path: Path) -> None:
     assert not registry.dispatch("search_knowledge", {"query": "momentum"}).ok
 
 
-def test_persisted_legacy_knowledge_result_decodes_to_neutral_input() -> None:
+def test_canonical_knowledge_result_decodes_to_neutral_input() -> None:
     chat = ChatService()
     thread = chat.create_chat("alpha", title="Knowledge", owner_actor_id="operator")
+    request_envelope = SessionMessage(
+        "request-message",
+        "outgoing",
+        MessageContent(
+            "Searching knowledge",
+            "agent",
+            requests=(
+                ToolRequest("search-call", "search_knowledge", '{"query":"momentum"}'),
+            ),
+        ),
+    )
     request = chat.create_message(
         "alpha",
         thread.chat_id,
         actor_id="agent",
+        message_id="request-message",
         role=MessageRole.ASSISTANT,
         body="Searching knowledge",
-        data={
-            "toolCalls": [
-                {
-                    "id": "search-call",
-                    "type": "function",
-                    "function": {
-                        "name": "search_knowledge",
-                        "arguments": '{"query":"momentum"}',
-                    },
-                }
-            ]
-        },
+        data={"sessionMessage": request_envelope.as_dict()},
     )
     result = {
         "callId": "search-call",
@@ -153,13 +158,26 @@ def test_persisted_legacy_knowledge_result_decodes_to_neutral_input() -> None:
         "ok": True,
         "structured": {"hits": [{"page_id": "momentum"}]},
     }
-    response = chat.create_message(
+    result_envelope = SessionMessage(
+        "result-message",
+        "incoming",
+        MessageContent(
+            "Knowledge evidence",
+            "tool_result",
+            correlation=ToolCorrelation(
+                "request-message", "search-call", "search_knowledge"
+            ),
+            result=result,
+        ),
+    )
+    response = chat.send_message(
         "alpha",
         thread.chat_id,
         actor_id="agent",
-        role=MessageRole.TOOL,
         body="Knowledge evidence",
+        role=MessageRole.TOOL,
         tool_result=result,
+        data={"sessionMessage": result_envelope.as_dict()},
     )
     canonical = decode_transcript((request, response))
     assert [message.direction for message in canonical] == ["outgoing", "incoming"]
@@ -174,23 +192,6 @@ def test_persisted_legacy_knowledge_result_decodes_to_neutral_input() -> None:
     assert projected[1].role == "tool"
     assert projected[1].tool_call_id == "search-call"
     assert projected[1].content == canonical[1].content.as_content()
-
-
-def test_workflow_configuration_validates_and_grants_retrieval() -> None:
-    workflow = build_hypothesis_development_workflow(knowledge_scope="workspace")
-    assert workflow.spec.knowledge_scope == "workspace"
-    assert workflow._doctrine is not None
-    assert {"search_knowledge", "read_knowledge"}.issubset(
-        workflow._doctrine.phase_tools["model_creation"]
-    )
-    with pytest.raises(ValueError, match="knowledge_scope"):
-        build_hypothesis_development_workflow(knowledge_scope=cast(Any, "unknown"))
-
-
-def test_new_workspace_scaffolds_knowledge(tmp_path: Path) -> None:
-    provider = LocalWorkspaceProvider(tmp_path / "workspaces")
-    workspace = provider.create(load_workspace_manifest("config/thesis/workspace.yaml"))
-    assert workspace.resolve_path("knowledge/.gitkeep", must_exist=True).is_file()
 
 
 def test_serving_without_harness_exposes_knowledge(

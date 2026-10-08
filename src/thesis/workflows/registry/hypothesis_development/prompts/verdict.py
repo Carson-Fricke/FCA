@@ -1,10 +1,11 @@
 """Verdict-phase prompts: the recorded-trials ask-before-completing protocol.
 
-The verdict agent receives the deterministic trials in its seed and must ask
-the operator before completing: it proposes the verdict and the next step in
-one response together with a ``request_workflow_input`` call, and finalizes
-only once the operator confirms — the same confirmation protocol the discovery
-and model-creation phases follow.
+The verdict agent receives the deterministic trials and the research evidence
+envelope in its seed and must ask the operator before completing: it proposes
+the verdict and the next step in one response together with a
+``request_workflow_input`` call, and finalizes only once the operator confirms
+— the same confirmation protocol the discovery and model-creation phases
+follow.
 """
 
 from __future__ import annotations
@@ -14,9 +15,12 @@ from __future__ import annotations
 _VERDICT_MISSION = (
     "You are the verdict agent of a falsification-first research pipeline. "
     "The falsification trials have already run as a deterministic computation "
-    "and their recorded trials are listed below. Your job is to read them and "
-    "propose the falsification verdict to the operator: what the trials "
-    "actually showed, and what the workflow should do next."
+    "and their recorded trials and research evidence envelope are below. The "
+    "envelope carries the plan, the per-assumption records (role, observed, "
+    "falsified, runState), the planned controls, and the model and fit "
+    "references. Your job is to read them per role and propose the "
+    "falsification verdict to the operator: what the trials actually showed, "
+    "and what the workflow should do next."
 )
 
 
@@ -28,9 +32,10 @@ _VERDICT_MISSION = (
 _VERDICT_COMPLETION_PROTOCOL = (
     "Completion protocol — follow it exactly:",
     "1. In ONE response: post your verdict proposal as your reply text — what "
-    "each planned falsifier actually recorded (its observed value and whether "
-    "it fired or survived), the outcome you propose (supported, refuted or "
-    "inconclusive), and the next step you propose — AND call "
+    "each planned falsifier actually recorded per role (its observed value and "
+    "whether it fired or survived), the outcome you propose (supported, "
+    "refuted or inconclusive), the evidence you cite, and the next step you "
+    "propose — AND call "
     'request_workflow_input {"message": "..."} with a concise request to '
     "confirm or revise it. A response that posts the proposal without that "
     "tool call is incomplete: the turn ends there and the operator is never "
@@ -79,6 +84,32 @@ _VERDICT_TARGET_RULES = (
 )
 
 
+#: How to read the evidence envelope per falsifier role.
+_VERDICT_EVIDENCE_RULES = (
+    "Read the research evidence per role before proposing:",
+    "- research.assumptions holds one record per planned test with role "
+    "(claim, assumption or control), observable, condition, threshold, test, "
+    "observed, falsified and runState; research.controls lists the planned "
+    "negative controls; research.plan lists the planned tests.",
+    "- Claim evidence: surviving claim falsifiers support the claim; a fired "
+    "claim falsifier refutes it.",
+    "- Assumption evidence: fired assumption falsifiers mean the inference is "
+    "not interpretable (dependence or HAC validity, stationarity, sample "
+    "adequacy) — treat that as inconclusive and loop back, not as a refutation "
+    "of the economic claim.",
+    "- Control evidence: a control that showed the thing it should not means "
+    "the design is suspect — treat the affected evidence as inconclusive.",
+    "- Distinguish a measured breach from missing evidence: a record whose "
+    "observed value is absent, whose runState reports an execution failure, or "
+    "whose planned test never ran is NOT a measured falsifier breach and must "
+    "not be cited as refutation. Name which tests could not be evaluated and "
+    "why.",
+    "- Cite evidence: name the test id, observable and observed value (or its "
+    "absence) behind each role's reading, and say explicitly whether the "
+    "evidence reads as supported, refuted or inconclusive.",
+)
+
+
 #: The final line of the prompt; the last rule the model reads before its
 #: first reply.
 _VERDICT_PROTOCOL_REMINDER = (
@@ -94,7 +125,8 @@ _VERDICT_CONTRACT = (
     "The verdict completion contract is one JSON object with these fields:",
     '- verdict: an object with outcome ("supported", "refuted" or '
     '"inconclusive") and reason (one concise sentence grounded in the '
-    "recorded trials).",
+    "recorded trials), plus optional evidence citing the test ids, observables "
+    "and observed values the verdict rests on.",
     '- target: "strategy_design" to progress, "model_creation" to loop back '
     'and re-model the same selected candidate, or "discovery" to start '
     "discovery over.",
@@ -109,6 +141,8 @@ def _verdict_instructions() -> str:
         *_VERDICT_COMPLETION_PROTOCOL,
         "",
         *_VERDICT_TARGET_RULES,
+        "",
+        *_VERDICT_EVIDENCE_RULES,
         "",
         *_VERDICT_CONTRACT,
         "",

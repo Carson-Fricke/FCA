@@ -50,7 +50,7 @@ derive from the deployment (`az storage account list --resource-group
       `.github/workflows/quant-smoke.yml`; the GitHub deployer identity holds
       no storage data-plane roles by design). Disengagement is a data-plane
       check: a missing row is a disengaged switch
-      (`TableKillSwitchPoller` contract in `src/harness/cli/supervisor.py`).
+      (`KillSwitchPoller` contract in `src/harness/live/src/supervision.rs`).
 
   ```powershell
   $arm = "https://management.azure.com/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Storage"
@@ -69,8 +69,8 @@ derive from the deployment (`az storage account list --resource-group
       `.github/runbooks/trader-operations.md`):
 
   ```powershell
-  az storage blob download --container-name harness-state --account-name <storage-account> --auth-mode login --name "runs/<run-id>/supervision.json" --file supervision.json
-  az storage blob download --container-name harness-state --account-name <storage-account> --auth-mode login --name "runs/<run-id>/restarts.json" --file restarts.json
+  az storage blob download --container-name harness-state --account-name <storage-account> --auth-mode login --name "runs/<job_id>/supervision.json" --file supervision.json
+  az storage blob download --container-name harness-state --account-name <storage-account> --auth-mode login --name "runs/<job_id>/restarts.json" --file restarts.json
   ```
 
 - [ ] **Restart ledger empty or budget-clear.** `restarts.json`
@@ -79,13 +79,13 @@ derive from the deployment (`az storage account list --resource-group
       outcomes. A spent budget exits `86` before any gate; clear it only
       after the root fault is fixed (see the restart-loop section).
 
-- [ ] **Snapshots present.** `runs/<run-id>/snapshots/` carries payload
+- [ ] **Snapshots present.** `runs/<job_id>/snapshots/` carries payload
       snapshots and the `latest.json` pointer that `resume_reconcile`
       restores from:
 
   ```powershell
-  az storage blob list --container-name harness-state --account-name <storage-account> --auth-mode login --prefix "runs/<run-id>/snapshots/" --output table
-  az storage blob show --container-name harness-state --account-name <storage-account> --auth-mode login --name "runs/<run-id>/latest.json"
+  az storage blob list --container-name harness-state --account-name <storage-account> --auth-mode login --prefix "runs/<job_id>/snapshots/" --output table
+  az storage blob show --container-name harness-state --account-name <storage-account> --auth-mode login --name "runs/<job_id>/latest.json"
   ```
 
 - [ ] **Universe cleanliness declared.** The trader universe is the explicit
@@ -122,7 +122,7 @@ az containerapp update --name <rth-trader-app> --resource-group <resource-group>
 az storage entity insert --table-name killswitch --account-name <storage-account> --auth-mode login --if-exists replace --entity PartitionKey=killswitch RowKey=global engaged=true reason="go-live drill"
 # expect the next boot to record phase "halted", detail "kill switch engaged at boot", exit 41
 az containerapp logs show --name <rth-trader-app> --resource-group <resource-group> --tail 200
-az storage blob download --container-name harness-state --account-name <storage-account> --auth-mode login --name "runs/<run-id>/supervision.json" --file supervision.json
+az storage blob download --container-name harness-state --account-name <storage-account> --auth-mode login --name "runs/<job_id>/supervision.json" --file supervision.json
 az storage entity insert --table-name killswitch --account-name <storage-account> --auth-mode login --if-exists replace --entity PartitionKey=killswitch RowKey=global engaged=false
 az containerapp update --name <rth-trader-app> --resource-group <resource-group> --min-replicas 0
 ```
@@ -170,11 +170,11 @@ Every criterion is measurable from a named surface.
 
 | Criterion | Field and threshold | Source | Operator action |
 | --- | --- | --- | --- |
-| Restartable-fault rate | Any `fault` outcome in `history` within one hour, or `consecutive_faults` ≥ 1 during the ramp | `runs/<run-id>/restarts.json` | Halt; fix the root fault before resuming |
+| Restartable-fault rate | Any `fault` outcome in `history` within one hour, or `consecutive_faults` ≥ 1 during the ramp | `runs/<job_id>/restarts.json` | Halt; fix the root fault before resuming |
 | Crash-loop budget | `consecutive_faults` ≥ `HARNESS_TRADER_RESTART_BUDGET` (default 3) → exit `86` refuses boot | `restarts.json`; exit code | The trader halts itself; fix the root fault, clear the ledger (restart-loop section), verify a clean boot |
 | Reconciler abort | Detail beginning `reconciliation aborted:` (periodic, exit `1`) or `recovery.action` = `halt` with `boot policy resume_reconcile halted` (boot, exit `42`) | `supervision.json` | Halt; capture the diff id in `detail` / `recovery.failure`; roll back if the image changed (rollback section) |
 | Kill-switch trip | `engaged` = true with a reason you did not write | killswitch table row | Halt is already effective (exit `41`); investigate who engaged and why before disengaging |
-| Daily-loss bound | `risk.daily_losses` per strategy instance ≥ the configured `daily_loss_halt` limit; equity drop: latest `books[].equity` below the session's opening snapshot equity minus the limit | `runs/<run-id>/snapshots/latest.json` | The rule halts the strategy at trade time when configured (daily-loss section); otherwise halt manually and treat as a halt criterion |
+| Daily-loss bound | `risk.daily_losses` per strategy instance ≥ the configured `daily_loss_halt` limit; equity drop: latest `books[].equity` below the session's opening snapshot equity minus the limit | `runs/<job_id>/snapshots/latest.json` | The rule halts the strategy at trade time when configured (daily-loss section); otherwise halt manually and treat as a halt criterion |
 | Market-wait exceeded | Detail beginning `market-wait exceeded` (exit `75`) | `supervision.json`; exit code | One retry with the platform restart is acceptable; a second within an hour is a halt — check feed, session window, and universe before widening `HARNESS_TRADER_MARKET_WAIT_MINUTES` |
 
 ## Rollback
@@ -270,8 +270,8 @@ today. Wiring a console emit (the supervisor's `emit` boundary) lights the
 armed halt-class rule without a query change; until then, run the manual
 daily check below and keep the drill record.
 
-**Manual daily check.** Fetch `runs/<run-id>/supervision.json` and
-`runs/<run-id>/snapshots/latest.json` from the `harness-state` container and
+**Manual daily check.** Fetch `runs/<job_id>/supervision.json` and
+`runs/<job_id>/snapshots/latest.json` from the `harness-state` container and
 record: `phase`, `consecutive_faults`, the killswitch row state, and
 `risk.daily_losses` per strategy instance against the configured
 `daily_loss_halt` limit; compare `books[].equity` against the run's opening
@@ -286,7 +286,7 @@ outcomes reset the counter, history keeps the last eight). At
 (`crash_loop`) before any gate. Remediation ladder: read `history` and the
 fault details → fix the root fault (`Common Failures` in
 `.github/runbooks/trader-operations.md`) → delete
-`runs/<run-id>/restarts.json` → verify the next boot is clean and
+`runs/<job_id>/restarts.json` → verify the next boot is clean and
 `consecutive_faults` = 0. A spent budget never self-clears.
 
 **Watchdog.** Two supervision watchdogs fail closed with exit `75`:

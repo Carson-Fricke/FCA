@@ -29,9 +29,10 @@ pub const SCREEN_BAR_INTERVALS: [&str; 2] = ["1min", "1d"];
 const SCREEN_CONFIG_DOMAIN: &[u8] = b"fca:harness-screen-config:v1\0";
 
 /// Every top-level key a screening configuration may carry.
-const SCREEN_KEYS: [&str; 15] = [
+const SCREEN_KEYS: [&str; 16] = [
     "schema_version",
     "shell",
+    "job_id",
     "name",
     "as_of",
     "bar_interval",
@@ -59,6 +60,8 @@ pub struct ScreenConfig {
     pub schema_version: u64,
     /// Configuration shell (always `screen`).
     pub shell: String,
+    /// Execution job identifier.
+    pub job_id: String,
     /// Human-readable screener name.
     pub name: String,
     /// Evaluation date (`YYYY-MM-DD`).
@@ -127,6 +130,7 @@ impl ScreenConfig {
         let fields = RawFields {
             schema_version: required_int(root, "schema_version")?,
             shell: required_string(root, "shell")?,
+            job_id: required_string(root, "job_id")?,
             name: required_string(root, "name")?,
             as_of: required_string(root, "as_of")?,
             bar_interval: required_string(root, "bar_interval")?,
@@ -177,6 +181,7 @@ impl ScreenConfig {
         let fields = RawFields {
             schema_version: json_int(object, "schema_version")?,
             shell: json_string(object, "shell")?,
+            job_id: json_string(object, "job_id")?,
             name: json_string(object, "name")?,
             as_of: json_string(object, "as_of")?,
             bar_interval: json_string(object, "bar_interval")?,
@@ -200,13 +205,15 @@ impl ScreenConfig {
         digest_hex(self.source.as_bytes())
     }
 
-    /// The content address of this configuration, as 64 lowercase hex.
+    /// The configuration content address, as 64 lowercase hex.
     ///
     /// The digest is domain-separated and canonical:
     /// `sha256("fca:harness-screen-config:v1\0" || canonical_json(content))`,
     /// where `content` carries every run-defining field (the authored source
     /// enters through `bundle_hash`). Object keys are sorted, so the digest is
-    /// stable across processes and checkout line endings.
+    /// stable across processes and checkout line endings. The execution
+    /// `job_id` is provenance-excluded so identical configurations always
+    /// produce the same digest.
     #[must_use]
     pub fn configuration_digest(&self) -> String {
         let payload =
@@ -215,18 +222,6 @@ impl ScreenConfig {
         bytes.extend_from_slice(SCREEN_CONFIG_DOMAIN);
         bytes.extend_from_slice(payload.as_bytes());
         digest_hex(&bytes)
-    }
-
-    /// The deterministic run identifier derived from the configuration content.
-    ///
-    /// Derivation: `run_id = "screen-" + <first 16 hex chars of
-    /// `configuration_digest`>`. Identical configurations always produce the
-    /// same run id; any change to a run-defining field produces a different
-    /// one. No wall clock or randomness is involved.
-    #[must_use]
-    pub fn run_id(&self) -> String {
-        let digest = self.configuration_digest();
-        format!("screen-{}", &digest[..16])
     }
 
     /// The first session of the run's data window (`YYYY-MM-DD`).
@@ -268,6 +263,7 @@ impl ScreenConfig {
 struct RawFields {
     schema_version: i64,
     shell: String,
+    job_id: String,
     name: String,
     as_of: String,
     bar_interval: String,
@@ -293,6 +289,7 @@ fn assemble(fields: RawFields, base_dir: Option<&Path>) -> Result<ScreenConfig, 
             fields.shell
         )));
     }
+    let job_id = validated_job_id(&fields.job_id)?;
     let name = fields.name.trim();
     if name.is_empty() || name.len() > 256 {
         return Err(configuration_error("name must be 1 to 256 characters"));
@@ -357,6 +354,7 @@ fn assemble(fields: RawFields, base_dir: Option<&Path>) -> Result<ScreenConfig, 
     Ok(ScreenConfig {
         schema_version: 1,
         shell: SCREEN_SHELL.to_string(),
+        job_id,
         name: name.to_string(),
         as_of: fields.as_of,
         bar_interval: fields.bar_interval,
@@ -446,6 +444,22 @@ fn reject_unknown_keys<'a>(keys: impl Iterator<Item = &'a String>) -> Result<(),
 
 fn configuration_error(message: &str) -> BacktestError {
     BacktestError::Configuration(message.to_string())
+}
+
+fn validated_job_id(value: &str) -> Result<String, BacktestError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || trimmed.len() > 128
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed == "."
+        || trimmed == ".."
+    {
+        return Err(configuration_error(
+            "job_id must be a single safe path segment of at most 128 characters",
+        ));
+    }
+    Ok(trimmed.to_string())
 }
 
 fn lowercase_hex(value: &str, field: &str) -> Result<String, BacktestError> {

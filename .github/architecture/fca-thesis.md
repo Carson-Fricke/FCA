@@ -22,13 +22,16 @@ This document is the architecture and phased roadmap for **FCA Thesis**.
 Roadmap provisions record planned work; they do not claim that the described
 services are implemented.
 
-The current concrete workflow (version `2.0.0`) lives behind the
+The current concrete workflow (version `2.3.0`) lives behind the
 `thesis.workflows.registry.hypothesis_development` public facade: discovery,
-model creation, trials, verdict, and the strategy/backtest/RCA/optimization
+model creation, trials, verdict, and the
+strategy/backtest/RCA/optimization/null-testing/variation/forward-validation
 chain are phases of that workflow. The older standalone strategy-development,
 discovery, and RCA workflows are retired, not separate current packages.
-`thesis.experiments` implements experiment contracts, dependency-interval audits,
-attempt/influence ledgers, and evidence grades. The hosted harness MCP gateway,
+`thesis.experiments` implements experiment contracts and research mandates
+(time-ordered development/holdout partitions with purge/embargo vocabulary),
+dependency-interval audits, attempt/influence ledgers with durable
+per-execution attempt records, and evidence grades. The hosted harness MCP gateway,
 backend process boundary (`thesis`, `Dockerfile.thesis`), and operations/security
 substrate are implemented. Broader roadmap provisions below are not a claim that
 all planned orchestration or deployment capabilities exist.
@@ -384,7 +387,7 @@ A new workspace should start from a versioned scaffold similar to:
 |-- investigations/               Objectives, decisions, and finding indexes
 |-- strategies/                      Rust strategy code and tests
 |-- experiments/                   Contracts, analysis, and evidence claims
-|-- backtests/                     Manifests, metrics, traces, and reports
+|-- jobs/                          Imported job manifests, metrics, traces, and reports
 |-- uploads/                       Hashed user-provided evidence and metadata
 |-- activations/                   Bundles, consent references, and outcomes
 `-- README.md                      Workspace purpose and navigation
@@ -622,7 +625,7 @@ Tools are narrow capabilities rather than arbitrary credentials:
 | --- | --- |
 | Workspace Git | Read, branch, edit, test, checkpoint, and publish within the selected workspace. |
 | Market lake | Ensure and query point-in-time equity, option, and crypto data through published contracts. |
-| Quant harness | Validate strategy code, launch deterministic backtests/sweeps, and query complete result artifacts. |
+| Quant harness | Validate program code, launch deterministic backtests, studies, and screens, and query job status and result artifacts. |
 | Code sandbox | Run generated Rust programs and their tests with bounded CPU, memory, filesystem, and no implicit network or secrets. |
 | Knowledge search | Retrieve global versioned pages and citations under trust-tier rules. |
 | Web research | Search current or archived sources only in workflow contexts whose policy allows it. |
@@ -638,8 +641,9 @@ supported market, horizon, and strategy direction only within those bounds.
 
 The quant-harness tool family is implemented as an MCP (JSON-RPC 2.0) tool
 gateway rather than a planned capability. The harness publishes its backtest,
-sweep, run-query, artifact, and supervised-trader operations through MCP; Thesis
-consumes them through `thesis.integrations.mcp` and `thesis.agent.harness_tools`.
+study, screening, job-query, artifact, and supervised-trader operations through
+MCP; Thesis consumes them through `thesis.integrations.mcp` and
+`thesis.agent.harness_tools`.
 The client discovers the catalog with `tools/list` and executes it with
 `tools/call`, so a launch can only route through a tool the harness actually
 publishes.
@@ -666,7 +670,7 @@ there is no second policy-enforcing dispatcher.
 
 Backtest launches route through the MCP `run_backtest` tool; capabilities derive
 from the discovered catalog. The local harness HTTP `/mcp` endpoint composes
-`NativeBacktestSubmitter` over the same durable run/job stores as REST. Thesis
+`NativeBacktestSubmitter` over the same authoritative job store as REST. Thesis
 does not spawn a harness process or fall back to local execution when MCP is
 unavailable. Workflow execution is composed only with the harness tool provider;
 spec-only session policy and knowledge tools still work without it.
@@ -674,10 +678,18 @@ spec-only session policy and knowledge tools still work without it.
 `McpBacktestRunner` and `McpStudyRunner` send configuration mappings inline;
 explicit path strings name a file on the harness host. A confirmed domain
 not-found response permits a new launch; transport/auth/protocol failures and
-unknown states do not count as absence. Pending jobs are joined, terminal jobs
-can be relaunched for revised artifacts, and polling uses a monotonic deadline,
+unknown states do not count as absence. Pending jobs are joined and polled, and
+a terminal job's stored result is returned under its submitted `job_id` rather
+than relaunched; an explicit rerun allocates a fresh job. Submission
+composition allocates the id and durably retains the recoverable submission
+reference with immutable program attribution before dispatch; a transport
+interruption after possible dispatch is an unknown outcome reconciled by that
+retained id, never an automatic replay. Polling uses a monotonic deadline,
 bounded backoff, and cancellation checks. Deterministic run failures fail the
-owning workflow rather than sending it into an agent recovery loop.
+owning workflow rather than sending it into an agent recovery loop. The
+"Execution Job Contract" in `.github/instructions/copilot-instructions.md` is
+the normative policy for submission identity, admission, acknowledgement, and
+recovery.
 
 The harness owns study validation reuse. Its local `StudyValidator` uses the
 JIT service's bounded 64-entry full-input cache and compiler identity, with
@@ -689,24 +701,49 @@ identity probes, or regex diagnostic inference. Infrastructure errors are never
 cached as deterministic compiler errors. See `rust-native-authoring-plan.md`.
 
 The local harness submitter is asynchronous like the remote one: `run_backtest`
-returns a `run_id` with `state: running` immediately and completes on a worker,
-so the caller follows `get_job_status` to a terminal state, then `get_run`
-and `list_artifacts`. A run's result set (`backtest.json`, `metrics.json`,
+returns an accepted `job_id` and state immediately and completes on a worker,
+so the caller follows `get_job_status` to a terminal state, then `get_job_result`
+and `list_artifacts`. A job's result set (`backtest.json`, `metrics.json`,
 `report.html`, and the recorded Parquet trail such as `artifacts/equity.parquet`)
-is registered in the durable run store, and `read_artifact` returns any artifact's
-bytes (UTF-8 or hex) through the same boundary in both local and remote modes.
+is registered as one authoritative job record (`jobs/<job_id>.json`) with
+artifact payloads under the `jobs/<job_id>/` object prefix, and `read_artifact`
+returns any artifact's bytes (UTF-8 or hex) through the same boundary in both
+local and remote modes. The public job vocabulary is `queued`, `running`,
+`succeeded`, `failed`, and `cancelled`; engine-internal completion states are
+translated once per adapter and never surface as public aliases. A failed or
+cancelled job publishes its terminal record with the truthful message in
+`error_message` and may carry no artifacts, and no synthetic failure artifact
+is fabricated. Thesis's workspace-scoped tracking records reuse the same
+`job_id` while remaining attribution, submission certainty, and late-result
+observation, not a second execution-state authority; non-harness tool jobs are
+explicitly classified and are never presented as harness executions. The
+result digest is domain-separated over a payload keyed by
+`job_id` (`fca:harness-results:job:v1` / `harness.results.job.v1`); screening's
+run digest uses its own job-based domain (`fca:harness-screen-job:v1`).
+`metrics.json` carries a canonical `trades` block — trade count, hit rate,
+net, gross and fee totals, per-slice `rows` with exact nanosecond timestamps, and
+a profit factor that is undefined (with a reason), never a gross-profit
+substitute, when there are no net losses — and an `equity` block whose Sharpe is
+published with its own reason. Import and candidate selection read this one
+authority instead of recomputing statistics or rebuilding trades from fills.
 Artifact bytes are read through the harness boundary when available and
 otherwise via the artifact's published SAS/object URL, so one importer serves
-local and Azure runs. A materialization route
-(`GET /v1/workspaces/{ws}/backtests/runs/{run_id}`) lets the UI fetch the card
-data once the tool returns, so neither side blocks on a long poll.
+local and Azure jobs. A materialization
+route (`GET /v1/workspaces/{ws}/backtests/jobs/{job_id}`) lets the UI fetch the
+card data once the tool returns, so neither side blocks on a long poll;
+`GET /v1/workspaces/{ws}/backtests/{job_id}` serves the imported detail.
 `thesis.backtests` coordinates this lifecycle: on a terminal success it imports
-the run into the workspace backtest store as a `BacktestRecord` carrying the
-equity curve, FIFO-paired trades, and stats, linked to the originating
-`chat_id` and `execution_id`. The chat tool loop attaches the resulting
-`backtest_id` to the tool message so the UI renders the report inline where the
-run happened, and the backtests page surfaces the run with a link back to its
-chat and workflow.
+the job into the workspace backtest store as a `BacktestRecord` keyed by
+`(workspace_id, job_id)` carrying the equity curve, the canonical closed trades
+(`closed_trades.v1` rows as the harness published them), and the published stats.
+A statistic the harness did not publish is stored as `null` with a reason; the
+importer never recomputes a statistic, rebuilds trades from fills, or zero-fills.
+The record exposes `capital_change` (final minus initial capital) in place of a
+net-PnL figure, because fees and trade PnL are reported by the trade rows. The
+record is linked to the originating `chat_id` and `execution_id`. The chat tool
+loop attaches the `job_id` to the tool message so the UI renders the report
+inline where the job ran, and the backtests page surfaces the job with a link
+back to its chat and workflow.
 
 ## Research Workflows
 
@@ -776,14 +813,23 @@ The model serves two falsification layers:
 - **Layer B** runs while a position is open. The strategy applies the same
   model's frozen Layer A fit to a trailing window and exits when observations
   leave the calibrated range: the idea behind the entry has been refuted. It
-  does not re-estimate the model or replacement parameters. A strategy is
-  therefore a falsification instrument whose declared exit criteria are
-  monitor re-checks, and PnL is only a guardrail.
+  does not re-estimate the model or replacement parameters. A strategy
+  therefore separates its trading exits from assumption monitors that re-check
+  the entry's premises: each monitor names a trailing window, minimum sample,
+  and breach action, while aggregate or offline statistics remain monitoring
+  duties rather than per-trade exits. PnL is only a guardrail.
 
-The discovery agent runs small targeted studies on the starting intuition,
-records every attempt including negative results, and hands model creation one
-candidate opportunity with its signal, information timing, direction, holding
-period, profit source, expected effect, and main competing explanation. The
+The discovery agent runs targeted studies on the starting intuition, records
+every attempt including negative results, and hands model creation one
+candidate thesis: signal, information timing, direction, holding period,
+profit source, expected effect, main competing explanation, entry and exit
+ideas, necessary assumptions, named building blocks, validation questions, and
+exploratory evidence. Composable representations — event-time methods,
+path-shape extraction, duration statistics, and learned representations —
+are legitimate exploration directions; simple statistical families are
+baselines, not the search-space limit. When the attempts show nothing worth
+pursuing, discovery concludes with an explicit no-candidate reason instead of
+manufacturing an opportunity, and the run ends `completed`. The
 model-creation agent proposes the model itself -- assets, estimator,
 sampling frequency, windows, sample period, expected estimates versus the
 null, falsifiers, and negative controls -- and infers rather than interrogates.
@@ -824,11 +870,15 @@ relay operator questions.
 
 Every request for operator input or direction is model-authored from a structured reason, never a canned workflow string; only mechanical text (phase names, counts, digests, ledger statements, activity labels) is deterministic. See `thesis-operator-text.md` for the rule and the current inventory.
 
-1. `discovery` -- a durable conversation in which the research agent runs small
+1. `discovery` -- a durable conversation in which the research agent runs
     targeted studies on the launching premise, logs every attempt, and returns
-    one candidate opportunity with its competing explanation, the data it left
-    untouched, and its limitations. Discovery is deliberately weaker than
-    validation: it never runs the final model or a backtest.
+    one candidate thesis with its entry/exit ideas, necessary assumptions,
+    building blocks, validation questions, competing explanation, the data it
+    left untouched, and its limitations -- or an honest no-candidate conclusion
+    when nothing is worth pursuing (completed). Discovery is deliberately
+    weaker than validation: it never runs the final model, and its trusted tool
+    policy excludes the backtest execution tools (`run_backtest`,
+    `backtest_config_template`) so it can only run studies.
 2. `model_creation` -- a durable conversation in which the agent turns the
     accepted candidate into the statistical model, states the Layer A
      falsifiers, and authors the Rust study. It asks for review through
@@ -860,8 +910,8 @@ Every request for operator input or direction is model-authored from a structure
    (preserved as `data.subscriptions` in the study configuration). The compiled
    ABI v4 JSON union of source and dependencies must canonically equal that
    echo before any ensure/read; `validate_study` returns the union for author
-   feedback. Legacy interval-only documents remain readable, but their authored
-   sources must migrate to the current SDK API and rebuild. The study observes
+   feedback. Interval-only configuration is rejected, and authored sources use
+   the current SDK API. The study observes
    subscribed ticks and `BarFrame`s, and publishes Layer A observables in
    `on_stop` through
    `MetricPublisher::publish`; the `fit.<parameter>` metrics are frozen as the
@@ -872,9 +922,9 @@ Every request for operator input or direction is model-authored from a structure
    replay orders by availability, with ticks, completed frames, then generated
    execution events at equal time. Bars are available at interval end, not bar
    start. Thesis writes a workspace evidence
-   record under `models/runs/` containing the model ref, run ID, state,
+   record under `models/runs/` containing the model ref, `jobId`, state,
     metrics, and result artifacts. This is a deterministic phase in topology
-    `2.0.0`: `run_falsification_trials` resolves the recorded result and returns
+    `2.3.0`: `run_falsification_trials` resolves the recorded result and returns
     the trials contract without creating a phase agent or model turn. The report
     projection uses observed metrics and declared thresholds;
     distribution and time-series charts render only when the evidence artifact
@@ -882,28 +932,34 @@ Every request for operator input or direction is model-authored from a structure
      evidence is an execution/data problem, not permission to rewrite the premise.
      Agent tool failures can be repaired within the turn; deterministic executor
      failures instead fail the workflow durably.
-4. `verdict` -- the deterministic verdict is `refuted` when any falsifier
-    fires, `supported` when none fires and every falsifier has evidence, and
-    `inconclusive` otherwise. A supported verdict advances to strategy design.
-    A refuted verdict posts the observed findings into the persistent
-    `model_creation` conversation, reopens that same phase node, and asks
-     the agent for a revised model and conversational operator review. When the
-    premise itself is not worth pursuing, the verdict instead loops back to
-    `discovery`, reopening the persistent discovery conversation with the
-    superseding verdict. This premise loop is bounded to five approved
-    hypothesis attempts.
-5. `strategy_design` -- a conversational phase. The agent implements the
-    surviving hypothesis from the finalized model specification and its declared
-    falsifiers, explains the strategy to the operator in prose, and authors it
+4. `verdict` -- a durable conversation in which the agent interprets the
+    accepted research evidence envelope (per-role assumptions, controls,
+    trials, run states, and plan) and proposes `supported`, `refuted`, or
+    `inconclusive` with cited evidence, distinguishing a measured falsifier
+    breach from missing evidence or execution failure. A supported verdict
+    advances to strategy design; a refuted verdict reopens the persistent
+    `model_creation` conversation for a revised model; when the premise itself
+    is not worth pursuing the agent loops back to `discovery` with the
+    superseding verdict. The engine validates the typed verdict contract and
+    the declared target only; operator review stays conversational through
+    `request_workflow_input`.
+5. `strategy_design` -- a conversational phase. The agent consumes the
+    discovery thesis, the research evidence envelope, and the verdict; the
+    agent designs the strategy — trading exits plus assumption monitors that
+    name a trailing window, minimum sample, and breach action — explains it to
+    the operator in prose, and authors it
     through the `author_strategy` tool as pure Rust source against
     `harness-strategy-sdk` (the harness JIT-compiles it). The strategy
    references the surviving workspace model and fitted-model hashes instead of
    copying their definitions, implements `MarketConsumer<Context = OrderSink>`
    for exact subscriptions and common quote/trade/frame callbacks, and keeps
    `new`, `on_start`, `on_fill`, and `on_stop` in `StrategyProgram`. It feeds
-   trailing events to the model monitor and
-   publishes each current Layer B observation under the exact falsifier name.
-   A falsifier hit submits flattening orders and prevents new entries. The current
+   trailing events to the model monitors and
+   applies each monitor's declared breach action (warn, disable entries,
+   de-risk, or flatten) as authored. The strategy declares every meaningful
+   tunable in the committed manifest `parameter_declaration` (name, type,
+   default, bounds or levels; `source` and `symbols` stay reserved), which
+   later phases use to compose validated parameter assignments. The current
    authoring path commits `strategies/<program_id>/program.rs` and `manifest.json`,
    then writes the accepted `validation.json` receipt through `validate_strategy`.
    The older `WorkspaceStrategyArtifacts` service and Strategies HTTP projection
@@ -915,7 +971,9 @@ Every request for operator input or direction is model-authored from a structure
 6. `strategy_backtesting` -- a `OneShotPhase` agent, not a deterministic executor.
    It reads the handed-off `strategy.programId` with `read_strategy`, calls
    `run_backtest {program_id: ...}` using latest committed content and its current
-   accepted validation, records the actual run receipt, and requests completion.
+   accepted validation, optionally with a `parameters` assignment validated
+   against the committed declaration before submission, records the actual run
+   receipt, and requests completion.
    Stale or rejected validation is reported as a blocker, not bypassed with inline
    source or caller paths.
    A successful terminal run advances to optimization. A failed run advances to
@@ -926,9 +984,40 @@ Every request for operator input or direction is model-authored from a structure
    conversation. The design agent revises and re-enters strategy backtesting.
    Optimization failures use the same back-edge. This strategy loop is bounded
    to five designed-and-tested attempts.
-8. `optimization` -- the validated and successfully tested strategy is optimized
-   within the declared falsifier bounds.
-9. `completed`, plus `paused` (a failed gate, exhausted loop budget, or steering pauses with a
+8. `optimization` -- a `OneShotPhase` agent that evaluates a bounded parameter
+   search for the designed strategy: it composes at most sixteen assignments
+   from the committed declaration, submits them in one `run_backtest_batch`
+   call, follows each run to a terminal state, records honest states and
+   observed metrics, and completes with a typed candidate evaluation carrying
+   the batch identity, per-run evidence, a selection rule, and a shortlist
+   chosen on net return, profit factor, drawdown, trade count, turnover and
+   diversity — not top return alone. Unknown-outcome runs are recorded, never
+   relaunched automatically.
+9. `null_testing` -- a `OneShotPhase` agent that tests the selected candidate
+   against signal-destruction nulls: it fixes the observed run and statistic,
+   submits up to sixteen seeded replicates through `run_null_batch` (the
+   harness block-permutes per-symbol bar returns and rescales the feed), polls
+   every run to a terminal state, records honest states and metrics, and
+   completes with a typed evaluation carrying the observed value, replicate
+   values, exceedance count, and the empirical `(1+k)/(1+n)` p-value. Unknown
+   runs are recorded, never relaunched automatically.
+10. `variation` -- a `OneShotPhase` agent that runs a deterministic
+    one-at-a-time parameter neighborhood around the selected candidate within
+    its declared bounds (at most sixteen points, exactly one differing
+    parameter per point) through `run_backtest_batch`, records honest points
+    and metrics, and completes with a typed variation evaluation plus a
+    stability assessment. The UI renders per-parameter value-versus-total-
+    return/profit-factor charts from the phase report artifact.
+11. `forward_validation` -- a `OneShotPhase` agent that repeats the frozen
+    observed run, the null design, and the variation points on the protected
+    forward partition. The phase receives a trusted forward-window policy from
+    the research mandate; the run boundary rewrites the committed window to
+    the holdout bounds (agent tools cannot supply windows), each holdout job is
+    recorded in the durable exposure ledger at submission, before dispatch, and the
+    completion may report only jobs that provably ran the frozen design on the
+    forward window. Development and forward evidence are then compared without
+    retuning.
+12. `completed`, plus `paused` (a failed gate, exhausted loop budget, or steering pauses with a
     recorded reason) and `failed`.
 
 Each repeated phase uses one durable top-level phase node. Re-entry appends new
@@ -1280,9 +1369,10 @@ helpers carrying workflow attribution. Serving configures this through
 `THESIS_KNOWLEDGE_SCOPE` (default `both`). The requested scope intersects the
 trusted scope; a disjoint request fails rather than falling back to both.
 `WorkflowSpec.phase_knowledge` additionally restricts individual phases to
-named collections: discovery may retrieve only `discovery`, `data-quality`, and
-`trading-costs`; model creation only `model-cards`, `inference`, `validation`,
-and `trading-costs`; every other phase is unrestricted. The allowlist filters
+named collections: discovery may retrieve only `discovery`, `data-quality`,
+`trading-costs`, and `model-cards`; model creation only `model-cards`,
+`inference`, `validation`, and `trading-costs`; every other phase is
+unrestricted. The allowlist filters
 the searched page set before lexical, semantic, or hyperlink expansion, and is
 re-checked on read, so an excluded page cannot be reached by any retrieval
 path. Workspace identity comes from runtime context, not tool arguments.
@@ -1573,7 +1663,7 @@ The architecture should define versioned schemas for at least:
 - `WorkflowDefinition` and `WorkflowExecution`
 - `ExecutionEvent` and `ToolJob`
 - `IntentEpoch` and `WorkspaceJournalEntry`
-- `ExperimentContract`
+- `ExperimentContract` and `ResearchMandate`
 - `StrategyLineage` and `StrategyBundle`
 - `BacktestReference` and the harness reproducibility manifest
 - `AttemptLedger`, `InfluenceLedger`, and the protected exposure mirror

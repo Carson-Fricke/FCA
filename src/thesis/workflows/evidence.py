@@ -76,7 +76,7 @@ class EvidenceReport:
     historical: bool = True
     phase_label: str = HISTORICAL_PHASE_LABEL
     schema: str = _REPORT_SCHEMA
-    backtest_job_id: str | None = None
+    job_id: str | None = None
     backtest_state: str | None = None
     harness_manifest_reference: str | None = None
     metrics: object | None = None
@@ -127,7 +127,6 @@ class EvidenceReport:
             "artifactReferences": [
                 dict(reference) for reference in self.artifact_references
             ],
-            "backtestJobId": self.backtest_job_id,
             "backtestState": self.backtest_state,
             "bundleSha256": self.bundle_sha256,
             "evidenceGrade": self.evidence_grade,
@@ -135,6 +134,7 @@ class EvidenceReport:
             "gitCommits": list(self.git_commits),
             "harnessManifestReference": self.harness_manifest_reference,
             "historical": self.historical,
+            "jobId": self.job_id,
             "journalId": self.journal_id,
             "limitations": list(self.limitations),
             "metrics": self.metrics,
@@ -215,7 +215,7 @@ def build_evidence_report(
         strategy_id=bundle.strategy_id,
         strategy_version=bundle.version,
         bundle_sha256=bundle.bundle_sha256,
-        backtest_job_id=job_id if isinstance(job_id, str) else None,
+        job_id=job_id if isinstance(job_id, str) else None,
         backtest_state=state if isinstance(state, str) else None,
         harness_manifest_reference=manifest_reference,
         metrics=summary.get("metrics"),

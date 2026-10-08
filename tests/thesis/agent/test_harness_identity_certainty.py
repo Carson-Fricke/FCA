@@ -2,8 +2,8 @@ from collections.abc import Mapping
 
 import pytest
 
-from thesis.agent.harness_tools import HarnessToolProvider, _failure_from_error
-from thesis.integrations.mcp import HarnessMcpClient, HarnessMcpToolError
+from thesis.agent.harness_tools import HarnessToolProvider
+from thesis.integrations.mcp import HarnessMcpClient
 
 
 class Transport:
@@ -74,7 +74,3 @@ def test_structured_certainty_survives_provider_and_tool_exception(
     assert failure is not None
     assert failure.execution_certainty == expected
     assert failure.payload["serverError"] == {"message": "actual queue failure"}
-    error = HarnessMcpToolError(
-        "run_backtest", "actual queue failure", {"executionCertainty": certainty}
-    )
-    assert _failure_from_error(error).execution_certainty == expected

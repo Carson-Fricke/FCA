@@ -167,10 +167,6 @@ export interface ModelOutput {
 	activityKind: 'model_output';
 	invocationId?: string | null;
 	subAgentId?: string | null;
-	toolCallId?: string | null;
-	toolCalls?: {
-		[k: string]: unknown;
-	}[];
 	[k: string]: unknown;
 }
 export interface RuntimeTool {
@@ -347,8 +343,8 @@ export interface RecordLinks {
 	chat_ids?: string[];
 	experiment_ids?: string[];
 	investigation_ids?: string[];
+	job_ids?: string[];
 	strategy_ids?: string[];
-	tool_job_ids?: string[];
 	workflow_execution_ids?: string[];
 	[k: string]: unknown;
 }
@@ -597,9 +593,9 @@ export interface SubAgentNodeListWire {
 }
 export interface SubmitToolJobRequest {
 	actor_id: string;
-	correlation_id?: string | null;
 	experiment_ids?: string[];
 	investigation_id?: string | null;
+	job_id?: string | null;
 	strategy_ids?: string[];
 	tool_name: string;
 }
@@ -639,6 +635,7 @@ export interface WorkflowExecutionWire {
 	finished_at: string | null;
 	intent_epoch: number;
 	investigation_id: string | null;
+	job_ids: string[];
 	parent_conversation_id: string | null;
 	phase: string | null;
 	requested_by: string;
@@ -647,7 +644,6 @@ export interface WorkflowExecutionWire {
 	state: WorkflowExecutionState;
 	steering_message_ids: string[];
 	strategy_ids: string[];
-	tool_job_ids: string[];
 	trigger_message_id: string;
 	updated_at: string | null;
 	workflow_id: string;

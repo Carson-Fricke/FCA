@@ -36,6 +36,9 @@ class HypothesisDevelopmentPhase(StrEnum):
     STRATEGY_BACKTESTING = "strategy_backtesting"
     STRATEGY_RCA = "strategy_rca"
     OPTIMIZATION = "optimization"
+    NULL_TESTING = "null_testing"
+    VARIATION = "variation"
+    FORWARD_VALIDATION = "forward_validation"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -87,6 +90,15 @@ _STRATEGY_RCA = HypothesisDevelopmentPhase.STRATEGY_RCA
 
 
 _OPTIMIZATION = HypothesisDevelopmentPhase.OPTIMIZATION
+
+
+_NULL_TESTING = HypothesisDevelopmentPhase.NULL_TESTING
+
+
+_VARIATION = HypothesisDevelopmentPhase.VARIATION
+
+
+_FORWARD_VALIDATION = HypothesisDevelopmentPhase.FORWARD_VALIDATION
 
 
 _COMPLETED = HypothesisDevelopmentPhase.COMPLETED

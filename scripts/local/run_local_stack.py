@@ -372,7 +372,7 @@ def check_chat(ctx: StackContext) -> StageResult:
                 f"chat creation returned HTTP {chat.status_code}",
                 REMEDIATIONS[STAGE_CHAT],
             )
-        chat_id = (chat.body or {}).get("id")
+        chat_id = (chat.body or {}).get("chat_id")
         if not isinstance(chat_id, str) or not chat_id:
             return StageResult(
                 STAGE_CHAT,
@@ -400,7 +400,7 @@ def check_chat(ctx: StackContext) -> StageResult:
             f"chat message post returned HTTP {message.status_code}",
             REMEDIATIONS[STAGE_CHAT],
         )
-    message_id = (message.body or {}).get("id")
+    message_id = (message.body or {}).get("message_id")
     if not isinstance(message_id, str) or not message_id:
         return StageResult(
             STAGE_CHAT,

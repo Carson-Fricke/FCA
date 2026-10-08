@@ -34,7 +34,7 @@ HARNESS_TOOL_SYSTEM_PROMPT = (
     DEFAULT_SYSTEM_PROMPT
     + " You can call the quant-harness tools for deterministic research "
     "execution: run_backtest and run_study launch jobs, get_job_status "
-    "and get_run report state, list_artifacts enumerates outputs, and "
+    "and get_job_result report state, list_artifacts enumerates outputs, and "
     "launch_trader starts a supervised session. Call a tool only when the "
     "operator's request needs it, pass typed arguments, and summarize the "
     "structured results as evidence. For run_backtest and run_study, use the "

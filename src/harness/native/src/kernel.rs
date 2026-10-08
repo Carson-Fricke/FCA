@@ -1,7 +1,7 @@
 //! Deterministic event kernel and replay driver.
 //!
-//! This module hosts the port of `replay.zig`: a K-way deterministic replay
-//! merge over one-lookahead source cursors. Events are merged by timestamp,
+//! This module hosts a K-way deterministic replay merge over one-lookahead
+//! source cursors. Events are merged by timestamp,
 //! then source sequence, then the serialized event-class priority table
 //! (`crate::market::EVENT_CLASS_PRIORITY`, where quotes precede trades at
 //! equal keys), then the source feed order, then the source-local row order.

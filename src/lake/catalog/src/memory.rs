@@ -175,7 +175,7 @@ impl MemoryRunRepository {
     pub fn from_records(records: impl IntoIterator<Item = RunRecord>) -> Self {
         let mut index = BTreeMap::new();
         for record in records {
-            index.insert(record.run_id.clone(), record);
+            index.insert(record.job_id.clone(), record);
         }
         Self {
             records: Mutex::new(index),
@@ -184,12 +184,12 @@ impl MemoryRunRepository {
 }
 
 impl RunRepository for MemoryRunRepository {
-    fn get(&self, run_id: &str) -> Result<Option<RunRecord>, DataError> {
-        Ok(guard(&self.records).get(run_id.trim()).cloned())
+    fn get(&self, job_id: &str) -> Result<Option<RunRecord>, DataError> {
+        Ok(guard(&self.records).get(job_id.trim()).cloned())
     }
 
     fn upsert(&self, record: &RunRecord) -> Result<(), DataError> {
-        guard(&self.records).insert(record.run_id.clone(), record.clone());
+        guard(&self.records).insert(record.job_id.clone(), record.clone());
         Ok(())
     }
 
@@ -208,12 +208,12 @@ impl RunRepository for MemoryRunRepository {
             })
             .cloned()
             .collect();
-        matches.sort_by(|left, right| left.run_id.cmp(&right.run_id));
+        matches.sort_by(|left, right| left.job_id.cmp(&right.job_id));
         Ok(matches)
     }
 
-    fn delete(&self, run_id: &str) -> Result<bool, DataError> {
-        Ok(guard(&self.records).remove(run_id.trim()).is_some())
+    fn delete(&self, job_id: &str) -> Result<bool, DataError> {
+        Ok(guard(&self.records).remove(job_id.trim()).is_some())
     }
 }
 

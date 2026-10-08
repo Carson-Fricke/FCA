@@ -290,6 +290,8 @@ def build_serving_stack(
             programs=programs
             if context.workflow_execution_id is None
             else cast(WorkspacePrograms | None, bindings.programs),
+            data_window=bindings.data_window,
+            job_retention=bindings.job_retention,
         )
 
     def apply_completion(

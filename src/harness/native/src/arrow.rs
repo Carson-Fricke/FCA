@@ -35,10 +35,9 @@ pub const BATCH_NAME: &str = "value";
 /// The exported batch length.
 pub const BATCH_LEN: usize = 8;
 
-/// The pinned deterministic batch of unscaled decimal128(38, 18) values. This is
-/// the golden vector carried over from the retired Zig native core; the Python
-/// parity test reads it back through `harness_decimal_batch_values` and asserts
-/// the imported pyarrow values byte-for-byte.
+/// The pinned deterministic batch of unscaled decimal128(38, 18) values. The
+/// Python parity test reads it back through `harness_decimal_batch_values` and
+/// asserts the imported pyarrow values byte-for-byte.
 pub const BATCH_VALUES: [i128; BATCH_LEN] = [
     1_500_000_000_000_000_000,
     1,

@@ -23,7 +23,8 @@ to their respective packages, not to the conversation implementation.
 - `knowledge_tools.py` binds context-scoped retrieval tools to knowledge ports.
 - `policy.py` defines spawn and operator-input authority.
 - `program_tools.py` binds committed study, strategy, and indicator operations
-  and bounded SDK-reference reads to trusted workspace context. Validation/run
+  and bounded SDK-reference reads to trusted workspace context, including the
+  bounded `run_backtest_batch` and `run_null_batch` tools. Validation/run
   accept IDs, not inline source or paths; the existing dispatcher delivers results.
 - `registry.py` composes injected tools under the effective session policy.
 - `schema.py` validates advertised tool arguments.

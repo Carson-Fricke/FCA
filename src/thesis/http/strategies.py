@@ -124,10 +124,10 @@ class StrategyDataService:
             "symbol": symbol,
             "status": status,
             "description": description,
-            "pnl": 0.0,
-            "return_pct": 0.0,
-            "win_rate": 0.0,
-            "capital": 0.0,
+            "pnl": None,
+            "return_pct": None,
+            "win_rate": None,
+            "capital": None,
             "code": "",
             "versions": [
                 {

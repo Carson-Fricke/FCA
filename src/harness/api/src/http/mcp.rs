@@ -26,39 +26,28 @@ use crate::local::{
 use super::models::error_body;
 use super::native::NativeScreenRunner;
 use super::state::AppState;
-use super::store::{JobRepository, RunStore};
+use super::store::JobStore;
 
 /// Compose the MCP server the HTTP boundary serves.
 ///
-/// The server runs in the `local` boundary and queries the same results store
-/// and job repository as the REST routes, so a remote MCP call observes exactly
-/// the runs and jobs the HTTP API exposes.
+/// The server runs in the `local` boundary and queries the same job store as
+/// the REST routes, so a remote MCP call observes exactly the jobs the HTTP API
+/// exposes.
 ///
 /// # Errors
 ///
 /// Returns [`ContextError`] when the local tool context cannot be composed.
-pub fn compose_local_server(
-    run_store: Arc<dyn RunStore>,
-    job_repository: Arc<dyn JobRepository>,
-) -> Result<Arc<McpServer>, ContextError> {
+pub fn compose_local_server(job_store: Arc<dyn JobStore>) -> Result<Arc<McpServer>, ContextError> {
     let mut context =
         HarnessToolsContext::new(Boundary::Local, Arc::new(EnvironmentBearerTokenSource));
-    context.backtest_submitter = Some(Arc::new(NativeBacktestSubmitter::new(
-        run_store.clone(),
-        job_repository.clone(),
-    )));
-    context.study_submitter = Some(Arc::new(NativeStudySubmitter::new(
-        run_store.clone(),
-        job_repository.clone(),
-    )));
+    context.backtest_submitter = Some(Arc::new(NativeBacktestSubmitter::new(job_store.clone())));
+    context.study_submitter = Some(Arc::new(NativeStudySubmitter::new(job_store.clone())));
     context.screening_submitter = Some(Arc::new(NativeScreeningSubmitter::new(
-        run_store.clone(),
-        job_repository.clone(),
+        job_store.clone(),
         Arc::new(NativeScreenRunner::default()),
     )));
     context.study_validator = Some(Arc::new(NativeStudyValidator));
-    context.run_store = Some(run_store);
-    context.job_repository = Some(job_repository);
+    context.job_store = Some(job_store);
     let context = context.validate()?;
     Ok(Arc::new(mcp::create_server(context)?))
 }

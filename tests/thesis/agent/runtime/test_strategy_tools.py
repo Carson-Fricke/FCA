@@ -38,7 +38,9 @@ def _arguments() -> dict[str, object]:
                 "src/lib.rs": "// harness_strategy_sdk StrategyProgram export_strategy_program!"
             },
             "tests": {"tests/momentum.rs": "// Rust tests"},
-            "harnessConfiguration": {},
+            "harnessConfiguration": {
+                "subscriptions": [{"data_type": "quote", "symbols": ["SPY"]}]
+            },
             "exitCriteria": [
                 {
                     "falsifierId": "f1",

@@ -535,8 +535,10 @@ impl SupervisedFeed {
 /// The resolved trader configuration the supervisor consumes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TraderConfig {
-    /// Deployment run identifier.
-    pub run_id: String,
+    /// Configured execution job identifier, when pinned.
+    pub job_id: Option<String>,
+    /// Deployment name metadata; never the execution identity.
+    pub deployment_name: String,
     /// `paper` or `shadow` mode.
     pub mode: String,
     /// Run seed.
@@ -589,11 +591,21 @@ impl TraderConfig {
             )));
         }
         let seed = value.get("seed").and_then(Value::as_u64).unwrap_or(0);
+        let job_id = match value.get("job_id") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(text)) => Some(job_identifier(text, "job_id")?),
+            Some(_) => {
+                return Err(SupervisionError::Configuration(
+                    "job_id must be a string".to_string(),
+                ))
+            }
+        };
         let name = value
             .get("deployment")
             .and_then(|deployment| deployment.get("name"))
             .and_then(Value::as_str)
             .unwrap_or("trader");
+        let deployment_name = job_identifier(name, "deployment.name")?;
         let strategy_instance_ids = value
             .get("strategy_instances")
             .and_then(Value::as_array)
@@ -636,7 +648,8 @@ impl TraderConfig {
             })
             .unwrap_or_default();
         Ok(Self {
-            run_id: format!("trader-{name}"),
+            job_id,
+            deployment_name,
             mode: mode.to_string(),
             seed,
             strategy_instance_ids,
@@ -735,31 +748,37 @@ impl SnapshotObjectStore for LocalFileSnapshotStore {
 /// Durable supervision phase, heartbeat, and restart-ledger records.
 pub struct SupervisionJournal {
     store: SharedSnapshotStore,
-    run_id: String,
+    job_id: String,
     clock: Rc<dyn SupervisionClock>,
 }
 
 impl SupervisionJournal {
-    /// Bind a journal to one run.
+    /// Bind a journal to one execution job.
     #[must_use]
     pub fn new(
         store: SharedSnapshotStore,
-        run_id: impl Into<String>,
+        job_id: impl Into<String>,
         clock: Rc<dyn SupervisionClock>,
     ) -> Self {
         Self {
             store,
-            run_id: run_id.into(),
+            job_id: job_id.into(),
             clock,
         }
     }
 
+    /// The execution job identifier this journal records.
+    #[must_use]
+    pub fn job_id(&self) -> &str {
+        &self.job_id
+    }
+
     fn status_key(&self) -> String {
-        format!("runs/{}/supervision.json", self.run_id)
+        format!("runs/{}/supervision.json", self.job_id)
     }
 
     fn ledger_key(&self) -> String {
-        format!("runs/{}/restarts.json", self.run_id)
+        format!("runs/{}/restarts.json", self.job_id)
     }
 
     /// The consecutive-fault count on the restart ledger.
@@ -780,7 +799,7 @@ impl SupervisionJournal {
             .unwrap_or_else(|| {
                 json!({
                     "format_version": 1,
-                    "run_id": self.run_id,
+                    "job_id": self.job_id,
                     "consecutive_faults": 0,
                     "history": [],
                 })
@@ -799,7 +818,7 @@ impl SupervisionJournal {
         let now = self.clock.now_ns();
         let document = json!({
             "format_version": 1,
-            "run_id": self.run_id,
+            "job_id": self.job_id,
             "phase": phase.value(),
             "detail": detail,
             "updated_at_ns": now,
@@ -842,7 +861,7 @@ impl SupervisionJournal {
         }
         ledger = json!({
             "format_version": 1,
-            "run_id": self.run_id,
+            "job_id": self.job_id,
             "consecutive_faults": faults,
             "history": history,
         });
@@ -872,8 +891,8 @@ pub struct SessionWindow {
 /// The terminal result of one supervised boot.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SupervisorOutcome {
-    /// Run identifier.
-    pub run_id: String,
+    /// Execution job identifier.
+    pub job_id: String,
     /// Process exit code.
     pub exit_code: TraderExitCode,
     /// Terminal phase.
@@ -905,6 +924,7 @@ enum SessionEnd {
 /// Drive one supervised paper or shadow session to a terminal outcome.
 pub struct TraderSupervisor {
     config: TraderConfig,
+    job_id: String,
     settings: SupervisorSettings,
     session: Option<SessionWindow>,
     clock: Rc<dyn SupervisionClock>,
@@ -931,7 +951,7 @@ impl TraderSupervisor {
     ///
     /// # Errors
     ///
-    /// Returns [`SupervisionError::Configuration`] when the settings, run
+    /// Returns [`SupervisionError::Configuration`] when the settings, job
     /// identifiers, or kill switch are invalid.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -947,13 +967,26 @@ impl TraderSupervisor {
         emit: Box<dyn Fn(&str)>,
     ) -> Result<Self, SupervisionError> {
         settings.validate()?;
-        if state_store.run_id() != config.run_id {
+        let job_id = match config.job_id.clone() {
+            Some(job_id) => job_id,
+            None => state_store.job_id().to_string(),
+        };
+        if state_store.job_id() != job_id {
             return Err(SupervisionError::Configuration(format!(
-                "state store run {:?} does not match run {:?}",
-                state_store.run_id(),
-                config.run_id
+                "state store job {:?} does not match job {:?}",
+                state_store.job_id(),
+                job_id
             )));
         }
+        if journal.job_id() != job_id {
+            return Err(SupervisionError::Configuration(format!(
+                "journal job {:?} does not match job {:?}",
+                journal.job_id(),
+                job_id
+            )));
+        }
+        let mut config = config;
+        config.job_id = Some(job_id.clone());
         if let Some(window) = session {
             if window.close_ns <= window.open_ns {
                 return Err(SupervisionError::Configuration(
@@ -968,6 +1001,7 @@ impl TraderSupervisor {
             next_reconcile_ns: clock.now_ns(),
             market_deadline_ns: 0,
             config,
+            job_id,
             settings,
             session,
             clock,
@@ -985,10 +1019,10 @@ impl TraderSupervisor {
         })
     }
 
-    /// The supervised run identifier.
+    /// The supervised execution job identifier.
     #[must_use]
-    pub fn run_id(&self) -> &str {
-        &self.config.run_id
+    pub fn job_id(&self) -> &str {
+        &self.job_id
     }
 
     /// The most recent audited phase.
@@ -1062,7 +1096,7 @@ impl TraderSupervisor {
             None,
         );
         self.feed.connect()?;
-        let options = self.paper_options(&self.config.run_id);
+        let options = self.paper_options(&self.job_id);
         let mut shell = match resumed {
             Some(snapshot) => {
                 let restored = self.state_store.restore_shell(&snapshot, options.clone())?;
@@ -1090,8 +1124,8 @@ impl TraderSupervisor {
             .collect()
     }
 
-    fn paper_options(&self, run_id: &str) -> PaperOptions {
-        let mut options = PaperOptions::new(run_id);
+    fn paper_options(&self, job_id: &str) -> PaperOptions {
+        let mut options = PaperOptions::new(job_id);
         options.initial_cash = self.settings.initial_cash.to_string();
         options.session_policy = self.config.session_policy();
         options
@@ -1141,11 +1175,13 @@ impl TraderSupervisor {
             // A clean stop snapshot is not resumed.
             return Ok(None);
         }
-        if !snapshot_matches_session(
-            &snapshot,
-            &session,
-            &self.paper_options(&self.config.run_id),
-        ) {
+        if snapshot.job_id != self.job_id {
+            return Err(SupervisionError::Configuration(format!(
+                "persisted snapshot job {:?} does not match job {:?}",
+                snapshot.job_id, self.job_id
+            )));
+        }
+        if session.close_ns <= session.open_ns {
             let snapshot_id = self.last_snapshot_id.clone();
             self.transition(
                 SupervisionPhase::Restore,
@@ -1276,7 +1312,7 @@ impl TraderSupervisor {
         shell: &PaperRuntimeShell,
         trigger: SnapshotTrigger,
     ) -> Result<(), SupervisionError> {
-        let options = self.paper_options(&self.config.run_id);
+        let options = self.paper_options(&self.job_id);
         let snapshot = self.state_store.capture(
             shell,
             &options,
@@ -1396,13 +1432,13 @@ impl TraderSupervisor {
         self.journal
             .record_boot_outcome(kind, detail.as_deref().unwrap_or(phase.value()));
         (self.emit)(&format!(
-            "supervision run={} phase={} exit={}",
-            self.config.run_id,
+            "supervision job={} phase={} exit={}",
+            self.job_id,
             phase.value(),
             exit_code.code()
         ));
         SupervisorOutcome {
-            run_id: self.config.run_id.clone(),
+            job_id: self.job_id.clone(),
             exit_code,
             phase,
             detail,
@@ -1438,8 +1474,8 @@ impl TraderSupervisor {
         );
         if detail == "heartbeat" {
             (self.emit)(&format!(
-                "heartbeat run={} phase={} at={}",
-                self.config.run_id,
+                "heartbeat job={} phase={} at={}",
+                self.job_id,
                 phase.value(),
                 self.clock.now_ns()
             ));
@@ -1447,48 +1483,185 @@ impl TraderSupervisor {
     }
 }
 
-fn snapshot_matches_session(
-    snapshot: &backtest::runtime::state_store::RuntimeSnapshot,
-    session: &SessionWindow,
-    options: &PaperOptions,
-) -> bool {
-    // The snapshot's run must match; the session window is carried out-of-band
-    // in this port, so a matching run resumes and a differing run does not.
-    snapshot.run_id == options.run_id && session.close_ns > session.open_ns
-}
-
 /// Eight hours in nanoseconds: the default supervised paper session window.
 const DEFAULT_SESSION_NS: i64 = 8 * 3_600_000_000_000;
 
-fn default_state_root(run_id: &str) -> PathBuf {
-    PathBuf::from(".local").join("trader-state").join(run_id)
+/// The environment variable pinning the trader execution job identifier.
+pub const TRADER_JOB_ID_ENV: &str = "HARNESS_TRADER_JOB_ID";
+
+fn default_state_base() -> PathBuf {
+    PathBuf::from(".local").join("trader-state")
+}
+
+fn deployment_state_root(base: &std::path::Path, deployment_name: &str) -> PathBuf {
+    base.join(deployment_name)
+}
+
+fn job_identifier(value: &str, field: &str) -> Result<String, SupervisionError> {
+    let text = value.trim();
+    let valid = text
+        .chars()
+        .next()
+        .is_some_and(|first| first.is_ascii_alphanumeric())
+        && text
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'));
+    if !valid {
+        return Err(SupervisionError::Configuration(format!(
+            "{field} contains invalid characters"
+        )));
+    }
+    Ok(text.to_string())
+}
+
+fn allocate_job_id() -> String {
+    backtest::backtest::manifest::generate_job_id()
+}
+
+/// Resolve the one execution job identifier for a supervised process.
+///
+/// # Errors
+///
+/// Returns [`SupervisionError::Configuration`] when the configured identifier
+/// conflicts with the persisted execution identity.
+pub fn resolve_job_id(
+    configured: Option<&str>,
+    persisted: Option<&str>,
+) -> Result<String, SupervisionError> {
+    match (configured, persisted) {
+        (Some(configured), Some(persisted)) if configured != persisted => {
+            Err(SupervisionError::Configuration(format!(
+                "configured job {configured:?} does not match persisted job {persisted:?}"
+            )))
+        }
+        (Some(configured), _) => Ok(configured.to_string()),
+        (None, Some(persisted)) => Ok(persisted.to_string()),
+        (None, None) => Ok(allocate_job_id()),
+    }
+}
+
+fn requested_job_id(configured: Option<&str>) -> Result<Option<String>, SupervisionError> {
+    let pinned = std::env::var(TRADER_JOB_ID_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    match (configured, pinned.as_deref()) {
+        (Some(configured), Some(pinned)) if configured != pinned => {
+            Err(SupervisionError::Configuration(format!(
+                "configured job {configured:?} does not match {TRADER_JOB_ID_ENV} {pinned:?}"
+            )))
+        }
+        (Some(configured), _) => Ok(Some(job_identifier(configured, "job_id")?)),
+        (None, Some(pinned)) => Ok(Some(job_identifier(pinned, TRADER_JOB_ID_ENV)?)),
+        (None, None) => Ok(None),
+    }
+}
+
+fn read_persisted_job_id(root: &std::path::Path) -> Result<Option<String>, SupervisionError> {
+    let path = root.join("current.json");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(SupervisionError::Configuration(format!(
+                "persisted job identity at {} could not be read: {error}",
+                path.display()
+            )))
+        }
+    };
+    let document: Value = serde_json::from_str(&text).map_err(|error| {
+        SupervisionError::Configuration(format!(
+            "persisted job identity at {} is not valid JSON: {error}",
+            path.display()
+        ))
+    })?;
+    let job_id = document
+        .get("job_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            SupervisionError::Configuration(format!(
+                "persisted job identity at {} does not carry job_id",
+                path.display()
+            ))
+        })?;
+    Ok(Some(job_identifier(job_id, "persisted job_id")?))
+}
+
+fn persist_job_id(root: &std::path::Path, job_id: &str) -> Result<(), SupervisionError> {
+    std::fs::create_dir_all(root).map_err(|error| {
+        SupervisionError::Configuration(format!(
+            "job state root {} could not be created: {error}",
+            root.display()
+        ))
+    })?;
+    let document = json!({"format_version": 1, "job_id": job_id});
+    let text = serde_json::to_string(&document).map_err(|error| {
+        SupervisionError::Configuration(format!("job identity could not be encoded: {error}"))
+    })?;
+    let path = root.join("current.json");
+    let temporary = root.join("current.json.tmp");
+    std::fs::write(&temporary, text).map_err(|error| {
+        SupervisionError::Configuration(format!(
+            "job identity at {} could not be persisted: {error}",
+            temporary.display()
+        ))
+    })?;
+    std::fs::rename(&temporary, &path).map_err(|error| {
+        SupervisionError::Configuration(format!(
+            "job identity at {} could not be persisted: {error}",
+            path.display()
+        ))
+    })
+}
+
+fn resolve_process_job_id(
+    deployment_name: &str,
+    configured: Option<&str>,
+) -> Result<String, SupervisionError> {
+    let requested = requested_job_id(configured)?;
+    let root = deployment_state_root(&default_state_base(), deployment_name);
+    let persisted = read_persisted_job_id(&root)?;
+    let job_id = resolve_job_id(requested.as_deref(), persisted.as_deref())?;
+    if persisted.as_deref() != Some(job_id.as_str()) {
+        persist_job_id(&root, &job_id)?;
+    }
+    Ok(job_id)
 }
 
 /// Compose and run one supervised trader process from a configuration path.
 ///
 /// This is the deployment composition used by both process entrypoints: it
-/// resolves the run identifier, binds the durable local state store and
-/// supervision journal, and runs one supervised paper or shadow session. The
-/// market-data boundary is the deterministic in-process feed; the live adapter
-/// is supplied by the runtime environment.
+/// resolves the execution job identifier, binds the durable local state store
+/// and supervision journal, and runs one supervised paper or shadow session.
+/// The market-data boundary is the deterministic in-process feed; the live
+/// adapter is supplied by the runtime environment.
 #[must_use]
 pub fn run_trader_process(config_path: &std::path::Path) -> TraderExitCode {
-    let configuration = match TraderConfig::load(config_path) {
+    let mut configuration = match TraderConfig::load(config_path) {
         Ok(configuration) => configuration,
         Err(error) => {
             eprintln!("{error}");
             return TraderExitCode::Usage;
         }
     };
-    let run_id =
-        std::env::var("HARNESS_TRADER_RUN_ID").unwrap_or_else(|_| configuration.run_id.clone());
+    let job_id = match resolve_process_job_id(
+        &configuration.deployment_name,
+        configuration.job_id.as_deref(),
+    ) {
+        Ok(job_id) => job_id,
+        Err(error) => {
+            eprintln!("{error}");
+            return TraderExitCode::Usage;
+        }
+    };
+    configuration.job_id = Some(job_id.clone());
     let clock = Rc::new(SystemClock);
     let shared = SharedSnapshotStore::new(Box::new(LocalFileSnapshotStore::new(
-        default_state_root(&run_id),
+        deployment_state_root(&default_state_base(), &configuration.deployment_name),
     )));
-    let mut state_store = RuntimeStateStore::new(&run_id);
+    let mut state_store = RuntimeStateStore::new(&job_id);
     state_store.add_store(Box::new(shared.clone()));
-    let journal = SupervisionJournal::new(shared, &run_id, clock.clone());
+    let journal = SupervisionJournal::new(shared, &job_id, clock.clone());
     let settings = SupervisorSettings::default();
     let now_ns = clock.now_ns();
     let session = Some(SessionWindow {
@@ -1546,13 +1719,15 @@ pub fn run_trader_process(config_path: &std::path::Path) -> TraderExitCode {
     outcome.exit_code
 }
 
-/// Read the latest supervision document for a configured run.
+/// Read the latest supervision document for a configured execution job.
 #[must_use]
 pub fn read_supervision_status(config_path: &std::path::Path) -> Option<String> {
     let configuration = TraderConfig::load(config_path).ok()?;
-    let run_id = std::env::var("HARNESS_TRADER_RUN_ID").unwrap_or(configuration.run_id);
-    let shared = SharedSnapshotStore::new(Box::new(LocalFileSnapshotStore::new(
-        default_state_root(&run_id),
-    )));
-    shared.read_text(&format!("runs/{run_id}/supervision.json"))
+    let root = deployment_state_root(&default_state_base(), &configuration.deployment_name);
+    let job_id = match requested_job_id(configuration.job_id.as_deref()).ok()? {
+        Some(job_id) => job_id,
+        None => read_persisted_job_id(&root).ok()??,
+    };
+    let shared = SharedSnapshotStore::new(Box::new(LocalFileSnapshotStore::new(root)));
+    shared.read_text(&format!("runs/{job_id}/supervision.json"))
 }

@@ -17,6 +17,7 @@ pub mod fills;
 pub mod fixture;
 pub mod job;
 pub mod manifest;
+pub mod null;
 pub mod portfolio;
 pub mod preflight;
 pub mod rng;

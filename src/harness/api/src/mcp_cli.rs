@@ -15,7 +15,7 @@ use std::sync::Arc;
 use clap::Parser;
 use mcp::auth::{EnvironmentBearerTokenSource, BEARER_TOKEN_VARIABLE};
 use mcp::server::McpServer;
-use mcp::store::{FileSystemJobRepository, FileSystemRunStore, JobRepository, RunStore};
+use mcp::store::{FileSystemJobStore, JobStore};
 use mcp::tools::{
     Boundary, ConfigurationLoader, HarnessToolsContext, ProcessOutcome, ProcessRunner,
     RemoteResponse, RemoteTransport,
@@ -167,21 +167,13 @@ pub fn build_mcp_server(args: &crate::McpArgs) -> Result<McpServer, McpServeErro
     context.configuration_loader = default_loader();
     if boundary == Boundary::Local {
         let root = crate::http::state::results_root_from_env();
-        let run_store: Arc<dyn RunStore> = Arc::new(FileSystemRunStore::new(&root));
-        let jobs: Arc<dyn JobRepository> = Arc::new(FileSystemJobRepository::new(&root));
-        context.run_store = Some(run_store.clone());
-        context.job_repository = Some(jobs.clone());
-        context.backtest_submitter = Some(Arc::new(NativeBacktestSubmitter::new(
-            run_store.clone(),
-            jobs.clone(),
-        )));
-        context.study_submitter = Some(Arc::new(NativeStudySubmitter::new(
-            run_store.clone(),
-            jobs.clone(),
-        )));
+        let job_store: Arc<dyn JobStore> = Arc::new(FileSystemJobStore::new(&root));
+        context.job_store = Some(job_store.clone());
+        context.backtest_submitter =
+            Some(Arc::new(NativeBacktestSubmitter::new(job_store.clone())));
+        context.study_submitter = Some(Arc::new(NativeStudySubmitter::new(job_store.clone())));
         context.screening_submitter = Some(Arc::new(NativeScreeningSubmitter::new(
-            run_store,
-            jobs,
+            job_store,
             Arc::new(crate::http::native::NativeScreenRunner::default()),
         )));
         context.study_validator = Some(Arc::new(NativeStudyValidator));

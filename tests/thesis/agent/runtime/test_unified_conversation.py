@@ -88,7 +88,7 @@ def test_consumed_input_has_no_duplicate_turn_but_late_input_does(
     def handler(arguments: Mapping[str, object]) -> ToolExecution:
         envelope = service.transcript(anchor)[-1]
         assert envelope.role is MessageRole.ASSISTANT
-        assert envelope.data is not None and envelope.data["toolCalls"]
+        assert from_record(envelope).content.requests
         dispatched.append("check")
         if not late:
             intake()
@@ -606,24 +606,32 @@ def test_runtime_tool_is_neutral_input_and_root_publishes_every_row_once(
     if external_delivery:
         assert "External evidence" in requests[1][-1].content
     durable = service.transcript(anchor)
-    activity = [
-        message for message in durable if (message.data or {}).get("toolActivity")
+    started = [
+        message
+        for message in durable
+        if (message.data or {}).get("toolActivity") == "started"
     ]
-    assert len(activity) == 2
+    assert len(started) == 1
+    pending = started[0]
+    assert pending.data is not None
     owning_contexts = [c for c in contexts if c.sub_agent_id == anchor.sub_agent_id]
     assert owning_contexts
-    for message in activity:
-        assert message.data is not None
-        assert all(message.created_by == c.actor_id for c in owning_contexts)
-        assert all(
-            message.execution_id == c.workflow_execution_id for c in owning_contexts
-        )
-        if message.data["toolActivity"] == "started":
-            assert all(
-                message.data["ownerActorId"] == c.actor_id for c in owning_contexts
-            )
-        if nested and message.data["toolActivity"] == "started":
-            assert message.data["phase"] == "analysis"
+    assert all(pending.created_by == c.actor_id for c in owning_contexts)
+    assert all(pending.execution_id == c.workflow_execution_id for c in owning_contexts)
+    assert all(pending.data["ownerActorId"] == c.actor_id for c in owning_contexts)
+    if nested:
+        assert pending.data["phase"] == "analysis"
+    finished = []
+    for message in durable:
+        if not isinstance((message.data or {}).get("sessionMessage"), Mapping):
+            continue
+        result = from_record(message).content.result
+        if isinstance(result, Mapping) and str(result.get("toolCallId", "")).startswith(
+            "runtime-"
+        ):
+            finished.append(message)
+    assert len(finished) == 1
+    assert from_record(finished[0]).content.correlation is None
     replay = project_native_messages(decode_transcript(durable))
     assert not any("Running validate_study" in message.content for message in replay)
     assert sum("Internal evidence" in message.content for message in replay) == 1

@@ -24,6 +24,7 @@ projection, workflow phase policy, or a second incoming-message writer.
 | `workflows.py` | Read-only registered workflow definitions for transition-graph clients. |
 | `workspaces.py` | Workspace catalog, summary and overview snapshots, and local data composition. |
 | `state.py` | Workspace evidence, lineage, and consent/audit record projection. |
+| `artifacts.py` | Read-only durable artifact catalog (strategies, studies, indicators) and bounded UTF-8 file reads. |
 | `strategies.py` | Workspace strategy registry projection and strategy-domain endpoints. |
 | `backtests.py` | Backtest records and result views, with launch delegated to the harness adapter. |
 | `deployments.py` | Deployment, order, portfolio, and risk-decision endpoints. |

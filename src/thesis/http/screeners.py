@@ -115,15 +115,21 @@ def create_screener_router() -> APIRouter:
                 f"screener definition {definition_id!r} does not exist",
             ) from error
         except ScreenerUnavailableError as error:
-            raise HTTPException(
-                status_code=503,
-                detail={"code": "harness_unavailable", "message": str(error)},
-            ) from error
+            detail: dict[str, object] = {
+                "code": "harness_unavailable",
+                "message": str(error),
+            }
+            if error.job_id is not None:
+                detail["job_id"] = error.job_id
+            raise HTTPException(status_code=503, detail=detail) from error
         except ScreeningRunError as error:
-            raise HTTPException(
-                status_code=502,
-                detail={"code": "screener_run_failed", "message": str(error)},
-            ) from error
+            detail = {
+                "code": "screener_run_failed",
+                "message": str(error),
+            }
+            if error.job_id is not None:
+                detail["job_id"] = error.job_id
+            raise HTTPException(status_code=502, detail=detail) from error
         except ScreenerDefinitionError as error:
             raise _validation_error(error) from error
         return record.document()

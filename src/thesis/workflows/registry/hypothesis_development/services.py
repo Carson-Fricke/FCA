@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from thesis.agent.router import ModelRouter, Role
-from thesis.experiments.ledger import AttemptLedger
 from thesis.persistence.journal import CommandJournal
 from thesis.research.hypothesis import HypothesisStore
 from thesis.strategies.validation import StrategySandboxValidator
@@ -39,7 +38,6 @@ class HypothesisDevelopmentServices:
     research_runner: ResearchModelRunner | None = None
     programs: ProgramSnapshots | None = None
     validator: StrategySandboxValidator | None = None
-    ledger: AttemptLedger | None = None
     journal: CommandJournal | None = None
     research_role: Role = "research"
     experiment_id: str | None = None

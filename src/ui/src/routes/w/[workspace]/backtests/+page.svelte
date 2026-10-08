@@ -83,10 +83,13 @@
 	);
 
 	const summary = $derived.by(() => {
-		if (!backtests.length) return { count: 0, best: 0, avgSharpe: 0 };
-		const best = Math.max(...backtests.map((b) => b.total_return));
-		const avgSharpe = backtests.reduce((a, b) => a + b.sharpe, 0) / backtests.length;
-		return { count: backtests.length, best, avgSharpe };
+		const returns = backtests.map((b) => b.total_return).filter((v): v is number => v != null);
+		const sharpes = backtests.map((b) => b.sharpe).filter((v): v is number => v != null);
+		return {
+			count: backtests.length,
+			best: returns.length ? Math.max(...returns) : null,
+			avgSharpe: sharpes.length ? sharpes.reduce((a, b) => a + b, 0) / sharpes.length : null
+		};
 	});
 </script>
 
@@ -127,8 +130,8 @@
 
 	<div class="grid grid-cols-3 gap-3">
 		<MetricCard label="Runs" value={summary.count} />
-		<MetricCard label="Best return" value={summary.best} format="signedPct" />
-		<MetricCard label="Average Sharpe" value={summary.avgSharpe} format="ratio" />
+		<MetricCard label="Best return" value={summary.best ?? '—'} format="signedPct" />
+		<MetricCard label="Average Sharpe" value={summary.avgSharpe ?? '—'} format="ratio" />
 	</div>
 
 	<div class="flex flex-wrap items-center gap-2">
@@ -166,10 +169,10 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each filtered as backtest (backtest.id)}
+					{#each filtered as backtest (backtest.job_id)}
 						<tr class="border-t border-surface-700 hover:bg-surface-900">
 							<td class="px-4 py-2">
-								<a href="/w/{workspaceId}/backtests/{backtest.id}" class="text-accent hover:underline">
+								<a href="/w/{workspaceId}/backtests/{backtest.job_id}" class="text-accent hover:underline">
 									{backtest.name}
 								</a>
 							</td>
@@ -177,11 +180,23 @@
 							<td class="px-4 py-2 text-slate-500">
 								{shortDate(backtest.period_start)} → {shortDate(backtest.period_end)}
 							</td>
-							<td class="px-4 py-2 text-right {backtest.total_return >= 0 ? 'text-profit' : 'text-loss'}">
-								{(backtest.total_return * 100).toFixed(1)}%
+							<td
+								class="px-4 py-2 text-right {backtest.total_return == null
+									? 'text-slate-500'
+									: backtest.total_return >= 0
+										? 'text-profit'
+										: 'text-loss'}"
+							>
+								{backtest.total_return == null ? '—' : `${(backtest.total_return * 100).toFixed(1)}%`}
 							</td>
-							<td class="px-4 py-2 text-right text-slate-700">{backtest.sharpe.toFixed(2)}</td>
-							<td class="px-4 py-2 text-right text-loss">{(backtest.max_drawdown * 100).toFixed(1)}%</td>
+							<td class="px-4 py-2 text-right text-slate-700"
+								>{backtest.sharpe == null ? '—' : backtest.sharpe.toFixed(2)}</td
+							>
+							<td class="px-4 py-2 text-right text-loss"
+								>{backtest.max_drawdown == null
+									? '—'
+									: `${(backtest.max_drawdown * 100).toFixed(1)}%`}</td
+							>
 							<td class="px-4 py-2 text-center">
 								{#if backtest.split_declared}
 									<span class="rounded-full border border-accent/40 px-2 py-0.5 text-[10px] text-accent">declared</span>

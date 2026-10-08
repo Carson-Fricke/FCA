@@ -41,13 +41,14 @@ from thesis.agent.router import (
 )
 from thesis.agent.runtime.context import ToolContext
 from thesis.agent.runtime.conversation import Conversations
+from thesis.agent.runtime.program_tools import ContextJobRetention
 from thesis.agent.runtime.session import ToolExecution
 from thesis.agent.runtime.store import SubAgentStore
 from thesis.agent.skills import SkillRegistry
 from thesis.agent.subagents import SubagentContextFactory
 from thesis.chat.contracts import SubAgentRecord
 from thesis.chat.service import ChatService
-from thesis.experiments.ledger import AttemptLedger
+from thesis.experiments.mandate import DataWindowPolicy
 from thesis.integrations.harness import HarnessClientPort, ThesisHarnessClient
 from thesis.knowledge.service import KnowledgeScope, validate_scope
 from thesis.persistence.journal import CommandJournal
@@ -100,6 +101,8 @@ class WorkflowSessionBindings:
     knowledge_collections: tuple[str, ...] | None = None
     strategy_authoring: WorkspaceStrategyArtifacts | None = None
     programs: ProgramSnapshots | None = None
+    data_window: DataWindowPolicy | None = None
+    job_retention: ContextJobRetention | None = None
 
 
 class WorkflowSessionServices(Protocol):
@@ -423,7 +426,6 @@ class WorkflowRuntime:
         chat: ChatService,
         validator: StrategySandboxValidator | None = None,
         hypothesis_store: HypothesisStore | None = None,
-        ledger: AttemptLedger | None = None,
         subagent_factory: SubagentContextFactory | None = None,
         journal: CommandJournal | None = None,
         research_role: Role = "research",
@@ -440,7 +442,6 @@ class WorkflowRuntime:
                 for value in (
                     validator,
                     hypothesis_store,
-                    ledger,
                     subagent_factory,
                     journal,
                     experiment_id,
@@ -452,7 +453,6 @@ class WorkflowRuntime:
                 chat=chat,
                 validator=validator,
                 hypothesis_store=hypothesis_store,
-                ledger=ledger,
                 subagent_factory=subagent_factory,
                 journal=journal,
                 research_role=research_role,
@@ -493,7 +493,6 @@ class WorkflowRuntime:
         chat: ChatService,
         validator: StrategySandboxValidator | None = None,
         hypothesis_store: HypothesisStore | None = None,
-        ledger: AttemptLedger | None = None,
         subagent_factory: SubagentContextFactory | None = None,
         journal: CommandJournal | None = None,
         research_role: Role = "research",
@@ -521,7 +520,6 @@ class WorkflowRuntime:
             programs=self._programs,
             validator=resolved_validator,
             hypothesis_store=resolved_store,
-            ledger=ledger,
             subagent_factory=subagent_factory,
             journal=journal,
             clock=self._clock,

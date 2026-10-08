@@ -122,7 +122,7 @@ def test_builtin_definition_is_available_without_execution_services(
 
 
 def test_breaking_builtin_topology_has_a_new_major_version() -> None:
-    assert _WORKFLOW_VERSION == "2.0.0"
+    assert _WORKFLOW_VERSION == "2.3.0"
 
 
 @pytest.mark.parametrize("prefix", ["", "/api"])

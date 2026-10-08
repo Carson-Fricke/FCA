@@ -95,10 +95,9 @@ preserves it as `data.subscriptions`, and uses `validate_study` to return the
 compiled union and reject canonically unequal echoes. Entries have exactly
 `data_type` and `symbols`, with `interval` only for `bars`; unknown fields and
 tick intervals are rejected. Optional global symbols must equal the subscription
-symbol union; a legacy interval must match the single bars interval. Tick-only
-inputs need no global interval. Legacy interval-only configuration documents
-remain readable, but old authored source must migrate and artifacts must rebuild
-for ABI v4.
+symbol union. Tick-only inputs need no interval. Interval-only configuration is
+rejected; authored source uses the current SDK API and artifacts build for
+ABI v4.
 
 The manifest distinguishes `effective_subscriptions` (source plus dependencies),
 `execution_subscriptions` (backtest quote/trade feeds), and

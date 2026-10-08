@@ -250,7 +250,7 @@ pub fn text(value: &str, field_name: &'static str) -> Result<String, ConfigError
 #[derive(Clone)]
 pub struct RecorderConfig {
     /// Run identifier.
-    pub run_id: String,
+    pub job_id: String,
     /// Directory holding the run artifacts.
     pub directory: PathBuf,
     /// Deterministic identifier seed.
@@ -281,7 +281,7 @@ impl fmt::Debug for RecorderConfig {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("RecorderConfig")
-            .field("run_id", &self.run_id)
+            .field("job_id", &self.job_id)
             .field("directory", &self.directory)
             .field("seed", &self.seed)
             .field("batch_size", &self.batch_size)
@@ -303,15 +303,15 @@ impl RecorderConfig {
     ///
     /// # Errors
     ///
-    /// Returns [`ConfigError`] when `run_id` is blank, `batch_size` is zero,
+    /// Returns [`ConfigError`] when `job_id` is blank, `batch_size` is zero,
     /// `compression` or `parquet_version` is blank, or a metadata key is blank.
     pub fn new(
-        run_id: impl Into<String>,
+        job_id: impl Into<String>,
         directory: impl Into<PathBuf>,
     ) -> Result<Self, ConfigError> {
-        let run_id = text(&run_id.into(), "run_id")?;
+        let job_id = text(&job_id.into(), "job_id")?;
         Ok(Self {
-            run_id,
+            job_id,
             directory: directory.into(),
             seed: Seed::default(),
             batch_size: 4096,

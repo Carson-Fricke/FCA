@@ -26,8 +26,8 @@ def reset_premise(
     Applied when the workflow circles back from the verdict to model creation
     or rediscovery to model creation: the refuted hypothesis, its model
     references, plan, trials, and the abandoned strategy artifacts all belong
-    to the previous attempt.  The discovery draft is deliberately kept — the
-    selected candidate is the premise the new model re-uses — and only a full
+    to the previous attempt.  The discovery draft is deliberately kept: the
+    selected candidate is the premise the new model re-uses, and only a full
     rediscovery clears it through :func:`reset_discovery`.
     """
     return replace(
@@ -41,10 +41,12 @@ def reset_premise(
         research_model_runtime_configuration=None,
         plan=None,
         trials=(),
-        strategy_bundle=None,
-        exit_criteria=(),
+        strategy=None,
         strategy_backtest=None,
-        optimization_backtest=None,
+        candidate_evaluation=None,
+        null_testing=None,
+        variation=None,
+        forward_validation=None,
     )
 
 
@@ -70,21 +72,31 @@ def reset_discovery(
         research_model_runtime_configuration=None,
         plan=None,
         trials=(),
-        strategy_bundle=None,
-        exit_criteria=(),
+        strategy=None,
         strategy_backtest=None,
-        optimization_backtest=None,
+        candidate_evaluation=None,
+        null_testing=None,
+        variation=None,
+        forward_validation=None,
     )
 
 
 def reset_backtests(
     state: HypothesisDevelopmentState,
 ) -> HypothesisDevelopmentState:
-    """Clear the previous revision's backtest results before a redesign."""
+    """Clear the previous revision's strategy evidence before a redesign.
+
+    The redesign names a new frozen strategy reference, so the old reference,
+    its backtest handoff, and every evaluation built on it are superseded.
+    """
     return replace(
         state,
+        strategy=None,
         strategy_backtest=None,
-        optimization_backtest=None,
+        candidate_evaluation=None,
+        null_testing=None,
+        variation=None,
+        forward_validation=None,
     )
 
 

@@ -183,7 +183,7 @@ fail-closed condition.
 
 Measure with `measure_repository` through the injectable `RepositorySizePort`;
 the default local adapter walks the tree deterministically and counts artifact
-subtrees (`backtests/`, `uploads/`, `activations/`) separately. Enforce with
+subtrees (`jobs/`, `uploads/`, `activations/`) separately. Enforce with
 `enforce_budget`, which checks **both** the total repository ceiling and the
 artifact ceiling and raises `RepositoryBudgetExceeded` naming the breach.
 

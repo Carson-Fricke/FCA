@@ -34,7 +34,6 @@ from thesis.workflows.registry.hypothesis_development import (
     VERDICT_INCONCLUSIVE,
     VERDICT_REFUTED,
     VERDICT_SUPPORTED,
-    ExitCriterion,
     FalsificationPlan,
     FalsificationTrial,
     FalsificationVerdict,
@@ -46,6 +45,7 @@ from thesis.workflows.registry.hypothesis_development import (
     HypothesisDraft,
     PlaceboControl,
     RcaDiagnosis,
+    StrategyBacktest,
 )
 from thesis.workflows.research_models import (
     BacktestResearchModelRunner,
@@ -63,7 +63,7 @@ from thesis.workflows.runtime import (
 __all__ = [
     "EVIDENCE_GRADE",
     "EXPLORATORY_DISCLOSURE",
-    "ExitCriterion",
+    "StrategyBacktest",
     "FalsificationPlan",
     "FalsificationTrial",
     "FalsificationVerdict",

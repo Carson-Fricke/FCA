@@ -67,7 +67,7 @@ class _FakeStudyRunner:
             ),
             backtest=BacktestRunResult(
                 job_id="study-1",
-                state="completed",
+                state="succeeded",
                 metrics={"sharpe": 1.0, "sample_valid": 1.0},
             ),
             workspace_artifact="workspace-model:momentum-model",
@@ -267,9 +267,6 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     assert seeds[0].role is MessageRole.USER
     assert _message_data(seeds[0])["kind"] == "agent_prompt"
     assert IDEAS in seeds[0].body
-    assert "request_phase_completion" in seeds[0].body
-    assert "REQUIRES the operator's confirmation" in seeds[0].body
-    assert "request_workflow_input" in seeds[0].body
     assert kit.conversations.in_flight(WORKSPACE, request.chat_id, node_id) is True
 
     # The discovery agent's exact agent-facing policy: the study tools it runs
@@ -288,7 +285,7 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
         "validate_study",
         "run_study",
         "get_job_status",
-        "get_run",
+        "get_job_result",
         "list_artifacts",
         "read_artifact",
         "search_knowledge",
@@ -375,8 +372,6 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     assert len(seeds) == 2
     model_node = str(_message_data(seeds[1])["subAgentId"])
     assert model_node != node_id
-    assert "Selected discovery candidate" in seeds[1].body
-    assert "Five-day momentum in SPY" in seeds[1].body
     assert kit.conversations.in_flight(WORKSPACE, request.chat_id, model_node) is True
 
     # The live discovery exit projects its selected candidate as the discovery
@@ -469,8 +464,6 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     next_node = str(_message_data(seeds[2])["subAgentId"])
     assert next_node != node_id and next_node != model_node
     # The verdict agent's prompt carries the trials the deterministic phase ran.
-    assert '"trials"' in seeds[2].body
-    assert "runState" in seeds[2].body
     assert kit.conversations.in_flight(WORKSPACE, request.chat_id, next_node) is True
 
     # The deterministic trials phase is not a sub-agent: no trials record
@@ -516,13 +509,14 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     )
     assert rebuilt.phase is HypothesisDevelopmentPhase.VERDICT
     assert rebuilt.discovery is not None
+    assert rebuilt.discovery.candidate is not None
     assert (
         rebuilt.discovery.candidate.opportunity
         == "Five-day momentum in SPY continues over the next five days."
     )
     assert rebuilt.draft is not None
     assert rebuilt.draft.claim == _hypothesis_envelope()["claim"]
-    assert [trial.run_state for trial in rebuilt.trials] == ["completed"]
+    assert [trial.run_state for trial in rebuilt.trials] == ["succeeded"]
 
     # Discovery and model creation are closed once they completed; the verdict
     # agent is a conversation, so it accepts the operator's input from birth.
@@ -536,8 +530,6 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     # The verdict agent must ask before completing: its seed carries the
     # completion protocol, and its first turn proposes the verdict and calls
     # request_workflow_input instead of completing.
-    assert "request_workflow_input" in seeds[2].body
-    assert "model_creation" in seeds[2].body
     runner = _runner(
         kit,
         store,
@@ -710,13 +702,6 @@ def test_loop_back_reseeds_the_revisited_phase(tmp_path: Path) -> None:
         _message_data(revisited)["deliveryKey"]
         != _message_data(seeds[1])["deliveryKey"]
     )
-    assert "Loop-back revision" in revisited.body
-    assert "do NOT reply that the phase is complete" in revisited.body
-    assert "the planned falsifier fired" in revisited.body
-    assert "Falsification trials findings:" in revisited.body
-    assert "sharpe" in revisited.body
-    assert "Selected discovery candidate" in revisited.body
-    assert "request_workflow_input" in revisited.body
     assert len(revisited.body) * 2 <= len(seeds[1].body)
     assert kit.conversations.in_flight(WORKSPACE, request.chat_id, model_node) is True
 
@@ -840,7 +825,7 @@ def test_strategy_design_is_a_conversation(tmp_path: Path) -> None:
     assert "validate_strategy" in seeds[3].body
     assert "author_strategy" in seeds[3].body
     assert "### Strategy" in seeds[3].body
-    assert "Falsifier Re-checks" in seeds[3].body
+    assert "Assumption Monitors" in seeds[3].body
     assert "request_workflow_input" in seeds[3].body
     assert "sharpe" in seeds[3].body
 

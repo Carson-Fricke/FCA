@@ -43,7 +43,7 @@
 				</p>
 			</div>
 			<div class="ml-auto flex items-baseline gap-4 font-mono text-sm">
-				<span class={s.pnl >= 0 ? 'text-profit' : 'text-loss'}>{signedPct(s.return_pct)}</span>
+				<span class={s.return_pct == null ? 'text-slate-500' : s.return_pct >= 0 ? 'text-profit' : 'text-loss'}>{signedPct(s.return_pct)}</span>
 				<span class="text-slate-500 text-xs">win {pct(s.win_rate, 0)}</span>
 			</div>
 		</header>

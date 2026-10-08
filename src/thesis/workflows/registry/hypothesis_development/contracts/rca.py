@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from ..errors import (
@@ -39,3 +40,35 @@ class RcaDiagnosis:
             "followUps": list(self.follow_ups),
             "rationale": self.rationale,
         }
+
+    @classmethod
+    def from_dict(cls, payload: object) -> RcaDiagnosis:
+        """Rebuild one diagnosis from the completion's ``diagnosis`` object."""
+        if not isinstance(payload, Mapping):
+            raise WorkflowError("a diagnosis must be an object")
+        falsifier_id = payload.get("falsifierId")
+        failure_class = payload.get("failureClass")
+        rationale = payload.get("rationale")
+        confidence = payload.get("confidence")
+        follow_ups = payload.get("followUps", [])
+        if (
+            not isinstance(falsifier_id, str)
+            or not isinstance(failure_class, str)
+            or not isinstance(rationale, str)
+        ):
+            raise WorkflowError(
+                "a diagnosis requires falsifierId, failureClass, and rationale text"
+            )
+        if isinstance(confidence, bool) or not isinstance(confidence, int | float):
+            raise WorkflowError("a diagnosis confidence must be a number")
+        if not isinstance(follow_ups, list) or any(
+            not isinstance(item, str) for item in follow_ups
+        ):
+            raise WorkflowError("a diagnosis followUps must be a list of text")
+        return cls(
+            falsifier_id=falsifier_id,
+            failure_class=failure_class,
+            rationale=rationale,
+            confidence=float(confidence),
+            follow_ups=tuple(follow_ups),
+        )

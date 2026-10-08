@@ -15,6 +15,8 @@ from thesis.research.hypothesis import (
 from .contracts import (
     HypothesisDevelopmentRequest,
     HypothesisDraft,
+    VariationCenter,
+    VariationPoint,
 )
 from .services import DevelopmentEngine, services_of
 from .state import HypothesisDevelopmentState
@@ -53,7 +55,7 @@ def project_hypothesis(
         return state
     projected_status = document.status if status is None else HypothesisStatus(status)
     links = HypothesisLinks(
-        runs=tuple(trial.run_id for trial in state.trials),
+        runs=tuple(trial.job_id for trial in state.trials),
         evidence=tuple(trial.digest for trial in state.trials),
     )
     projected = document.projected(status=projected_status, links=links)
@@ -69,13 +71,52 @@ def discovery_report_artifact(
     if draft is None:
         return None
     candidate = draft.candidate
+    content = (
+        f"Discovery found no candidate: {draft.no_candidate_reason}"
+        if candidate is None
+        else f"Discovery candidate: {candidate.opportunity}"
+    )
     return {
         "type": "discovery",
-        "content": f"Discovery candidate: {candidate.opportunity}",
-        "candidate": candidate.as_dict(),
+        "content": content,
+        "candidate": None if candidate is None else candidate.as_dict(),
+        "noCandidateReason": draft.no_candidate_reason,
         "attempts": [attempt.as_dict() for attempt in draft.attempts],
         "untouchedData": draft.untouched_data,
         "limitations": draft.limitations,
+    }
+
+
+def variation_report_artifact(
+    state: HypothesisDevelopmentState,
+) -> dict[str, object] | None:
+    """Build the variation phase's structured neighborhood artifact.
+
+    The artifact carries exactly the frozen UI payload shape with the
+    contract's camelCase wire keys: the succeeded center, the varied points,
+    the declared parameter names, and the stability prose.
+    """
+    evaluation = state.variation
+    if evaluation is None:
+        return None
+    return {
+        "type": "variation",
+        "center": _variation_point_artifact(evaluation.center),
+        "points": [_variation_point_artifact(point) for point in evaluation.points],
+        "parameters": list(evaluation.parameters),
+        "stability": evaluation.stability,
+    }
+
+
+def _variation_point_artifact(
+    point: VariationPoint | VariationCenter,
+) -> dict[str, object]:
+    """Render one center or point with the contract's wire key casing."""
+    return {
+        "parameters": dict(point.parameters),
+        "jobId": point.job_id,
+        "state": point.state,
+        "metrics": None if point.metrics is None else dict(point.metrics),
     }
 
 
@@ -99,7 +140,7 @@ def falsification_report_artifact(
             {
                 "testId": t.test_id,
                 "falsifierId": t.falsifier_id,
-                "runId": t.run_id,
+                "jobId": t.job_id,
                 "runState": t.run_state,
                 "detail": t.detail,
                 "observed": t.observed,
@@ -140,6 +181,9 @@ def falsification_report_artifact(
         "falsifiedCount": falsified_count,
         "totalCount": total_count,
         "survived": survived,
+        "limitations": (
+            state.discovery.limitations if state.discovery is not None else None
+        ),
         "hypothesis": {
             "claim": (state.hypothesis.front_matter.claim if state.hypothesis else ""),
             "disagreement": (

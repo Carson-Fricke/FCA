@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixtures } from '$lib/fixtures';
 import type { TimelineItemWire } from '$lib/generated';
 import { decodeWire } from '$lib/wire';
-import { aggregateEnvelope, aggregateMessage } from './timeline-fixture';
+import { aggregateDatums, aggregateEnvelope, aggregateMessage } from './timeline-fixture';
 
 const live = vi.hoisted(() => {
 	vi.stubEnv('PUBLIC_THESIS_API_BASE', '/api');
@@ -74,10 +74,10 @@ describe.each(['page', 'copilot'])('actual %s host with real API transport', (ho
 	}
 	it('renders two datum cards from one decoded workflow result record through page history and SSE replay', async () => {
 		const original = vi.mocked(fetch).getMockImplementation()!;
-		const datums = [{ ...aggregateMessage.data.datums[0], datumType: 'workflow_execution', summary: 'Workflow launched',
+		const datums = [{ ...aggregateDatums[0], datumType: 'workflow_execution', summary: 'Workflow launched',
 			structured: { executionId: 'aggregate-workflow', workflowId: 'hypothesis-development', state: 'running', phase: 'discovery' } },
-			aggregateMessage.data.datums[1]];
-		const workflowResult = { ...aggregateMessage, data: { ...aggregateMessage.data, datums,
+			aggregateDatums[1]];
+		const workflowResult = { ...aggregateMessage, data: { ...aggregateMessage.data,
 			sessionMessage: { ...aggregateMessage.data.sessionMessage, content: { ...aggregateMessage.data.sessionMessage.content,
 				result: { datums } } } } };
 		const item = (payload: unknown, seq: number) => ({ id: `aggregate-${seq}`, kind: 'message', seq,

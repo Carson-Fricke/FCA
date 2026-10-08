@@ -1,7 +1,7 @@
-"""Read harness run artifacts across local and remote topologies.
+"""Read harness job artifacts across local and remote topologies.
 
-Local harness runs expose artifact bytes through the MCP ``read_artifact``
-tool.  Remote (Azure) runs may refuse raw bytes over MCP and instead publish
+Local harness jobs expose artifact bytes through the MCP ``read_artifact``
+tool.  Remote (Azure) jobs may refuse raw bytes over MCP and instead publish
 the artifact through a SAS URL or an absolute object URL; this reader falls
 back to a plain HTTP GET so one importer serves both topologies, which is what
 gives the in-chat backtest card parity between local and Azure execution.
@@ -21,15 +21,15 @@ HttpGet = Callable[[str], bytes]
 
 
 class ArtifactReader(Protocol):
-    """Read one run artifact's bytes without assuming a storage backend."""
+    """Read one job artifact's bytes without assuming a storage backend."""
 
-    def read(self, run_id: str, name: str) -> bytes | None: ...
+    def read(self, job_id: str, name: str) -> bytes | None: ...
 
 
 class HarnessArtifactReader:
     """Read artifacts via MCP first, then a SAS/object URL over HTTP.
 
-    The MCP ``read_artifact`` tool works for local runs.  A remote harness may
+    The MCP ``read_artifact`` tool works for local jobs.  A remote harness may
     reject it; in that case the artifact's published ``sas_url`` (or an absolute
     ``uri``) is fetched directly, which is the documented remote access path.
     """
@@ -45,11 +45,11 @@ class HarnessArtifactReader:
             http_get if http_get is not None else _default_http_get
         )
 
-    def read(self, run_id: str, name: str) -> bytes | None:
-        via_mcp = self._read_via_mcp(run_id, name)
+    def read(self, job_id: str, name: str) -> bytes | None:
+        via_mcp = self._read_via_mcp(job_id, name)
         if via_mcp is not None:
             return via_mcp
-        url = self._artifact_url(run_id, name)
+        url = self._artifact_url(job_id, name)
         if url is None:
             return None
         try:
@@ -57,16 +57,16 @@ class HarnessArtifactReader:
         except Exception:  # an unreachable artifact must never fail the import
             return None
 
-    def _read_via_mcp(self, run_id: str, name: str) -> bytes | None:
+    def _read_via_mcp(self, job_id: str, name: str) -> bytes | None:
         result = self._tools.call_tool(
-            TOOL_READ_ARTIFACT, {"run_id": run_id, "name": name}
+            TOOL_READ_ARTIFACT, {"job_id": job_id, "name": name}
         )
         if not result.ok:
             return None
         return _decode(result.structured)
 
-    def _artifact_url(self, run_id: str, name: str) -> str | None:
-        result = self._tools.call_tool(TOOL_LIST_ARTIFACTS, {"run_id": run_id})
+    def _artifact_url(self, job_id: str, name: str) -> str | None:
+        result = self._tools.call_tool(TOOL_LIST_ARTIFACTS, {"job_id": job_id})
         if not result.ok:
             return None
         entries = result.structured.get("artifacts")

@@ -1,21 +1,29 @@
-/** Signed/monetary/percent formatting for numerics (JetBrains Mono surfaces). */
+/** Signed/monetary/percent formatting for numerics (JetBrains Mono surfaces).
+ *
+ * A ``null`` value means the harness or the registry did not publish the figure;
+ * it renders as a dash, never as a zero.
+ */
 
-export function signed(value: number, digits = 1): string {
+export function signed(value: number | null, digits = 1): string {
+	if (value == null) return '—';
 	return `${value >= 0 ? '+' : '-'}${Math.abs(value).toFixed(digits)}`;
 }
 
-export function signedPct(value: number, digits = 1): string {
+export function signedPct(value: number | null, digits = 1): string {
+	if (value == null) return '—';
 	return `${signed(value, digits)}%`;
 }
 
-export function money(value: number, digits = 0): string {
+export function money(value: number | null, digits = 0): string {
+	if (value == null) return '—';
 	return `${value < 0 ? '-' : ''}$${Math.abs(value).toLocaleString('en-US', {
 		minimumFractionDigits: digits,
 		maximumFractionDigits: digits
 	})}`;
 }
 
-export function pct(value: number, digits = 1): string {
+export function pct(value: number | null, digits = 1): string {
+	if (value == null) return '—';
 	return `${(value * 100).toFixed(digits)}%`;
 }
 

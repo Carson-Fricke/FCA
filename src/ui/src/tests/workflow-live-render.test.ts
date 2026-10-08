@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { aggregateEnvelope, aggregateMessage, timelineFixture } from './timeline-fixture';
+import { aggregateDatums, aggregateEnvelope, aggregateMessage, timelineFixture } from './timeline-fixture';
 
 const fixture = vi.hoisted(() => ({
 	subscribers: [] as Array<(item: Record<string, unknown>) => void>,
@@ -92,8 +92,7 @@ const anchor = fixture.anchor as unknown as ChatMessage;
 
 describe('durable tool activity', () => {
 	it('retires pending from canonical neutral correlation and retains raw incoming prompt text', () => {
-		const { toolCallId, ...data } = aggregateMessage.data;
-		const messages = [aggregateEnvelope, { ...aggregateMessage, role: 'system', data }] as ChatMessage[];
+		const messages = [aggregateEnvelope, { ...aggregateMessage, role: 'system' }] as ChatMessage[];
 		const projected = projectToolMessages(messages);
 		expect(projected.filter((message) => message.tool_result).map((message) => message.tool_result?.callId)).toEqual([
 			'aggregate-call', 'aggregate-call'
@@ -107,7 +106,7 @@ describe('durable tool activity', () => {
 	});
 	it('retires pending for any explicitly correlated result and suppresses aggregate datum event copies', () => {
 		const result = { ...aggregateMessage, role: 'system', data: {}, tool_result: {
-			...aggregateMessage.data.datums[0], tool: 'validate_study', callId: 'aggregate-call'
+			...aggregateDatums[0], tool: 'validate_study', callId: 'aggregate-call'
 		} } as ChatMessage;
 		expect(projectToolMessages([aggregateEnvelope as ChatMessage, result]).some((message) => message.tool_result?.pending)).toBe(false);
 		const event = { eventId: 'aggregate-copy', eventType: 'tool.result', cursor: 3,
@@ -134,12 +133,14 @@ describe('durable tool activity', () => {
 	});
 	it('projects structured-only datums when the durable tool result carries no content', () => {
 		const structuredOnly = { ...aggregateMessage, message_id: 'structured-only', body: 'read_sdk_reference result',
-			data: { ...aggregateMessage.data, datums: [
-				{ datumType: 'read_sdk_reference', ok: true, summary: null, text: '',
-					structured: { topic: 'study', source: 'export_study_program!' }, failure: null },
-				{ datumType: 'read_artifact', ok: true, summary: null, text: '',
-					structured: { name: 'metrics.json', content: '{"sharpe":1.2}' }, failure: null }
-			] } } as ChatMessage;
+			data: { activityKind: 'delivery', sessionMessage: { message_id: 'structured-only', direction: 'incoming', position: 1,
+				content: { text: 'read_sdk_reference result', source: 'tool_result', requests: [], correlation: null,
+					result: { datums: [
+						{ datumType: 'read_sdk_reference', ok: true, summary: null, text: '',
+							structured: { topic: 'study', source: 'export_study_program!' }, failure: null },
+						{ datumType: 'read_artifact', ok: true, summary: null, text: '',
+							structured: { name: 'metrics.json', content: '{"sharpe":1.2}' }, failure: null }
+					] } } } } } as ChatMessage;
 		const projected = projectToolMessages([structuredOnly]);
 		expect(projected.map((message) => message.tool_result?.structured)).toEqual([
 			{ topic: 'study', source: 'export_study_program!' },
@@ -150,14 +151,20 @@ describe('durable tool activity', () => {
 		]);
 	});
 	const envelope: ChatMessage = { ...anchor, kind: 'message', role: 'assistant',
-		message_id: 'envelope', body: 'Checking the study now.', data: { startedAt: '2026-01-01T00:00:01Z', toolCalls: [
-			{ id: 'validate-1', function: { name: 'validate_study', arguments: '{"study":"one"}' } },
-			{ id: 'run-1', function: { name: 'run_study', arguments: '{"study":"one"}' } }
-		] } };
+		message_id: 'envelope', body: 'Checking the study now.', data: { startedAt: '2026-01-01T00:00:01Z',
+			sessionMessage: { message_id: 'envelope', direction: 'outgoing', position: 0,
+				content: { text: 'Checking the study now.', source: 'agent', requests: [
+					{ id: 'validate-1', name: 'validate_study', arguments: '{"study":"one"}' },
+					{ id: 'run-1', name: 'run_study', arguments: '{"study":"one"}' }
+				], correlation: null, result: null } } } };
 	const result: ChatMessage = { ...envelope, role: 'tool', message_id: 'result', body: 'validated',
-		created_at: '2026-01-01T00:00:02Z', data: { toolCallId: 'validate-1' },
+		created_at: '2026-01-01T00:00:02Z',
+		data: { sessionMessage: { message_id: 'result', direction: 'incoming', position: 1,
+			content: { text: 'validated', source: 'tool_result', requests: [],
+				correlation: { request_message_id: 'envelope', request_id: 'validate-1', tool_name: 'validate_study' },
+				result: { durationMs: 42 } } } },
 		tool_result: { tool: 'validate_study', callId: 'validate-1', ok: true, summary: 'validated',
-			structured: {}, text: '', failure: null, durationMs: 42, reused: false } };
+			structured: {}, text: '', failure: null } };
 
 	it.each(['root', 'scoped'])('renders pending -> final once in the %s transcript, retaining assistant text', async (scope) => {
 		const props = { workspaceId: 'ws-1', messages: [envelope] };
@@ -172,14 +179,16 @@ describe('durable tool activity', () => {
 		expect(screen.getAllByTestId('tool-result-card')).toHaveLength(2);
 		expect(screen.getAllByTestId('tool-result-status').map((card) => card.textContent?.trim()).sort()).toEqual(['ok', 'pending']);
 		expect(screen.getByText('duration: 42 ms')).toBeInTheDocument();
-		expect(screen.getByText('reused: false')).toBeInTheDocument();
 		expect(screen.getAllByText('arguments')).toHaveLength(2);
 	});
 
 	it.each(['root', 'scoped'])('normalizes persisted message metadata in the %s transcript', (scope) => {
-		const persisted = { ...result, data: { toolCallId: 'validate-1', durationMs: 120,
-			arguments: { study: 'persisted-study' }, reused: true },
-			tool_result: { ...result.tool_result!, durationMs: undefined, reused: undefined } };
+		const persisted = { ...result,
+			data: { sessionMessage: { message_id: 'result', direction: 'incoming', position: 1,
+				content: { text: 'validated', source: 'tool_result', requests: [],
+					correlation: { request_message_id: 'envelope', request_id: 'validate-1', tool_name: 'validate_study' },
+					result: { durationMs: 120, arguments: { study: 'persisted-study' } } } } },
+			tool_result: { ...result.tool_result!, structured: { reused: true } } };
 		const messages = [envelope, persisted];
 		if (scope === 'root') render(ChatTranscript, { props: { workspaceId: 'ws-1', messages } });
 		else render(ScopeTranscript, { props: { workspaceId: 'ws-1', entries: buildNodeEntries({ messages, events: [] }) } });
@@ -287,8 +296,8 @@ describe('durable tool activity', () => {
 
 	it.each(['tool_result', 'get_job_status', 'sub_agent_handle'])('shows shared metadata once for %s renderers', (datumType) => {
 		render(ToolResultCard, { props: { workspaceId: 'ws-1', result: { ...result.tool_result!, datumType,
-			startedAt: '2026-01-01T00:00:01Z', arguments: { study: 'one' }, durationMs: 42, reused: false,
-			structured: { subAgentId: 'child-1', job_id: 'job-1', state: 'completed' } } } });
+			startedAt: '2026-01-01T00:00:01Z', arguments: { study: 'one' }, durationMs: 42,
+			structured: { subAgentId: 'child-1', job_id: 'job-1', state: 'completed', reused: false } } } });
 		expect(screen.getAllByTestId('tool-metadata')).toHaveLength(1);
 		expect(screen.getAllByTestId('tool-started-at')).toHaveLength(1);
 		expect(screen.getAllByText('duration: 42 ms')).toHaveLength(1);
@@ -307,7 +316,9 @@ describe('durable tool activity', () => {
 		const notice: ChatMessage = { ...envelope, message_id: 'interruption', role: 'system',
 			created_at: '2026-01-01T00:00:02Z', data: { status: 'interrupted' } };
 		const later: ChatMessage = { ...envelope, message_id: 'later', created_at: '2026-01-01T00:00:03Z',
-			data: { toolCalls: [{ id: 'later-call', function: { name: 'run_study', arguments: '{}' } }] } };
+			data: { sessionMessage: { message_id: 'later', direction: 'outgoing', position: 0,
+				content: { text: 'Checking the study now.', source: 'agent',
+					requests: [{ id: 'later-call', name: 'run_study', arguments: '{}' }], correlation: null, result: null } } } };
 		const tools = projectToolMessages([envelope, notice, later]).filter((message) => message.role === 'tool');
 		expect(tools.map((message) => message.tool_result?.outcome ?? 'pending')).toEqual(['interrupted', 'interrupted', 'pending']);
 		expect(tools.map((message) => message.tool_result?.ok)).toEqual([false, false, false]);
@@ -330,9 +341,11 @@ describe('durable tool activity', () => {
 
 describe('runtime validation activity', () => {
 	const outer: ChatMessage = { ...anchor, kind: 'message', role: 'assistant', message_id: 'outer-envelope',
-		body: 'Requesting phase completion.', created_at: '2026-01-01T00:00:01Z', data: { toolCalls: [
-			{ id: 'outer-completion', function: { name: 'request_phase_completion', arguments: '{}' } }
-		] } };
+		body: 'Requesting phase completion.', created_at: '2026-01-01T00:00:01Z',
+		data: { sessionMessage: { message_id: 'outer-envelope', direction: 'outgoing', position: 0,
+			content: { text: 'Requesting phase completion.', source: 'agent', requests: [
+				{ id: 'outer-completion', name: 'request_phase_completion', arguments: '{}' }
+			], correlation: null, result: null } } } };
 	const start: ChatMessage = { ...anchor, kind: 'message', role: 'tool', message_id: 'runtime-start',
 		conversation_id: 'node-1', parent_conversation_id: 'chat-1',
 		body: 'Internal study validation started', created_at: '2026-01-01T00:00:02Z', data: {
@@ -362,9 +375,13 @@ describe('runtime validation activity', () => {
 			render(ScopeTranscript, { props: { workspaceId: 'ws-1', entries: buildNodeEntries({ messages: initial, events: [] }) } });
 		expect(screen.getAllByTestId('tool-result-card').map((card) => card.dataset.tool)).toEqual(['request_phase_completion', 'validate_study']);
 		const finished: ChatMessage = { ...start, message_id: 'runtime-finish', created_at: '2026-01-01T00:00:03Z',
-			data: { subAgentId: 'node-1', toolActivity: 'finished', toolCallId: 'runtime-validation-1', durationMs: 12, reused: ok },
+			data: { subAgentId: 'node-1', activityKind: 'delivery',
+				sessionMessage: { message_id: 'runtime-finish', direction: 'incoming', position: 1,
+					content: { text: ok ? 'Validation reused' : 'Validation failed', source: 'runtime',
+						requests: [], correlation: null,
+						result: { durationMs: 12, toolCallId: 'runtime-validation-1' } } } },
 			tool_result: { tool: 'validate_study', callId: 'runtime-validation-1', ok: Boolean(ok),
-				summary: ok ? 'Validation reused' : 'Validation failed', structured: {}, text: '',
+				summary: ok ? 'Validation reused' : 'Validation failed', structured: { reused: ok }, text: '',
 				failure: ok ? null : { kind: 'compile', message: 'Invalid study source' } } };
 		const messages = [outer, start, finished, { ...start }, { ...finished }];
 		await view.rerender(scope === 'root' ? { workspaceId: 'ws-1', messages } :
@@ -377,7 +394,7 @@ describe('runtime validation activity', () => {
 		if (!ok) expect(screen.getByTestId('tool-failure')).toHaveTextContent('Invalid study source');
 		const completed: ChatMessage = { ...finished, message_id: 'outer-finish', created_at: '2026-01-01T00:00:04Z',
 			conversation_id: anchor.conversation_id, parent_conversation_id: anchor.parent_conversation_id,
-			data: { toolCallId: 'outer-completion' }, tool_result: { ...finished.tool_result!,
+			tool_result: { ...finished.tool_result!,
 				tool: 'request_phase_completion', callId: 'outer-completion' } };
 		const projected = projectToolMessages([...messages, completed]);
 		expect(projected.filter((message) => message.role === 'assistant').map((message) => message.message_id)).toEqual(['outer-envelope']);
@@ -401,8 +418,11 @@ describe('root mid-turn composer', () => {
 		let finish!: () => void;
 		const onSend = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
 		const message: ChatMessage = { ...anchor, kind: 'message', role: activity === 'prompt' ? 'user' : 'assistant',
-			body: 'Agent is working', data: activity === 'tool' ? { toolCalls: [{ id: 'root-tool',
-				function: { name: 'run_study', arguments: '{}' } }] } : {} };
+			body: 'Agent is working', data: activity === 'tool' ? { sessionMessage: {
+				message_id: anchor.message_id, direction: 'outgoing', position: 0,
+				content: { text: 'Agent is working', source: 'agent',
+					requests: [{ id: 'root-tool', name: 'run_study', arguments: '{}' }],
+					correlation: null, result: null } } } : {} };
 		render(ChatSurface, { props: { workspaceId: 'ws-1', chatId: 'chat-1', timeline: timelineFixture([message]), onSend,
 			streaming: { active: activity === 'streaming', text: 'Still working', reasoning: '' } } });
 		const input = screen.getByTestId('composer-input');
@@ -476,9 +496,10 @@ describe('Copilot live timeline rendering', () => {
 		vi.mocked(postMessage).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
 		render(CopilotPanel, { props: { workspaceId: 'ws-1', onExpand: vi.fn(), onClose: vi.fn() } });
 		await waitFor(() => expect(fixture.subscribers.length).toBeGreaterThan(0));
-		const envelope: ChatMessage = { ...anchor, kind: 'message', role: 'assistant', data: { toolCalls: [
-			{ id: 'working', function: { name: 'run_study', arguments: '{}' } }
-		] } };
+		const envelope: ChatMessage = { ...anchor, kind: 'message', role: 'assistant', data: { sessionMessage: {
+			message_id: anchor.message_id, direction: 'outgoing', position: 0,
+			content: { text: '', source: 'agent',
+				requests: [{ id: 'working', name: 'run_study', arguments: '{}' }], correlation: null, result: null } } } };
 		fixture.subscribers.at(-1)!(timelineMessageItem(envelope, 1));
 		await screen.findByTestId('tool-result-status');
 		const input = screen.getByTestId('composer-input');
@@ -509,12 +530,17 @@ describe('Copilot live timeline rendering', () => {
 		render(CopilotPanel, { props: { workspaceId: 'ws-1', onExpand: vi.fn(), onClose: vi.fn() } });
 		await waitFor(() => expect(fixture.subscribers.length).toBeGreaterThan(0));
 		const envelope: ChatMessage = { ...anchor, message_id: 'root-envelope', kind: 'message', role: 'assistant',
-			body: '', data: { toolCalls: [{ id: 'root-call', type: 'function',
-				function: { name: 'run_study', arguments: '{}' } }] } };
+			body: '', data: { sessionMessage: { message_id: 'root-envelope', direction: 'outgoing', position: 0,
+				content: { text: '', source: 'agent',
+					requests: [{ id: 'root-call', name: 'run_study', arguments: '{}' }], correlation: null, result: null } } } };
 		const deliver = fixture.subscribers.at(-1)!;
 		deliver(timelineMessageItem(envelope, 1));
 		expect(await screen.findByTestId('tool-result-status')).toHaveTextContent('pending');
-		const result: ChatMessage = { ...envelope, message_id: 'root-result', role: 'tool', data: { toolCallId: 'root-call' },
+		const result: ChatMessage = { ...envelope, message_id: 'root-result', role: 'tool',
+			data: { sessionMessage: { message_id: 'root-result', direction: 'incoming', position: 1,
+				content: { text: 'Study complete', source: 'tool_result', requests: [],
+					correlation: { request_message_id: 'root-envelope', request_id: 'root-call', tool_name: 'run_study' },
+					result: {} } } },
 			tool_result: { tool: 'run_study', callId: 'root-call', ok: true, summary: 'Study complete',
 				structured: {}, text: '', failure: null } };
 		deliver(timelineMessageItem(result, 2));

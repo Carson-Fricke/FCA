@@ -7,7 +7,7 @@
 	import type { BacktestDetail } from '$lib/types';
 
 	const workspaceId = $derived(page.params.workspace ?? '');
-	const backtestId = $derived(page.params.id ?? '');
+	const jobId = $derived(page.params.id ?? '');
 
 	let backtest = $state<BacktestDetail | null>(null);
 	let loadError = $state('');
@@ -15,7 +15,7 @@
 	$effect(() => {
 		let cancelled = false;
 		loadError = '';
-		getBacktest(workspaceId, backtestId)
+		getBacktest(workspaceId, jobId)
 			.then((item) => {
 				if (!cancelled) backtest = item;
 			})
@@ -53,11 +53,21 @@
 		<header class="flex flex-wrap items-baseline gap-3">
 			<h1 class="text-xl font-semibold text-slate-800">{backtest.name}</h1>
 			<span class="font-mono text-xs text-slate-500">
-				{backtest.period_start} → {backtest.period_end} · initial ${backtest.initial_capital.toLocaleString('en-US')} · final
-				<span class={backtest.net_pnl >= 0 ? 'text-profit' : 'text-loss'}>
-					${backtest.final_capital.toLocaleString('en-US')}
+				{backtest.period_start} → {backtest.period_end} · initial {backtest.initial_capital == null
+					? '—'
+					: `$${backtest.initial_capital.toLocaleString('en-US')}`} · final
+				<span
+					class={backtest.capital_change == null
+						? ''
+						: backtest.capital_change >= 0
+							? 'text-profit'
+							: 'text-loss'}
+				>
+					{backtest.final_capital == null ? '—' : `$${backtest.final_capital.toLocaleString('en-US')}`}
 				</span>
-				({backtest.net_pnl >= 0 ? '+' : ''}{backtest.net_pnl.toLocaleString('en-US')})
+				{#if backtest.capital_change != null}
+					({backtest.capital_change >= 0 ? '+' : ''}{backtest.capital_change.toLocaleString('en-US')})
+				{/if}
 			</span>
 		</header>
 

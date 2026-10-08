@@ -8,26 +8,22 @@
 
 	const data = $derived(isRecord(result.structured) ? result.structured : {});
 	const boundary = $derived(readString(data, 'boundary'));
-	const runId = $derived(readString(data, 'run_id'));
 	const jobId = $derived(readString(data, 'job_id'));
 	const runState = $derived(readString(data, 'state'));
-	const status = $derived(readString(data, 'status'));
 	const location = $derived(readString(data, 'location'));
 	const exitCode = $derived(readNumber(data, 'exit_code'));
 	const metrics = $derived(readRecord(data, 'metrics'));
 	const metricRows = $derived(Object.entries(metrics));
-	const backtestId = $derived(readString(data, 'backtest_id'));
 	const chatId = $derived(readString(data, 'chat_id'));
 	const executionId = $derived(readString(data, 'execution_id'));
 
-	const identifier = $derived(runId ?? jobId ?? status ?? runState);
-	const statusText = $derived(runState ?? status);
-	const normalizedState = $derived((runState ?? status ?? '').toLowerCase());
+	const identifier = $derived(jobId ?? runState);
+	const statusText = $derived(runState);
+	const normalizedState = $derived((runState ?? '').toLowerCase());
 	const isActive = $derived(normalizedState === 'running' || normalizedState === 'queued');
 	const isFailed = $derived(
 		!result.ok ||
 			normalizedState === 'failed' ||
-			normalizedState === 'error' ||
 			normalizedState === 'cancelled'
 	);
 
@@ -40,11 +36,10 @@
 
 	$effect(() => {
 		const ws = workspaceId;
-		const id = backtestId;
-		const run = runId;
+		const id = jobId ?? '';
 		const chat = chatId;
 		const execution = executionId;
-		if (!ws || (!id && !run)) {
+		if (!ws || !id) {
 			detail = null;
 			loading = false;
 			loadError = '';
@@ -57,8 +52,8 @@
 		loadError = '';
 		detail = null;
 
-		async function loadById(backtestIdValue: string): Promise<void> {
-			const next = await getBacktest(ws, backtestIdValue);
+		async function loadById(jobIdValue: string): Promise<void> {
+			const next = await getBacktest(ws, jobIdValue);
 			if (cancelled) return;
 			detail = next;
 			loading = false;
@@ -66,29 +61,29 @@
 
 		async function resolve(): Promise<void> {
 			try {
-				if (id) {
-					await loadById(id);
-					return;
-				}
-				const card = await materializeBacktestRun(ws, run as string, {
+				const card = await materializeBacktestRun(ws, id, {
 					chatId: chat,
 					executionId: execution
 				});
 				if (cancelled) return;
-				if (card.status === 'complete') {
-					if (card.backtest_id) {
-						await loadById(card.backtest_id);
-					} else if (card.backtest) {
-						detail = card.backtest;
-						loading = false;
-					} else {
-						loading = false;
-					}
+				if (card.backtest) {
+					detail = card.backtest;
+					loading = false;
 					return;
 				}
-				if (card.status === 'failed') {
-					loadError = card.error ?? 'Backtest failed before a report was produced.';
+				const cardState = (card.state ?? '').toLowerCase();
+				if (card.error) {
+					loadError = card.error;
 					loading = false;
+					return;
+				}
+				if (cardState === 'failed' || cardState === 'cancelled') {
+					loadError = failureMessage;
+					loading = false;
+					return;
+				}
+				if (cardState === 'succeeded') {
+					await loadById(id);
 					return;
 				}
 				attempts += 1;
@@ -117,8 +112,10 @@
 	 * so carry every original key through and add the camelCase aliases the
 	 * report understands.
 	 */
-	function normalizeStats(stats: Record<string, number>): Record<string, number> {
-		const out: Record<string, number> = { ...stats };
+	function normalizeStats(
+		stats: Record<string, number | string | null>
+	): Record<string, number | string | null> {
+		const out: Record<string, number | string | null> = { ...stats };
 		const aliases: Record<string, string> = {
 			max_drawdown: 'maxDrawdown',
 			win_rate: 'hitRate',
@@ -148,14 +145,15 @@
 	});
 
 	const failureMessage = $derived(
-		result.failure?.message || result.summary || 'Backtest failed before a report was produced.'
+		readString(isRecord(result.failure) ? result.failure : {}, 'message') ||
+			result.summary ||
+			'Backtest failed before a report was produced.'
 	);
 </script>
 
 <div class="space-y-2" data-testid="backtest-tool-card">
 	<dl class="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 font-mono text-[11px]">
 		{#if boundary}<dt class="text-slate-500">boundary</dt><dd class="text-slate-800">{boundary}</dd>{/if}
-		{#if runId}<dt class="text-slate-500">run_id</dt><dd class="text-slate-800">{runId}</dd>{/if}
 		{#if jobId}<dt class="text-slate-500">job_id</dt><dd class="text-slate-800">{jobId}</dd>{/if}
 		{#if statusText}<dt class="text-slate-500">state</dt><dd class="text-slate-800">{statusText}</dd>{/if}
 		{#if exitCode !== null}<dt class="text-slate-500">exit_code</dt><dd class="text-slate-800">{exitCode}</dd>{/if}
@@ -178,7 +176,7 @@
 		</div>
 	{/if}
 
-	{#if backtestId || runId}
+	{#if jobId}
 		{#if loading}
 			<p
 				class="flex items-center gap-2 text-xs text-slate-500"

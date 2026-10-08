@@ -76,7 +76,7 @@ jobs:
         run: uv run --extra dev ty check
 
       - name: Run tests
-        run: uv run --extra dev pytest -p no:cacheprovider
+        run: uv run --extra dev pytest -p no:cacheprovider --durations=25
 
       - name: Build package
         run: uv build --python 3.12 --wheel --force-pep517 --out-dir dist-ci --clear --no-create-gitignore .
