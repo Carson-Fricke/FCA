@@ -7,7 +7,9 @@
 
 use std::collections::BTreeMap;
 
-use num::Decimal18;
+use num::{Decimal18, DecimalError};
+
+use crate::backtest::errors::BacktestError;
 
 /// What initiated one reconciliation pass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,17 +109,41 @@ impl ReconciliationDiff {
     }
 }
 
-fn parse(value: &str) -> Decimal18 {
-    value.parse::<Decimal18>().unwrap_or(Decimal18::ZERO)
+/// Parse one string-exact broker or expected quantity or cash value.
+///
+/// # Errors
+///
+/// Returns [`BacktestError::DataPreflight`] when the text is not an exact
+/// decimal. A malformed value is never read as zero.
+fn parse(field: &str, value: &str) -> Result<Decimal18, BacktestError> {
+    value.parse::<Decimal18>().map_err(|error| {
+        BacktestError::DataPreflight(format!(
+            "{field} {value:?} is not an exact decimal: {error}"
+        ))
+    })
+}
+
+fn arithmetic(operation: &str, error: DecimalError) -> BacktestError {
+    BacktestError::Arithmetic(format!(
+        "{operation} cannot be represented exactly: {error}"
+    ))
 }
 
 /// Compare expected and broker positions within tolerance.
-#[must_use]
+///
+/// A symbol absent from one side is a flat position, which is a valid zero. A
+/// quantity that is not an exact decimal is never read as zero.
+///
+/// # Errors
+///
+/// Returns [`BacktestError::DataPreflight`] when a position quantity is not an
+/// exact decimal, and [`BacktestError::Arithmetic`] when a difference leaves the
+/// decimal128(38, 18) bound.
 pub fn reconcile_positions(
     expected: &[ExpectedPosition],
     actual: &[BrokerPosition],
     tolerances: ReconciliationTolerances,
-) -> Vec<PositionDelta> {
+) -> Result<Vec<PositionDelta>, BacktestError> {
     let mut expected_map: BTreeMap<&str, &str> = BTreeMap::new();
     for position in expected {
         expected_map.insert(position.symbol.as_str(), position.quantity.as_str());
@@ -138,9 +164,15 @@ pub fn reconcile_positions(
     for symbol in symbols {
         let expected_quantity = expected_map.get(symbol).copied().unwrap_or(&zero);
         let actual_quantity = actual_map.get(symbol).copied().unwrap_or(&zero);
-        let difference = parse(expected_quantity)
-            .checked_sub(parse(actual_quantity))
-            .unwrap_or(Decimal18::ZERO);
+        let difference = parse(
+            &format!("expected quantity for {symbol}"),
+            expected_quantity,
+        )?
+        .checked_sub(parse(
+            &format!("broker quantity for {symbol}"),
+            actual_quantity,
+        )?)
+        .map_err(|error| arithmetic("position difference", error))?;
         if difference.abs().less_than(tolerances.position_abs)
             || difference.abs() == tolerances.position_abs
         {
@@ -153,23 +185,28 @@ pub fn reconcile_positions(
             difference: difference.to_string(),
         });
     }
-    deltas
+    Ok(deltas)
 }
 
 /// Compare expected and broker cash within tolerance.
-#[must_use]
+///
+/// # Errors
+///
+/// Returns [`BacktestError::DataPreflight`] when either cash value is not an
+/// exact decimal, and [`BacktestError::Arithmetic`] when the difference leaves
+/// the decimal128(38, 18) bound.
 pub fn reconcile_cash(
     expected: &str,
     actual: &str,
     tolerances: ReconciliationTolerances,
-) -> Option<String> {
-    let difference = parse(expected)
-        .checked_sub(parse(actual))
-        .unwrap_or(Decimal18::ZERO);
+) -> Result<Option<String>, BacktestError> {
+    let difference = parse("expected cash", expected)?
+        .checked_sub(parse("broker cash", actual)?)
+        .map_err(|error| arithmetic("cash difference", error))?;
     if difference.abs().less_than(tolerances.cash_abs) || difference.abs() == tolerances.cash_abs {
-        None
+        Ok(None)
     } else {
-        Some(difference.to_string())
+        Ok(Some(difference.to_string()))
     }
 }
 

@@ -1338,13 +1338,19 @@ impl TraderSupervisor {
         let tolerances = ReconciliationTolerances::default();
         let expected: Vec<ExpectedPosition> = Vec::new();
         let actual: Vec<BrokerPosition> = Vec::new();
-        let position_deltas = reconcile_positions(&expected, &actual, tolerances);
+        let position_deltas =
+            reconcile_positions(&expected, &actual, tolerances).map_err(|error| {
+                SupervisionError::Fault(format!("position reconciliation failed: {error}"))
+            })?;
         let expected_cash = self.settings.initial_cash.to_string();
         let actual_cash = shell
             .books()
             .first()
             .map_or_else(|| expected_cash.clone(), |book| book.cash.clone());
-        let cash_delta = reconcile_cash(&expected_cash, &actual_cash, tolerances);
+        let cash_delta =
+            reconcile_cash(&expected_cash, &actual_cash, tolerances).map_err(|error| {
+                SupervisionError::Fault(format!("cash reconciliation failed: {error}"))
+            })?;
         if !position_deltas.is_empty() || cash_delta.is_some() {
             return Err(SupervisionError::Restartable(format!(
                 "reconciliation diverged (positions={}, cash={:?})",

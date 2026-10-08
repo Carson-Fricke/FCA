@@ -189,7 +189,7 @@
 	const riskTiles = $derived.by(() => {
 		if (!stats) return [];
 		const out = [];
-		if (stats.sharpe != null) out.push({ label: 'Sharpe', text: stats.sharpe.toFixed(2), cls: '' });
+		if (stats.sharpePerSample != null) out.push({ label: 'Sharpe (per sample)', text: stats.sharpePerSample.toFixed(2), cls: '' });
 		if (stats.sortino != null) out.push({ label: 'Sortino', text: stats.sortino.toFixed(2), cls: '' });
 		if (stats.maxDrawdown != null)
 			out.push({ label: 'Max DD', text: `${(stats.maxDrawdown * 100).toFixed(1)}%`, cls: 'neg' });
@@ -254,8 +254,8 @@
 			text: count == null ? '—' : `${count} (${stats?.winCount ?? '—'}W/${stats?.lossCount ?? '—'}L)`,
 			cls: ''
 		});
-		if (stats?.sharpe != null) {
-			out.push({ label: 'Sharpe', text: stats.sharpe.toFixed(2), cls: '' });
+		if (stats?.sharpePerSample != null) {
+			out.push({ label: 'Sharpe (per sample)', text: stats.sharpePerSample.toFixed(2), cls: '' });
 		}
 		if (stats?.maxDrawdown != null) {
 			out.push({ label: 'Max DD', text: `${(stats.maxDrawdown * 100).toFixed(1)}%`, cls: '' });

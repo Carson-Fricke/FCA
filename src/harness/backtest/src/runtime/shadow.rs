@@ -11,8 +11,9 @@
 
 use std::collections::BTreeMap;
 
-use num::Decimal18;
+use num::{Decimal18, DecimalError};
 
+use crate::backtest::errors::BacktestError;
 use crate::canonical_json::JsonValue;
 use crate::runtime::paper::PaperSessionResult;
 use crate::runtime::state_store::FillState;
@@ -399,19 +400,41 @@ fn print_json(print: &LivePrint) -> JsonValue {
     ])
 }
 
-fn parse_decimal(value: &str) -> Decimal18 {
-    value.parse::<Decimal18>().unwrap_or(Decimal18::ZERO)
+/// Parse one string-exact decimal from a would-be fill or a live print.
+///
+/// # Errors
+///
+/// Returns [`BacktestError::DataPreflight`] when the text is not an exact
+/// decimal. A malformed value is never read as zero.
+fn parse_decimal(field: &str, value: &str) -> Result<Decimal18, BacktestError> {
+    value.parse::<Decimal18>().map_err(|error| {
+        BacktestError::DataPreflight(format!(
+            "{field} {value:?} is not an exact decimal: {error}"
+        ))
+    })
+}
+
+fn arithmetic(operation: &str, error: DecimalError) -> BacktestError {
+    BacktestError::Arithmetic(format!(
+        "{operation} cannot be represented exactly: {error}"
+    ))
 }
 
 /// Build the complete shadow report from an intent trail and live prints.
-#[must_use]
+///
+/// # Errors
+///
+/// Returns [`BacktestError::DataPreflight`] when a compared value is not an
+/// exact decimal, and [`BacktestError::Arithmetic`] when a would-be quantity sum
+/// leaves the decimal128(38, 18) bound. A malformed value never becomes a match
+/// or a divergence by reading as zero.
 pub fn build_report(
     job_id: impl Into<String>,
     deployment_mode: impl Into<String>,
     session: PaperSessionResult,
     intents: &[BrokerIntent],
     live_prints: &[LivePrint],
-) -> ShadowReport {
+) -> Result<ShadowReport, BacktestError> {
     let mut fills_by_order: BTreeMap<&str, Vec<FillState>> = BTreeMap::new();
     for fill in &session.fills {
         fills_by_order
@@ -427,7 +450,7 @@ pub fn build_report(
         .iter()
         .map(|intent| intent.order_id.as_str())
         .collect();
-    let comparisons: Vec<IntentComparison> = intents
+    let comparisons = intents
         .iter()
         .map(|intent| {
             let would_be = fills_by_order
@@ -438,28 +461,28 @@ pub fn build_report(
                 .map(|print| (*print).clone());
             compare(intent, would_be, live)
         })
-        .collect();
+        .collect::<Result<Vec<IntentComparison>, BacktestError>>()?;
     let mut live_only: Vec<LivePrint> = live_prints
         .iter()
         .filter(|print| !intent_orders.contains(&print.order_id.as_str()))
         .cloned()
         .collect();
     live_only.sort_by(|left, right| left.order_id.cmp(&right.order_id));
-    ShadowReport {
+    Ok(ShadowReport {
         job_id: job_id.into(),
         deployment_mode: deployment_mode.into(),
         session,
         intents: intents.to_vec(),
         comparisons,
         live_only_prints: live_only,
-    }
+    })
 }
 
 fn compare(
     intent: &BrokerIntent,
     would_be: Vec<FillState>,
     live: Option<LivePrint>,
-) -> IntentComparison {
+) -> Result<IntentComparison, BacktestError> {
     let make = |verdict, would_be, live, detail| IntentComparison {
         intent_sequence: intent.sequence,
         order_id: intent.order_id.clone(),
@@ -469,62 +492,75 @@ fn compare(
         detail,
     };
     if would_be.is_empty() && live.is_none() {
-        return make(
+        return Ok(make(
             ShadowVerdict::Unfilled,
             Vec::new(),
             None,
             Some("no simulated fill and no live print".to_string()),
-        );
+        ));
     }
     if would_be.is_empty() {
-        return make(
+        return Ok(make(
             ShadowVerdict::Diverged,
             Vec::new(),
             live,
             Some("no simulated fill; live printed".to_string()),
-        );
+        ));
     }
     let Some(live) = live else {
-        return make(
+        return Ok(make(
             ShadowVerdict::WouldBeOnly,
             would_be,
             None,
             Some("no live print available".to_string()),
-        );
+        ));
     };
-    let detail = first_would_be_difference(intent, &would_be, &live);
+    let detail = first_would_be_difference(intent, &would_be, &live)?;
     let verdict = if detail.is_some() {
         ShadowVerdict::Diverged
     } else {
         ShadowVerdict::Matched
     };
-    make(verdict, would_be, Some(live), detail)
+    Ok(make(verdict, would_be, Some(live), detail))
 }
 
 /// Return the first pinned-field disagreement between the two outcomes.
-#[must_use]
+///
+/// Every would-be fill quantity is validated. The live quantity is read once
+/// the symbol and side agree, and the prices only when there is exactly one
+/// would-be fill; a malformed value that is read fails by name.
+///
+/// # Errors
+///
+/// Returns [`BacktestError::DataPreflight`] when a value that is read is not an
+/// exact decimal, and [`BacktestError::Arithmetic`] when the would-be quantity
+/// sum leaves the decimal128(38, 18) bound.
 pub fn first_would_be_difference(
     intent: &BrokerIntent,
     would_be: &[FillState],
     live: &LivePrint,
-) -> Option<String> {
+) -> Result<Option<String>, BacktestError> {
     let mut quantity = Decimal18::ZERO;
     for fill in would_be {
+        let fill_quantity = parse_decimal("would-be fill quantity", &fill.quantity)?;
         quantity = quantity
-            .checked_add(parse_decimal(&fill.quantity))
-            .unwrap_or(quantity);
+            .checked_add(fill_quantity)
+            .map_err(|error| arithmetic("would-be fill quantity sum", error))?;
     }
     if intent.symbol != live.symbol {
-        return Some(format!("symbol {} != {}", intent.symbol, live.symbol));
+        return Ok(Some(format!("symbol {} != {}", intent.symbol, live.symbol)));
     }
     if intent.side != live.side {
-        return Some(format!("side {} != {}", intent.side, live.side));
+        return Ok(Some(format!("side {} != {}", intent.side, live.side)));
     }
-    if quantity != parse_decimal(&live.quantity) {
-        return Some(format!("quantity {} != {}", quantity, live.quantity));
+    if quantity != parse_decimal("live print quantity", &live.quantity)? {
+        return Ok(Some(format!("quantity {} != {}", quantity, live.quantity)));
     }
-    if would_be.len() == 1 && parse_decimal(&would_be[0].price) != parse_decimal(&live.price) {
-        return Some(format!("price {} != {}", would_be[0].price, live.price));
+    if let [fill] = would_be {
+        let fill_price = parse_decimal("would-be fill price", &fill.price)?;
+        if fill_price != parse_decimal("live print price", &live.price)? {
+            return Ok(Some(format!("price {} != {}", fill.price, live.price)));
+        }
     }
-    None
+    Ok(None)
 }

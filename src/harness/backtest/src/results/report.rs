@@ -12,7 +12,7 @@
 
 use std::fmt::Write as _;
 
-use crate::results::metrics::{equity_curve_metrics, EquityPoint, TradeStats};
+use crate::results::metrics::{EquityMetrics, EquityPoint, Outcome, TradeStats};
 
 const CSS: &str = ":root{color-scheme:light}body{margin:0;padding:2rem;background:#f8fafc;\
 color:#1f2937;font-family:system-ui,\"Segoe UI\",sans-serif}main{max-width:1080px;margin:0 auto}\
@@ -56,6 +56,14 @@ fn escape(value: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
+}
+
+/// Render a defined value with `format`, or the closed reason it is undefined.
+fn undefined_or<T>(outcome: Outcome<T>, format: impl FnOnce(T) -> String) -> String {
+    match outcome {
+        Ok(value) => format(value),
+        Err(reason) => format!("undefined ({reason})"),
+    }
 }
 
 fn sample_indices(count: usize, limit: usize) -> Vec<usize> {
@@ -120,12 +128,17 @@ aria-label=\"Equity curve\"><polyline class=\"line\" points=\"{}\" /></svg>",
 
 /// Render one run's data as a self-contained HTML document.
 ///
-/// The document is a pure function of `header`, `equity`, and `trades`: no wall
-/// clock, randomness, I/O, or network access participates, and repeated calls
-/// return byte-identical strings.
+/// The document is a pure function of `header`, `metrics`, `equity`, and
+/// `trades`: no wall clock, randomness, I/O, or network access participates,
+/// and repeated calls return byte-identical strings. An undefined metric renders
+/// with its reason, never as zero.
 #[must_use]
-pub fn render_report(header: &ReportHeader, equity: &[EquityPoint], trades: &TradeStats) -> String {
-    let metrics = equity_curve_metrics(equity);
+pub fn render_report(
+    header: &ReportHeader,
+    metrics: &EquityMetrics,
+    equity: &[EquityPoint],
+    trades: &TradeStats,
+) -> String {
     let mut document = String::new();
     document.push_str("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">");
     let _ = write!(
@@ -171,17 +184,13 @@ pub fn render_report(header: &ReportHeader, equity: &[EquityPoint], trades: &Tra
     document.push_str("</table></section>");
 
     document.push_str("<section><h2>Equity and drawdown</h2>");
-    let total_return = metrics
-        .total_return
-        .map_or_else(|| "-".to_string(), |value| value.to_string());
-    let cagr = metrics
-        .cagr
-        .map_or_else(|| "-".to_string(), |value| format!("{value:.4}"));
     let _ = write!(
         document,
-        "<p><code>Total return {total_return}</code> <code>CAGR {cagr}</code> \
+        "<p><code>Total return {}</code> <code>CAGR {}</code> \
 <code>Max drawdown {}</code></p>",
-        metrics.max_drawdown
+        undefined_or(metrics.total_return, |value| value.to_string()),
+        undefined_or(metrics.cagr, |value| format!("{value:.4}")),
+        undefined_or(metrics.max_drawdown, |value| value.to_string()),
     );
     document.push_str(&equity_svg(equity));
     document.push_str("</section>");
@@ -217,8 +226,9 @@ pub fn render_report(header: &ReportHeader, equity: &[EquityPoint], trades: &Tra
 #[must_use]
 pub fn render_report_bytes(
     header: &ReportHeader,
+    metrics: &EquityMetrics,
     equity: &[EquityPoint],
     trades: &TradeStats,
 ) -> Vec<u8> {
-    render_report(header, equity, trades).into_bytes()
+    render_report(header, metrics, equity, trades).into_bytes()
 }

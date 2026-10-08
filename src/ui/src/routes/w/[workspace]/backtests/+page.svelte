@@ -84,11 +84,11 @@
 
 	const summary = $derived.by(() => {
 		const returns = backtests.map((b) => b.total_return).filter((v): v is number => v != null);
-		const sharpes = backtests.map((b) => b.sharpe).filter((v): v is number => v != null);
+		const sharpes = backtests.map((b) => b.sharpe_per_sample).filter((v): v is number => v != null);
 		return {
 			count: backtests.length,
 			best: returns.length ? Math.max(...returns) : null,
-			avgSharpe: sharpes.length ? sharpes.reduce((a, b) => a + b, 0) / sharpes.length : null
+			avgSharpePerSample: sharpes.length ? sharpes.reduce((a, b) => a + b, 0) / sharpes.length : null
 		};
 	});
 </script>
@@ -131,7 +131,7 @@
 	<div class="grid grid-cols-3 gap-3">
 		<MetricCard label="Runs" value={summary.count} />
 		<MetricCard label="Best return" value={summary.best ?? '—'} format="signedPct" />
-		<MetricCard label="Average Sharpe" value={summary.avgSharpe ?? '—'} format="ratio" />
+		<MetricCard label="Average Sharpe (per sample)" value={summary.avgSharpePerSample ?? '—'} format="ratio" />
 	</div>
 
 	<div class="flex flex-wrap items-center gap-2">
@@ -162,7 +162,7 @@
 						<th class="px-4 py-2">Strategy</th>
 						<th class="px-4 py-2">Period</th>
 						<th class="px-4 py-2 text-right">Return</th>
-						<th class="px-4 py-2 text-right">Sharpe</th>
+						<th class="px-4 py-2 text-right">Sharpe (per sample)</th>
 						<th class="px-4 py-2 text-right">Max DD</th>
 						<th class="px-4 py-2 text-center">Split</th>
 						<th class="px-4 py-2">Origin</th>
@@ -190,7 +190,7 @@
 								{backtest.total_return == null ? '—' : `${(backtest.total_return * 100).toFixed(1)}%`}
 							</td>
 							<td class="px-4 py-2 text-right text-slate-700"
-								>{backtest.sharpe == null ? '—' : backtest.sharpe.toFixed(2)}</td
+								>{backtest.sharpe_per_sample == null ? '—' : backtest.sharpe_per_sample.toFixed(2)}</td
 							>
 							<td class="px-4 py-2 text-right text-loss"
 								>{backtest.max_drawdown == null

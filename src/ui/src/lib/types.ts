@@ -378,7 +378,8 @@ export interface BacktestSummaryRow {
 	period_end: string;
 	capital: number | null;
 	total_return: number | null;
-	sharpe: number | null;
+	/** Per-sample Sharpe; not annualized. */
+	sharpe_per_sample: number | null;
 	max_drawdown: number | null;
 	win_rate: number | null;
 	trades: number | null;

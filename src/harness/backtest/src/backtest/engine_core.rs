@@ -219,7 +219,7 @@ pub fn assemble_study_frames(
     let mut frames: BTreeMap<i64, EngineBarFrame> = BTreeMap::new();
     let mut seen = BTreeSet::new();
     for event in &fixture.events {
-        let EngineMarket::Bar(bar) = market_event(event, options) else {
+        let EngineMarket::Bar(bar) = market_event(event, options)? else {
             continue;
         };
         if !symbols.contains(&bar.symbol) {
@@ -718,11 +718,16 @@ struct WorkingOrder {
 }
 
 impl WorkingOrder {
-    fn remaining(&self) -> Decimal {
+    fn remaining(&self) -> Result<Decimal, BacktestError> {
         self.order
             .quantity
             .checked_sub(self.filled_quantity)
-            .unwrap_or(Decimal::ZERO)
+            .map_err(|error| {
+                BacktestError::Arithmetic(format!(
+                    "order {} remaining quantity exceeds the decimal128(38,18) bound: {error}",
+                    self.order.order_id
+                ))
+            })
     }
 
     fn is_active(&self) -> bool {
@@ -794,11 +799,16 @@ impl SimulatedVenue {
         }
     }
 
-    fn on_market(&mut self, market: &EngineMarket, clock_ns: i64, bus: &mut EventBus) {
+    fn on_market(
+        &mut self,
+        market: &EngineMarket,
+        clock_ns: i64,
+        bus: &mut EventBus,
+    ) -> Result<(), BacktestError> {
         // The venue trades book and print events only; a bar is explicitly not
         // a matchable event and never enters the last-trade book.
         if matches!(market, EngineMarket::Bar(_)) {
-            return;
+            return Ok(());
         }
         self.observe(market.timestamp_ns(), market.sequence());
         self.latest_markets
@@ -812,11 +822,10 @@ impl SimulatedVenue {
             }
             let side = self.orders[index].order.side.clone();
             let available = market_quantity(&side, market);
-            let maybe = self.attempt(index, market, available, clock_ns, bus);
-            if maybe.is_some() {
-                // A single match per event is enough for the simple-touch model.
-            }
+            // A single match per event is enough for the simple-touch model.
+            self.attempt(index, market, available, clock_ns, bus)?;
         }
+        Ok(())
     }
 
     fn on_report(&mut self, report: &EngineReport) {
@@ -837,7 +846,12 @@ impl SimulatedVenue {
         self.observe(fill.timestamp_ns, fill.sequence);
     }
 
-    fn submit(&mut self, order: EngineOrder, clock_ns: i64, bus: &mut EventBus) {
+    fn submit(
+        &mut self,
+        order: EngineOrder,
+        clock_ns: i64,
+        bus: &mut EventBus,
+    ) -> Result<(), BacktestError> {
         self.observe(order.timestamp_ns, order.sequence);
         let working = WorkingOrder {
             order: order.clone(),
@@ -854,9 +868,10 @@ impl SimulatedVenue {
                 .iter()
                 .position(|working| working.order.order_id == order.order_id);
             if let Some(index) = index {
-                let _ = self.attempt(index, &market, available, clock_ns, bus);
+                self.attempt(index, &market, available, clock_ns, bus)?;
             }
         }
+        Ok(())
     }
 
     fn attempt(
@@ -866,28 +881,29 @@ impl SimulatedVenue {
         available: Decimal,
         clock_ns: i64,
         bus: &mut EventBus,
-    ) -> Option<Decimal> {
+    ) -> Result<(), BacktestError> {
         let (order, remaining) = {
             let working = &self.orders[index];
-            (working.order.clone(), working.remaining())
+            (working.order.clone(), working.remaining()?)
         };
         if remaining.cmp_value(Decimal::ZERO) != Ordering::Greater {
-            return None;
+            return Ok(());
         }
         if available <= Decimal::ZERO {
-            return None;
+            return Ok(());
         }
-        let decision = simple_touch_price(&order, market)?;
+        let Some(decision) = simple_touch_price(&order, market) else {
+            return Ok(());
+        };
         let quantity = if remaining.cmp_value(available) == Ordering::Less {
             remaining
         } else {
             available
         };
         if quantity.cmp_value(Decimal::ZERO) != Ordering::Greater {
-            return None;
+            return Ok(());
         }
-        self.schedule_fill(index, quantity, decision, clock_ns, bus);
-        Some(quantity)
+        self.schedule_fill(index, quantity, decision, clock_ns, bus)
     }
 
     fn schedule_fill(
@@ -897,14 +913,20 @@ impl SimulatedVenue {
         price: Decimal,
         clock_ns: i64,
         bus: &mut EventBus,
-    ) {
+    ) -> Result<(), BacktestError> {
         {
             let working = &mut self.orders[index];
-            working.filled_quantity = working
-                .filled_quantity
-                .checked_add(quantity)
-                .unwrap_or(working.filled_quantity);
-            working.status = if working.remaining().is_zero() {
+            working.filled_quantity =
+                working
+                    .filled_quantity
+                    .checked_add(quantity)
+                    .map_err(|error| {
+                        BacktestError::Arithmetic(format!(
+                            "order {} filled quantity exceeds the decimal128(38,18) bound: {error}",
+                            working.order.order_id
+                        ))
+                    })?;
+            working.status = if working.remaining()?.is_zero() {
                 "filled".to_string()
             } else {
                 "partially_filled".to_string()
@@ -929,6 +951,7 @@ impl SimulatedVenue {
             fee: Decimal::ZERO,
             liquidity: "taker".to_string(),
         }));
+        Ok(())
     }
 
     fn schedule_report(
@@ -1565,8 +1588,15 @@ fn risk_json(decision: &RiskDecision) -> JsonValue {
 }
 
 /// Convert one fixture event to a Python-scale market event.
-#[must_use]
-pub fn market_event(event: &MarketEvent, options: &SyntheticDataOptions) -> EngineMarket {
+///
+/// # Errors
+///
+/// Returns [`BacktestError::DataPreflight`] when a market value cannot be
+/// represented as an engine decimal. Such a value never becomes zero.
+pub fn market_event(
+    event: &MarketEvent,
+    options: &SyntheticDataOptions,
+) -> Result<EngineMarket, BacktestError> {
     let (quote_scale, trade_scale) = crate::backtest::fixture::synthetic_scales(options);
     match event {
         MarketEvent::Quote {
@@ -1579,17 +1609,17 @@ pub fn market_event(event: &MarketEvent, options: &SyntheticDataOptions) -> Engi
             bid_quantity,
             ask_quantity,
             venue,
-        } => EngineMarket::Quote {
+        } => Ok(EngineMarket::Quote {
             event_id: event_id.clone(),
             timestamp_ns: *timestamp_ns,
             sequence: *sequence,
             symbol: symbol.clone(),
-            bid: py_from(*bid, quote_scale),
-            ask: py_from(*ask, quote_scale),
-            bid_quantity: py_from(*bid_quantity, options.quantity_scale),
-            ask_quantity: py_from(*ask_quantity, options.quantity_scale),
+            bid: py_from(*bid, quote_scale, "bid", symbol)?,
+            ask: py_from(*ask, quote_scale, "ask", symbol)?,
+            bid_quantity: py_from(*bid_quantity, options.quantity_scale, "bid size", symbol)?,
+            ask_quantity: py_from(*ask_quantity, options.quantity_scale, "ask size", symbol)?,
             venue: venue.clone(),
-        },
+        }),
         MarketEvent::Trade {
             event_id,
             timestamp_ns,
@@ -1599,16 +1629,16 @@ pub fn market_event(event: &MarketEvent, options: &SyntheticDataOptions) -> Engi
             quantity,
             venue,
             trade_id,
-        } => EngineMarket::Trade {
+        } => Ok(EngineMarket::Trade {
             event_id: event_id.clone(),
             timestamp_ns: *timestamp_ns,
             sequence: *sequence,
             symbol: symbol.clone(),
-            price: py_from(*price, trade_scale),
-            quantity: py_from(*quantity, options.quantity_scale),
+            price: py_from(*price, trade_scale, "trade price", symbol)?,
+            quantity: py_from(*quantity, options.quantity_scale, "trade size", symbol)?,
             venue: venue.clone(),
             trade_id: trade_id.clone(),
-        },
+        }),
         MarketEvent::Bar {
             event_id,
             timestamp_ns,
@@ -1619,70 +1649,95 @@ pub fn market_event(event: &MarketEvent, options: &SyntheticDataOptions) -> Engi
             low,
             close,
             volume,
-        } => EngineMarket::Bar(EngineBar {
+        } => Ok(EngineMarket::Bar(EngineBar {
             event_id: event_id.clone(),
             timestamp_ns: *timestamp_ns,
             sequence: *sequence,
             symbol: symbol.clone(),
-            open: py_from(*open, quote_scale),
-            high: py_from(*high, quote_scale),
-            low: py_from(*low, quote_scale),
-            close: py_from(*close, quote_scale),
-            volume: py_from(*volume, options.quantity_scale),
-        }),
+            open: py_from(*open, quote_scale, "bar open", symbol)?,
+            high: py_from(*high, quote_scale, "bar high", symbol)?,
+            low: py_from(*low, quote_scale, "bar low", symbol)?,
+            close: py_from(*close, quote_scale, "bar close", symbol)?,
+            volume: py_from(*volume, options.quantity_scale, "bar volume", symbol)?,
+        })),
     }
 }
 
-fn py_from(value: num::Decimal18, scale: u32) -> Decimal {
-    crate::backtest::fixture::python_decimal(value, scale)
-        .parse()
-        .unwrap_or(Decimal::ZERO)
+/// Re-read one exact fixture value as an engine decimal at its Python scale.
+fn py_from(
+    value: num::Decimal18,
+    scale: u32,
+    field: &str,
+    symbol: &str,
+) -> Result<Decimal, BacktestError> {
+    let text = crate::backtest::fixture::python_decimal(value, scale);
+    text.parse::<Decimal>().map_err(|error| {
+        BacktestError::DataPreflight(format!(
+            "market {field} {text:?} for symbol {symbol:?} is not a representable decimal: {error}"
+        ))
+    })
 }
 
 /// Evaluate one configured rule against a candidate order.
+///
+/// # Errors
+///
+/// Returns [`BacktestError::Arithmetic`] when the notional cannot be represented.
+/// An unrepresentable notional is never treated as zero, which would pass any
+/// limit.
 fn evaluate_rule(
     rule: &ResolvedRiskRule,
     order: &EngineOrder,
     prices: &BTreeMap<String, Decimal>,
     current_quantity: Decimal,
-) -> (String, Option<String>) {
+) -> Result<(String, Option<String>), BacktestError> {
     match rule.kind {
         RiskRuleKind::MaxOrderNotional => {
             let Some(price) = order_price(order, prices) else {
-                return (
+                return Ok((
                     "reject".to_string(),
                     Some("max_order_notional missing price".to_string()),
-                );
+                ));
             };
-            let notional = order.quantity.checked_mul(price).unwrap_or(Decimal::ZERO);
+            let notional = order.quantity.checked_mul(price).map_err(|error| {
+                BacktestError::Arithmetic(format!(
+                    "max_order_notional of order {} exceeds the decimal128(38,18) bound: {error}",
+                    order.order_id
+                ))
+            })?;
             if notional.cmp_value(rule.limit) != Ordering::Greater {
-                ("allow".to_string(), None)
+                Ok(("allow".to_string(), None))
             } else {
-                (
+                Ok((
                     "reject".to_string(),
                     Some("max_order_notional has no permitted quantity".to_string()),
-                )
+                ))
             }
         }
         RiskRuleKind::MaxPositionNotional => {
             let Some(price) = order_price(order, prices) else {
-                return (
+                return Ok((
                     "reject".to_string(),
                     Some("max_position_notional missing price".to_string()),
-                );
+                ));
             };
             let projected = current_quantity
                 .checked_add(order.signed_quantity())
                 .map(|value| value.abs())
                 .and_then(|value| value.checked_mul(price))
-                .unwrap_or(Decimal::ZERO);
+                .map_err(|error| {
+                    BacktestError::Arithmetic(format!(
+                        "max_position_notional of order {} exceeds the decimal128(38,18) bound: {error}",
+                        order.order_id
+                    ))
+                })?;
             if projected.cmp_value(rule.limit) != Ordering::Greater {
-                ("allow".to_string(), None)
+                Ok(("allow".to_string(), None))
             } else {
-                (
+                Ok((
                     "reject".to_string(),
                     Some("max_position_notional has no permitted quantity".to_string()),
-                )
+                ))
             }
         }
     }
@@ -1745,21 +1800,13 @@ pub fn run_native_engine(
     let rules = resolve_risk_rules(configuration)?;
     let mut hub = PortfolioHub::new(&configuration.job_id);
     for instance in &strategies {
-        let capital_fraction = capital_fraction(configuration, &instance.instance_id);
-        let initial_cash = configuration
-            .initial_cash_decimal
-            .checked_mul(capital_fraction)
-            .unwrap_or(configuration.initial_cash_decimal);
+        let initial_cash = instance_initial_cash(configuration, &instance.instance_id)?;
         hub.create_book(&instance.instance_id, initial_cash);
     }
 
     let mut strategies = strategies;
     for instance in &mut strategies {
-        let capital_fraction = capital_fraction(configuration, &instance.instance_id);
-        let initial_cash = configuration
-            .initial_cash_decimal
-            .checked_mul(capital_fraction)
-            .unwrap_or(configuration.initial_cash_decimal);
+        let initial_cash = instance_initial_cash(configuration, &instance.instance_id)?;
         let start = StrategyStart {
             instance_id: instance.instance_id.clone(),
             account_id: configuration.job_id.clone(),
@@ -1785,7 +1832,9 @@ pub fn run_native_engine(
         .events
         .iter()
         .filter(|event| !matches!(event, MarketEvent::Bar { .. }))
-        .map(|event| EngineEvent::Market(market_event(event, synthetic_options)))
+        .map(|event| market_event(event, synthetic_options).map(EngineEvent::Market))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
         .chain(frames.into_iter().map(EngineEvent::BarFrame))
         .collect();
     // Sort by actual availability before draining; raw bar starts are not dispatch times.
@@ -1951,14 +2000,14 @@ fn dispatch_event(
                         order_owners,
                         order_counts,
                         risk_decisions,
-                    );
+                    )?;
                 }
             }
         }
         EngineEvent::Market(market) => {
             let clock_ns = market.timestamp_ns();
             if configuration.shell != "study" {
-                venue.on_market(market, clock_ns, bus);
+                venue.on_market(market, clock_ns, bus)?;
             }
             let mark = market.mark_price();
             prices.insert(market.symbol().to_string(), mark);
@@ -2005,7 +2054,7 @@ fn dispatch_event(
                         order_owners,
                         order_counts,
                         risk_decisions,
-                    );
+                    )?;
                 }
             }
         }
@@ -2028,7 +2077,7 @@ fn dispatch_event(
                 &configuration.job_id,
                 &strategy_id,
                 &options.asset_class,
-            );
+            )?;
             let booked = EngineFill {
                 fee: assessment.total(),
                 ..fill.clone()
@@ -2077,7 +2126,7 @@ fn process_order(
     order_owners: &mut BTreeMap<String, String>,
     order_counts: &mut BTreeMap<String, u64>,
     risk_decisions: &mut Vec<RiskDecision>,
-) {
+) -> Result<(), BacktestError> {
     let snapshot = hub.snapshot();
     let current_quantity = snapshot
         .positions
@@ -2088,7 +2137,7 @@ fn process_order(
     let mut reason = None;
     let mut action = "allow".to_string();
     for rule in rules {
-        let (rule_action, rule_reason) = evaluate_rule(rule, order, prices, current_quantity);
+        let (rule_action, rule_reason) = evaluate_rule(rule, order, prices, current_quantity)?;
         audits.push(RiskAudit {
             sequence: audits.len() as u64,
             pass_number: 1,
@@ -2112,20 +2161,64 @@ fn process_order(
         audits,
     });
     if action == "reject" {
-        return;
+        return Ok(());
     }
     *order_counts.entry(instance_id.to_string()).or_insert(0) += 1;
     order_owners.insert(order.order_id.clone(), instance_id.to_string());
-    venue.submit(order.clone(), clock_ns, bus);
+    venue.submit(order.clone(), clock_ns, bus)
 }
 
-fn capital_fraction(configuration: &BacktestConfig, instance_id: &str) -> Decimal {
+/// The starting cash of one strategy instance: the configured initial cash
+/// times the instance's capital fraction.
+///
+/// # Errors
+///
+/// Returns [`BacktestError::Configuration`] when the fraction is malformed and
+/// [`BacktestError::Arithmetic`] when the product cannot be represented exactly.
+/// Neither case falls back to full cash.
+fn instance_initial_cash(
+    configuration: &BacktestConfig,
+    instance_id: &str,
+) -> Result<Decimal, BacktestError> {
+    let fraction = capital_fraction(configuration, instance_id)?;
     configuration
+        .initial_cash_decimal
+        .checked_mul(fraction)
+        .map_err(|error| {
+            BacktestError::Arithmetic(format!(
+                "initial cash times capital fraction for strategy instance {instance_id} \
+                 cannot be represented exactly: {error}"
+            ))
+        })
+}
+
+/// The capital fraction one strategy instance is configured with.
+///
+/// An instance the configuration does not declare takes the default fraction of
+/// `1.0`, the same default the YAML parser applies when `capital_fraction` is
+/// omitted. A declared fraction that is not an exact decimal is an error.
+///
+/// # Errors
+///
+/// Returns [`BacktestError::Configuration`] when the declared fraction is not an
+/// exact decimal.
+fn capital_fraction(
+    configuration: &BacktestConfig,
+    instance_id: &str,
+) -> Result<Decimal, BacktestError> {
+    let Some(instance) = configuration
         .strategy_instances
         .iter()
         .find(|instance| instance.instance_id == instance_id)
-        .and_then(|instance| instance.capital_fraction.parse::<Decimal>().ok())
-        .unwrap_or(Decimal::ONE)
+    else {
+        return Ok(Decimal::ONE);
+    };
+    instance.capital_fraction.parse::<Decimal>().map_err(|error| {
+        BacktestError::Configuration(format!(
+            "capital_fraction {:?} for strategy instance {instance_id} is not an exact decimal: {error}",
+            instance.capital_fraction
+        ))
+    })
 }
 
 fn verify_replay(

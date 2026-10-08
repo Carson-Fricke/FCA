@@ -1,10 +1,10 @@
 use backtest::backtest::config::BacktestConfig;
 use backtest::backtest::manifest::{configuration_timestamp, utc_timestamp};
-use backtest::sweeps::{configuration_digest, configuration_json};
+use backtest::configuration_identity::{configuration_digest, configuration_json};
 use std::collections::BTreeMap;
 
 #[test]
-fn sweep_retains_its_shipped_utf8_v1_identity_through_shared_hasher() {
+fn configuration_digest_retains_its_shipped_utf8_v1_identity_through_shared_hasher() {
     let config = BacktestConfig::from_yaml(
         "shell: backtest\njob_id: sweep\ndata:\n  symbols: [\"caf\u{e9}\"]\n  subscriptions:\n    - data_type: quote\n      symbols: [\"caf\u{e9}\"]\n",
     )

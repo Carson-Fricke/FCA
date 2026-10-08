@@ -1,10 +1,21 @@
-//! A byte-exact port of CPython's Mersenne Twister (`random.Random`).
+//! A port of the CPython Mersenne Twister core (`random.Random`) with these
+//! exact compatibility boundaries:
 //!
-//! The synthetic benchmark fixture draws its price drift from
-//! `random.Random(configuration.seed).randint(-drift, drift)`. To keep that
-//! fixture reproducible across the Python and Rust engines, this module ports
-//! CPython's MT19937 seeding (`init_by_array` over little-endian 32-bit seed
-//! words) and its `getrandbits`/`randbelow` rejection sampling.
+//! - Integer seeding matches CPython. [`PythonRandom::from_seed`] runs
+//!   `init_by_array` over the little-endian 32-bit words of the seed, as
+//!   `random.Random(n)` does. The synthetic benchmark fixture draws its price
+//!   drift from `random.Random(configuration.seed).randint(-drift, drift)`, so
+//!   this integer path must stay reproducible across engines.
+//! - [`PythonRandom::from_bytes`] does not match CPython. CPython seeds
+//!   version-2 bytes by converting `bytes + sha512(bytes)` to an integer. This
+//!   crate instead reads the raw bytes as little-endian 32-bit key words and
+//!   runs the same `init_by_array`. The null block permutation uses that
+//!   crate-internal seeding for its domain-separated digest.
+//! - [`PythonRandom::randbelow`] matches CPython for every bound that is not a
+//!   power of two. CPython draws `bound.bit_length()` bits per attempt; this
+//!   module draws `(bound - 1).bit_length()` bits and returns 0 without drawing
+//!   for a bound of 1. [`PythonRandom::randint`] inherits the rule through its
+//!   width `high - low + 1`.
 
 const N: usize = 624;
 const M: usize = 397;
@@ -20,7 +31,8 @@ pub struct PythonRandom {
 }
 
 impl PythonRandom {
-    /// Seed the generator from a non-negative integer, like `random.Random(n)`.
+    /// Seed the generator from a non-negative integer, matching CPython's integer
+    /// seeding (`random.Random(n)`).
     #[must_use]
     pub fn from_seed(seed: u64) -> Self {
         let mut key: Vec<u32> = Vec::new();
@@ -40,11 +52,13 @@ impl PythonRandom {
         generator
     }
 
-    /// Seed the generator from raw bytes, like `random.Random(b"...")`.
+    /// Seed the generator from raw bytes using this crate's own seeding.
     ///
     /// The bytes are read as little-endian 32-bit key words; a trailing partial
-    /// word is zero-padded. This is the seeding bridge the null block
-    /// permutation uses for its domain-separated SHA-256 digest.
+    /// word is zero-padded, and empty input uses the single key word `0`. This
+    /// does NOT reproduce CPython's `random.Random(bytes)`, which seeds from
+    /// `bytes + sha512(bytes)` read as an integer. It is the seeding bridge the
+    /// null block permutation uses for its domain-separated SHA-256 digest.
     #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Self {
         let mut key: Vec<u32> = Vec::with_capacity(bytes.len() / 4 + 1);
@@ -146,7 +160,11 @@ impl PythonRandom {
         self.gen_u32() >> (32 - bits)
     }
 
-    /// Return a uniform integer in `[0, bound)`.
+    /// Return a uniform integer in `[0, bound)` by rejection sampling.
+    ///
+    /// Draws `(bound - 1).bit_length()` bits per attempt. CPython draws
+    /// `bound.bit_length()`, so the sequences differ for power-of-two bounds (see
+    /// the module documentation).
     pub fn randbelow(&mut self, bound: u32) -> u32 {
         if bound == 0 {
             panic!("randbelow requires a positive bound");
@@ -163,7 +181,8 @@ impl PythonRandom {
         }
     }
 
-    /// Return a uniform integer in `[low, high]`, like `Random.randint`.
+    /// Return a uniform integer in `[low, high]`, like `Random.randint`, under the
+    /// same bound rule as [`PythonRandom::randbelow`].
     pub fn randint(&mut self, low: i64, high: i64) -> i64 {
         let span = u32::try_from(high - low + 1).expect("randint span");
         low + i64::from(self.randbelow(span))

@@ -30,6 +30,9 @@ pub enum BacktestError {
     StrategyHalt(String),
     /// A strategy requested that the whole run stops.
     BacktestAbort(String),
+    /// Exact decimal arithmetic left the decimal128(38, 18) bound, so a
+    /// quantity, notional, or risk value cannot be represented.
+    Arithmetic(String),
 }
 
 impl fmt::Display for BacktestError {
@@ -42,7 +45,8 @@ impl fmt::Display for BacktestError {
             | Self::LookaheadViolation(message)
             | Self::Aborted(message)
             | Self::StrategyHalt(message)
-            | Self::BacktestAbort(message) => formatter.write_str(message),
+            | Self::BacktestAbort(message)
+            | Self::Arithmetic(message) => formatter.write_str(message),
         }
     }
 }

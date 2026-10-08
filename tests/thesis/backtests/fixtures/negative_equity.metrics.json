@@ -1,0 +1,97 @@
+{
+  "job_id": "job-0123456789abcdef0123456789abcdef",
+  "status": "completed",
+  "counts": {
+    "market_events": 3,
+    "dispatched": 3,
+    "orders": 3,
+    "fills": 3
+  },
+  "equity": {
+    "samples": 4,
+    "total_return": null,
+    "total_return_reason": "negative_equity",
+    "cagr": null,
+    "cagr_reason": "negative_equity",
+    "max_drawdown": null,
+    "max_drawdown_reason": "negative_equity",
+    "drawdown_duration_ns": null,
+    "drawdown_recovered": null,
+    "sharpe_per_sample": null,
+    "sharpe_per_sample_reason": "negative_equity"
+  },
+  "execution": {
+    "fill_count": 3,
+    "fees_total": "0.000000000000000000",
+    "slippage_total": null,
+    "slippage_total_reason": "not_modeled",
+    "outcomes": {
+      "total": 3,
+      "filled": 3,
+      "rejected": 0,
+      "cancelled": 0,
+      "other": 0
+    }
+  },
+  "trades": {
+    "schema": "closed_trades.v1",
+    "fee_allocation": "fill_quantity_share.v1",
+    "trade_count": 2,
+    "win_count": 0,
+    "loss_count": 2,
+    "zero_count": 0,
+    "gross_pnl": "-18.000000000000000000",
+    "fees": "0.000000000000000000",
+    "net_pnl": "-18.000000000000000000",
+    "open_fees": "0.000000000000000000",
+    "gross_profit": "0.000000000000000000",
+    "gross_loss": "18.000000000000000000",
+    "net_profit": "0.000000000000000000",
+    "net_loss": "18.000000000000000000",
+    "profit_factor": "0.000000000000000000",
+    "profit_factor_reason": null,
+    "hit_rate": "0.000000000000000000",
+    "hit_rate_reason": null,
+    "average_net_win": null,
+    "average_net_loss": "-9.000000000000000000",
+    "largest_net_win": null,
+    "largest_net_loss": "-9.000000000000000000",
+    "rows": [
+      {
+        "trade_id": 1,
+        "symbol": "SPY",
+        "side": "long",
+        "quantity": "1.000000000000000000",
+        "entry_sequence": 1,
+        "exit_sequence": 3,
+        "entry_timestamp_ns": 1704205800000000123,
+        "exit_timestamp_ns": 1704205920000000789,
+        "entry_price": "10.000000000000000000",
+        "exit_price": "1.000000000000000000",
+        "gross_pnl": "-9.000000000000000000",
+        "entry_fee": "0.000000000000000000",
+        "exit_fee": "0.000000000000000000",
+        "fees": "0.000000000000000000",
+        "net_pnl": "-9.000000000000000000"
+      },
+      {
+        "trade_id": 2,
+        "symbol": "SPY",
+        "side": "long",
+        "quantity": "1.000000000000000000",
+        "entry_sequence": 2,
+        "exit_sequence": 3,
+        "entry_timestamp_ns": 1704205860000000456,
+        "exit_timestamp_ns": 1704205920000000789,
+        "entry_price": "10.000000000000000000",
+        "exit_price": "1.000000000000000000",
+        "gross_pnl": "-9.000000000000000000",
+        "entry_fee": "0.000000000000000000",
+        "exit_fee": "0.000000000000000000",
+        "fees": "0.000000000000000000",
+        "net_pnl": "-9.000000000000000000"
+      }
+    ]
+  },
+  "custom": {}
+}

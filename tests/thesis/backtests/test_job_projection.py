@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -74,15 +75,16 @@ class FakeReader:
         return json.dumps(document).encode()
 
 
+FIXTURES = pathlib.Path(__file__).parent / "fixtures"
+
+
+def _document(name: str) -> object:
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
 ARTIFACTS: dict[str, object] = {
-    "metrics.json": {
-        "equity": {"total_return": 0.1, "max_drawdown": -0.05, "sharpe": 1.0}
-    },
-    "backtest.json": {
-        "portfolio": {"initial_cash": 1000.0, "total_pnl": 100.0, "equity": 1100.0},
-        "manifest": {"start": "2024-01-01T00:00:00Z", "end": "2024-01-02T00:00:00Z"},
-        "fills": [],
-    },
+    "metrics.json": _document("closed_trades.metrics.json"),
+    "backtest.json": _document("closed_trades.backtest.json"),
 }
 
 
@@ -125,7 +127,7 @@ def _record(name: str) -> BacktestRecord:
         initial_capital=1000.0,
         final_capital=1100.0,
         total_return=0.1,
-        sharpe=1.0,
+        sharpe_per_sample=1.0,
         max_drawdown=-0.05,
         win_rate=0.5,
         trades=2,
@@ -143,6 +145,7 @@ def test_import_keys_the_record_and_manifest_by_job_id() -> None:
 
     assert record.job_id == JOB_ID
     assert record.status == "succeeded"
+    assert record.sharpe_per_sample == -0.41
     assert record.manifest["job_id"] == JOB_ID
     assert "run_id" not in record.manifest
     detail = record.detail()

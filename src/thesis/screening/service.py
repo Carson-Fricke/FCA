@@ -18,19 +18,16 @@ from uuid import uuid4
 from thesis.integrations.mcp import HarnessMcpError, McpToolResult
 from thesis.screening.definitions import ScreenerDefinition
 from thesis.screening.runs import (
+    COMPLETE_JOB_STATES,
+    FAILED_JOB_STATES,
+    PENDING_JOB_STATES,
     ScreeningRecord,
     ScreeningRunError,
     ScreeningToolProvider,
+    failed_run_message,
     import_screening_run,
 )
 from thesis.screening.store import InMemoryScreenerStore, ScreenerStore
-
-#: Screening job states the status tool reports while the run is in flight.
-_PENDING_JOB_STATES = frozenset({"queued", "running"})
-#: Screening job states that ended without a usable result.
-_FAILED_JOB_STATES = frozenset({"failed", "cancelled"})
-#: Screening job states that ended with a result.
-_COMPLETE_JOB_STATES = frozenset({"succeeded"})
 
 
 class ScreenerError(RuntimeError):
@@ -162,13 +159,15 @@ class ScreenerService:
         for attempt in range(self._max_polls):
             status = self._tools.get_job_status(job_id=job_id)
             if status.is_error:
-                raise ScreenerUnavailableError(_failure(status, "get_job_status"))
+                raise ScreenerUnavailableError(
+                    _failure(status, "get_job_status"), job_id=job_id
+                )
             state = _state_of(status.structured)
-            if state in _COMPLETE_JOB_STATES:
+            if state in COMPLETE_JOB_STATES:
                 return
-            if state in _FAILED_JOB_STATES:
+            if state in FAILED_JOB_STATES:
                 raise ScreeningRunError(
-                    f"harness screener run {job_id!r} ended in state {state!r}",
+                    failed_run_message(self._tools, job_id, state, status.structured),
                     job_id=job_id,
                 )
             if state is None:
@@ -176,7 +175,7 @@ class ScreenerService:
                     f"harness screener run {job_id!r} reported no state",
                     job_id=job_id,
                 )
-            if state not in _PENDING_JOB_STATES:
+            if state not in PENDING_JOB_STATES:
                 raise ScreeningRunError(
                     f"harness screener run {job_id!r} reported unknown state {state!r}",
                     job_id=job_id,

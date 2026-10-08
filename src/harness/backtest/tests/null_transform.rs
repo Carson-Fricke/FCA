@@ -455,6 +455,32 @@ fn non_positive_closes_are_rejected_instead_of_leaking_nan() {
     assert!(error.to_string().contains("positive bar closes"), "{error}");
 }
 
+#[test]
+fn non_positive_tick_prices_fail_preflight_by_name_before_rescaling() {
+    let config = base_config(62);
+    let bars = [
+        bar("SPY", config.start_ns + MINUTE, 10),
+        bar("SPY", config.start_ns + 2 * MINUTE, 11),
+    ];
+    let broken_ticks = [
+        ("bid", quote("SPY", config.start_ns, 0, 10)),
+        ("ask", quote("SPY", config.start_ns, 9, 0)),
+        ("trade price", trade("SPY", config.start_ns, 0, 5)),
+        ("trade price", trade("SPY", config.start_ns, -3, 5)),
+    ];
+    for (field, tick) in broken_ticks {
+        let mut events = bars.to_vec();
+        events.push(tick);
+        let error = apply_null_transform(&config, &fixture(&config, events)).unwrap_err();
+        assert!(
+            matches!(&error, BacktestError::DataPreflight(_)),
+            "a non-positive {field} must be a DataPreflight error, got {error:?}"
+        );
+        assert!(error.to_string().contains("positive"), "{error}");
+        assert!(error.to_string().contains(field), "{error}");
+    }
+}
+
 struct NoopProgram;
 
 impl StrategyRuntime for NoopProgram {

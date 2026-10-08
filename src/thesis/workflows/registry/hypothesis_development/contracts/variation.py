@@ -60,12 +60,13 @@ _MAX_ERROR = 8_192
 _MAX_LIMITATIONS = 4_096
 
 
-def _field(payload: Mapping[str, object], *keys: str) -> Any:
-    """Return the first present spelling of one wire field."""
-    for key in keys:
-        if key in payload:
-            return payload[key]
-    return None
+def _wire_field(payload: Mapping[str, object], key: str) -> Any:
+    """Return one camelCase wire field as decoded JSON, or ``None`` when absent.
+
+    The typed constructors validate the value, so a missing or mistyped field is
+    rejected there with its camelCase name.
+    """
+    return payload.get(key)
 
 
 def _finite_number(value: object) -> float | None:
@@ -109,44 +110,51 @@ def _parameter_errors(parameters: Mapping[str, object], label: str) -> list[str]
     return errors
 
 
-def _canonical(value: object) -> object:
-    """Normalize one scalar so ``5`` and ``5.0`` share one identity."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return float(value)
-    return value
+def canonical_parameter_identity(parameters: Mapping[str, object]) -> str:
+    """Return the type-strict canonical identity of one parameter vector.
 
+    This is the canonical JSON text the workspace parameter digest hashes
+    (``programs.parameter_assignment_sha256``): keys sorted, compact separators,
+    and no NaN or infinity.  The identity is type-strict, so integer ``5`` and
+    float ``5.0`` are different parameter values, and so are ``true`` and ``1``.
+    Two vectors are the same parameter vector exactly when their identities are
+    equal.  Python equality on the mappings is not that test, because it treats
+    ``5`` and ``5.0`` as equal.
 
-def _vector_key(parameters: Mapping[str, object]) -> str | None:
-    """Return the deterministic identity of one parameter vector."""
+    Raises :class:`WorkflowError` when a name is not a string or a value is not
+    finite JSON.
+    """
+    if not all(isinstance(name, str) for name in parameters):
+        raise WorkflowError("parameter names must be strings")
     try:
         return json.dumps(
-            {str(name): _canonical(value) for name, value in parameters.items()},
+            dict(parameters),
             allow_nan=False,
             ensure_ascii=True,
             separators=(",", ":"),
             sort_keys=True,
         )
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as error:
+        raise WorkflowError(
+            f"parameter values must be finite JSON scalars: {error}"
+        ) from error
+
+
+def _value_identity(parameters: Mapping[str, object], name: str) -> str | None:
+    """Return one parameter's identity, or ``None`` when the vector omits it."""
+    if name not in parameters:
         return None
+    return canonical_parameter_identity({name: parameters[name]})
 
 
-def _same_value(left: object, right: object) -> bool:
-    """Compare two scalar parameter values without conflating bools and ints."""
-    if isinstance(left, bool) or isinstance(right, bool):
-        return left is right
-    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
-        return float(left) == float(right)
-    return left == right
-
-
-def _diff_keys(left: Mapping[str, object], right: Mapping[str, object]) -> set[str]:
-    """Return the keys whose scalar values differ between two vectors."""
+def _differing_names(
+    left: Mapping[str, object], right: Mapping[str, object]
+) -> set[str]:
+    """Return the parameter names whose values differ under the identity."""
     return {
-        str(key)
-        for key in set(left) | set(right)
-        if not _same_value(left.get(key), right.get(key))
+        name
+        for name in set(left) | set(right)
+        if _value_identity(left, name) != _value_identity(right, name)
     }
 
 
@@ -280,12 +288,15 @@ def variation_payload_errors(payload: Mapping[str, object]) -> list[str]:
                 declared.append(name)
 
     center_parameters: Mapping[str, object] = {}
+    center_valid = False
     center = payload.get("center")
     if isinstance(center, Mapping):
         raw_center = center.get("parameters")
         if isinstance(raw_center, Mapping):
             center_parameters = raw_center
-            errors.extend(_parameter_errors(raw_center, "variation.center.parameters"))
+            center_errors = _parameter_errors(raw_center, "variation.center.parameters")
+            errors.extend(center_errors)
+            center_valid = not center_errors
         if center.get("state") != "succeeded":
             errors.append("variation.center.state must be 'succeeded'")
         metrics = center.get("metrics")
@@ -298,7 +309,9 @@ def variation_payload_errors(payload: Mapping[str, object]) -> list[str]:
 
     points = payload.get("points")
     vectors: set[str] = set()
-    center_key = _vector_key(center_parameters)
+    center_key = (
+        canonical_parameter_identity(center_parameters) if center_valid else None
+    )
     covered: set[str] = set()
     if isinstance(points, Sequence) and not isinstance(points, (str, bytes)):
         for index, item in enumerate(points):
@@ -307,29 +320,32 @@ def variation_payload_errors(payload: Mapping[str, object]) -> list[str]:
             label = f"variation.points[{index}]"
             raw_point = item.get("parameters")
             if isinstance(raw_point, Mapping):
-                errors.extend(_parameter_errors(raw_point, f"{label}.parameters"))
-                diff = _diff_keys(center_parameters, raw_point)
-                if len(diff) != 1:
-                    errors.append(
-                        f"{label} must differ from the center in exactly one parameter"
-                    )
-                else:
-                    key = next(iter(diff))
-                    if key in declared:
-                        covered.add(key)
-                    else:
-                        errors.append(
-                            f"{label} differs in parameter {key!r} which is not "
-                            "declared in variation.parameters"
-                        )
-                vector = _vector_key(raw_point)
-                if vector is not None:
+                point_errors = _parameter_errors(raw_point, f"{label}.parameters")
+                errors.extend(point_errors)
+                if not point_errors:
+                    if center_valid:
+                        diff = _differing_names(center_parameters, raw_point)
+                        if len(diff) != 1:
+                            errors.append(
+                                f"{label} must differ from the center in exactly one "
+                                "parameter"
+                            )
+                        else:
+                            key = next(iter(diff))
+                            if key in declared:
+                                covered.add(key)
+                            else:
+                                errors.append(
+                                    f"{label} differs in parameter {key!r} which is "
+                                    "not declared in variation.parameters"
+                                )
+                    vector = canonical_parameter_identity(raw_point)
                     if vector in vectors:
                         errors.append(
                             "variation.points parameter vectors must be unique"
                         )
                     vectors.add(vector)
-                    if center_key is not None and vector == center_key:
+                    if vector == center_key:
                         errors.append(
                             "variation.points must not repeat the center "
                             "parameter vector"
@@ -341,11 +357,12 @@ def variation_payload_errors(payload: Mapping[str, object]) -> list[str]:
                 errors.append(
                     f"{label}.metrics must be an object for a succeeded point"
                 )
-        for name in declared:
-            if name not in covered:
-                errors.append(
-                    f"variation.parameters name {name!r} is not varied by any point"
-                )
+        if center_valid:
+            for name in declared:
+                if name not in covered:
+                    errors.append(
+                        f"variation.parameters name {name!r} is not varied by any point"
+                    )
     return errors
 
 
@@ -366,7 +383,7 @@ class VariationPoint:
         if errors:
             raise WorkflowError("; ".join(errors))
         object.__setattr__(self, "parameters", dict(self.parameters))
-        _text(self.job_id, "variation point job_id", max_length=_MAX_JOB_ID)
+        _text(self.job_id, "variation point jobId", max_length=_MAX_JOB_ID)
         if self.state not in VARIATION_STATES:
             raise WorkflowError(
                 f"variation point state must be one of {', '.join(VARIATION_STATES)}"
@@ -406,13 +423,13 @@ class VariationPoint:
         metrics = payload.get("metrics")
         if metrics is not None and not isinstance(metrics, Mapping):
             raise WorkflowError("variation point metrics must be an object")
-        error = _field(payload, "error")
+        error = payload.get("error")
         if error is not None and not isinstance(error, str):
             raise WorkflowError("variation point error must be text")
         return cls(
             parameters=parameters,
-            job_id=_field(payload, "jobId", "job_id"),
-            state=_field(payload, "state"),
+            job_id=_wire_field(payload, "jobId"),
+            state=_wire_field(payload, "state"),
             metrics=metrics,
             error=error,
         )
@@ -437,7 +454,7 @@ class VariationCenter:
         if errors:
             raise WorkflowError("; ".join(errors))
         object.__setattr__(self, "parameters", dict(self.parameters))
-        _text(self.job_id, "variation center job_id", max_length=_MAX_JOB_ID)
+        _text(self.job_id, "variation center jobId", max_length=_MAX_JOB_ID)
         if self.state != "succeeded":
             raise WorkflowError("variation center state must be 'succeeded'")
         if not isinstance(self.metrics, Mapping):
@@ -474,13 +491,13 @@ class VariationCenter:
             raise WorkflowError(
                 "variation center metrics must be an object for the succeeded center"
             )
-        error = _field(payload, "error")
+        error = payload.get("error")
         if error is not None and not isinstance(error, str):
             raise WorkflowError("variation center error must be text")
         return cls(
             parameters=parameters,
-            job_id=_field(payload, "jobId", "job_id"),
-            state=_field(payload, "state"),
+            job_id=_wire_field(payload, "jobId"),
+            state=_wire_field(payload, "state"),
             metrics=metrics,
             error=error,
         )
@@ -511,7 +528,7 @@ class VariationEvaluation:
                 "variation evaluation must reference a strategy program"
             )
         object.__setattr__(self, "strategy", dict(self.strategy))
-        _text(self.batch_id, "variation evaluation batch_id", max_length=_MAX_BATCH_ID)
+        _text(self.batch_id, "variation evaluation batchId", max_length=_MAX_BATCH_ID)
         if not isinstance(self.center, VariationCenter):
             raise WorkflowError("variation evaluation center must be a VariationCenter")
         if isinstance(self.points, (str, bytes)) or not isinstance(self.points, tuple):
@@ -557,9 +574,9 @@ class VariationEvaluation:
             )
         covered: set[str] = set()
         vectors: set[str] = set()
-        center_key = _vector_key(self.center.parameters)
+        center_key = canonical_parameter_identity(self.center.parameters)
         for index, point in enumerate(self.points):
-            diff = _diff_keys(self.center.parameters, point.parameters)
+            diff = _differing_names(self.center.parameters, point.parameters)
             if len(diff) != 1:
                 raise WorkflowError(
                     f"variation evaluation point[{index}] must differ from the "
@@ -572,17 +589,13 @@ class VariationEvaluation:
                     f"{key!r} which is not declared in parameters"
                 )
             covered.add(key)
-            vector = _vector_key(point.parameters)
-            if vector is None:
-                raise WorkflowError(
-                    f"variation evaluation point[{index}] parameters are not canonical"
-                )
+            vector = canonical_parameter_identity(point.parameters)
             if vector in vectors:
                 raise WorkflowError(
                     "variation evaluation point parameter vectors must be unique"
                 )
             vectors.add(vector)
-            if center_key is not None and vector == center_key:
+            if vector == center_key:
                 raise WorkflowError(
                     "variation evaluation points must not repeat the center "
                     "parameter vector"
@@ -625,15 +638,15 @@ class VariationEvaluation:
             raise WorkflowError("variation evaluation requires a parameters list")
         return cls(
             strategy=strategy,
-            batch_id=_field(payload, "batchId", "batch_id"),
+            batch_id=_wire_field(payload, "batchId"),
             center=VariationCenter.from_dict(center),
             points=tuple(
                 VariationPoint.from_dict(cast(Mapping[str, object], item))
                 for item in points
             ),
             parameters=tuple(cast(str, item) for item in parameters),
-            stability=_field(payload, "stability"),
-            limitations=_field(payload, "limitations"),
+            stability=_wire_field(payload, "stability"),
+            limitations=_wire_field(payload, "limitations"),
         )
 
 
@@ -644,5 +657,6 @@ __all__ = [
     "VariationCenter",
     "VariationEvaluation",
     "VariationPoint",
+    "canonical_parameter_identity",
     "variation_payload_errors",
 ]

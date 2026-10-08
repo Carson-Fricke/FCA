@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use harness_lakeclient::{BlockingLakeClient, EnsureSpec, ReadSpec};
-use num::Decimal18;
+use num::{Decimal18, DecimalError};
 
 use marketdata::{DataType, Date};
 
@@ -32,8 +32,8 @@ use crate::backtest::preflight::preflight_data;
 use crate::backtest::screen::ScreenConfig;
 use crate::canonical_json::JsonValue;
 use crate::results::metrics::{
-    equity_curve_metrics, equity_sharpe, execution_stats, trade_stats, EquityPoint, FillRow,
-    OrderRow, TradeRow,
+    equity_curve_metrics, execution_stats, trade_stats, EquityMetrics, EquityPoint, ExecutionStats,
+    FillRow, MetricsError, OrderRow, Outcome, TradeRow, TradeStats,
 };
 use crate::results::recorder::{
     ActionKind, ActionRecord, EquityRecord, FillRecord, RecorderConfig, RunManifest, RunRecorder,
@@ -53,6 +53,17 @@ pub enum BacktestJobError {
     WrongScreenShell(String),
     /// The engine rejected the run.
     Engine(String),
+    /// A fill's quantity, price, fee, or side is malformed, or its notional
+    /// leaves the decimal128(38,18) bound. The job fails; no partial result is
+    /// written.
+    MalformedFill {
+        /// The fill that failed.
+        fill_id: String,
+        /// What is malformed about it.
+        detail: String,
+    },
+    /// Exact ledger or metric arithmetic left the decimal128(38,18) bound.
+    Overflow(String),
     /// An artifact could not be written.
     Artifact(String),
 }
@@ -75,6 +86,10 @@ impl std::fmt::Display for BacktestJobError {
                 )
             }
             Self::Engine(message) => write!(formatter, "{message}"),
+            Self::MalformedFill { fill_id, detail } => {
+                write!(formatter, "fill {fill_id} is malformed: {detail}")
+            }
+            Self::Overflow(message) => write!(formatter, "{message}"),
             Self::Artifact(message) => write!(formatter, "{message}"),
         }
     }
@@ -555,6 +570,9 @@ fn run_native_engine_outcome(
 }
 
 /// Write the canonical artifact and complete result set for one native outcome.
+///
+/// Every derived ledger and metric is computed before the first write, so a
+/// malformed fill fails the job without leaving a partial result set behind.
 fn write_run_artifacts(
     configuration: &BacktestConfig,
     outcome: &BacktestOutcome,
@@ -562,6 +580,9 @@ fn write_run_artifacts(
     default_subdir: &str,
     artifact_name: &str,
 ) -> Result<PathBuf, BacktestJobError> {
+    let fills = ledger_fills_from_outcome(outcome);
+    let orders = ledger_orders_from_outcome(outcome);
+    let ledger = build_ledger(configuration, &fills, &orders)?;
     let directory = output_dir.map_or_else(
         || {
             PathBuf::from(".local")
@@ -576,7 +597,7 @@ fn write_run_artifacts(
     payload.push(b'\n');
     std::fs::write(&artifact_path, payload)
         .map_err(|error| BacktestJobError::Artifact(error.to_string()))?;
-    write_native_results(&directory, configuration, outcome)?;
+    write_native_results(&directory, configuration, outcome, &fills, &orders, &ledger)?;
     Ok(artifact_path)
 }
 
@@ -594,10 +615,10 @@ fn write_native_results(
     directory: &Path,
     configuration: &BacktestConfig,
     outcome: &BacktestOutcome,
+    fills: &[LedgerFill],
+    orders: &[LedgerOrder],
+    ledger: &JobLedger,
 ) -> Result<(), BacktestJobError> {
-    let fills = ledger_fills_from_outcome(outcome);
-    let orders = ledger_orders_from_outcome(outcome);
-    let ledger = build_ledger(configuration, &fills, &orders)?;
     let counts = JobCounts {
         market_events: outcome.market_event_count,
         dispatched: outcome.dispatched_count,
@@ -610,22 +631,22 @@ fn write_native_results(
         &outcome.manifest.job_id,
         outcome.status.value(),
         &counts,
-        &ledger,
+        ledger,
         &outcome.custom_metrics,
     )?;
     write_report(
         directory,
         &outcome.manifest.job_id,
         configuration.seed,
-        &ledger,
+        ledger,
     )?;
     let artifact_dir = directory.join("artifacts");
     record_artifacts(
         &artifact_dir,
         configuration,
-        &orders,
-        &fills,
-        &ledger,
+        orders,
+        fills,
+        ledger,
         &outcome.custom_metrics,
     )?;
     Ok(())
@@ -922,13 +943,15 @@ struct JobCounts {
     fills: u64,
 }
 
-/// The deterministic metrics the job derives from the engine's fills.
+/// The deterministic metrics the job derives from the engine's fills. Every
+/// statistic is computed once here, before any artifact is written.
 struct JobLedger {
     equity: Vec<EquityPoint>,
     rows: Vec<LedgerRow>,
-    fills: Vec<FillRow>,
-    orders: Vec<OrderRow>,
     trades: ClosedTrades,
+    trade_stats: TradeStats,
+    equity_metrics: EquityMetrics,
+    execution: ExecutionStats,
 }
 
 /// One normalized fill shared by the injected and native engine paths.
@@ -952,30 +975,74 @@ struct LedgerOrder {
     quantity: String,
 }
 
-/// Parse one ledger decimal. A malformed value fails the job; it never defaults
-/// to zero, which would silently change PnL.
+/// Parse one configuration decimal. A malformed value fails the job; it never
+/// defaults to zero, which would silently change PnL.
 fn ledger_decimal(value: &str, field: &str) -> Result<Decimal18, BacktestJobError> {
     value.parse::<Decimal18>().map_err(|error| {
-        BacktestJobError::Engine(format!("{field} {value:?} is not a decimal: {error:?}"))
+        BacktestJobError::Engine(format!("{field} {value:?} is not a decimal: {error}"))
     })
 }
 
-/// Map one checked decimal operation onto the job error type.
-fn checked<E: std::fmt::Debug>(
-    result: Result<Decimal18, E>,
+/// Parse one field of a fill. A malformed value fails the job as a
+/// [`BacktestJobError::MalformedFill`]; it never defaults to zero.
+fn fill_decimal(
+    fill: &LedgerFill,
+    field: &str,
+    value: &str,
 ) -> Result<Decimal18, BacktestJobError> {
-    result.map_err(|error| BacktestJobError::Engine(format!("ledger arithmetic failed: {error:?}")))
+    value.parse::<Decimal18>().map_err(|error| {
+        malformed_fill(
+            fill,
+            format!("{field} {value:?} is not a decimal in decimal128(38,18): {error}"),
+        )
+    })
 }
 
-/// Direction of one fill: `true` for a buy, `false` for a sell.
+fn malformed_fill(fill: &LedgerFill, detail: impl Into<String>) -> BacktestJobError {
+    BacktestJobError::MalformedFill {
+        fill_id: fill.fill_id.clone(),
+        detail: detail.into(),
+    }
+}
+
+/// Map one exact operation that left the decimal bound onto the job error.
+fn overflow_ledger(
+    result: Result<Decimal18, DecimalError>,
+    operation: &str,
+) -> Result<Decimal18, BacktestJobError> {
+    result.map_err(|_| {
+        BacktestJobError::Overflow(format!("{operation} overflows the decimal128(38,18) bound"))
+    })
+}
+
+/// Map one exact operation on a fill's own fields onto a malformed-fill error.
+fn overflow_fill(
+    fill: &LedgerFill,
+    result: Result<Decimal18, DecimalError>,
+    operation: &str,
+) -> Result<Decimal18, BacktestJobError> {
+    result.map_err(|_| {
+        malformed_fill(
+            fill,
+            format!("{operation} overflows the decimal128(38,18) bound"),
+        )
+    })
+}
+
+fn metrics_overflow(error: MetricsError) -> BacktestJobError {
+    BacktestJobError::Overflow(error.to_string())
+}
+
+/// Direction of one fill: `true` for a buy, `false` for a sell. The side is an
+/// exact lowercase comparison; any other value fails the job.
 fn fill_is_buy(fill: &LedgerFill) -> Result<bool, BacktestJobError> {
     match fill.side.as_str() {
         "buy" => Ok(true),
         "sell" => Ok(false),
-        other => Err(BacktestJobError::Engine(format!(
-            "fill {} has unknown side {other:?}",
-            fill.fill_id
-        ))),
+        other => Err(malformed_fill(
+            fill,
+            format!("side {other:?} is neither \"buy\" nor \"sell\""),
+        )),
     }
 }
 
@@ -989,7 +1056,7 @@ fn fee_share(
     if part == whole {
         return Ok(amount);
     }
-    checked(amount.checked_mul_div(part, whole))
+    overflow_ledger(amount.checked_mul_div(part, whole), "fee allocation")
 }
 
 fn ledger_fills_from_outcome(outcome: &BacktestOutcome) -> Vec<LedgerFill> {
@@ -1056,53 +1123,49 @@ fn closed_trades(fills: &[LedgerFill]) -> Result<ClosedTrades, BacktestJobError>
     let mut rows: Vec<TradeRow> = Vec::new();
     for fill in ordered {
         let is_buy = fill_is_buy(fill)?;
-        let quantity = ledger_decimal(&fill.quantity, "quantity")?;
-        let fee = ledger_decimal(&fill.fee, "fee")?;
-        let price = ledger_decimal(&fill.price, "price")?;
+        let quantity = fill_decimal(fill, "quantity", &fill.quantity)?;
+        let fee = fill_decimal(fill, "fee", &fill.fee)?;
+        let price = fill_decimal(fill, "price", &fill.price)?;
         if quantity.is_zero() {
             if fee.is_zero() {
                 continue;
             }
-            return Err(BacktestJobError::Engine(format!(
-                "fill {} carries a fee without quantity",
-                fill.fill_id
-            )));
+            return Err(malformed_fill(fill, "fee is non-zero but quantity is zero"));
         }
         if quantity.is_negative() {
-            return Err(BacktestJobError::Engine(format!(
-                "fill {} has a negative quantity",
-                fill.fill_id
-            )));
+            return Err(malformed_fill(fill, "quantity is negative"));
         }
         let queue = lots.entry(fill.symbol.clone()).or_default();
         let mut remaining = quantity;
         let mut remaining_fee = fee;
         while remaining.is_positive() {
-            let (long, lot_sequence, lot_timestamp, lot_price, lot_quantity, lot_fee) =
-                match queue.front() {
-                    Some(head) if head.long != is_buy => (
-                        head.long,
-                        head.sequence,
-                        head.timestamp_ns,
-                        head.price,
-                        head.quantity,
-                        head.fee,
-                    ),
-                    _ => break,
-                };
+            let Some(head) = queue.front() else {
+                break;
+            };
+            if head.long == is_buy {
+                break;
+            }
+            let (long, lot_sequence, lot_timestamp, lot_price, lot_quantity, lot_fee) = (
+                head.long,
+                head.sequence,
+                head.timestamp_ns,
+                head.price,
+                head.quantity,
+                head.fee,
+            );
             let matched = lot_quantity.min(remaining);
             let entry_fee = fee_share(lot_fee, matched, lot_quantity)?;
             let exit_fee = fee_share(remaining_fee, matched, remaining)?;
             let difference = if long {
-                checked(price.checked_sub(lot_price))?
+                overflow_ledger(price.checked_sub(lot_price), "trade price difference")?
             } else {
-                checked(lot_price.checked_sub(price))?
+                overflow_ledger(lot_price.checked_sub(price), "trade price difference")?
             };
-            let gross_pnl = checked(difference.checked_mul(matched))?;
-            let fees = checked(entry_fee.checked_add(exit_fee))?;
-            let net_pnl = checked(gross_pnl.checked_sub(fees))?;
+            let gross_pnl = overflow_ledger(difference.checked_mul(matched), "trade gross pnl")?;
+            let fees = overflow_ledger(entry_fee.checked_add(exit_fee), "trade fees")?;
+            let net_pnl = overflow_ledger(gross_pnl.checked_sub(fees), "trade net pnl")?;
             rows.push(TradeRow {
-                trade_id: format!("trade-{:04}", rows.len() + 1),
+                trade_id: rows.len() as u64 + 1,
                 symbol: fill.symbol.clone(),
                 side: if long { "long" } else { "short" }.to_string(),
                 quantity: matched,
@@ -1120,17 +1183,20 @@ fn closed_trades(fills: &[LedgerFill]) -> Result<ClosedTrades, BacktestJobError>
             });
             let head_done = {
                 let Some(head) = queue.front_mut() else {
-                    break;
+                    return Err(BacktestJobError::Engine(
+                        "open lot queue lost its head while matching".to_string(),
+                    ));
                 };
-                head.quantity = checked(head.quantity.checked_sub(matched))?;
-                head.fee = checked(head.fee.checked_sub(entry_fee))?;
+                head.quantity =
+                    overflow_ledger(head.quantity.checked_sub(matched), "open lot quantity")?;
+                head.fee = overflow_ledger(head.fee.checked_sub(entry_fee), "open lot fee")?;
                 head.quantity.is_zero()
             };
             if head_done {
                 queue.pop_front();
             }
-            remaining = checked(remaining.checked_sub(matched))?;
-            remaining_fee = checked(remaining_fee.checked_sub(exit_fee))?;
+            remaining = overflow_ledger(remaining.checked_sub(matched), "fill quantity")?;
+            remaining_fee = overflow_ledger(remaining_fee.checked_sub(exit_fee), "fill fee")?;
         }
         if remaining.is_positive() {
             queue.push_back(OpenLot {
@@ -1146,7 +1212,7 @@ fn closed_trades(fills: &[LedgerFill]) -> Result<ClosedTrades, BacktestJobError>
     let mut open_fees = Decimal18::ZERO;
     for queue in lots.values() {
         for lot in queue {
-            open_fees = checked(open_fees.checked_add(lot.fee))?;
+            open_fees = overflow_ledger(open_fees.checked_add(lot.fee), "open fees")?;
         }
     }
     Ok(ClosedTrades { rows, open_fees })
@@ -1173,39 +1239,53 @@ fn build_ledger(
         fill_count: 0,
     }];
     let mut ledger_fills = Vec::new();
+    let mut last_timestamp_ns = configuration.start_ns;
     for (index, fill) in fills.iter().enumerate() {
         let fill_count = index as u64 + 1;
         let is_buy = fill_is_buy(fill)?;
-        let quantity = ledger_decimal(&fill.quantity, "quantity")?;
-        let price = ledger_decimal(&fill.price, "price")?;
-        let fee = ledger_decimal(&fill.fee, "fee")?;
-        let notional = quantity.checked_mul(price).unwrap_or(Decimal18::ZERO);
+        let quantity = fill_decimal(fill, "quantity", &fill.quantity)?;
+        let price = fill_decimal(fill, "price", &fill.price)?;
+        let fee = fill_decimal(fill, "fee", &fill.fee)?;
+        if fill.timestamp_ns < last_timestamp_ns {
+            return Err(BacktestJobError::Engine(format!(
+                "fill {} at {} precedes the previous ledger sample at {last_timestamp_ns}; \
+                 the engine must dispatch fills in time order",
+                fill.fill_id, fill.timestamp_ns
+            )));
+        }
+        last_timestamp_ns = fill.timestamp_ns;
+        let notional = overflow_fill(
+            fill,
+            quantity.checked_mul(price),
+            "notional (quantity times price)",
+        )?;
         let position = positions
             .entry(fill.symbol.clone())
             .or_insert(Decimal18::ZERO);
         if is_buy {
-            cash = cash
-                .checked_sub(notional)
-                .and_then(|value| value.checked_sub(fee))
-                .unwrap_or(cash);
-            *position = position.checked_add(quantity).unwrap_or(*position);
+            cash = overflow_ledger(
+                cash.checked_sub(notional)
+                    .and_then(|value| value.checked_sub(fee)),
+                "cash after a buy",
+            )?;
+            *position = overflow_ledger(position.checked_add(quantity), "position")?;
         } else {
-            cash = cash
-                .checked_add(notional)
-                .and_then(|value| value.checked_sub(fee))
-                .unwrap_or(cash);
-            *position = position.checked_sub(quantity).unwrap_or(*position);
+            cash = overflow_ledger(
+                cash.checked_add(notional)
+                    .and_then(|value| value.checked_sub(fee)),
+                "cash after a sell",
+            )?;
+            *position = overflow_ledger(position.checked_sub(quantity), "position")?;
         }
         marks.insert(fill.symbol.clone(), price);
         let mut market_value = Decimal18::ZERO;
         for (symbol, held) in &positions {
             if let Some(mark) = marks.get(symbol) {
-                market_value = market_value
-                    .checked_add(held.checked_mul(*mark).unwrap_or(Decimal18::ZERO))
-                    .unwrap_or(market_value);
+                let value = overflow_ledger(held.checked_mul(*mark), "position market value")?;
+                market_value = overflow_ledger(market_value.checked_add(value), "market value")?;
             }
         }
-        let equity_value = cash.checked_add(market_value).unwrap_or(cash);
+        let equity_value = overflow_ledger(cash.checked_add(market_value), "equity")?;
         equity.push(EquityPoint {
             timestamp_ns: fill.timestamp_ns,
             equity: equity_value,
@@ -1225,11 +1305,10 @@ fn build_ledger(
             quantity,
             price,
             fee,
-            slippage: Decimal18::ZERO,
             latency_ns: None,
         });
     }
-    let ledger_orders = orders
+    let ledger_orders: Vec<OrderRow> = orders
         .iter()
         .map(|order| OrderRow {
             order_id: order.order_id.clone(),
@@ -1237,12 +1316,17 @@ fn build_ledger(
             outcome: "filled".to_string(),
         })
         .collect();
+    let trades = closed_trades(fills)?;
+    let trade_stats = trade_stats(&trades.rows, trades.open_fees).map_err(metrics_overflow)?;
+    let equity_metrics = equity_curve_metrics(&equity).map_err(metrics_overflow)?;
+    let execution = execution_stats(&ledger_fills, &ledger_orders).map_err(metrics_overflow)?;
     Ok(JobLedger {
         equity,
         rows,
-        fills: ledger_fills,
-        orders: ledger_orders,
-        trades: closed_trades(fills)?,
+        trades,
+        trade_stats,
+        equity_metrics,
+        execution,
     })
 }
 
@@ -1253,7 +1337,7 @@ fn decimal_opt(value: Option<Decimal18>) -> JsonValue {
     }
 }
 
-/// A decimal as its exact 18-place text.
+/// A decimal in the canonical Decimal18 text (Python `str(Decimal)` form).
 fn decimal_text(value: Decimal18) -> JsonValue {
     JsonValue::String(value.to_string())
 }
@@ -1266,10 +1350,35 @@ fn reason_opt(reason: Option<&'static str>) -> JsonValue {
     }
 }
 
+/// An equity decimal: its canonical text, or null when it is undefined.
+fn decimal_outcome(outcome: Outcome<Decimal18>) -> JsonValue {
+    match outcome {
+        Ok(value) => JsonValue::String(value.to_string()),
+        Err(_) => JsonValue::Null,
+    }
+}
+
+/// An equity ratio as a decimal string with 18 fractional digits, or null when
+/// it is undefined.
+fn float_outcome(outcome: Outcome<f64>) -> JsonValue {
+    match outcome {
+        Ok(value) => JsonValue::String(format!("{value:.18}")),
+        Err(_) => JsonValue::Null,
+    }
+}
+
+/// The closed reason an equity metric is undefined, or null when it is defined.
+fn reason_outcome<T>(outcome: Outcome<T>) -> JsonValue {
+    match outcome {
+        Ok(_) => JsonValue::Null,
+        Err(reason) => JsonValue::string(reason),
+    }
+}
+
 /// One closed trade slice as its canonical JSON row.
 fn trade_row_json(row: &TradeRow) -> JsonValue {
     JsonValue::object([
-        ("trade_id", JsonValue::string(row.trade_id.as_str())),
+        ("trade_id", JsonValue::UInt(row.trade_id)),
         ("symbol", JsonValue::string(row.symbol.as_str())),
         ("side", JsonValue::string(row.side.as_str())),
         ("quantity", decimal_text(row.quantity)),
@@ -1294,10 +1403,9 @@ fn metrics_json(
     ledger: &JobLedger,
     custom_metrics: &BTreeMap<String, String>,
 ) -> JsonValue {
-    let metrics = equity_curve_metrics(&ledger.equity);
-    let (sharpe, sharpe_reason) = equity_sharpe(&ledger.equity);
-    let execution = execution_stats(&ledger.fills, &ledger.orders);
-    let trades = trade_stats(&ledger.trades.rows, ledger.trades.open_fees);
+    let equity = &ledger.equity_metrics;
+    let execution = &ledger.execution;
+    let trades = &ledger.trade_stats;
     let mut count_values = BTreeMap::from([
         (
             "market_events".to_string(),
@@ -1318,33 +1426,30 @@ fn metrics_json(
             "equity",
             JsonValue::object([
                 ("samples", JsonValue::UInt(ledger.equity.len() as u64)),
-                ("total_return", decimal_opt(metrics.total_return)),
-                (
-                    "cagr",
-                    match metrics.cagr {
-                        Some(value) => JsonValue::String(format!("{value:.10}")),
-                        None => JsonValue::Null,
-                    },
-                ),
-                (
-                    "sharpe",
-                    match sharpe {
-                        Some(value) => JsonValue::String(format!("{value:.10}")),
-                        None => JsonValue::Null,
-                    },
-                ),
-                ("sharpe_reason", reason_opt(sharpe_reason)),
-                (
-                    "max_drawdown",
-                    JsonValue::String(metrics.max_drawdown.to_string()),
-                ),
+                ("total_return", decimal_outcome(equity.total_return)),
+                ("total_return_reason", reason_outcome(equity.total_return)),
+                ("cagr", float_outcome(equity.cagr)),
+                ("cagr_reason", reason_outcome(equity.cagr)),
+                ("max_drawdown", decimal_outcome(equity.max_drawdown)),
+                ("max_drawdown_reason", reason_outcome(equity.max_drawdown)),
                 (
                     "drawdown_duration_ns",
-                    JsonValue::Int(metrics.drawdown.duration_ns),
+                    match equity.drawdown {
+                        Ok(span) => JsonValue::Int(span.duration_ns),
+                        Err(_) => JsonValue::Null,
+                    },
                 ),
                 (
                     "drawdown_recovered",
-                    JsonValue::Bool(metrics.drawdown.recovered),
+                    match equity.drawdown {
+                        Ok(span) => JsonValue::Bool(span.recovered),
+                        Err(_) => JsonValue::Null,
+                    },
+                ),
+                ("sharpe_per_sample", float_outcome(equity.sharpe_per_sample)),
+                (
+                    "sharpe_per_sample_reason",
+                    reason_outcome(equity.sharpe_per_sample),
                 ),
             ]),
         ),
@@ -1356,10 +1461,8 @@ fn metrics_json(
                     "fees_total",
                     JsonValue::String(execution.fees_total.to_string()),
                 ),
-                (
-                    "slippage_total",
-                    JsonValue::String(execution.slippage_total.to_string()),
-                ),
+                ("slippage_total", JsonValue::Null),
+                ("slippage_total_reason", JsonValue::string("not_modeled")),
                 (
                     "outcomes",
                     JsonValue::object([
@@ -1452,8 +1555,12 @@ fn write_report(
 ) -> Result<PathBuf, BacktestJobError> {
     let mut header = ReportHeader::new(job_id);
     header.seed = seed.to_string();
-    let trades = trade_stats(&ledger.trades.rows, ledger.trades.open_fees);
-    let document = render_report(&header, &ledger.equity, &trades);
+    let document = render_report(
+        &header,
+        &ledger.equity_metrics,
+        &ledger.equity,
+        &ledger.trade_stats,
+    );
     let path = directory.join("report.html");
     std::fs::write(&path, document.into_bytes())
         .map_err(|error| BacktestJobError::Artifact(error.to_string()))?;

@@ -1,19 +1,26 @@
 """Import one terminal harness screening run into a workspace record.
 
 Mirrors :mod:`thesis.backtests.run_import`: the importer reads the run catalog
-(``get_job_result``), the artifact index (``list_artifacts``), and the harness
-``screen.json`` artifact (``read_artifact``) through the injected MCP tool
-provider, then builds a :class:`ScreeningRecord`.  Unlike the backtest
-importer, a missing or unreadable ``screen.json`` fails closed: a screening
-result is exactly its artifact, so an import without one is not a result.
+(``get_job_result``, whose ``state`` is the job state), the artifact index
+(``list_artifacts``), and the harness ``screen.json`` artifact
+(``read_artifact``) through the injected MCP tool provider, then builds a
+:class:`ScreeningRecord`.  Unlike the backtest importer, a missing or unreadable
+``screen.json`` fails closed: a screening result is exactly its artifact, so an
+import without one is not a result.
+
+Nothing is recomputed.  Rows and metrics are the harness's ranked output as
+published; no row or statistic is derived from other artifacts, fills, equity,
+or trades.  A metric a row did not publish stays absent, never zero.  An empty
+row list is kept empty and says so through ``rows_reason``.
 
 The artifact contract is frozen.  ``screen.json`` declares
 ``schema == SCREEN_SCHEMA`` and carries ``as_of`` -- there is no ``asOf``
 spelling; its ``status`` is ``succeeded`` or ``failed``; rows are exactly
 ``{"symbol": <str>, "metrics": {<str>: <decimal string>}}`` with no ``rank``
-key because row order is the rank; and ``definition_id``, ``definition_hash``,
-and ``bundle_hash`` must echo the definition being imported.  A failed
-artifact surfaces its ``error`` string.
+key because row order is the rank; and ``job_id``, ``definition_id``,
+``definition_hash``, and ``bundle_hash`` must echo the job and the definition
+being imported.  A failed run surfaces its reason: the artifact ``error`` when
+that artifact is readable for the job, else the job record's ``error_message``.
 
 The tool provider contract is the typed surface of
 :class:`~thesis.integrations.mcp.HarnessMcpClient`, so the service can pass a
@@ -25,11 +32,11 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Protocol
 
-from thesis.integrations.mcp import McpToolResult
+from thesis.integrations.mcp import HarnessMcpError, McpToolResult
 from thesis.screening.definitions import ScreenerDefinition
 
 #: The harness result artifact a screening run is imported from.
@@ -49,6 +56,8 @@ COMPLETE_JOB_STATES = frozenset({"succeeded"})
 COMPLETE_ARTIFACT_STATES = frozenset({"succeeded"})
 #: Artifact statuses that ended without a usable result.
 FAILED_ARTIFACT_STATES = frozenset({"failed"})
+#: The ``rows_reason`` of a succeeded artifact that published an empty row list.
+NO_ROWS_REASON = "artifact_has_no_rows"
 
 _RECORD_HASH_DOMAIN = b"fca:thesis-screening-result:v1\0"
 _ROW_KEYS = frozenset({"symbol", "metrics"})
@@ -96,14 +105,16 @@ class ScreeningToolProvider(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ScreenRow:
-    """One ranked screening row: a symbol and its exact metric values.
+    """One ranked screening row: a symbol and the metrics it published.
 
     The row's rank is its position in the artifact's ``rows`` order; the frozen
-    artifact carries no rank key, and no rank key is accepted on import.
+    artifact carries no rank key, and no rank key is accepted on import.  A
+    metric the row did not publish has no key in ``metrics``; it is never filled
+    in with a zero.
     """
 
     symbol: str
-    metrics: Mapping[str, object] = field(default_factory=dict)
+    metrics: Mapping[str, object]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "symbol", _text(self.symbol, "row symbol"))
@@ -120,7 +131,13 @@ class ScreenRow:
 
 @dataclass(frozen=True, slots=True)
 class ScreeningRecord:
-    """One imported screening result with its definition and run provenance."""
+    """One imported screening result with its definition and run provenance.
+
+    ``rows_reason`` is ``None`` when ``rows`` is non-empty and
+    :data:`NO_ROWS_REASON` when the artifact published an empty row list, so an
+    empty list always says why it is empty.  Every field is required: nothing
+    stands in for a value the import did not read.
+    """
 
     result_id: str
     workspace_id: str
@@ -129,8 +146,9 @@ class ScreeningRecord:
     job_id: str
     status: str
     as_of: str
-    rows: tuple[ScreenRow, ...] = ()
-    provenance: Mapping[str, object] = field(default_factory=dict)
+    rows: tuple[ScreenRow, ...]
+    rows_reason: str | None
+    provenance: Mapping[str, object]
 
     def __post_init__(self) -> None:
         for name in ("result_id", "workspace_id", "definition_id", "job_id"):
@@ -145,6 +163,12 @@ class ScreeningRecord:
         rows = tuple(self.rows)
         if not all(isinstance(row, ScreenRow) for row in rows):
             raise ScreeningArtifactError("record rows must be ScreenRow values")
+        expected_reason = None if rows else NO_ROWS_REASON
+        if self.rows_reason != expected_reason:
+            raise ScreeningArtifactError(
+                "record rows_reason must be None for published rows and "
+                f"{NO_ROWS_REASON!r} for an empty row list"
+            )
         object.__setattr__(self, "rows", rows)
         object.__setattr__(
             self,
@@ -161,6 +185,7 @@ class ScreeningRecord:
             "provenance": dict(self.provenance),
             "result_id": self.result_id,
             "rows": [row.document() for row in self.rows],
+            "rows_reason": self.rows_reason,
             "job_id": self.job_id,
             "status": self.status,
             "workspace_id": self.workspace_id,
@@ -198,9 +223,9 @@ def import_screening_run(
     Raises :class:`ScreeningRunPending` while the run catalog reports an
     in-flight status, :class:`ScreeningRunError` when the run ended without a
     usable result, and :class:`ScreeningArtifactError` when the ``screen.json``
-    artifact is missing, unreadable, or not the frozen schema.  There is no
-    partial success: the record is built only from the terminal run and its
-    artifact.
+    artifact is missing, unreadable, not the frozen schema, or not produced for
+    this job.  There is no partial success: the record is built only from the
+    terminal run and its artifact, and nothing is recomputed from it.
     """
     resolved_workspace = _required_text(workspace_id, "workspace id")
     resolved_job = _required_text(job_id, "job id")
@@ -208,13 +233,13 @@ def import_screening_run(
     catalog = _tool_document(
         tools.get_job_result(job_id=resolved_job), f"get_job_result({resolved_job!r})"
     )
-    state = _status_of(catalog)
+    state = _optional_text(catalog.get("state"))
     if state is None:
-        raise ScreeningRunError(f"harness job {resolved_job!r} reported no status")
+        raise ScreeningRunError(f"harness job {resolved_job!r} reported no state")
     if state in PENDING_JOB_STATES:
         raise ScreeningRunPending(f"harness job {resolved_job!r} is still {state}")
     if state in FAILED_JOB_STATES:
-        raise ScreeningRunError(_failed_run_message(tools, resolved_job, state))
+        raise ScreeningRunError(failed_run_message(tools, resolved_job, state, catalog))
     if state not in COMPLETE_JOB_STATES:
         raise ScreeningRunError(
             f"harness job {resolved_job!r} has no usable terminal status {state!r}"
@@ -234,7 +259,8 @@ def import_screening_run(
     )
     document = _screen_document(raw_artifact, resolved_job)
     _verify_schema(document, resolved_job)
-    artifact_status = _status_of(document)
+    _verify_job(document, resolved_job)
+    artifact_status = _optional_text(document.get("status"))
     if artifact_status is None:
         raise ScreeningArtifactError(
             f"harness job {resolved_job!r} screen artifact reported no status"
@@ -247,6 +273,7 @@ def import_screening_run(
             f"{artifact_status!r}"
         )
     rows = _rows(document.get("rows"), resolved_job)
+    rows_reason = None if rows else NO_ROWS_REASON
     _verify_definition(document, definition, resolved_job)
     resolved_as_of = _text(document.get("as_of"), "as_of")
     provenance: dict[str, object] = {
@@ -261,6 +288,7 @@ def import_screening_run(
         "definition_id": definition.definition_id,
         "provenance": provenance,
         "rows": [row.document() for row in rows],
+        "rows_reason": rows_reason,
         "job_id": resolved_job,
         "status": artifact_status,
         "workspace_id": resolved_workspace,
@@ -274,6 +302,7 @@ def import_screening_run(
         status=artifact_status,
         as_of=resolved_as_of,
         rows=rows,
+        rows_reason=rows_reason,
         provenance=provenance,
     )
 
@@ -354,6 +383,19 @@ def _verify_schema(document: Mapping[str, object], job_id: str) -> None:
         )
 
 
+def _verify_job(document: Mapping[str, object], job_id: str) -> None:
+    """The artifact must name the job it was read for; a missing or other id fails."""
+    echoed = _optional_text(document.get("job_id"))
+    if echoed is None:
+        raise ScreeningArtifactError(
+            f"harness job {job_id!r} screen artifact requires 'job_id'"
+        )
+    if echoed != job_id:
+        raise ScreeningArtifactError(
+            f"harness job {job_id!r} screen artifact was produced for job {echoed!r}"
+        )
+
+
 def _rows(value: object, job_id: str) -> tuple[ScreenRow, ...]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         raise ScreeningArtifactError(
@@ -423,15 +465,42 @@ def _verify_definition(
 
 
 def _failure_message(document: Mapping[str, object], job_id: str) -> str:
-    detail = document.get("error")
-    if isinstance(detail, str) and detail.strip():
-        return f"harness job {job_id!r} failed: {detail.strip()}"
-    return f"harness job {job_id!r} failed without an error string"
+    return _with_reason(
+        f"harness job {job_id!r} failed", _optional_text(document.get("error"))
+    )
 
 
-def _failed_run_message(tools: ScreeningToolProvider, job_id: str, state: str) -> str:
-    """Surface a failed run's artifact error string when one is readable."""
+def failed_run_message(
+    tools: ScreeningToolProvider,
+    job_id: str,
+    state: str,
+    catalog: Mapping[str, object],
+) -> str:
+    """Name a failed run with the reason the harness published for it.
+
+    The screen artifact's ``error`` is the screening run's own reason and wins
+    when that artifact is readable for this job; otherwise the job record's
+    ``error_message`` is used.  When neither is published the message says so.
+    """
     message = f"harness job {job_id!r} ended in state {state!r}"
+    reason = _artifact_error(tools, job_id) or _optional_text(
+        catalog.get("error_message")
+    )
+    return _with_reason(message, reason)
+
+
+def _with_reason(message: str, reason: str | None) -> str:
+    if reason is None:
+        return f"{message}; no failure reason was published"
+    return f"{message}: {reason}"
+
+
+def _artifact_error(tools: ScreeningToolProvider, job_id: str) -> str | None:
+    """Return the ``error`` of this job's readable ``screen.json``, when published.
+
+    A missing, unreadable, or foreign artifact contributes no reason: a failed
+    run is still reported as failed, never as another job's failure.
+    """
     try:
         listing = _tool_document(
             tools.list_artifacts(job_id=job_id),
@@ -440,23 +509,20 @@ def _failed_run_message(tools: ScreeningToolProvider, job_id: str, state: str) -
         )
         entries = _artifact_entries(listing, job_id)
         if not any(entry.get("name") == SCREEN_ARTIFACT for entry in entries):
-            return message
+            return None
         raw_artifact = _tool_document(
             tools.read_artifact(job_id=job_id, name=SCREEN_ARTIFACT),
             f"read_artifact({SCREEN_ARTIFACT!r})",
             error_type=ScreeningArtifactError,
         )
         document = _screen_document(raw_artifact, job_id)
-    except ScreeningArtifactError:
-        return message
-    detail = document.get("error")
-    if isinstance(detail, str) and detail.strip():
-        return f"{message}: {detail.strip()}"
-    return message
+        _verify_job(document, job_id)
+    except (ScreeningArtifactError, HarnessMcpError):
+        return None
+    return _optional_text(document.get("error"))
 
 
-def _status_of(document: Mapping[str, object]) -> str | None:
-    value = document.get("status")
+def _optional_text(value: object) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
     return value.strip()
@@ -479,6 +545,7 @@ __all__ = [
     "COMPLETE_JOB_STATES",
     "FAILED_ARTIFACT_STATES",
     "FAILED_JOB_STATES",
+    "NO_ROWS_REASON",
     "PENDING_JOB_STATES",
     "SCREEN_ARTIFACT",
     "SCREEN_SCHEMA",
@@ -488,6 +555,7 @@ __all__ = [
     "ScreeningRunError",
     "ScreeningRunPending",
     "ScreeningToolProvider",
+    "failed_run_message",
     "import_screening_run",
     "screening_result_id",
 ]

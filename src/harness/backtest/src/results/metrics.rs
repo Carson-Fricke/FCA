@@ -2,14 +2,21 @@
 //!
 //! Port of `harness.results.metrics`. Every function is a pure mapping from
 //! plain data to plain data: no I/O, wall clock, randomness, or network. Money
-//! and ratio arithmetic uses the scale-18 fixed-point kernel; the two final
-//! annualization steps (the Sharpe/Sortino square root and the CAGR fractional
-//! exponent) convert to `f64` and bound the tolerance at float64 rounding.
+//! and ratio arithmetic uses the scale-18 fixed-point kernel. Only the two
+//! statistics that need a square root or a fractional exponent (the sample
+//! standard deviation behind the per-sample Sharpe and the CAGR exponent)
+//! leave that kernel, at their final step.
 //!
-//! Undefined values are represented as `None` rather than a sentinel: fewer
-//! than two equity points for `total_return`/CAGR, a zero start equity, a zero
-//! standard deviation for Sharpe, a zero downside deviation for Sortino, and a
-//! zero net loss for the profit factor.
+//! Undefined values are explicit. A metric that cannot be defined is
+//! `Err(reason)` with a closed reason name (see [`Outcome`]); the job publishes
+//! it as JSON null beside a `*_reason` key, never as zero. Exact arithmetic
+//! that leaves the decimal128(38,18) bound is a [`MetricsError`], so a job
+//! fails instead of publishing a partial sum.
+//!
+//! Equity points must be ordered by non-decreasing timestamp. The job builds
+//! them in dispatch order and checks that order before calling these functions.
+
+use std::fmt;
 
 use num::Decimal18;
 
@@ -18,8 +25,42 @@ pub const NANOS_PER_DAY: i64 = 86_400_000_000_000;
 /// Nanoseconds per 365-day year.
 pub const NANOS_PER_YEAR_365: i64 = 365 * NANOS_PER_DAY;
 
-fn dec(value: &str) -> Decimal18 {
-    value.parse::<Decimal18>().unwrap_or(Decimal18::ZERO)
+/// The outcome of one metric: its value, or the closed reason it is undefined.
+pub type Outcome<T> = Result<T, &'static str>;
+
+/// Exact decimal arithmetic left the decimal128(38,18) bound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MetricsError {
+    /// The metric whose arithmetic overflowed.
+    pub metric: &'static str,
+}
+
+impl fmt::Display for MetricsError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{} overflows the decimal128(38,18) bound",
+            self.metric
+        )
+    }
+}
+
+impl std::error::Error for MetricsError {}
+
+const fn overflow(metric: &'static str) -> MetricsError {
+    MetricsError { metric }
+}
+
+fn add(left: Decimal18, right: Decimal18, metric: &'static str) -> Result<Decimal18, MetricsError> {
+    left.checked_add(right).map_err(|_| overflow(metric))
+}
+
+fn sub(left: Decimal18, right: Decimal18, metric: &'static str) -> Result<Decimal18, MetricsError> {
+    left.checked_sub(right).map_err(|_| overflow(metric))
+}
+
+fn div(left: Decimal18, right: Decimal18, metric: &'static str) -> Result<Decimal18, MetricsError> {
+    left.checked_div(right).map_err(|_| overflow(metric))
 }
 
 /// One equity mark; timestamps ascend across points.
@@ -38,8 +79,8 @@ pub struct EquityPoint {
 /// fill's remaining fee, each rounded half-even at scale 18.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TradeRow {
-    /// Trade identifier in exit order, `trade-0001` onward.
-    pub trade_id: String,
+    /// Trade identifier in exit order, starting at 1.
+    pub trade_id: u64,
     /// Instrument symbol.
     pub symbol: String,
     /// `long` when the opening fill bought, `short` when it sold.
@@ -85,8 +126,6 @@ pub struct FillRow {
     pub price: Decimal18,
     /// Fee.
     pub fee: Decimal18,
-    /// Signed per-fill slippage.
-    pub slippage: Decimal18,
     /// Optional latency.
     pub latency_ns: Option<i64>,
 }
@@ -111,17 +150,22 @@ pub struct DrawdownSpan {
     pub recovered: bool,
 }
 
-/// Aggregate metrics over one equity curve.
+/// Aggregate metrics over one equity curve. Each field is either its value or
+/// the closed reason it is undefined.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EquityMetrics {
-    /// `last/first - 1`, if defined.
-    pub total_return: Option<Decimal18>,
-    /// 365-day CAGR as a float, if defined.
-    pub cagr: Option<f64>,
-    /// Largest `1 - trough/peak`.
-    pub max_drawdown: Decimal18,
-    /// Longest peak-to-recovery span.
-    pub drawdown: DrawdownSpan,
+    /// `last / first - 1`.
+    pub total_return: Outcome<Decimal18>,
+    /// 365-day CAGR as a fraction (`0.5` is 50 percent per year).
+    pub cagr: Outcome<f64>,
+    /// Largest `1 - trough / peak`.
+    pub max_drawdown: Outcome<Decimal18>,
+    /// Longest peak-to-recovery span. Undefined exactly when `max_drawdown` is,
+    /// with the same reason.
+    pub drawdown: Outcome<DrawdownSpan>,
+    /// Mean over the sample standard deviation of per-sample returns; not
+    /// annualized.
+    pub sharpe_per_sample: Outcome<f64>,
 }
 
 /// Aggregates over closed trades. Win, loss, hit rate, and profit factor classify
@@ -203,119 +247,132 @@ pub struct ExecutionStats {
     pub fill_count: usize,
     /// Total fees.
     pub fees_total: Decimal18,
-    /// Total slippage.
-    pub slippage_total: Decimal18,
     /// Latency aggregates.
     pub latency: LatencyStats,
     /// Order outcome counts.
     pub outcomes: OrderOutcomeCounts,
 }
 
-/// Return the signed slippage of one fill against its reference price.
-#[must_use]
-pub fn fill_slippage(
-    quantity: Decimal18,
-    reference_price: Decimal18,
-    fill_price: Decimal18,
-) -> Decimal18 {
-    quantity
-        .checked_mul(
-            fill_price
-                .checked_sub(reference_price)
-                .unwrap_or(Decimal18::ZERO),
-        )
-        .unwrap_or(Decimal18::ZERO)
+fn has_negative(points: &[EquityPoint]) -> bool {
+    points.iter().any(|point| point.equity.is_negative())
 }
 
-fn validate_points(points: &[EquityPoint]) -> Result<(), &'static str> {
-    for (index, point) in points.iter().enumerate() {
-        if point.equity.is_negative() {
-            return Err("equity values must be non-negative");
-        }
-        if index > 0 && point.timestamp_ns < points[index - 1].timestamp_ns {
-            return Err("equity points must be in ascending order");
-        }
+/// The shared undefined-value checks for the first-to-last ratio metrics.
+fn ratio_reason(points: &[EquityPoint]) -> Option<&'static str> {
+    if points.len() < 2 {
+        return Some("fewer_than_two_samples");
     }
-    Ok(())
+    if !points[0].equity.is_positive() {
+        return Some("nonpositive_initial_equity");
+    }
+    if has_negative(points) {
+        return Some("negative_equity");
+    }
+    None
 }
 
-/// Return `last/first - 1` over the curve, or `None` if undefined.
-#[must_use]
-pub fn total_return(points: &[EquityPoint]) -> Option<Decimal18> {
-    if validate_points(points).is_err() || points.len() < 2 || points[0].equity.is_zero() {
-        return None;
+/// Return `last / first - 1`, or the reason it is undefined.
+///
+/// # Errors
+///
+/// Returns [`MetricsError`] when the exact ratio leaves the decimal bound.
+pub fn total_return(points: &[EquityPoint]) -> Result<Outcome<Decimal18>, MetricsError> {
+    if let Some(reason) = ratio_reason(points) {
+        return Ok(Err(reason));
     }
-    points[points.len() - 1]
-        .equity
-        .checked_div(points[0].equity)
-        .ok()
-        .and_then(|ratio| ratio.checked_sub(Decimal18::ONE).ok())
+    let first = points[0].equity;
+    let last = points[points.len() - 1].equity;
+    let ratio = div(last, first, "total_return")?;
+    Ok(Ok(sub(ratio, Decimal18::ONE, "total_return")?))
 }
 
-/// Return the 365-day-year CAGR, or `None` if undefined.
-#[must_use]
-pub fn cagr(points: &[EquityPoint]) -> Option<f64> {
-    if validate_points(points).is_err() || points.len() < 2 {
-        return None;
+/// Return the 365-day-year CAGR as a fraction, or the reason it is undefined.
+///
+/// The value is `(last / first)^(365 days / span) - 1`.
+///
+/// # Errors
+///
+/// Returns [`MetricsError`] when the exact growth ratio leaves the decimal
+/// bound or the annualized value is not finite.
+pub fn cagr(points: &[EquityPoint]) -> Result<Outcome<f64>, MetricsError> {
+    if let Some(reason) = ratio_reason(points) {
+        return Ok(Err(reason));
     }
-    let start = points[0];
-    let end = points[points.len() - 1];
-    let span = end.timestamp_ns - start.timestamp_ns;
-    if span <= 0 || !start.equity.is_positive() {
-        return None;
+    let first = points[0];
+    let last = points[points.len() - 1];
+    let Some(span) = last.timestamp_ns.checked_sub(first.timestamp_ns) else {
+        return Err(overflow("cagr"));
+    };
+    if span <= 0 {
+        return Ok(Err("nonpositive_span"));
     }
-    let growth = end.equity.checked_div(start.equity).ok()?;
-    if !growth.is_positive() {
-        return None;
+    let growth = div(last.equity, first.equity, "cagr")?.to_f64();
+    let years = span as f64 / NANOS_PER_YEAR_365 as f64;
+    let value = growth.powf(1.0 / years) - 1.0;
+    if value.is_finite() {
+        Ok(Ok(value))
+    } else {
+        Err(overflow("cagr"))
     }
-    let years = Decimal18::from_i64(span)
-        .checked_div(Decimal18::from_i64(NANOS_PER_YEAR_365))
-        .ok()?;
-    let exponent = 1.0 / years.to_f64();
-    Some(growth.to_f64().powf(exponent))
 }
 
-/// Return the largest `1 - trough/peak` as a non-negative decimal.
-#[must_use]
-pub fn max_drawdown(points: &[EquityPoint]) -> Decimal18 {
-    if validate_points(points).is_err() {
-        return Decimal18::ZERO;
+/// Return the largest `1 - trough / peak`, or `negative_equity` when any sample
+/// is negative.
+///
+/// # Errors
+///
+/// Returns [`MetricsError`] when an exact drawdown ratio leaves the decimal
+/// bound.
+pub fn max_drawdown(points: &[EquityPoint]) -> Result<Outcome<Decimal18>, MetricsError> {
+    if has_negative(points) {
+        return Ok(Err("negative_equity"));
     }
     let mut peak = points.first().map_or(Decimal18::ZERO, |point| point.equity);
     let mut worst = Decimal18::ZERO;
     for point in points {
         if point.equity > peak {
             peak = point.equity;
-        } else if peak.is_positive() && point.equity.less_than(peak) {
-            if let Ok(ratio) = point.equity.checked_div(peak) {
-                if let Ok(dip) = Decimal18::ONE.checked_sub(ratio) {
-                    if dip > worst {
-                        worst = dip;
-                    }
-                }
+        } else if peak.is_positive() && point.equity < peak {
+            let ratio = div(point.equity, peak, "max_drawdown")?;
+            let dip = sub(Decimal18::ONE, ratio, "max_drawdown")?;
+            if dip > worst {
+                worst = dip;
             }
         }
     }
-    worst
+    Ok(Ok(worst))
 }
 
-/// Return the longest peak-to-recovery span of the equity curve.
-#[must_use]
-pub fn longest_drawdown(points: &[EquityPoint]) -> DrawdownSpan {
-    if validate_points(points).is_err() || points.len() < 2 {
-        return DrawdownSpan {
+fn span_ns(from: i64, to: i64) -> Result<i64, MetricsError> {
+    to.checked_sub(from)
+        .ok_or_else(|| overflow("drawdown_duration_ns"))
+}
+
+/// Return the longest peak-to-recovery span, or `negative_equity` when any
+/// sample is negative. A curve with fewer than two samples has no drawdown and
+/// reports a zero span that recovered.
+///
+/// # Errors
+///
+/// Returns [`MetricsError`] when a span does not fit in an `i64`.
+pub fn longest_drawdown(points: &[EquityPoint]) -> Result<Outcome<DrawdownSpan>, MetricsError> {
+    if has_negative(points) {
+        return Ok(Err("negative_equity"));
+    }
+    let Some(first) = points.first() else {
+        return Ok(Ok(DrawdownSpan {
             duration_ns: 0,
             recovered: true,
-        };
-    }
-    let mut peak = points[0].equity;
-    let mut peak_ts = points[0].timestamp_ns;
+        }));
+    };
+    let mut peak = first.equity;
+    let mut peak_ts = first.timestamp_ns;
     let mut best_closed = 0i64;
     let mut open_peak_ts: Option<i64> = None;
     for point in &points[1..] {
         if point.equity >= peak {
             if let Some(opened) = open_peak_ts.take() {
-                best_closed = best_closed.max(point.timestamp_ns - opened);
+                best_closed = best_closed.max(span_ns(opened, point.timestamp_ns)?);
             }
             peak = point.equity;
             peak_ts = point.timestamp_ns;
@@ -323,35 +380,114 @@ pub fn longest_drawdown(points: &[EquityPoint]) -> DrawdownSpan {
             open_peak_ts = Some(peak_ts);
         }
     }
-    if let Some(opened) = open_peak_ts {
-        let open_span = points[points.len() - 1].timestamp_ns - opened;
+    if let (Some(opened), Some(last)) = (open_peak_ts, points.last()) {
+        let open_span = span_ns(opened, last.timestamp_ns)?;
         if open_span > best_closed {
-            return DrawdownSpan {
+            return Ok(Ok(DrawdownSpan {
                 duration_ns: open_span,
                 recovered: false,
-            };
+            }));
         }
     }
-    DrawdownSpan {
+    Ok(Ok(DrawdownSpan {
         duration_ns: best_closed,
         recovered: true,
+    }))
+}
+
+/// Return the per-sample Sharpe: the mean of the per-sample returns divided by
+/// their sample (n - 1) standard deviation. It is not annualized.
+///
+/// The per-sample returns are `r_i = (E_i - E_{i-1}) / E_{i-1}` over consecutive
+/// samples. The reasons are checked in this order:
+///
+/// - `fewer_than_three_returns`: fewer than three returns exist.
+/// - `negative_equity`: a sample is negative, or a sample before the last is
+///   zero, which leaves its return without a denominator. The spec gives no
+///   separate reason for a zero predecessor, so it shares this one.
+/// - `zero_volatility`: every return is equal, so the deviation is zero.
+///
+/// # Errors
+///
+/// Returns [`MetricsError`] when exact arithmetic leaves the decimal bound.
+pub fn sharpe_per_sample(points: &[EquityPoint]) -> Result<Outcome<f64>, MetricsError> {
+    let return_count = points.len().saturating_sub(1);
+    if return_count < 3 {
+        return Ok(Err("fewer_than_three_returns"));
+    }
+    if has_negative(points) {
+        return Ok(Err("negative_equity"));
+    }
+    let mut returns: Vec<Decimal18> = Vec::with_capacity(return_count);
+    for pair in points.windows(2) {
+        let previous = pair[0].equity;
+        if previous.is_zero() {
+            return Ok(Err("negative_equity"));
+        }
+        let ratio = div(pair[1].equity, previous, "sharpe_per_sample")?;
+        returns.push(sub(ratio, Decimal18::ONE, "sharpe_per_sample")?);
+    }
+    let mut sum = Decimal18::ZERO;
+    for value in &returns {
+        sum = add(sum, *value, "sharpe_per_sample")?;
+    }
+    let mean = div(
+        sum,
+        Decimal18::from_i64(returns.len() as i64),
+        "sharpe_per_sample",
+    )?;
+    // Deviations are exact decimal differences. Squares are taken in f64 so that
+    // unequal returns cannot round to zero volatility at scale 18.
+    let mut squares = 0.0f64;
+    for value in &returns {
+        let deviation = sub(*value, mean, "sharpe_per_sample")?.to_f64();
+        squares += deviation * deviation;
+    }
+    if squares <= 0.0 {
+        return Ok(Err("zero_volatility"));
+    }
+    let variance = squares / (returns.len() - 1) as f64;
+    let value = mean.to_f64() / variance.sqrt();
+    if value.is_finite() {
+        Ok(Ok(value))
+    } else {
+        Err(overflow("sharpe_per_sample"))
     }
 }
 
 /// Return every equity-curve metric for one curve at once.
-#[must_use]
-pub fn equity_curve_metrics(points: &[EquityPoint]) -> EquityMetrics {
-    EquityMetrics {
-        total_return: total_return(points),
-        cagr: cagr(points),
-        max_drawdown: max_drawdown(points),
-        drawdown: longest_drawdown(points),
+///
+/// # Errors
+///
+/// Returns [`MetricsError`] when a metric's exact arithmetic overflows.
+pub fn equity_curve_metrics(points: &[EquityPoint]) -> Result<EquityMetrics, MetricsError> {
+    Ok(EquityMetrics {
+        total_return: total_return(points)?,
+        cagr: cagr(points)?,
+        max_drawdown: max_drawdown(points)?,
+        drawdown: longest_drawdown(points)?,
+        sharpe_per_sample: sharpe_per_sample(points)?,
+    })
+}
+
+/// Mean of a slice of decimals, or `None` when it is empty.
+fn mean(values: &[Decimal18], metric: &'static str) -> Result<Option<Decimal18>, MetricsError> {
+    if values.is_empty() {
+        return Ok(None);
     }
+    let mut total = Decimal18::ZERO;
+    for value in values {
+        total = add(total, *value, metric)?;
+    }
+    div(total, Decimal18::from_i64(values.len() as i64), metric).map(Some)
 }
 
 /// Aggregate closed trade slices and the fees still attached to open lots.
-#[must_use]
-pub fn trade_stats(trades: &[TradeRow], open_fees: Decimal18) -> TradeStats {
+///
+/// # Errors
+///
+/// Returns [`MetricsError`] when a sum or ratio leaves the decimal bound.
+pub fn trade_stats(trades: &[TradeRow], open_fees: Decimal18) -> Result<TradeStats, MetricsError> {
     let zero = Decimal18::ZERO;
     let mut stats = TradeStats {
         trade_count: trades.len(),
@@ -378,37 +514,19 @@ pub fn trade_stats(trades: &[TradeRow], open_fees: Decimal18) -> TradeStats {
     let mut wins: Vec<Decimal18> = Vec::new();
     let mut losses: Vec<Decimal18> = Vec::new();
     for row in trades {
-        stats.gross_pnl = stats
-            .gross_pnl
-            .checked_add(row.gross_pnl)
-            .unwrap_or(stats.gross_pnl);
-        stats.fees = stats.fees.checked_add(row.fees).unwrap_or(stats.fees);
-        stats.net_pnl = stats
-            .net_pnl
-            .checked_add(row.net_pnl)
-            .unwrap_or(stats.net_pnl);
+        stats.gross_pnl = add(stats.gross_pnl, row.gross_pnl, "gross_pnl")?;
+        stats.fees = add(stats.fees, row.fees, "fees")?;
+        stats.net_pnl = add(stats.net_pnl, row.net_pnl, "net_pnl")?;
         if row.gross_pnl.is_positive() {
-            stats.gross_profit = stats
-                .gross_profit
-                .checked_add(row.gross_pnl)
-                .unwrap_or(stats.gross_profit);
+            stats.gross_profit = add(stats.gross_profit, row.gross_pnl, "gross_profit")?;
         } else if row.gross_pnl.is_negative() {
-            stats.gross_loss = stats
-                .gross_loss
-                .checked_sub(row.gross_pnl)
-                .unwrap_or(stats.gross_loss);
+            stats.gross_loss = sub(stats.gross_loss, row.gross_pnl, "gross_loss")?;
         }
         if row.net_pnl.is_positive() {
-            stats.net_profit = stats
-                .net_profit
-                .checked_add(row.net_pnl)
-                .unwrap_or(stats.net_profit);
+            stats.net_profit = add(stats.net_profit, row.net_pnl, "net_profit")?;
             wins.push(row.net_pnl);
         } else if row.net_pnl.is_negative() {
-            stats.net_loss = stats
-                .net_loss
-                .checked_sub(row.net_pnl)
-                .unwrap_or(stats.net_loss);
+            stats.net_loss = sub(stats.net_loss, row.net_pnl, "net_loss")?;
             losses.push(row.net_pnl);
         } else {
             stats.zero_count += 1;
@@ -420,132 +538,25 @@ pub fn trade_stats(trades: &[TradeRow], open_fees: Decimal18) -> TradeStats {
         stats.hit_rate_reason = Some("no_closed_trades");
         stats.profit_factor_reason = Some("no_closed_trades");
     } else {
-        stats.hit_rate = Decimal18::from_i64(stats.win_count as i64)
-            .checked_div(Decimal18::from_i64(trades.len() as i64))
-            .ok();
+        stats.hit_rate = Some(div(
+            Decimal18::from_i64(stats.win_count as i64),
+            Decimal18::from_i64(trades.len() as i64),
+            "hit_rate",
+        )?);
         if stats.net_loss.is_zero() {
             stats.profit_factor_reason = Some("no_net_losses");
         } else {
-            stats.profit_factor = stats.net_profit.checked_div(stats.net_loss).ok();
+            stats.profit_factor = Some(div(stats.net_profit, stats.net_loss, "profit_factor")?);
         }
     }
-    stats.average_net_win = mean(&wins);
-    stats.average_net_loss = mean(&losses);
+    stats.average_net_win = mean(&wins, "average_net_win")?;
+    stats.average_net_loss = mean(&losses, "average_net_loss")?;
     stats.largest_net_win = wins.iter().copied().max();
     stats.largest_net_loss = losses.iter().copied().min();
-    stats
+    Ok(stats)
 }
 
-fn mean(values: &[Decimal18]) -> Option<Decimal18> {
-    if values.is_empty() {
-        return None;
-    }
-    let mut total = Decimal18::ZERO;
-    for value in values {
-        total = total.checked_add(*value).unwrap_or(total);
-    }
-    total
-        .checked_div(Decimal18::from_i64(values.len() as i64))
-        .ok()
-}
-
-/// Return the Sharpe ratio over per-sample returns, annualized by
-/// `sqrt(periods_per_year)`, using the sample (n - 1) standard deviation.
-///
-/// Returns `None` when there are fewer than two returns or zero volatility.
-#[must_use]
-pub fn sharpe(returns: &[Decimal18], periods_per_year: i64) -> Option<f64> {
-    if returns.len() < 2 || periods_per_year <= 0 {
-        return None;
-    }
-    let count = Decimal18::from_i64(returns.len() as i64);
-    let degrees = Decimal18::from_i64((returns.len() - 1) as i64);
-    let mut sum = Decimal18::ZERO;
-    for value in returns {
-        sum = sum.checked_add(*value).unwrap_or(sum);
-    }
-    let mean = sum.checked_div(count).ok()?;
-    let mut variance = Decimal18::ZERO;
-    for value in returns {
-        let deviation = value.checked_sub(mean).ok()?;
-        let square = deviation.checked_mul(deviation).ok()?;
-        variance = variance.checked_add(square).unwrap_or(variance);
-    }
-    variance = variance.checked_div(degrees).ok()?;
-    if variance.is_zero() {
-        return None;
-    }
-    let ratio = mean.to_f64() / variance.to_f64().sqrt();
-    Some(ratio * (periods_per_year as f64).sqrt())
-}
-
-/// Trading samples per year assumed when annualizing equity-curve Sharpe.
-pub const SHARPE_PERIODS_PER_YEAR: i64 = 252;
-
-/// Equity-curve Sharpe with the reason it is null.
-///
-/// Per-sample returns are `equity[i] / equity[i - 1] - 1` for every non-zero
-/// predecessor. Null reasons are `fewer_than_three_samples`,
-/// `fewer_than_two_returns`, and `zero_volatility`.
-#[must_use]
-pub fn equity_sharpe(points: &[EquityPoint]) -> (Option<f64>, Option<&'static str>) {
-    if points.len() < 3 {
-        return (None, Some("fewer_than_three_samples"));
-    }
-    let mut returns: Vec<Decimal18> = Vec::new();
-    for pair in points.windows(2) {
-        if pair[0].equity.is_zero() {
-            continue;
-        }
-        if let Ok(ratio) = pair[1].equity.checked_div(pair[0].equity) {
-            if let Ok(value) = ratio.checked_sub(Decimal18::ONE) {
-                returns.push(value);
-            }
-        }
-    }
-    if returns.len() < 2 {
-        return (None, Some("fewer_than_two_returns"));
-    }
-    match sharpe(&returns, SHARPE_PERIODS_PER_YEAR) {
-        Some(value) => (Some(value), None),
-        None => (None, Some("zero_volatility")),
-    }
-}
-
-/// Return the annualized Sortino ratio, or `None` if undefined.
-#[must_use]
-pub fn sortino(returns: &[Decimal18], periods_per_year: i64, target: Decimal18) -> Option<f64> {
-    if returns.is_empty() || periods_per_year <= 0 {
-        return None;
-    }
-    let shortfalls: Vec<Decimal18> = returns
-        .iter()
-        .filter(|value| **value < target)
-        .map(|value| value.checked_sub(target).unwrap_or(Decimal18::ZERO))
-        .collect();
-    if shortfalls.is_empty() {
-        return None;
-    }
-    let count = Decimal18::from_i64(returns.len() as i64);
-    let mut sum = Decimal18::ZERO;
-    for value in returns {
-        sum = sum.checked_add(*value).unwrap_or(sum);
-    }
-    let mean = sum.checked_div(count).ok()?;
-    let mut variance = Decimal18::ZERO;
-    for shortfall in &shortfalls {
-        let square = shortfall.checked_mul(*shortfall).ok()?;
-        variance = variance.checked_add(square).unwrap_or(variance);
-    }
-    variance = variance.checked_div(count).ok()?;
-    if variance.is_zero() {
-        return None;
-    }
-    let ratio = mean.to_f64() / variance.to_f64().sqrt();
-    Some(ratio * (periods_per_year as f64).sqrt())
-}
-
-/// Aggregate fill latencies, ignoring `None` rows.
+/// Aggregate latency, ignoring `None` rows.
 #[must_use]
 pub fn latency_stats(fills: &[FillRow]) -> LatencyStats {
     let samples: Vec<i64> = fills.iter().filter_map(|fill| fill.latency_ns).collect();
@@ -587,28 +598,23 @@ pub fn order_outcome_counts(orders: &[OrderRow]) -> OrderOutcomeCounts {
     counts
 }
 
-/// Aggregate fees, slippage, latency, and outcomes over the ledgers.
-#[must_use]
-pub fn execution_stats(fills: &[FillRow], orders: &[OrderRow]) -> ExecutionStats {
+/// Aggregate fees, latency, and outcomes over the ledgers.
+///
+/// # Errors
+///
+/// Returns [`MetricsError`] when the fee total leaves the decimal bound.
+pub fn execution_stats(
+    fills: &[FillRow],
+    orders: &[OrderRow],
+) -> Result<ExecutionStats, MetricsError> {
     let mut fees_total = Decimal18::ZERO;
-    let mut slippage_total = Decimal18::ZERO;
     for fill in fills {
-        fees_total = fees_total.checked_add(fill.fee).unwrap_or(fees_total);
-        slippage_total = slippage_total
-            .checked_add(fill.slippage)
-            .unwrap_or(slippage_total);
+        fees_total = add(fees_total, fill.fee, "fees_total")?;
     }
-    ExecutionStats {
+    Ok(ExecutionStats {
         fill_count: fills.len(),
         fees_total,
-        slippage_total,
         latency: latency_stats(fills),
         outcomes: order_outcome_counts(orders),
-    }
-}
-
-/// Parse a string-exact decimal for callers building metric rows.
-#[must_use]
-pub fn decimal(value: &str) -> Decimal18 {
-    dec(value)
+    })
 }

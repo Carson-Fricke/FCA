@@ -16,17 +16,21 @@ from dataclasses import dataclass
 
 from thesis.persistence.journal import content_hash
 
+from .contracts.variation import canonical_parameter_identity
 from .errors import WorkflowError
 from .state import HypothesisDevelopmentState
 
 
-def _canonical_text(value: Mapping[str, object]) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
-
-
 def canonical_parameters(parameters: Mapping[str, object]) -> dict[str, object]:
-    """Return a parameter vector with keys in canonical order."""
-    return {str(key): parameters[key] for key in sorted(parameters)}
+    """Return one parameter vector in its canonical, type-strict form.
+
+    The form is the parsed :func:`canonical_parameter_identity`: keys are sorted
+    and every value keeps its JSON type, so integer ``5`` stays an integer and
+    float ``5.0`` stays a float.  Python equality on the result is not the
+    identity test; compare :func:`canonical_parameter_identity` texts instead.
+    """
+    parsed: dict[str, object] = json.loads(canonical_parameter_identity(parameters))
+    return parsed
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,8 +84,8 @@ def frozen_design(
     null = state.null_testing
     variation = state.variation
     points = sorted(
-        (canonical_parameters(point.parameters) for point in variation.points),
-        key=_canonical_text,
+        variation.points,
+        key=lambda point: canonical_parameter_identity(point.parameters),
     )
     return FrozenDesign(
         strategy=dict(state.strategy),
@@ -93,7 +97,9 @@ def frozen_design(
         seeds=tuple(sorted(replicate.seed for replicate in null.replicates)),
         center=canonical_parameters(variation.center.parameters),
         variation_parameters=tuple(sorted(variation.parameters)),
-        variation_points=tuple(points),
+        variation_points=tuple(
+            canonical_parameters(point.parameters) for point in points
+        ),
     )
 
 

@@ -47,12 +47,45 @@ def _empty_assignments(payload: dict[str, object]) -> None:
     payload["assignments"] = []
 
 
-def _shortlist_outside_assignments(payload: dict[str, object]) -> None:
+def _shortlist_parameters_outside_assignments(payload: dict[str, object]) -> None:
     shortlist = payload["shortlist"]
     assert isinstance(shortlist, list)
     entry = shortlist[0]
     assert isinstance(entry, dict)
     entry["parameters"] = {"fast": 7}
+
+
+def _shortlist_job_id_not_an_assignment(payload: dict[str, object]) -> None:
+    shortlist = payload["shortlist"]
+    assert isinstance(shortlist, list)
+    entry = shortlist[0]
+    assert isinstance(entry, dict)
+    entry["jobId"] = "strategy-momentum-scope-run-9"
+
+
+def _shortlist_binds_another_assignment(payload: dict[str, object]) -> None:
+    shortlist = payload["shortlist"]
+    assert isinstance(shortlist, list)
+    entry = shortlist[0]
+    assert isinstance(entry, dict)
+    # The parameters {"fast": 5} belong to run-1, not to run-2.
+    entry["jobId"] = "strategy-momentum-scope-run-2"
+
+
+def _duplicate_assignment_vector(payload: dict[str, object]) -> None:
+    assignments = payload["assignments"]
+    assert isinstance(assignments, list)
+    entry = assignments[1]
+    assert isinstance(entry, dict)
+    entry["parameters"] = {"fast": 5}
+
+
+def _duplicate_assignment_job_id(payload: dict[str, object]) -> None:
+    assignments = payload["assignments"]
+    assert isinstance(assignments, list)
+    entry = assignments[1]
+    assert isinstance(entry, dict)
+    entry["jobId"] = "strategy-momentum-scope-run-1"
 
 
 def _non_finite_metrics(payload: dict[str, object]) -> None:
@@ -69,15 +102,11 @@ def _wrong_strategy_kind(payload: dict[str, object]) -> None:
     strategy["kind"] = "study"
 
 
-def test_candidate_evaluation_round_trips_and_decodes_snake_case() -> None:
-    evaluation = CandidateEvaluation.from_dict(_candidate_evaluation_envelope())
-    assert CandidateEvaluation.from_dict(evaluation.as_dict()) == evaluation
-
-    portable = evaluation.as_dict()
-    assignments = portable["assignments"]
-    shortlist = portable["shortlist"]
-    assert isinstance(assignments, list) and isinstance(shortlist, list)
-    legacy = {
+def _snake_case_wire(portable: Mapping[str, object]) -> dict[str, object]:
+    """Respell every camelCase wire key of one portable evaluation in snake_case."""
+    assignments = cast(list[dict[str, object]], portable["assignments"])
+    shortlist = cast(list[dict[str, object]], portable["shortlist"])
+    return {
         "strategy": portable["strategy"],
         "batch_id": portable["batchId"],
         "assignments": [
@@ -102,7 +131,24 @@ def test_candidate_evaluation_round_trips_and_decodes_snake_case() -> None:
         "limitations": portable["limitations"],
     }
 
-    assert CandidateEvaluation.from_dict(legacy) == evaluation
+
+def test_candidate_evaluation_round_trips_on_camel_case_keys() -> None:
+    evaluation = CandidateEvaluation.from_dict(_candidate_evaluation_envelope())
+    assert CandidateEvaluation.from_dict(evaluation.as_dict()) == evaluation
+
+
+def test_candidate_evaluation_rejects_snake_case_keys() -> None:
+    portable = CandidateEvaluation.from_dict(_candidate_evaluation_envelope()).as_dict()
+    legacy = _snake_case_wire(portable)
+
+    assert candidate_evaluation_payload_errors(legacy)
+    phase = build_hypothesis_development_workflow().spec.phase_specs["optimization"]
+    assert phase.validate is not None
+    failure = phase.validate({"target": "null_testing", "optimization": legacy})
+    assert failure is not None
+
+    with pytest.raises(WorkflowError, match="jobId"):
+        CandidateEvaluation.from_dict(legacy)
 
 
 def test_candidate_completion_schema_and_validator_accept_the_evaluation() -> None:
@@ -126,7 +172,20 @@ def test_candidate_completion_schema_and_validator_accept_the_evaluation() -> No
     ("mutate", "marker"),
     [
         (_empty_assignments, "at least 1 item"),
-        (_shortlist_outside_assignments, "must match one of the submitted assignment"),
+        (
+            _shortlist_job_id_not_an_assignment,
+            "must be the jobId of a submitted assignment",
+        ),
+        (
+            _shortlist_parameters_outside_assignments,
+            "must match the parameters of the assignment it references",
+        ),
+        (
+            _shortlist_binds_another_assignment,
+            "must match the parameters of the assignment it references",
+        ),
+        (_duplicate_assignment_vector, "duplicates an earlier parameter assignment"),
+        (_duplicate_assignment_job_id, "duplicates an earlier assignment jobId"),
         (_non_finite_metrics, "must be finite numbers"),
         (_wrong_strategy_kind, "must be 'strategy'"),
     ],
@@ -144,6 +203,52 @@ def test_candidate_evaluation_rejections(mutate, marker: str) -> None:
     assert failure is not None and marker in failure
 
     with pytest.raises(WorkflowError):
+        CandidateEvaluation.from_dict(payload)
+
+
+def _float_form_assignment() -> dict[str, object]:
+    """One succeeded run whose fast parameter is float 5.0, not integer 5."""
+    return {
+        "parameters": {"fast": 5.0},
+        "jobId": "strategy-momentum-scope-run-3",
+        "state": "succeeded",
+        "metrics": {"netTotalReturn": 0.11, "profitFactor": 1.5},
+        "error": None,
+    }
+
+
+def test_integer_and_float_forms_of_one_value_are_distinct_assignments() -> None:
+    payload = _candidate_evaluation_envelope()
+    assignments = cast(list[dict[str, object]], payload["assignments"])
+    assignments.append(_float_form_assignment())
+
+    assert candidate_evaluation_payload_errors(payload) == []
+    phase = build_hypothesis_development_workflow().spec.phase_specs["optimization"]
+    assert phase.validate is not None
+    assert phase.validate({"target": "null_testing", "optimization": payload}) is None
+
+    evaluation = CandidateEvaluation.from_dict(payload)
+    assert type(evaluation.assignments[0].parameters["fast"]) is int
+    assert type(evaluation.assignments[2].parameters["fast"]) is float
+
+
+def test_shortlist_entry_must_carry_the_exact_form_of_its_assignment() -> None:
+    payload = _candidate_evaluation_envelope()
+    cast(list[dict[str, object]], payload["assignments"]).append(
+        _float_form_assignment()
+    )
+    # Integer 5 is not the float 5.0 that run-3 was submitted with.
+    cast(list[dict[str, object]], payload["shortlist"]).append(
+        {
+            "parameters": {"fast": 5},
+            "jobId": "strategy-momentum-scope-run-3",
+            "rationale": "Names the float run with the integer parameter.",
+        }
+    )
+
+    errors = candidate_evaluation_payload_errors(payload)
+    assert any("must match the parameters" in error for error in errors)
+    with pytest.raises(WorkflowError, match="must match the parameters"):
         CandidateEvaluation.from_dict(payload)
 
 

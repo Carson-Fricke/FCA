@@ -117,6 +117,7 @@
 	): Record<string, number | string | null> {
 		const out: Record<string, number | string | null> = { ...stats };
 		const aliases: Record<string, string> = {
+			sharpe_per_sample: 'sharpePerSample',
 			max_drawdown: 'maxDrawdown',
 			win_rate: 'hitRate',
 			total_return: 'totalReturn',

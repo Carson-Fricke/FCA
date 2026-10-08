@@ -14,7 +14,6 @@ payload either composes exactly here or is rejected with a
 
 from __future__ import annotations
 
-import json
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -29,6 +28,7 @@ from thesis.workflows.research_models import PROGRAM_REFERENCE_SCHEMA
 
 from ..errors import WorkflowError
 from ..primitives import _text
+from .variation import canonical_parameter_identity
 
 #: The states one submitted candidate assignment may honestly report.
 CANDIDATE_ASSIGNMENT_STATES: tuple[str, ...] = (
@@ -49,30 +49,13 @@ _MAX_SELECTION_RULE = 4_096
 _MAX_LIMITATIONS = 4_096
 
 
-def _field(payload: Mapping[str, object], *keys: str) -> Any:
-    """Return the first present spelling of one wire field."""
-    for key in keys:
-        if key in payload:
-            return payload[key]
-    return None
+def _wire_field(payload: Mapping[str, object], key: str) -> Any:
+    """Return one camelCase wire field as decoded JSON, or ``None`` when absent.
 
-
-def _canonical_parameters(parameters: Mapping[str, object]) -> str:
-    """Return the canonical JSON identity of one parameter vector."""
-    if not all(isinstance(name, str) for name in parameters):
-        raise WorkflowError("parameter names must be strings")
-    try:
-        return json.dumps(
-            parameters,
-            allow_nan=False,
-            ensure_ascii=True,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-    except (TypeError, ValueError) as error:
-        raise WorkflowError(
-            f"parameter values must be finite JSON scalars: {error}"
-        ) from error
+    The typed constructors validate the value, so a missing or mistyped field is
+    rejected there with its camelCase name.
+    """
+    return payload.get(key)
 
 
 def _metric_errors(metrics: Mapping[str, object], label: str) -> list[str]:
@@ -93,7 +76,7 @@ def _checked_parameters(parameters: object, label: str) -> dict[str, object]:
     if not isinstance(parameters, Mapping):
         raise WorkflowError(f"{label} must be an object mapping parameter names")
     copied = dict(parameters)
-    _canonical_parameters(copied)
+    canonical_parameter_identity(copied)
     return copied
 
 
@@ -125,7 +108,7 @@ class CandidateAssignment:
             "parameters",
             _checked_parameters(self.parameters, "candidate assignment parameters"),
         )
-        _text(self.job_id, "candidate assignment job_id", max_length=_MAX_JOB_ID)
+        _text(self.job_id, "candidate assignment jobId", max_length=_MAX_JOB_ID)
         if self.state not in CANDIDATE_ASSIGNMENT_STATES:
             raise WorkflowError(
                 "candidate assignment state must be one of "
@@ -160,13 +143,13 @@ class CandidateAssignment:
         metrics = payload.get("metrics")
         if metrics is not None and not isinstance(metrics, Mapping):
             raise WorkflowError("candidate assignment metrics must be an object")
-        error = _field(payload, "error")
+        error = payload.get("error")
         if error is not None and not isinstance(error, str):
             raise WorkflowError("candidate assignment error must be text")
         return cls(
             parameters=parameters,
-            job_id=_field(payload, "jobId", "job_id"),
-            state=_field(payload, "state"),
+            job_id=_wire_field(payload, "jobId"),
+            state=_wire_field(payload, "state"),
             metrics=metrics,
             error=error,
         )
@@ -186,7 +169,7 @@ class CandidateShortlistEntry:
             "parameters",
             _checked_parameters(self.parameters, "candidate shortlist parameters"),
         )
-        _text(self.job_id, "candidate shortlist job_id", max_length=_MAX_JOB_ID)
+        _text(self.job_id, "candidate shortlist jobId", max_length=_MAX_JOB_ID)
         _text(
             self.rationale, "candidate shortlist rationale", max_length=_MAX_RATIONALE
         )
@@ -211,8 +194,8 @@ class CandidateShortlistEntry:
             )
         return cls(
             parameters=parameters,
-            job_id=_field(payload, "jobId", "job_id"),
-            rationale=_field(payload, "rationale"),
+            job_id=_wire_field(payload, "jobId"),
+            rationale=_wire_field(payload, "rationale"),
         )
 
 
@@ -327,48 +310,69 @@ def candidate_evaluation_payload_errors(
     strategy = payload.get("strategy")
     if isinstance(strategy, Mapping) and strategy.get("kind") != "strategy":
         errors.append("candidateEvaluation.strategy.kind must be 'strategy'")
-    assignment_vectors: set[str] = set()
+    # Each assignment's parameter identity keyed by its jobId.  A malformed
+    # parameter vector maps to None: its error is already reported, so no
+    # shortlist binding is judged against it.
+    assignment_identities: dict[str, str | None] = {}
+    seen_vectors: set[str] = set()
     assignments = payload.get("assignments")
     if isinstance(assignments, Sequence) and not isinstance(assignments, (str, bytes)):
         for index, item in enumerate(assignments):
             if not isinstance(item, Mapping):
                 continue
+            label = f"candidateEvaluation.assignments[{index}]"
+            vector: str | None = None
             parameters = item.get("parameters")
             if isinstance(parameters, Mapping):
                 try:
-                    assignment_vectors.add(_canonical_parameters(parameters))
+                    vector = canonical_parameter_identity(parameters)
                 except WorkflowError as error:
+                    errors.append(f"{label}.parameters: {error}")
+            if vector is not None:
+                if vector in seen_vectors:
+                    errors.append(f"{label} duplicates an earlier parameter assignment")
+                seen_vectors.add(vector)
+            job_id = item.get("jobId")
+            if isinstance(job_id, str):
+                if job_id in assignment_identities:
                     errors.append(
-                        f"candidateEvaluation.assignments[{index}].parameters: {error}"
+                        f"{label}.jobId duplicates an earlier assignment jobId"
                     )
+                else:
+                    assignment_identities[job_id] = vector
             metrics = item.get("metrics")
             if isinstance(metrics, Mapping):
-                errors.extend(
-                    _metric_errors(
-                        metrics,
-                        f"candidateEvaluation.assignments[{index}].metrics",
-                    )
-                )
+                errors.extend(_metric_errors(metrics, f"{label}.metrics"))
     shortlist = payload.get("shortlist")
     if isinstance(shortlist, Sequence) and not isinstance(shortlist, (str, bytes)):
         for index, item in enumerate(shortlist):
             if not isinstance(item, Mapping):
                 continue
+            label = f"candidateEvaluation.shortlist[{index}]"
+            entry_vector: str | None = None
             parameters = item.get("parameters")
-            if not isinstance(parameters, Mapping):
-                continue
-            try:
-                vector = _canonical_parameters(parameters)
-            except WorkflowError as error:
-                errors.append(
-                    f"candidateEvaluation.shortlist[{index}].parameters: {error}"
-                )
-                continue
-            if vector not in assignment_vectors:
-                errors.append(
-                    f"candidateEvaluation.shortlist[{index}].parameters must match "
-                    "one of the submitted assignment parameter vectors"
-                )
+            if isinstance(parameters, Mapping):
+                try:
+                    entry_vector = canonical_parameter_identity(parameters)
+                except WorkflowError as error:
+                    errors.append(f"{label}.parameters: {error}")
+            job_id = item.get("jobId")
+            if isinstance(job_id, str):
+                if job_id not in assignment_identities:
+                    errors.append(
+                        f"{label}.jobId must be the jobId of a submitted assignment"
+                    )
+                else:
+                    referenced = assignment_identities[job_id]
+                    if (
+                        entry_vector is not None
+                        and referenced is not None
+                        and entry_vector != referenced
+                    ):
+                        errors.append(
+                            f"{label}.parameters must match the parameters of the "
+                            "assignment it references"
+                        )
     return errors
 
 
@@ -396,7 +400,7 @@ class CandidateEvaluation:
                 "candidate evaluation must reference a strategy program"
             )
         object.__setattr__(self, "strategy", dict(self.strategy))
-        _text(self.batch_id, "candidate evaluation batch_id", max_length=_MAX_BATCH_ID)
+        _text(self.batch_id, "candidate evaluation batchId", max_length=_MAX_BATCH_ID)
         if isinstance(self.assignments, str) or not isinstance(self.assignments, tuple):
             raise WorkflowError("candidate evaluation assignments must be a tuple")
         if not 1 <= len(self.assignments) <= MAX_BATCH_POINTS:
@@ -422,7 +426,7 @@ class CandidateEvaluation:
             )
         _text(
             self.selection_rule,
-            "candidate evaluation selection_rule",
+            "candidate evaluation selectionRule",
             max_length=_MAX_SELECTION_RULE,
         )
         if self.limitations is not None:
@@ -431,12 +435,33 @@ class CandidateEvaluation:
                 "candidate evaluation limitations",
                 max_length=_MAX_LIMITATIONS,
             )
-        vectors = {_canonical_parameters(item.parameters) for item in self.assignments}
-        for index, entry in enumerate(self.shortlist):
-            if _canonical_parameters(entry.parameters) not in vectors:
+        vectors: set[str] = set()
+        identities: dict[str, str] = {}
+        for index, item in enumerate(self.assignments):
+            vector = canonical_parameter_identity(item.parameters)
+            if vector in vectors:
                 raise WorkflowError(
-                    f"candidate evaluation shortlist[{index}] parameters must match "
-                    "one of the submitted assignment parameter vectors"
+                    f"candidate evaluation assignments[{index}] duplicates an earlier "
+                    "parameter assignment"
+                )
+            vectors.add(vector)
+            if item.job_id in identities:
+                raise WorkflowError(
+                    f"candidate evaluation assignments[{index}] jobId duplicates an "
+                    "earlier assignment jobId"
+                )
+            identities[item.job_id] = vector
+        for index, entry in enumerate(self.shortlist):
+            if entry.job_id not in identities:
+                raise WorkflowError(
+                    f"candidate evaluation shortlist[{index}] jobId must be the jobId "
+                    "of a submitted assignment"
+                )
+            entry_identity = canonical_parameter_identity(entry.parameters)
+            if entry_identity != identities[entry.job_id]:
+                raise WorkflowError(
+                    f"candidate evaluation shortlist[{index}] parameters must match the "
+                    "parameters of the assignment it references"
                 )
 
     def as_dict(self) -> dict[str, object]:
@@ -466,7 +491,7 @@ class CandidateEvaluation:
             raise WorkflowError("candidate evaluation requires a shortlist list")
         return cls(
             strategy=strategy,
-            batch_id=_field(payload, "batchId", "batch_id"),
+            batch_id=_wire_field(payload, "batchId"),
             assignments=tuple(
                 CandidateAssignment.from_dict(cast(Mapping[str, object], item))
                 for item in assignments
@@ -475,8 +500,8 @@ class CandidateEvaluation:
                 CandidateShortlistEntry.from_dict(cast(Mapping[str, object], item))
                 for item in shortlist
             ),
-            selection_rule=_field(payload, "selectionRule", "selection_rule"),
-            limitations=_field(payload, "limitations"),
+            selection_rule=_wire_field(payload, "selectionRule"),
+            limitations=_wire_field(payload, "limitations"),
         )
 
 

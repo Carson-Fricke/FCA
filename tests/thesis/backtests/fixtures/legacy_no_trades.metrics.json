@@ -1,0 +1,37 @@
+{
+  "job_id": "job-0123456789abcdef0123456789abcdef",
+  "status": "completed",
+  "counts": {
+    "market_events": 3,
+    "dispatched": 2,
+    "orders": 2,
+    "fills": 2
+  },
+  "equity": {
+    "samples": 3,
+    "total_return": "0.002000000000000000",
+    "total_return_reason": null,
+    "cagr": "0.002000000000000000",
+    "cagr_reason": null,
+    "max_drawdown": "0.000000000000000000",
+    "max_drawdown_reason": null,
+    "drawdown_duration_ns": 0,
+    "drawdown_recovered": true,
+    "sharpe_per_sample": null,
+    "sharpe_per_sample_reason": "fewer_than_three_returns"
+  },
+  "execution": {
+    "fill_count": 2,
+    "fees_total": "0.000000000000000000",
+    "slippage_total": null,
+    "slippage_total_reason": "not_modeled",
+    "outcomes": {
+      "total": 2,
+      "filled": 2,
+      "rejected": 0,
+      "cancelled": 0,
+      "other": 0
+    }
+  },
+  "custom": {}
+}

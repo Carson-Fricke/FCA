@@ -141,7 +141,9 @@ impl SnapshotObjectStore for InMemorySnapshotStore {
 /// Normalize a string-exact decimal the way `_decimal_text` does.
 ///
 /// Zero renders as `0`; otherwise trailing fractional zeros are removed and
-/// the sign and integer part are preserved.
+/// the sign and integer part are preserved. Text with no digits (for example an
+/// empty string) is malformed and is returned unchanged rather than read as
+/// zero.
 #[must_use]
 pub fn decimal_text(value: &str) -> String {
     let value = value.trim();
@@ -153,6 +155,9 @@ pub fn decimal_text(value: &str) -> String {
         Some((integer, fraction)) => (integer, fraction),
         None => (unsigned, ""),
     };
+    if integer.is_empty() && fraction.is_empty() {
+        return value.to_string();
+    }
     let integer = integer.trim_start_matches('0');
     let integer = if integer.is_empty() { "0" } else { integer };
     let fraction = fraction.trim_end_matches('0');
@@ -174,10 +179,19 @@ pub fn decimal_tag(value: &str) -> JsonValue {
 }
 
 /// Compare two string-exact decimals by numeric value.
-fn decimal_eq(left: &str, right: &str) -> bool {
-    let left = left.parse::<Decimal18>().unwrap_or(Decimal18::ZERO);
-    let right = right.parse::<Decimal18>().unwrap_or(Decimal18::ZERO);
-    left == right
+///
+/// # Errors
+///
+/// Returns [`StateStoreError::Integrity`] when either side is not an exact
+/// decimal, so a malformed value never compares equal to zero.
+fn decimal_eq(left: &str, right: &str) -> Result<bool, StateStoreError> {
+    Ok(exact_decimal(left)? == exact_decimal(right)?)
+}
+
+fn exact_decimal(value: &str) -> Result<Decimal18, StateStoreError> {
+    value.parse::<Decimal18>().map_err(|error| {
+        StateStoreError::Integrity(format!("{value:?} is not an exact decimal: {error}"))
+    })
 }
 
 /// Freeze the runtime options into the snapshot's canonical option map.
@@ -1076,8 +1090,9 @@ impl RuntimeStateStore {
     /// # Errors
     ///
     /// Returns [`StateStoreError::Integrity`] when the shell or options belong
-    /// to another run, when `strategy_ids` is empty, or when a book references
-    /// a fill the session history does not contain.
+    /// to another run, when `strategy_ids` is empty, when exported strategy
+    /// state is not a JSON object, or when a book references a fill the session
+    /// history does not contain.
     #[allow(clippy::too_many_arguments)]
     pub fn capture(
         &self,
@@ -1164,17 +1179,18 @@ impl RuntimeStateStore {
                 owners
             }
         };
-        let strategy_state: Vec<StrategyState> = shell
-            .strategy_state_export()
-            .into_iter()
-            .map(|(instance_id, values)| StrategyState {
+        let mut strategy_state: Vec<StrategyState> = Vec::new();
+        for (instance_id, values) in shell.strategy_state_export() {
+            let JsonValue::Object(values) = values else {
+                return Err(StateStoreError::Integrity(format!(
+                    "strategy state for {instance_id:?} must be a JSON object"
+                )));
+            };
+            strategy_state.push(StrategyState {
                 instance_id,
-                values: match values {
-                    JsonValue::Object(entries) => entries,
-                    _ => BTreeMap::new(),
-                },
-            })
-            .collect();
+                values,
+            });
+        }
         let watermarks = shell.venue_watermarks();
         Ok(RuntimeSnapshot {
             format_version: FORMAT_VERSION,
@@ -1232,7 +1248,8 @@ impl RuntimeStateStore {
     ///
     /// Returns [`StateStoreError::Restore`] when a book is missing, its initial
     /// cash disagrees, or replaying its fills does not reproduce the captured
-    /// cash exactly.
+    /// cash exactly. Returns [`StateStoreError::Integrity`] when a captured or
+    /// shell cash value is not an exact decimal.
     pub fn restore_into_shell(
         &self,
         snapshot: &RuntimeSnapshot,
@@ -1247,16 +1264,17 @@ impl RuntimeStateStore {
                     book_state.book_id
                 )));
             };
-            if !decimal_eq(&book.initial_cash, &book_state.initial_cash) {
+            if !decimal_eq(&book.initial_cash, &book_state.initial_cash)? {
                 return Err(StateStoreError::Restore(format!(
                     "book {:?} initial cash {:?} does not match the captured {:?}",
                     book_state.book_id, book.initial_cash, book_state.initial_cash
                 )));
             }
             for fill in &book_state.fills {
-                book.apply_fill(fill).map_err(StateStoreError::Restore)?;
+                book.apply_fill(fill)
+                    .map_err(|error| StateStoreError::Restore(error.to_string()))?;
             }
-            if !decimal_eq(&book.cash, &book_state.cash) {
+            if !decimal_eq(&book.cash, &book_state.cash)? {
                 return Err(StateStoreError::Restore(format!(
                     "replayed book {:?} cash {:?} does not match the captured {:?}",
                     book_state.book_id, book.cash, book_state.cash

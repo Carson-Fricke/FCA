@@ -49,7 +49,7 @@
 		const totalReturn = published('totalReturn');
 		return {
 			returnPct: totalReturn == null ? null : totalReturn * 100,
-			sharpe: published('sharpe'),
+			sharpePerSample: published('sharpePerSample'),
 			maxDrawdown: published('maxDrawdown'),
 			trades: published('tradeCount')
 		};
@@ -60,7 +60,7 @@
 			{ label: `${label} return`, value: metrics.returnPct, format: 'signedPct' as const },
 			{ label: `${label} Sharpe`, value: metrics.sharpe ?? '—', format: 'ratio' as const },
 			{ label: `${label} max DD`, value: metrics.maxDrawdown, format: 'pct' as const },
-			{ label: `${label} trades`, value: metrics.trades, format: 'text' as const }
+			{ label: `${label} trades`, value: metrics.trades ?? '—', format: 'text' as const }
 		];
 	}
 </script>
@@ -118,7 +118,7 @@
 		</div>
 		<div class="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
 			<MetricCard label="Return" value={overall.returnPct ?? '—'} format="signedPct" />
-			<MetricCard label="Sharpe" value={overall.sharpe ?? '—'} format="ratio" />
+			<MetricCard label="Sharpe (per sample)" value={overall.sharpePerSample ?? '—'} format="ratio" />
 			<MetricCard label="Max drawdown" value={overall.maxDrawdown ?? '—'} format="pct" />
 			<MetricCard label="Trades" value={overall.trades ?? '—'} />
 		</div>

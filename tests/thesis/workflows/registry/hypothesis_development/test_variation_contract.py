@@ -18,6 +18,7 @@ from thesis.workflows.registry.hypothesis_development.contracts.variation import
     VariationCenter,
     VariationEvaluation,
     VariationPoint,
+    canonical_parameter_identity,
     variation_payload_errors,
 )
 from thesis.workflows.registry.hypothesis_development.errors import WorkflowError
@@ -156,14 +157,11 @@ def _missing_center_run(payload: dict[str, object]) -> None:
     del center["jobId"]
 
 
-def test_variation_round_trips_and_decodes_snake_case() -> None:
-    evaluation = VariationEvaluation.from_dict(_variation_envelope())
-    assert VariationEvaluation.from_dict(evaluation.as_dict()) == evaluation
-
-    portable = evaluation.as_dict()
+def _snake_case_wire(portable: Mapping[str, object]) -> dict[str, object]:
+    """Respell every camelCase wire key of one portable variation in snake_case."""
     center = cast(dict[str, object], portable["center"])
     points = cast(list[dict[str, object]], portable["points"])
-    legacy = {
+    return {
         "strategy": portable["strategy"],
         "batch_id": portable["batchId"],
         "center": {
@@ -188,7 +186,24 @@ def test_variation_round_trips_and_decodes_snake_case() -> None:
         "limitations": portable["limitations"],
     }
 
-    assert VariationEvaluation.from_dict(legacy) == evaluation
+
+def test_variation_round_trips_on_camel_case_wire_keys() -> None:
+    evaluation = VariationEvaluation.from_dict(_variation_envelope())
+    assert VariationEvaluation.from_dict(evaluation.as_dict()) == evaluation
+
+
+def test_variation_rejects_snake_case_wire_keys() -> None:
+    portable = VariationEvaluation.from_dict(_variation_envelope()).as_dict()
+    legacy = _snake_case_wire(portable)
+
+    assert variation_payload_errors(legacy)
+    phase = build_hypothesis_development_workflow().spec.phase_specs["variation"]
+    assert phase.validate is not None
+    failure = phase.validate({"target": "forward_validation", "variation": legacy})
+    assert failure is not None
+
+    with pytest.raises(WorkflowError, match="jobId"):
+        VariationEvaluation.from_dict(legacy)
 
 
 def test_variation_center_and_points_round_trip_individually() -> None:
@@ -198,6 +213,36 @@ def test_variation_center_and_points_round_trip_individually() -> None:
     assert evaluation.center.as_dict()["state"] == "succeeded"
     assert evaluation.points[2].as_dict()["metrics"] is None
     assert evaluation.points[3].as_dict()["state"] == "running"
+
+
+def test_parameter_identity_is_type_strict_and_order_insensitive() -> None:
+    integer_five = canonical_parameter_identity({"fast": 5})
+    float_five = canonical_parameter_identity({"fast": 5.0})
+    assert integer_five != float_five
+    assert canonical_parameter_identity({"fast": True}) != (
+        canonical_parameter_identity({"fast": 1})
+    )
+    assert canonical_parameter_identity({"slow": 20, "fast": 5}) == (
+        canonical_parameter_identity({"fast": 5, "slow": 20})
+    )
+
+
+def test_integer_and_float_values_are_distinct_variation_points() -> None:
+    payload = _variation_envelope()
+    points = cast(list[dict[str, object]], payload["points"])
+    # The center holds integer 5. This point holds float 5.0: a different value
+    # that differs from the center in exactly one declared parameter.
+    points[0]["parameters"] = {"fast": 5.0, "slow": 20}
+
+    assert variation_payload_errors(payload) == []
+    phase = build_hypothesis_development_workflow().spec.phase_specs["variation"]
+    assert phase.validate is not None
+    completion = {"target": "forward_validation", "variation": payload}
+    assert phase.validate(completion) is None
+
+    evaluation = VariationEvaluation.from_dict(payload)
+    assert type(evaluation.points[0].parameters["fast"]) is float
+    assert type(evaluation.center.parameters["fast"]) is int
 
 
 def test_variation_completion_schema_and_validator_accept_the_evaluation() -> None:

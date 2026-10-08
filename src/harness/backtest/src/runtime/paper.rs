@@ -11,9 +11,11 @@
 
 use std::collections::BTreeMap;
 
-use num::Decimal18;
+use num::{Decimal18, DecimalError};
 
-use crate::backtest::errors::{AbortPolicy, FillModel, StrategyHaltPolicy, TeardownPolicy};
+use crate::backtest::errors::{
+    AbortPolicy, BacktestError, FillModel, StrategyHaltPolicy, TeardownPolicy,
+};
 use crate::backtest::fills::FillModelOptions;
 use crate::canonical_json::JsonValue;
 use crate::runtime::state_store::FillState;
@@ -120,8 +122,24 @@ impl Default for VenueWatermarks {
     }
 }
 
-fn parse_decimal(value: &str) -> Decimal18 {
-    value.parse::<Decimal18>().unwrap_or(Decimal18::ZERO)
+/// Parse one string-exact decimal from fill or book state.
+///
+/// # Errors
+///
+/// Returns [`BacktestError::DataPreflight`] when the text is not an exact
+/// decimal. A malformed value is never read as zero.
+fn parse_decimal(field: &str, value: &str) -> Result<Decimal18, BacktestError> {
+    value.parse::<Decimal18>().map_err(|error| {
+        BacktestError::DataPreflight(format!(
+            "{field} {value:?} is not an exact decimal: {error}"
+        ))
+    })
+}
+
+fn arithmetic(operation: &str, error: DecimalError) -> BacktestError {
+    BacktestError::Arithmetic(format!(
+        "{operation} cannot be represented exactly: {error}"
+    ))
 }
 
 /// One virtual book's restorable accounting state.
@@ -162,20 +180,45 @@ impl PaperBook {
 
     /// Book one fill, updating exact cash and rejecting duplicate identifiers.
     ///
+    /// Every input is validated and every result computed before any state
+    /// changes, so a rejected fill leaves the book exactly as it was.
+    ///
     /// # Errors
     ///
-    /// Returns a message when the fill was already booked.
-    pub fn apply_fill(&mut self, fill: &FillState) -> Result<(), String> {
+    /// Returns [`BacktestError::DataPreflight`] when the fill was already
+    /// booked, its side is not `buy` or `sell`, or a fill or cash value is not
+    /// an exact decimal. Returns [`BacktestError::Arithmetic`] when the notional
+    /// or the updated cash leaves the decimal128(38, 18) bound.
+    pub fn apply_fill(&mut self, fill: &FillState) -> Result<(), BacktestError> {
         if self
             .fills
             .iter()
             .any(|existing| existing.fill_id == fill.fill_id)
         {
-            return Err(format!(
+            return Err(BacktestError::DataPreflight(format!(
                 "book {} already accounts fill {}",
                 self.book_id, fill.fill_id
-            ));
+            )));
         }
+        let quantity = parse_decimal("fill quantity", &fill.quantity)?;
+        let price = parse_decimal("fill price", &fill.price)?;
+        let fee = parse_decimal("fill fee", &fill.fee)?;
+        let cash = parse_decimal("book cash", &self.cash)?;
+        let notional = quantity
+            .checked_mul(price)
+            .map_err(|error| arithmetic("fill notional", error))?;
+        let cash = match fill.side.as_str() {
+            "sell" => cash.checked_add(notional),
+            "buy" => cash.checked_sub(notional),
+            side => {
+                return Err(BacktestError::DataPreflight(format!(
+                    "fill {} side {side:?} is not buy or sell",
+                    fill.fill_id
+                )))
+            }
+        }
+        .and_then(|value| value.checked_sub(fee))
+        .map_err(|error| arithmetic("book cash", error))?;
         if let Some(marker) = self
             .markers
             .iter_mut()
@@ -185,19 +228,6 @@ impl PaperBook {
         } else {
             self.markers.push((fill.symbol.clone(), fill.price.clone()));
         }
-        let quantity = parse_decimal(&fill.quantity);
-        let price = parse_decimal(&fill.price);
-        let fee = parse_decimal(&fill.fee);
-        let notional = quantity.checked_mul(price).unwrap_or(Decimal18::ZERO);
-        let cash = parse_decimal(&self.cash);
-        let cash = if fill.side == "sell" {
-            cash.checked_add(notional)
-                .and_then(|value| value.checked_sub(fee))
-        } else {
-            cash.checked_sub(notional)
-                .and_then(|value| value.checked_sub(fee))
-        }
-        .unwrap_or(cash);
         self.cash = cash.to_string();
         self.fills.push(fill.clone());
         Ok(())
@@ -313,10 +343,13 @@ impl PaperRuntimeShell {
     ///
     /// # Errors
     ///
-    /// Returns a message when the book is unknown or already accounts the fill.
-    pub fn apply_fill(&mut self, book_id: &str, fill: FillState) -> Result<(), String> {
+    /// Returns [`BacktestError::Configuration`] when the book is unknown, and
+    /// the errors of [`PaperBook::apply_fill`] otherwise.
+    pub fn apply_fill(&mut self, book_id: &str, fill: FillState) -> Result<(), BacktestError> {
         let Some(book) = self.books.iter_mut().find(|book| book.book_id == book_id) else {
-            return Err(format!("unknown book {book_id}"));
+            return Err(BacktestError::Configuration(format!(
+                "unknown book {book_id}"
+            )));
         };
         book.apply_fill(&fill)?;
         self.session.fill_count += 1;
@@ -385,10 +418,12 @@ impl PaperShell for PaperRuntimeShell {
     }
 
     fn order_count(&self, instance_id: &str) -> u64 {
+        // An instance with no recorded orders has submitted none: a valid zero.
         self.order_counts.get(instance_id).copied().unwrap_or(0)
     }
 
     fn daily_loss(&self, instance_id: &str) -> String {
+        // No loss recorded for the instance yet: a valid zero daily loss.
         self.daily_losses
             .get(instance_id)
             .cloned()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
@@ -28,15 +29,16 @@ from thesis.integrations.mcp import (
 JOB_ID = "job-0123456789abcdef0123456789abcdef"
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
+FIXTURES = pathlib.Path(__file__).parent / "fixtures"
+
+
+def _document(name: str) -> object:
+    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
 ARTIFACTS: dict[str, object] = {
-    "metrics.json": {
-        "equity": {"total_return": 0.1, "max_drawdown": -0.05, "sharpe": 1.0}
-    },
-    "backtest.json": {
-        "portfolio": {"initial_cash": 1000.0, "total_pnl": 100.0, "equity": 1100.0},
-        "manifest": {"start": "2024-01-01T00:00:00Z", "end": "2024-01-02T00:00:00Z"},
-        "fills": [],
-    },
+    "metrics.json": _document("closed_trades.metrics.json"),
+    "backtest.json": _document("closed_trades.backtest.json"),
 }
 
 

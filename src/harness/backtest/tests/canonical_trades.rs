@@ -1,22 +1,28 @@
-//! Canonical `metrics.json` trade publication from the job ledger.
+//! Canonical `metrics.json` trade and equity publication from the job ledger.
 //!
-//! The job derives closed trades from the engine fills with the same FIFO
-//! semantics as the Python `run_import._build_trades` trade log and publishes
-//! them under the canonical `trades` block. These tests drive a real job
-//! through the fake lake routes and assert the published numbers, the
-//! undefined profit factor when no trade loses, and the rendered report.
+//! The job derives closed trades from the engine fills with FIFO lot matching
+//! and fee allocation by fill quantity share, then publishes them under the
+//! canonical `trades` block. These tests drive a real job through the fake lake
+//! routes and assert the published numbers: the undefined profit factor when no
+//! trade loses, flip and partial-close fee reconciliation, undefined equity
+//! statistics under negative equity, the per-sample Sharpe, and the named
+//! failure for a fill that leaves the decimal bound.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::path::PathBuf;
 
 use backtest::backtest::config::{BacktestConfig, FeeBasis, FeeRule};
 use backtest::backtest::engine_core::{
-    EngineMarket, EngineOptions, EngineOrder, MarketSubscription, StrategyInstance,
-    StrategyRuntime, StrategyStart,
+    BacktestOutcome, EngineMarket, EngineOptions, EngineOrder, MarketSubscription,
+    StrategyInstance, StrategyRuntime, StrategyStart,
 };
 use backtest::backtest::errors::BacktestError;
-use backtest::backtest::job::{parse_timestamp_ns, run_native_job_with_lake_client};
+use backtest::backtest::job::{
+    parse_timestamp_ns, run_native_job_with_lake_client, BacktestJobError,
+};
 use harness_lakeclient::testing::{quote_stream, FakeLakeConfig, FakeLakeServer, FakeQuoteRow};
 use harness_lakeclient::{BlockingLakeClient, LakeClientConfig};
+use num::Decimal18;
 use serde_json::Value;
 
 const TOKEN: &str = "canonical-trades-token";
@@ -97,21 +103,25 @@ fn run_job(name: &str, quotes: &[FakeQuoteRow], script: &[(&str, i128)]) -> (Val
     run_job_with(name, config(), quotes, script)
 }
 
-/// Run one scripted job under the given configuration.
-fn run_job_with(
+/// Run one scripted job under the given configuration and return the engine
+/// result with the job's output directory.
+fn run_scripted_job(
     name: &str,
-    config: BacktestConfig,
+    config: &BacktestConfig,
     quotes: &[FakeQuoteRow],
     script: &[(&str, i128)],
-) -> (Value, String) {
+) -> (
+    Result<(BacktestOutcome, PathBuf), BacktestJobError>,
+    PathBuf,
+) {
     let server = FakeLakeServer::start(FakeLakeConfig {
         read_bodies_by_type: BTreeMap::from([("quote".to_string(), quote_stream("SPY", quotes))]),
         ..FakeLakeConfig::new(TOKEN)
     });
     let directory = std::env::temp_dir().join(format!("backtest-canonical-trades-{name}"));
     let _ = std::fs::remove_dir_all(&directory);
-    let (outcome, _) = run_native_job_with_lake_client(
-        &config,
+    let result = run_native_job_with_lake_client(
+        config,
         &EngineOptions::default(),
         Some(&directory),
         vec![StrategyInstance {
@@ -125,8 +135,19 @@ fn run_job_with(
             }),
         }],
         &client(&server),
-    )
-    .expect("native job");
+    );
+    (result, directory)
+}
+
+/// Run one scripted job under the given configuration.
+fn run_job_with(
+    name: &str,
+    config: BacktestConfig,
+    quotes: &[FakeQuoteRow],
+    script: &[(&str, i128)],
+) -> (Value, String) {
+    let (result, directory) = run_scripted_job(name, &config, quotes, script);
+    let (outcome, _) = result.expect("native job");
     assert!(outcome.completed());
     assert_eq!(outcome.fills.len(), script.len());
     let metrics: Value =
@@ -134,6 +155,26 @@ fn run_job_with(
             .expect("metrics json");
     let report = std::fs::read_to_string(directory.join("report.html")).expect("report html");
     (metrics, report)
+}
+
+/// A per-unit commission rule at `rate` per share on every fill.
+fn per_unit_fee(rate: &str) -> FeeRule {
+    FeeRule {
+        fee_id: "commission".to_string(),
+        basis: FeeBasis::PerUnit,
+        rate: rate.parse().expect("rate"),
+        minimum: num::Decimal::from_i128(0),
+        side: "both".to_string(),
+    }
+}
+
+/// Parse one canonical decimal string from the metrics document.
+fn decimal(value: &Value) -> Decimal18 {
+    value
+        .as_str()
+        .expect("decimal string")
+        .parse()
+        .expect("decimal")
 }
 
 #[test]
@@ -268,10 +309,10 @@ fn publishes_an_empty_trades_block_when_no_order_fills() {
     assert!(trades["largest_net_win"].is_null());
     assert!(trades["largest_net_loss"].is_null());
     assert!(report.contains("<th>Trades</th><td>0</td>"));
-    assert!(metrics["equity"]["sharpe"].is_null());
+    assert!(metrics["equity"]["sharpe_per_sample"].is_null());
     assert_eq!(
-        metrics["equity"]["sharpe_reason"],
-        "fewer_than_three_samples"
+        metrics["equity"]["sharpe_per_sample_reason"],
+        "fewer_than_three_returns"
     );
 }
 
@@ -332,14 +373,169 @@ fn allocates_fees_by_quantity_share_and_balances_the_ledger() {
     let exit_time = rows[0]["exit_timestamp_ns"].as_i64().expect("exit time");
     assert!(entry_time < exit_time, "a slice opens before it closes");
     assert!(
-        metrics["equity"]["sharpe"].is_string(),
-        "four samples define a Sharpe"
+        metrics["equity"]["sharpe_per_sample"].is_string(),
+        "four samples define a per-sample Sharpe"
     );
-    assert!(metrics["equity"]["sharpe_reason"].is_null());
+    assert!(metrics["equity"]["sharpe_per_sample_reason"].is_null());
     let open_fees: f64 = trades["open_fees"]
         .as_str()
         .expect("open fees")
         .parse()
         .expect("decimal");
     assert!(open_fees.abs() < f64::EPSILON, "every lot closed");
+}
+
+#[test]
+fn flip_closes_the_long_and_carries_the_open_remainder_fee() {
+    let start = parse_timestamp_ns("2024-01-02T14:30:00Z").expect("start");
+    let minute = 60_000_000_000;
+    // Buy 10 at 10 (fee 1.0), then sell 15 at 12 (fee 1.5). The sell closes the
+    // 10-unit long, so its exit fee is 1.5 * 10 / 15 = 1.0. The 5-unit remainder
+    // opens a short lot that carries the other 0.5 of the sell fee.
+    let quotes = [quote(start, "9", "10"), quote(start + minute, "12", "13")];
+    let mut configured = config();
+    configured.fees.rules.push(per_unit_fee("0.10"));
+    let (metrics, _) = run_job_with(
+        "flip-fees",
+        configured,
+        &quotes,
+        &[("buy", 10), ("sell", 15)],
+    );
+    let trades = &metrics["trades"];
+    let rows = trades["rows"].as_array().expect("trade rows");
+    assert_eq!(rows.len(), 1, "only the long lot closes");
+    assert_eq!(rows[0]["trade_id"], 1);
+    assert_eq!(rows[0]["side"], "long");
+    assert_eq!(rows[0]["quantity"], "10.000000000000000000");
+    assert_eq!(rows[0]["entry_fee"], "1.000000000000000000");
+    assert_eq!(rows[0]["exit_fee"], "1.000000000000000000");
+    assert_eq!(rows[0]["fees"], "2.000000000000000000");
+    assert_eq!(rows[0]["gross_pnl"], "20.000000000000000000");
+    assert_eq!(rows[0]["net_pnl"], "18.000000000000000000");
+    assert_eq!(trades["open_fees"], "0.500000000000000000");
+    assert_eq!(metrics["execution"]["fees_total"], "2.500000000000000000");
+    let closed_fees = rows
+        .iter()
+        .map(|row| decimal(&row["fees"]))
+        .fold(Decimal18::ZERO, |sum, fee| {
+            sum.checked_add(fee).expect("sum")
+        });
+    assert_eq!(
+        closed_fees
+            .checked_add(decimal(&trades["open_fees"]))
+            .expect("sum"),
+        decimal(&metrics["execution"]["fees_total"]),
+        "closed slice fees plus open fees equal the total fees"
+    );
+}
+
+#[test]
+fn partial_closes_split_one_lot_into_slices_that_reconcile_to_the_flat_equity() {
+    let start = parse_timestamp_ns("2024-01-02T14:30:00Z").expect("start");
+    let minute = 60_000_000_000;
+    // Buy 10 at 10 (fee 1.0); sell 4 at 12 (fee 0.4); sell 6 at 13 (fee 0.6).
+    // Two sells close one lot, which is two closed slices. The first slice takes
+    // 0.4 of the entry fee and the second takes the remaining 0.6.
+    //
+    // Deviation: the spec's example names three rows. One lot closed by two sells
+    // is two rows, so this asserts two.
+    let quotes = [
+        quote(start, "9", "10"),
+        quote(start + minute, "12", "13"),
+        quote(start + 2 * minute, "13", "14"),
+    ];
+    let mut configured = config();
+    configured.fees.rules.push(per_unit_fee("0.10"));
+    let (metrics, _) = run_job_with(
+        "partial-close",
+        configured,
+        &quotes,
+        &[("buy", 10), ("sell", 4), ("sell", 6)],
+    );
+    let trades = &metrics["trades"];
+    let rows = trades["rows"].as_array().expect("trade rows");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["quantity"], "4.000000000000000000");
+    assert_eq!(rows[0]["entry_fee"], "0.400000000000000000");
+    assert_eq!(rows[0]["exit_fee"], "0.400000000000000000");
+    assert_eq!(rows[1]["quantity"], "6.000000000000000000");
+    assert_eq!(rows[1]["entry_fee"], "0.600000000000000000");
+    assert_eq!(rows[1]["exit_fee"], "0.600000000000000000");
+    assert_eq!(trades["fees"], "2.000000000000000000");
+    assert_eq!(decimal(&trades["open_fees"]), Decimal18::ZERO);
+    assert_eq!(trades["gross_pnl"], "26.000000000000000000");
+    assert_eq!(trades["net_pnl"], "24.000000000000000000");
+    // The position is flat, so the equity change equals net PnL: 24 on 1,000,000.
+    assert_eq!(metrics["equity"]["total_return"], "0.000024000000000000");
+    assert!(metrics["equity"]["total_return_reason"].is_null());
+}
+
+#[test]
+fn negative_equity_leaves_return_drawdown_cagr_and_sharpe_undefined_with_reasons() {
+    let start = parse_timestamp_ns("2024-01-02T14:30:00Z").expect("start");
+    let minute = 60_000_000_000;
+    // A 5-cash account buys two units at 10, then sells both at 1. Equity runs
+    // 5, 5, 5, and then -13: cash is -13 with no position left.
+    let mut configured = config();
+    configured.initial_cash = "5".to_string();
+    configured.initial_cash_decimal = num::Decimal::from_i128(5);
+    let quotes = [
+        quote(start, "9", "10"),
+        quote(start + minute, "9", "10"),
+        quote(start + 2 * minute, "1", "2"),
+    ];
+    let (metrics, _) = run_job_with(
+        "negative-equity",
+        configured,
+        &quotes,
+        &[("buy", 1), ("buy", 1), ("sell", 2)],
+    );
+    let equity = &metrics["equity"];
+    assert_eq!(equity["samples"], 4);
+    assert!(equity["total_return"].is_null(), "no zero stands in for it");
+    assert_eq!(equity["total_return_reason"], "negative_equity");
+    assert!(equity["cagr"].is_null());
+    assert_eq!(equity["cagr_reason"], "negative_equity");
+    assert!(equity["max_drawdown"].is_null());
+    assert_eq!(equity["max_drawdown_reason"], "negative_equity");
+    assert!(equity["drawdown_duration_ns"].is_null());
+    assert!(equity["drawdown_recovered"].is_null());
+    assert!(equity["sharpe_per_sample"].is_null());
+    assert_eq!(equity["sharpe_per_sample_reason"], "negative_equity");
+}
+
+#[test]
+fn a_fill_whose_notional_overflows_the_decimal_bound_fails_the_job_by_name() {
+    let start = parse_timestamp_ns("2024-01-02T14:30:00Z").expect("start");
+    // 4,000,000,000 shares at 100,000,000,000 is a 4e20 notional, beyond the
+    // decimal128(38,18) bound. The job must fail by name: it must not book the
+    // fill at zero notional, and it must not leave a partial result set.
+    let quotes = [FakeQuoteRow::new(
+        start,
+        "99000000000",
+        "100000000000",
+        100,
+        4_000_000_000,
+        "XNYS",
+    )];
+    let (result, directory) = run_scripted_job(
+        "malformed-fill",
+        &config(),
+        &quotes,
+        &[("buy", 4_000_000_000)],
+    );
+    let error = match result {
+        Ok(_) => panic!("an overflowing fill must fail the job"),
+        Err(error) => error,
+    };
+    assert!(
+        matches!(&error, BacktestJobError::MalformedFill { .. }),
+        "expected a named malformed-fill error, got {error}"
+    );
+    let message = error.to_string();
+    assert!(message.starts_with("fill sim-fill-"), "{message}");
+    assert!(message.contains("notional"), "{message}");
+    assert!(message.contains("overflows"), "{message}");
+    assert!(!directory.join("backtest.json").exists());
+    assert!(!directory.join("metrics.json").exists());
 }

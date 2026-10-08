@@ -65,7 +65,7 @@ class BacktestRecord:
     initial_capital: float | None
     final_capital: float | None
     total_return: float | None
-    sharpe: float | None
+    sharpe_per_sample: float | None
     max_drawdown: float | None
     win_rate: float | None
     trades: int | None
@@ -102,7 +102,7 @@ class BacktestRecord:
             "period_end": self.period_end,
             "capital": self.initial_capital,
             "total_return": self.total_return,
-            "sharpe": self.sharpe,
+            "sharpe_per_sample": self.sharpe_per_sample,
             "max_drawdown": self.max_drawdown,
             "win_rate": self.win_rate,
             "trades": self.trades,
@@ -144,7 +144,8 @@ class BacktestRecord:
 
     def _default_stats(self) -> dict[str, object]:
         return {
-            "sharpe": self.sharpe,
+            "sharpe_per_sample": self.sharpe_per_sample,
+            "sharpePerSample": self.sharpe_per_sample,
             "max_drawdown": self.max_drawdown,
             "win_rate": self.win_rate,
         }
@@ -304,8 +305,16 @@ class BacktestDataService:
         outcome: ActivationOutcome,
         job_id: str,
     ) -> BacktestRecord:
+        """Project one launch outcome onto a record without deriving any statistic.
+
+        Statistics are read from the canonical ``equity`` and ``trades`` blocks of
+        the outcome's ``metrics`` document, as the harness published them; a value
+        those blocks do not publish stays ``None``.
+        """
         raw = outcome.raw
         metrics = _mapping(raw.get("metrics"))
+        equity = _mapping(metrics.get("equity"))
+        trades = _mapping(metrics.get("trades"))
         manifest = _mapping(raw.get("manifest"))
         strategy_id = (
             request.strategy_id
@@ -341,13 +350,15 @@ class BacktestDataService:
             period_start=period_start,
             period_end=period_end,
             created_at=_iso_z(self._clock()),
-            initial_capital=_optional_number(metrics.get("initial_capital")),
-            final_capital=_optional_number(metrics.get("final_capital")),
-            total_return=_optional_number(metrics.get("total_return")),
-            sharpe=_optional_number(metrics.get("sharpe")),
-            max_drawdown=_optional_number(metrics.get("max_drawdown")),
-            win_rate=_optional_number(metrics.get("win_rate")),
-            trades=_optional_count(metrics.get("trades")),
+            # Canonical metrics publish no capital; the artifact import reads it
+            # from backtest.json, which a launch receipt does not carry.
+            initial_capital=None,
+            final_capital=None,
+            total_return=_optional_number(equity.get("total_return")),
+            sharpe_per_sample=_optional_number(equity.get("sharpe_per_sample")),
+            max_drawdown=_optional_number(equity.get("max_drawdown")),
+            win_rate=_optional_number(trades.get("hit_rate")),
+            trades=_optional_count(trades.get("trade_count")),
             split=_optional_mapping(metrics.get("split")),
             manifest=manifest_document,
             status=_launch_status(outcome),

@@ -1,0 +1,80 @@
+{
+  "job_id": "job-0123456789abcdef0123456789abcdef",
+  "status": "completed",
+  "counts": {
+    "market_events": 3,
+    "dispatched": 2,
+    "orders": 2,
+    "fills": 2
+  },
+  "equity": {
+    "samples": 3,
+    "total_return": "0.003600000000000000",
+    "total_return_reason": null,
+    "cagr": "0.003600000000000000",
+    "cagr_reason": null,
+    "max_drawdown": "0.000200000000000000",
+    "max_drawdown_reason": null,
+    "drawdown_duration_ns": 60000000000,
+    "drawdown_recovered": true,
+    "sharpe_per_sample": null,
+    "sharpe_per_sample_reason": "fewer_than_three_returns"
+  },
+  "execution": {
+    "fill_count": 2,
+    "fees_total": "0.400000000000000000",
+    "slippage_total": null,
+    "slippage_total_reason": "not_modeled",
+    "outcomes": {
+      "total": 2,
+      "filled": 2,
+      "rejected": 0,
+      "cancelled": 0,
+      "other": 0
+    }
+  },
+  "trades": {
+    "schema": "closed_trades.v1",
+    "fee_allocation": "fill_quantity_share.v1",
+    "trade_count": 1,
+    "win_count": 1,
+    "loss_count": 0,
+    "zero_count": 0,
+    "gross_pnl": "4.000000000000000000",
+    "fees": "0.400000000000000000",
+    "net_pnl": "3.600000000000000000",
+    "open_fees": "0.000000000000000000",
+    "gross_profit": "4.000000000000000000",
+    "gross_loss": "0.000000000000000000",
+    "net_profit": "3.600000000000000000",
+    "net_loss": "0.000000000000000000",
+    "profit_factor": null,
+    "profit_factor_reason": "no_net_losses",
+    "hit_rate": "1.000000000000000000",
+    "hit_rate_reason": null,
+    "average_net_win": "3.600000000000000000",
+    "average_net_loss": null,
+    "largest_net_win": "3.600000000000000000",
+    "largest_net_loss": null,
+    "rows": [
+      {
+        "trade_id": 1,
+        "symbol": "SPY",
+        "side": "long",
+        "quantity": "2.000000000000000000",
+        "entry_sequence": 1,
+        "exit_sequence": 2,
+        "entry_timestamp_ns": 1704205800000000123,
+        "exit_timestamp_ns": 1704205860000000456,
+        "entry_price": "10.000000000000000000",
+        "exit_price": "12.000000000000000000",
+        "gross_pnl": "4.000000000000000000",
+        "entry_fee": "0.200000000000000000",
+        "exit_fee": "0.200000000000000000",
+        "fees": "0.400000000000000000",
+        "net_pnl": "3.600000000000000000"
+      }
+    ]
+  },
+  "custom": {}
+}

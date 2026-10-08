@@ -30,7 +30,8 @@ use super::rng::PythonRandom;
 /// # Errors
 ///
 /// Returns [`BacktestError::DataPreflight`] when a symbol has events but no
-/// bars, when a bar close is not positive (the log return is undefined), or
+/// bars, when a bar close is not positive (the log return is undefined), when a
+/// bid, ask, or trade price is not positive (a tick has no rescaled value), or
 /// when a rescaled price is not representable at scale 18.
 pub fn apply_null_transform(
     configuration: &BacktestConfig,
@@ -133,6 +134,8 @@ pub fn apply_null_transform(
                 ask,
                 ..
             } => {
+                require_positive_tick(*bid, "bid", symbol, *timestamp_ns)?;
+                require_positive_tick(*ask, "ask", symbol, *timestamp_ns)?;
                 let (synthetic, original) = tick_reference(&references[symbol], *timestamp_ns);
                 *bid = scale_price(*bid, synthetic, original, symbol)?;
                 *ask = scale_price(*ask, synthetic, original, symbol)?;
@@ -143,6 +146,7 @@ pub fn apply_null_transform(
                 price,
                 ..
             } => {
+                require_positive_tick(*price, "trade price", symbol, *timestamp_ns)?;
                 let (synthetic, original) = tick_reference(&references[symbol], *timestamp_ns);
                 *price = scale_price(*price, synthetic, original, symbol)?;
             }
@@ -158,6 +162,23 @@ pub fn apply_null_transform(
         fingerprints,
         expected_data_fingerprint: fixture.expected_data_fingerprint.clone(),
     })
+}
+
+/// Reject a non-positive tick price. A tick is rescaled multiplicatively, so a
+/// zero or negative price has no meaningful rescaled value; it must fail the
+/// preflight rather than pass through as a silent zero.
+fn require_positive_tick(
+    price: Decimal18,
+    field: &str,
+    symbol: &str,
+    timestamp_ns: i64,
+) -> Result<(), BacktestError> {
+    if price.is_positive() {
+        return Ok(());
+    }
+    Err(BacktestError::DataPreflight(format!(
+        "null block permutation requires a positive {field} for symbol {symbol:?} at {timestamp_ns}"
+    )))
 }
 
 /// Rebuild one symbol's synthetic close path from its permuted return blocks.

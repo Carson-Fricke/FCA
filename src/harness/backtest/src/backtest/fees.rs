@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use num::{Context, Decimal, RoundingMode};
+use num::{Context, Decimal, DecimalError, RoundingMode};
 
 use crate::backtest::config::{BacktestConfig, FeeBasis, FeeConfig};
 use crate::backtest::errors::BacktestError;
@@ -150,14 +150,18 @@ pub struct FeeFill<'a> {
 
 impl FeeSchedule {
     /// Calculate rounded components for one fill with explicit attribution.
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BacktestError::Arithmetic`] when a component product cannot be
+    /// represented exactly, so the fee is never silently zeroed.
     pub fn calculate(
         &self,
         fill: &FeeFill<'_>,
         job_id: &str,
         strategy_id: &str,
         asset_class: &str,
-    ) -> FeeAssessment {
+    ) -> Result<FeeAssessment, BacktestError> {
         let components = match asset_class {
             "option" => {
                 let quantity = fill.quantity;
@@ -193,7 +197,7 @@ impl FeeSchedule {
                     .checked_mul(fill.price)
                     .and_then(|value| value.checked_div(basis_points()))
                     .and_then(|value| value.checked_mul(rate))
-                    .unwrap_or(Decimal::ZERO);
+                    .map_err(|error| fee_overflow(fill.fill_id, "crypto fee", error))?;
                 let role = if fill.liquidity == Some("maker") {
                     "maker"
                 } else {
@@ -209,7 +213,7 @@ impl FeeSchedule {
                 let commission = fill
                     .quantity
                     .checked_mul(equity.commission_per_share)
-                    .unwrap_or(Decimal::ZERO);
+                    .map_err(|error| fee_overflow(fill.fill_id, "commission", error))?;
                 let commission = max_decimal(commission, equity.commission_minimum);
                 let mut components = vec![FeeComponent {
                     fee_id: "commission".to_string(),
@@ -221,11 +225,11 @@ impl FeeSchedule {
                         .checked_mul(fill.price)
                         .and_then(|value| value.checked_mul(equity.sec_rate_bps))
                         .and_then(|value| value.checked_div(basis_points()))
-                        .unwrap_or(Decimal::ZERO);
+                        .map_err(|error| fee_overflow(fill.fill_id, "SEC regulatory fee", error))?;
                     let taf = min_decimal(
                         fill.quantity
                             .checked_mul(equity.taf_per_share)
-                            .unwrap_or(Decimal::ZERO),
+                            .map_err(|error| fee_overflow(fill.fill_id, "FINRA TAF", error))?,
                         equity.taf_maximum,
                     );
                     components.push(FeeComponent {
@@ -240,7 +244,7 @@ impl FeeSchedule {
                 components
             }
         };
-        FeeAssessment {
+        Ok(FeeAssessment {
             fill_id: fill.fill_id.to_string(),
             schedule_id: self.schedule_id.clone(),
             currency: self.currency.clone(),
@@ -248,7 +252,7 @@ impl FeeSchedule {
             strategy_id: strategy_id.to_string(),
             asset_class: asset_class.to_string(),
             components,
-        }
+        })
     }
 }
 
@@ -403,4 +407,11 @@ fn min_decimal(left: Decimal, right: Decimal) -> Decimal {
     } else {
         left
     }
+}
+
+/// The named failure for one fee component whose exact product overflows.
+fn fee_overflow(fill_id: &str, component: &str, error: DecimalError) -> BacktestError {
+    BacktestError::Arithmetic(format!(
+        "{component} for fill {fill_id} cannot be represented exactly: {error}"
+    ))
 }

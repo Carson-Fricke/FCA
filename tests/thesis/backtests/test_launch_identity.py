@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import pathlib
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -21,16 +23,23 @@ from thesis.integrations.harness_activation import (
     HarnessCapabilities,
 )
 
+FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 JOB_ID_PATTERN = re.compile(r"^job-[0-9a-f]{32}$")
 
 
 @dataclass
 class RecordingBoundary:
-    """HarnessBoundary double returning an optionally divergent job_id."""
+    """HarnessBoundary double returning an optionally divergent job_id.
+
+    ``state`` and ``metrics`` shape a terminal receipt that carries a published
+    metrics document; the default is the queued receipt a local harness returns.
+    """
 
     acknowledged_job_id: str | None = None
     omit_job_id: bool = False
     failure: Exception | None = None
+    state: str = "queued"
+    metrics: Mapping[str, object] | None = None
     requests: list[HarnessActivationRequest] = field(default_factory=list)
 
     @property
@@ -46,16 +55,18 @@ class RecordingBoundary:
         job_id: str | None = None if self.omit_job_id else request.job_id
         if self.acknowledged_job_id is not None:
             job_id = self.acknowledged_job_id
-        raw: dict[str, object] = {"state": "queued"}
+        raw: dict[str, object] = {"state": self.state}
         if job_id is not None:
             raw["job_id"] = job_id
+        if self.metrics is not None:
+            raw["metrics"] = dict(self.metrics)
         return ActivationOutcome(
             action=request.action,
             bundle_ref=request.bundle_ref,
             environment=request.environment,
             request_payload=request.to_payload(),
             job_id=job_id,
-            state="queued",
+            state=self.state,
             raw=raw,
         )
 
@@ -150,3 +161,21 @@ def test_launch_ignores_result_aliases_for_identity() -> None:
     mapping: Mapping[str, object] = document
     assert "run_id" not in mapping
     assert "backtest_id" not in mapping
+
+
+def test_terminal_launch_reads_the_canonical_equity_and_trades_blocks() -> None:
+    metrics = json.loads(
+        (FIXTURES / "closed_trades.metrics.json").read_text(encoding="utf-8")
+    )
+    service = _service(RecordingBoundary(state="succeeded", metrics=metrics))
+
+    service.launch("workspace-one", _request())
+
+    [row] = service.list_backtests("workspace-one")
+    assert row["total_return"] == -0.0024
+    assert row["sharpe_per_sample"] == -0.41
+    assert row["max_drawdown"] == 0.02
+    assert row["win_rate"] == pytest.approx(1 / 3)
+    assert row["trades"] == 3
+    # Canonical metrics publish no capital, so the launch record carries none.
+    assert row["capital"] is None

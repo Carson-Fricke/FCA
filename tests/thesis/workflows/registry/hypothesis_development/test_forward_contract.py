@@ -152,7 +152,7 @@ def _inverted_window(payload: dict[str, object]) -> None:
     window["end"] = window["start"]
 
 
-def test_forward_round_trips_and_decodes_snake_case() -> None:
+def test_forward_round_trips_and_rejects_the_snake_case_legacy_shape() -> None:
     evaluation = ForwardEvaluation.from_dict(_forward_envelope())
     assert ForwardEvaluation.from_dict(evaluation.as_dict()) == evaluation
 
@@ -216,7 +216,8 @@ def test_forward_round_trips_and_decodes_snake_case() -> None:
         "limitations": portable["limitations"],
     }
 
-    assert ForwardEvaluation.from_dict(legacy) == evaluation
+    with pytest.raises(WorkflowError):
+        ForwardEvaluation.from_dict(legacy)
 
 
 def test_forward_nested_evidence_round_trips_individually() -> None:

@@ -8,7 +8,7 @@
 		maxDrawdown: { label: 'Max drawdown', group: 'Returns', format: 'pct', sign: false },
 		maxDrawdownDurationNs: { label: 'Max DD duration', group: 'Returns', format: 'duration', sign: false },
 		maxDrawdownRecovered: { label: 'DD recovered', group: 'Returns', format: 'bool', sign: false },
-		sharpe: { label: 'Sharpe ratio', group: 'Returns', format: 'ratio', sign: false },
+		sharpePerSample: { label: 'Sharpe (per sample)', group: 'Returns', format: 'ratio', sign: false },
 		sortino: { label: 'Sortino ratio', group: 'Returns', format: 'ratio', sign: false },
 		tradeCount: { label: 'Trades', group: 'Trades', format: 'int', sign: false },
 		winCount: { label: 'Wins', group: 'Trades', format: 'int', sign: false },
@@ -35,7 +35,8 @@
 	const GROUP_ORDER = ['Returns', 'Trades', 'Execution', 'Other'];
 
 	function fmtValue(value, format) {
-		if (value == null || !Number.isFinite(value)) return '—';
+		if (value == null || (typeof value === 'number' && !Number.isFinite(value))) return '—';
+		if (typeof value !== 'number') return format === 'bool' ? (value ? 'yes' : 'no') : String(value);
 		switch (format) {
 			case 'pct':
 				return `${(value * 100).toFixed(1)}%`;

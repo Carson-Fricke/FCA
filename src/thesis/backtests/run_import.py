@@ -42,14 +42,23 @@ _CANONICAL_TRADE_FIELDS = (
     "win_count",
     "loss_count",
     "hit_rate",
+    "gross_pnl",
+    "fees",
     "net_pnl",
     "gross_profit",
     "gross_loss",
+    "net_profit",
+    "net_loss",
     "profit_factor",
     "average_net_win",
     "average_net_loss",
     "largest_net_win",
     "largest_net_loss",
+)
+
+_CANONICAL_TRADE_REASON_FIELDS = (
+    "profit_factor_reason",
+    "hit_rate_reason",
 )
 
 _TRADE_DECIMAL_FIELDS = (
@@ -86,10 +95,13 @@ class _EquityStatistics:
     """The equity-block statistics exactly as the harness published them."""
 
     total_return: float | None
+    total_return_reason: str | None
     max_drawdown: float | None
+    max_drawdown_reason: str | None
     cagr: float | None
-    sharpe: float | None
-    sharpe_reason: str | None
+    cagr_reason: str | None
+    sharpe_per_sample: float | None
+    sharpe_per_sample_reason: str | None
 
 
 def import_backtest_run(
@@ -134,10 +146,12 @@ def import_backtest_run(
     equity_points = _equity_from_parquet(reader, job_id)
     equity = _equity_statistics(metrics)
     canonical = _canonical_trade_stats(metrics)
+    trade_reasons = _canonical_trade_reasons(metrics)
     trade_log, trades_reason = _trade_log(metrics)
     stats = _stats_document(
         equity,
         canonical,
+        trade_reasons,
         equity_reason=None if equity_points else "artifact_unavailable",
         trades_reason=trades_reason,
     )
@@ -186,7 +200,7 @@ def import_backtest_run(
         initial_capital=initial_capital,
         final_capital=final_capital,
         total_return=equity.total_return,
-        sharpe=equity.sharpe,
+        sharpe_per_sample=equity.sharpe_per_sample,
         max_drawdown=equity.max_drawdown,
         win_rate=canonical["hit_rate"],
         trades=_optional_int(canonical["trade_count"]),
@@ -294,10 +308,13 @@ def _equity_statistics(metrics: Mapping[str, object]) -> _EquityStatistics:
     equity = _mapping(metrics.get("equity"))
     return _EquityStatistics(
         total_return=_number(equity.get("total_return")),
+        total_return_reason=_text(equity.get("total_return_reason")),
         max_drawdown=_number(equity.get("max_drawdown")),
+        max_drawdown_reason=_text(equity.get("max_drawdown_reason")),
         cagr=_number(equity.get("cagr")),
-        sharpe=_number(equity.get("sharpe")),
-        sharpe_reason=_text(equity.get("sharpe_reason")),
+        cagr_reason=_text(equity.get("cagr_reason")),
+        sharpe_per_sample=_number(equity.get("sharpe_per_sample")),
+        sharpe_per_sample_reason=_text(equity.get("sharpe_per_sample_reason")),
     )
 
 
@@ -310,6 +327,12 @@ def _canonical_trade_stats(metrics: Mapping[str, object]) -> dict[str, float | N
     """
     block = _mapping(metrics.get("trades"))
     return {field: _number(block.get(field)) for field in _CANONICAL_TRADE_FIELDS}
+
+
+def _canonical_trade_reasons(metrics: Mapping[str, object]) -> dict[str, str | None]:
+    """Read the published reasons that explain an undefined trade ratio as text."""
+    block = _mapping(metrics.get("trades"))
+    return {field: _text(block.get(field)) for field in _CANONICAL_TRADE_REASON_FIELDS}
 
 
 def _trade_log(
@@ -328,9 +351,21 @@ def _trade_log(
     return tuple(_trade_record(row) for row in rows), None
 
 
+def _trade_id(value: object) -> int | None:
+    """The canonical trade id is a non-negative JSON integer (``uint``).
+
+    A boolean is an integer in Python but never a trade id; a string or any
+    other type is malformed.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
 def _trade_record(row: object) -> dict[str, object]:
     """Map one canonical closed-trade row onto the workspace trade shape.
 
+    The workspace id is ``trade-NNNN``, formatted from the integer ``trade_id``.
     ``pnl`` is the net PnL the statistics headline; the gross PnL and the fees
     are carried alongside it.  A row that breaks the canonical contract fails
     the import rather than being dropped or defaulted.
@@ -339,7 +374,7 @@ def _trade_record(row: object) -> dict[str, object]:
     decimals = {name: _number(document.get(name)) for name in _TRADE_DECIMAL_FIELDS}
     entry_ns = _epoch_ns(document.get("entry_timestamp_ns"))
     exit_ns = _epoch_ns(document.get("exit_timestamp_ns"))
-    trade_id = _text(document.get("trade_id"))
+    trade_id = _trade_id(document.get("trade_id"))
     symbol = _text(document.get("symbol"))
     side = _text(document.get("side"))
     if (
@@ -354,7 +389,7 @@ def _trade_record(row: object) -> dict[str, object]:
             f"harness trade row {document.get('trade_id')!r} breaks the canonical contract"
         )
     return {
-        "id": trade_id,
+        "id": f"trade-{trade_id:04d}",
         "symbol": symbol,
         "side": "buy" if side == "long" else "sell",
         "qty": decimals["quantity"],
@@ -371,6 +406,7 @@ def _trade_record(row: object) -> dict[str, object]:
 def _stats_document(
     equity: _EquityStatistics,
     canonical: Mapping[str, float | None],
+    reasons: Mapping[str, str | None],
     *,
     equity_reason: str | None,
     trades_reason: str | None,
@@ -378,19 +414,27 @@ def _stats_document(
     """Project the published statistics under their snake_case and camelCase keys."""
     return {
         "total_return": equity.total_return,
+        "total_return_reason": equity.total_return_reason,
         "max_drawdown": equity.max_drawdown,
+        "max_drawdown_reason": equity.max_drawdown_reason,
         "cagr": equity.cagr,
-        "sharpe": equity.sharpe,
-        "sharpe_reason": equity.sharpe_reason,
+        "cagr_reason": equity.cagr_reason,
+        "sharpe_per_sample": equity.sharpe_per_sample,
+        "sharpe_per_sample_reason": equity.sharpe_per_sample_reason,
         "equity_unavailable_reason": equity_reason,
         "trades_unavailable_reason": trades_reason,
         **canonical,
+        **reasons,
         "win_rate": canonical["hit_rate"],
         "totalReturn": equity.total_return,
         "maxDrawdown": equity.max_drawdown,
+        "sharpePerSample": equity.sharpe_per_sample,
         "hitRate": canonical["hit_rate"],
         "tradeCount": canonical["trade_count"],
         "totalPnl": canonical["net_pnl"],
+        "grossPnl": canonical["gross_pnl"],
+        "netProfit": canonical["net_profit"],
+        "netLoss": canonical["net_loss"],
         "winCount": canonical["win_count"],
         "lossCount": canonical["loss_count"],
         "grossProfit": canonical["gross_profit"],
