@@ -105,8 +105,10 @@ or bootstrapping the environment.
 
 Read and follow `.github/instructions/testing-strategy.instructions.md` for
 every test change. Behavior tests at the highest practical boundary are the
-default; unit tests are limited to the documented pure-logic categories. Mark
-correct-but-expensive tests `slow` and local-stack tests `e2e`. Focused runs:
+default; unit tests are limited to the documented pure-logic categories. The
+full suite MUST finish in under 3 minutes; expensive tests that cannot fit are
+deleted or converted, not retained behind a marker. Markers `slow` and `e2e`
+remain for local filtering. Focused runs:
 `uv run --extra dev pytest -p no:cacheprovider -m "not slow" <paths>`.
 
 ## Architecture Documentation

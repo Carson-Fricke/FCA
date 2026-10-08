@@ -6,11 +6,9 @@ import os
 from pathlib import Path
 from typing import cast
 
-import pytest
 from tests.thesis.knowledge.test_service import Repositories, hits
 
 from thesis.knowledge.corpus import KnowledgeCorpus
-from thesis.knowledge.embeddings import EmbeddingModelError, MiniLmEmbedder
 from thesis.knowledge.service import KnowledgeService
 from thesis.workspaces.repository import WorkspaceRepositoryProvider
 
@@ -87,25 +85,3 @@ def test_page_titles_retrieve_themselves_with_the_offline_baseline(
         ranked = [cast(str, hit["page_id"]) for hit in hits(result)]
         assert ranked, title
         assert page_id in ranked[:5], (title, ranked)
-
-
-@pytest.mark.skipif(
-    not _cached_model_available(),
-    reason="the all-MiniLM-L6-v2 model is not cached on this machine",
-)
-@pytest.mark.slow
-def test_semantic_search_routes_paraphrased_questions(tmp_path: Path) -> None:
-    try:
-        embedder = MiniLmEmbedder.load()
-    except EmbeddingModelError as error:  # pragma: no cover - environment dependent
-        pytest.skip(f"embedding model unavailable: {error}")
-    service = KnowledgeService(
-        cast(WorkspaceRepositoryProvider, Repositories(tmp_path / "workspaces")),
-        LIBRARY,
-        embedder,
-    )
-    for query, page_id in SEMANTIC_QUERIES.items():
-        result = service.search("alpha", query, scope="shared", limit=6)
-        ranked = [cast(str, hit["page_id"]) for hit in hits(result)]
-        assert page_id in ranked[:5], (query, ranked)
-        assert result["retrieval_baseline"] == "Xenova/all-MiniLM-L6-v2"

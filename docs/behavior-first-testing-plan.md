@@ -18,27 +18,33 @@ shims, or weakening the mandated guards and named behavior suites in
 
 ## Outcome
 
-Measured after Slices 1, 2, and 4:
+Final state, measured on Windows:
 
-- Default suite (`-m "not slow"`): 1,260 passed, 1 skipped in 2m00s, down from
-  15m32s. CI runs it first, then the slow lane.
-- Slow lane (`-m slow`): 59 passed in 7m34s, down from 92 tests in 10m30s. It
-  retains the three build/native checks, the small real-git program suite, and
-  the mandated `test_study_validation_recovery.py` suite. The trim reduced the
-  rejected-contract matrix from 13 cases to 3, the Gitea remote-integrity matrix
-  from 8 to 4, deleted overlapping clone/recovery/tamper cases, and moved
-  workspace-id validation off Git.
-- `tests/thesis/workspaces/test_programs.py`: 56 fast tests in 4.5s through the
-  `ProgramGit` storage seam, 8 slow tests for real Git, build, and packaging
-  semantics. Previously 97 tests in 528s.
-- About 56 test functions (71 collected cases including parametrization) removed
-  across both passes: prompt-prose, wiring, constant, and private-helper tests,
-  then redundant slow-lane recovery and validation cases. Speed and boundary
-  placement were the goals, not a coverage-neutral count.
+- Full suite, one run: 1,272 passed, 1 skipped in 2m41s, down from 15m32s.
+  CI runs every test in one step; the `slow`/`e2e` markers remain only for
+  local filtering. The hard budget is 3 minutes.
+- Slow markers: 3 real-git smoke tests total — strategies author/restart
+  receipt, research-model restart isolation, and program targeted updates.
+  Their subjects are Git semantics a fake cannot prove; everything else was
+  deleted or converted off real Git.
+- The mandated `test_study_validation_recovery.py` suite (9 HTTP/workflow
+  behavior tests) was converted, not weakened: the test setup injects the
+  in-memory `ProgramGit` factory and in-memory research/hypothesis stores into
+  the serving composition. It runs in about 1.5s instead of ~140s.
+- Compile and packaging checks left pytest entirely: template cargo check,
+  wheel portability, native binary smoke, and lake binary help. CI's Rust
+  jobs and wheel build own compilation and packaging.
+- Removed across all passes: 97 test functions (118 collected cases). The
+  reductions were prompt-prose, wiring, constant, private-helper, parameter
+  matrices, and overlapping real-git recovery/validation cases. Missing edge
+  cases were preferred over slow tests by explicit direction.
 - Production seam: `WorkspacePrograms` accepts `git_factory`; `GitCoordinator`
   gained `has_staged_changes` and `commit_exact_files`, and
   `GitMaterializationError` preserves the known commit on materialization
-  failure. All real-Git keeper tests still pass.
+  failure. The surviving real-Git smoke tests still pass.
+- `tests/thesis/workspaces/test_programs.py`: 56 fast tests in about 5s through
+  the `ProgramGit` storage seam plus 1 real-git smoke test, from 97 tests in
+  528s before the work.
 
 ## Baseline
 
@@ -180,9 +186,9 @@ replacement; `ruff`, `ty`, and the focused suites pass.
 
 ## Slice 4: CI And Enforcement (implemented)
 
-- Python CI: run `pytest -m "not slow"` first, then `pytest -m "slow"` in a
-  step with its own timeout; keep the 20-minute job budget with headroom.
-- Add `--durations=25` to the CI test output.
+- Python CI: run the entire suite in one step with `--durations=25`. The
+  3-minute budget leaves wide headroom under the 20-minute job timeout;
+  `slow`/`e2e` markers remain for local filtering only.
 - Review discipline: a new unit test names its allow-list category; a behavior
   change lands with its behavior test; superseded tests are removed in the same
   change.

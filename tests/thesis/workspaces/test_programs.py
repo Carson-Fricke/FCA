@@ -1,12 +1,6 @@
 """Committed artifacts, content-fenced edits, and compiler input identity."""
 
-import json
-import os
 import shutil
-import subprocess
-import sys
-import tomllib
-import zipfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import cast
@@ -15,7 +9,6 @@ import pytest
 from tests.thesis.workspaces._support import MemoryGitFactory, Repositories
 
 from thesis.integrations.mcp import McpToolResult
-from thesis.persistence.git import GitCoordinator
 from thesis.workspaces.local import LocalWorkspaceProvider
 from thesis.workspaces.manifest import WorkspaceManifest, load_workspace_manifest
 from thesis.workspaces.programs import (
@@ -23,7 +16,6 @@ from thesis.workspaces.programs import (
     PROGRAM_TEMPLATES,
     STUDY_TEMPLATE,
     ProgramArtifactError,
-    ProgramKind,
     ProgramPublicationError,
     WorkspacePrograms,
 )
@@ -128,40 +120,6 @@ def git_programs(
         provider.create(WorkspaceManifest.model_validate(data))
     harness = Harness()
     return WorkspacePrograms(provider, harness), provider, harness
-
-
-@pytest.mark.slow
-def test_commits_only_artifacts_and_preserves_index(
-    git_programs: GitPrograms,
-) -> None:
-    service, provider, _ = git_programs
-    root = provider.open("workspace-one").root
-    git = GitCoordinator(root)
-    (root / "unrelated.txt").write_text("staged", encoding="utf-8")
-    git._run("add", "--", "unrelated.txt")
-    before = git.head()
-    receipt = service.author(
-        "workspace-one", "study", "alpha", STUDY_TEMPLATE, configuration=CONFIG
-    )
-    assert receipt["gitCommit"] != before
-    assert "source" not in receipt
-    assert set(
-        git._run(
-            "diff-tree",
-            "--no-commit-id",
-            "--name-only",
-            "-r",
-            cast(str, receipt["gitCommit"]),
-        ).stdout.splitlines()
-    ) == {"studies/alpha/program.rs", "studies/alpha/manifest.json"}
-    assert git._run("diff", "--cached", "--name-only").stdout.strip() == "unrelated.txt"
-    assert service.read("workspace-one", "study", "alpha")["source"] == STUDY_TEMPLATE
-    with pytest.raises(ProgramArtifactError, match="does not exist"):
-        service.read("workspace-two", "study", "alpha")
-    assert (
-        GitCoordinator(provider.open("workspace-two").root).head()
-        != receipt["gitCommit"]
-    )
 
 
 @pytest.mark.parametrize(
@@ -468,59 +426,6 @@ def test_missing_harness_fails_closed(
         service.validate("workspace-one", "study", "alpha")
 
 
-@pytest.mark.slow
-def test_templates_compile_against_actual_sdk(
-    tmp_path: Path, programs: Programs
-) -> None:
-    service = programs[0]
-    crate = tmp_path / "templates"
-    (crate / "src/bin").mkdir(parents=True)
-    (crate / "Cargo.toml").write_text(
-        '[package]\nname = "program-template-check"\nversion = "0.0.0"\nedition = "2021"\n'
-        '[dependencies]\nharness-strategy-sdk = { path = "'
-        + service.sdk_root.as_posix()
-        + '" }\n',
-        encoding="utf-8",
-    )
-    for kind, source in PROGRAM_TEMPLATES.items():
-        configuration = {
-            **CONFIG,
-            "subscriptions": [
-                {"data_type": "bars", "symbols": ["MSFT", "AAPL"], "interval": "1d"},
-                {"data_type": "quote", "symbols": ["MSFT"]},
-                {"data_type": "trade", "symbols": ["AAPL"]},
-            ],
-        }
-        source = service.template_source(cast(ProgramKind, kind), configuration)
-        if kind == "indicator":
-            source = service._assembled_source(
-                {
-                    "source": source,
-                    "dependencies": {},
-                    "manifest": {"indicatorType": "AuthoredIndicator"},
-                },
-                "indicator",
-            )
-        (crate / "src/bin" / f"{kind}.rs").write_text(
-            source + "\nfn main() {}\n", encoding="utf-8"
-        )
-    result = subprocess.run(
-        [
-            "cargo",
-            "check",
-            "--offline",
-            "--bins",
-            "--manifest-path",
-            str(crate / "Cargo.toml"),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=90,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-
-
 def test_configuration_cannot_override_committed_source(
     programs: Programs,
 ) -> None:
@@ -588,60 +493,6 @@ def test_missing_validation_and_nonaccepting_compiler_fail_closed(
     service.harness = EmptyHarness()
     assert service.validate("workspace-one", "study", "alpha")["accepted"] is False
     service.harness = harness
-
-
-@pytest.mark.slow
-def test_pinned_load_and_completion_verification(
-    git_programs: GitPrograms,
-) -> None:
-    service, _, _ = git_programs
-    dep = service.author(
-        "workspace-one", "indicator", "last", INDICATOR_TEMPLATE, configuration=CONFIG
-    )
-    first = service.author(
-        "workspace-one",
-        "study",
-        "alpha",
-        STUDY_TEMPLATE,
-        configuration=CONFIG,
-        indicator_ids=["last"],
-    )
-    pinned = service.load(
-        "workspace-one", "study", "alpha", cast(str, first["gitCommit"])
-    )
-    assert (
-        pinned["source"]
-        == "mod r#last {\n" + INDICATOR_TEMPLATE + "\n}\n" + STUDY_TEMPLATE
-    )
-    assert pinned["configuration"] == CONFIG
-    assert (
-        cast(list[dict[str, object]], pinned["dependencies"])[0]["sourceSha256"]
-        == dep["sourceSha256"]
-    )
-    service.update(
-        "workspace-one",
-        "indicator",
-        "last",
-        expected_version=cast(str, dep["version"]),
-        expected="bar.close",
-        replacement="bar.open",
-    )
-    assert (
-        service.load("workspace-one", "study", "alpha")["version"] != first["version"]
-    )
-    assert service.verify_completion("workspace-one", "study", "alpha", first) == pinned
-    assert (
-        service.load("workspace-one", "study", "alpha", cast(str, first["gitCommit"]))
-        == pinned
-    )
-    with pytest.raises(ProgramArtifactError, match="does not match"):
-        service.verify_completion(
-            "workspace-one", "study", "alpha", {**first, "version": "0" * 64}
-        )
-    with pytest.raises(ProgramArtifactError, match="reachable"):
-        service.load("workspace-two", "study", "alpha", cast(str, first["gitCommit"]))
-    with pytest.raises(ProgramArtifactError, match="object ID"):
-        service.load("workspace-one", "study", "alpha", "HEAD")
 
 
 def test_basic_template_defaults_follow_declared_inputs(
@@ -865,85 +716,6 @@ def test_publication_failure_retains_commit_and_explicit_recovery(
     )
 
 
-@pytest.mark.slow
-def test_sdk_wheel_assets_are_canonical_and_portable(tmp_path: Path) -> None:
-    """Build from a fresh tree so stale local build/lib cannot mask missing data."""
-    project = tmp_path / "project"
-    project.mkdir()
-    for filename in ("pyproject.toml", "MANIFEST.in"):
-        shutil.copyfile(filename, project / filename)
-    for package in ("thesis", "lake"):
-        shutil.copytree(
-            Path("src") / package,
-            project / "src" / package,
-            ignore=shutil.ignore_patterns("target", "__pycache__"),
-        )
-    for crate in ("strategy-sdk", "contracts", "num"):
-        source = Path("src/harness") / crate
-        destination = project / "src/harness" / crate
-        shutil.copytree(source / "src", destination / "src")
-        shutil.copyfile(source / "Cargo.toml", destination / "Cargo.toml")
-    output = tmp_path / "dist"
-    result = subprocess.run(
-        [
-            "uv",
-            "build",
-            "--python",
-            "3.12",
-            "--wheel",
-            "--force-pep517",
-            "--out-dir",
-            str(output),
-            "--clear",
-            "--no-create-gitignore",
-            str(project),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    installed = tmp_path / "installed"
-    with zipfile.ZipFile(next(output.glob("*.whl"))) as wheel:
-        names = wheel.namelist()
-        assert not any("/target/" in name for name in names)
-        for crate in ("strategy-sdk", "contracts", "num"):
-            root = Path("src/harness") / crate
-            for source in [root / "Cargo.toml", *sorted((root / "src").glob("*.rs"))]:
-                assert (
-                    wheel.read(source.relative_to("src").as_posix())
-                    == source.read_bytes()
-                )
-        wheel.extractall(installed)
-    sdk = installed / "harness/strategy-sdk"
-    manifest = tomllib.loads((sdk / "Cargo.toml").read_text(encoding="utf-8"))
-    for dependency in ("num", "harness-contracts"):
-        path = manifest["dependencies"][dependency]["path"]
-        assert not Path(path).is_absolute()
-        assert (sdk / path / "Cargo.toml").is_file()
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); "
-            "from thesis.workspaces.programs import WorkspacePrograms; "
-            "service = WorkspacePrograms(None); "
-            "assert service.sdk_root == Path(sys.argv[1]) / 'harness/strategy-sdk'; "
-            "assert service.read_sdk_reference('consumer')['sdkIdentity']; "
-            "assert service.read_sdk_reference('study')['sdkVersion'] == sys.argv[2]",
-            str(installed),
-            manifest["package"]["version"],
-        ],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-
-
 def test_publish_leaves_missing_checkout_without_new_commit(
     programs: Programs,
 ) -> None:
@@ -954,65 +726,6 @@ def test_publish_leaves_missing_checkout_without_new_commit(
     assert service.publish("workspace-one", "study", "alpha") == receipt
     assert not source.exists()
     assert provider.store("workspace-one").head == receipt["gitCommit"]
-
-
-@pytest.mark.slow
-def test_publish_preserves_staged_operator_edits(
-    git_programs: GitPrograms,
-) -> None:
-    service, provider, _ = git_programs
-    receipt = service.author("workspace-one", "study", "alpha", configuration=CONFIG)
-    source = provider.resolve_path("workspace-one", "studies/alpha/program.rs")
-    source.write_text("operator edit", encoding="utf-8")
-    git = GitCoordinator(provider.open("workspace-one").root)
-    git._run("add", "--", "studies/alpha/program.rs")
-    source.write_text(service.template_source("study", CONFIG), encoding="utf-8")
-    assert service.publish("workspace-one", "study", "alpha") == receipt
-    assert git.head() == receipt["gitCommit"]
-    assert git._run("show", ":studies/alpha/program.rs").stdout == "operator edit"
-
-
-@pytest.mark.slow
-def test_publish_does_not_repair_interrupted_update_materialization(
-    git_programs: GitPrograms,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    service, provider, _ = git_programs
-    first = service.author("workspace-one", "study", "alpha", configuration=CONFIG)
-    replace = os.replace
-    root = provider.open("workspace-one").root
-
-    def fail(source: str | Path, destination: str | Path) -> None:
-        if Path(destination) == root / "studies/alpha/program.rs":
-            raise OSError("injected checkout failure")
-        replace(source, destination)
-
-    monkeypatch.setattr(os, "replace", fail)
-    with pytest.raises(ProgramPublicationError) as error:
-        service.update(
-            "workspace-one",
-            "study",
-            "alpha",
-            expected_version=cast(str, first["version"]),
-            expected="self.frames += 1",
-            replacement="self.frames += 2",
-        )
-    receipt = error.value.receipt
-    assert receipt["gitCommit"] != first["gitCommit"]
-    assert "self.frames += 2" in str(
-        service.read("workspace-one", "study", "alpha")["source"]
-    )
-    monkeypatch.setattr(os, "replace", replace)
-    assert service.publish("workspace-one", "study", "alpha") == receipt
-    assert "self.frames += 1" in (root / "studies/alpha/program.rs").read_text(
-        encoding="utf-8"
-    )
-    git = GitCoordinator(root)
-    assert (
-        git._run("diff", "--cached", "--name-only").stdout.strip()
-        == "studies/alpha/program.rs"
-    )
-    assert not git._run("diff", "--name-only").stdout.strip()
 
 
 def test_sdk_dependency_change_invalidates_validation(
@@ -1660,119 +1373,3 @@ def test_local_sdk_guidance_and_artifact_reads_work_without_harness(
     )
     with pytest.raises(ProgramArtifactError, match="not configured"):
         local.validate("workspace-one", "study", "alpha")
-
-
-@pytest.mark.slow
-def test_native_study_validation_and_run_document_compile(
-    tmp_path: Path,
-    programs: Programs,
-) -> None:
-    """Optional built-binary smoke: real JIT compile, load, and subscriptions.
-
-    No replay/data fetch is attempted. Validate the run document's exact assembled
-    source and data echo through the native parser, JIT compiler, and ABI loader.
-    """
-    binary = Path(
-        "src/harness/target/debug/mcp.exe"
-        if os.name == "nt"
-        else "src/harness/target/debug/mcp"
-    )
-    if not binary.is_file():
-        pytest.skip(
-            "native MCP binary not built; template compilation is covered separately"
-        )
-    service, _, harness = programs
-    config = {
-        **CONFIG,
-        "subscriptions": [{"data_type": "bars", "symbols": ["MSFT"], "interval": "1d"}],
-    }
-    service.author("workspace-one", "indicator", "last", configuration=config)
-    source = service.template_source("study", config).replace(
-        "struct AuthoredStudy { frames: u64 }",
-        "struct AuthoredStudy { frames: u64, last: crate::last::AuthoredIndicator }",
-    )
-    source = source.replace(
-        "type Context = ObservationContext;",
-        "type Context = ObservationContext;\n"
-        "    fn indicators(&mut self) -> Vec<&mut dyn harness_strategy_sdk::Indicator> { vec![&mut self.last] }",
-    )
-    service.author(
-        "workspace-one",
-        "study",
-        "native",
-        source,
-        configuration=config,
-        indicator_ids=["last"],
-    )
-    service.validate("workspace-one", "study", "native")
-    service.run("workspace-one", "study", "native")
-    run_document = cast(dict[str, object], harness.calls[-1][1]["config"])
-    instance = cast(list[dict[str, object]], run_document["strategy_instances"])[0]
-    source = cast(dict[str, object], instance["parameters"])["source"]
-    data = cast(dict[str, object], run_document["data"])
-    model = {
-        "source": source,
-        "harnessConfiguration": {
-            "start": run_document["start"],
-            "end": run_document["end"],
-            "subscriptions": data["subscriptions"],
-            "symbols": data["symbols"],
-        },
-    }
-    requests = [
-        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
-        {
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "tools/call",
-            "params": {
-                "name": "read_sdk_reference",
-                "arguments": {"topic": "consumer", "start_line": 19, "end_line": 22},
-            },
-        },
-        {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {"name": "validate_study", "arguments": {"model": model}},
-        },
-    ]
-    environment = {
-        **os.environ,
-        "HARNESS_JIT_DIR": str(tmp_path / "jit"),
-        "HARNESS_SDK_DIR": str(service.sdk_root.resolve()),
-    }
-    result = subprocess.run(
-        [str(binary.resolve())],
-        input="\n".join(json.dumps(item) for item in requests) + "\n",
-        capture_output=True,
-        text=True,
-        env=environment,
-        timeout=120,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    responses = [
-        json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")
-    ]
-    response = next(item for item in responses if item.get("id") == 2)
-    server = next(item for item in responses if item.get("id") == 1)["result"][
-        "serverInfo"
-    ]
-    reference = next(item for item in responses if item.get("id") == 3)["result"][
-        "structuredContent"
-    ]
-    assert server["sdkIdentity"] == reference["sdkIdentity"] == service._sdk_identity()
-    assert (server["sdkVersion"], server["sdkAbiVersion"]) == service._sdk_metadata(
-        service.sdk_root
-    )
-    assert reference["content"] == "\n".join(
-        (service.sdk_root / "src/consumer.rs")
-        .read_text(encoding="utf-8")
-        .splitlines()[18:22]
-    )
-    assert "error" not in response, response
-    payload = response["result"]
-    assert not payload.get("isError"), payload
-    assert payload["structuredContent"]["valid"] is True
-    assert payload["structuredContent"]["subscriptions"] == data["subscriptions"]

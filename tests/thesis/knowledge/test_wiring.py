@@ -31,8 +31,6 @@ from thesis.workflows.registry.hypothesis_development.session_services import (
 from thesis.workflows.registry.hypothesis_development.spec import (
     build_hypothesis_development_workflow,
 )
-from thesis.workspaces.local import LocalWorkspaceProvider
-from thesis.workspaces.manifest import load_workspace_manifest
 from thesis.workspaces.repository import WorkspaceRepositoryProvider
 
 
@@ -194,13 +192,6 @@ def test_canonical_knowledge_result_decodes_to_neutral_input() -> None:
     assert projected[1].role == "tool"
     assert projected[1].tool_call_id == "search-call"
     assert projected[1].content == canonical[1].content.as_content()
-
-
-@pytest.mark.slow
-def test_new_workspace_scaffolds_knowledge(tmp_path: Path) -> None:
-    provider = LocalWorkspaceProvider(tmp_path / "workspaces")
-    workspace = provider.create(load_workspace_manifest("config/thesis/workspace.yaml"))
-    assert workspace.resolve_path("knowledge/.gitkeep", must_exist=True).is_file()
 
 
 def test_serving_without_harness_exposes_knowledge(

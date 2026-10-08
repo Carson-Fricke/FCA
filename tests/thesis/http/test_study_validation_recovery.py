@@ -11,6 +11,7 @@ from tests.thesis.workflows.registry.hypothesis_development._support import (
     _hypothesis_envelope,
     _inline_model,
 )
+from tests.thesis.workspaces._support import MemoryGitFactory, Repositories
 
 from thesis.agent.harness_tools import (
     HarnessToolFailure,
@@ -24,13 +25,12 @@ from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.store import PersistenceSubAgentStore
 from thesis.chat import ChatService
 from thesis.http import serving
-from thesis.persistence.git import GitCoordinator
 from thesis.providers.openrouter import OpenRouterProvider
+from thesis.research.hypothesis import InMemoryHypothesisStore
+from thesis.research.models import InMemoryResearchModelStore
 from thesis.workflows.core.execution_store import InMemoryExecutionStore
-from thesis.workspaces.local import LocalWorkspaceProvider
 from thesis.workspaces.manifest import load_workspace_manifest
-
-pytestmark = pytest.mark.slow
+from thesis.workspaces.programs import WorkspacePrograms
 
 
 class Harness(HarnessToolProvider):
@@ -143,7 +143,8 @@ class Harness(HarnessToolProvider):
 
 
 def setup_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    repositories = LocalWorkspaceProvider(tmp_path / "workspaces")
+    factory = MemoryGitFactory()
+    repositories = Repositories(tmp_path / "workspaces", factory)
     manifest = load_workspace_manifest("config/thesis/workspace.yaml")
     repositories.create(manifest)
     chat = ChatService()
@@ -159,7 +160,25 @@ def setup_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         callbacks["apply"] = kwargs["phase_completions"]
         return serving.ControlToolService(**kwargs)
 
+    class MemoryPrograms(WorkspacePrograms):
+        def __init__(self, repository_provider, harness_tools=None, **kwargs):
+            super().__init__(
+                repository_provider,
+                harness_tools,
+                git_factory=factory,
+                **kwargs,
+            )
+
     monkeypatch.setattr(serving, "Conversations", conversations)
+    monkeypatch.setattr(serving, "WorkspacePrograms", MemoryPrograms)
+    monkeypatch.setattr(
+        serving,
+        "_workspace_stores",
+        lambda workspace_root, workspace_repositories=None: (
+            InMemoryResearchModelStore(),
+            InMemoryHypothesisStore(),
+        ),
+    )
     work = []
     stack = serving.build_serving_stack(
         chat_service=chat,
@@ -305,8 +324,7 @@ def test_author_validate_complete_then_trials_use_pinned_commit(tmp_path, monkey
     )
     assert validation.is_file()
     assert (
-        GitCoordinator(repositories.open(request.workspace_id).root).head()
-        != checked.structured["gitCommit"]
+        repositories.store(request.workspace_id).head != checked.structured["gitCommit"]
     )
 
 
@@ -624,9 +642,9 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         == "optimization"
     )
     assert (
-        WorkspacePrograms(repositories).load(request.workspace_id, "strategy", "alpha")[
-            "version"
-        ]
+        WorkspacePrograms(repositories, git_factory=repositories.git_factory).load(
+            request.workspace_id, "strategy", "alpha"
+        )["version"]
         != reference["version"]
     )
 
@@ -671,7 +689,9 @@ def test_trials_pin_indicator_dependencies_and_configuration(tmp_path, monkeypat
     repositories, _, _, request, record, registry, harness, callbacks, work = (
         setup_workflow(tmp_path, monkeypatch)
     )
-    programs = WorkspacePrograms(repositories, harness)
+    programs = WorkspacePrograms(
+        repositories, harness, git_factory=repositories.git_factory
+    )
     snapshot = programs.load(request.workspace_id, "study", "momentum")
     configuration = snapshot["configuration"]
     assert registry.dispatch(

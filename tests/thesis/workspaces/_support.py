@@ -28,7 +28,9 @@ class Repositories:
         self.published: list[str] = []
 
     def create(self, manifest: WorkspaceManifest) -> LocalWorkspace:
-        raise NotImplementedError("the fast fixture scaffolds directories directly")
+        path = self.root / manifest.workspace_id
+        path.mkdir(parents=True, exist_ok=True)
+        return self.open(manifest.workspace_id)
 
     def open(self, workspace_id: str) -> LocalWorkspace:
         return LocalWorkspace(

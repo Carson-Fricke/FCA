@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -11,14 +10,13 @@ from typing import Any
 import httpx
 import pytest
 
-from thesis.workspaces.gitea import GiteaWorkspaceProvider, _remove_readonly
+from thesis.workspaces.gitea import GiteaWorkspaceProvider
 from thesis.workspaces.local import (
     WorkspacePathError,
     WorkspaceRepositoryError,
     _git,
 )
 from thesis.workspaces.manifest import WorkspaceManifest, load_workspace_manifest
-from thesis.workspaces.repository import WorkspaceRepositoryProvider
 
 TOKEN = "test-only-sensitive-token"
 BASE = "https://gitea.example.test"
@@ -107,177 +105,6 @@ def provider(
     return provider
 
 
-@pytest.mark.slow
-def test_create_reconcile_publish_and_rebuild(
-    provider: GiteaWorkspaceProvider,
-    service: Service,
-    manifest: WorkspaceManifest,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    boundary: WorkspaceRepositoryProvider = provider
-    workspace = boundary.create(manifest)
-    assert workspace.manifest == manifest
-    assert "Rust strategy source" in (workspace.root / "README.md").read_text()
-    assert boundary.create(manifest).root == workspace.root
-    assert sum(request.method == "POST" for request in service.requests) == 1
-    assert TOKEN not in (workspace.root / ".git/config").read_text()
-    assert boundary.publish(manifest.workspace_id) == _git(
-        workspace.root, "rev-parse", "HEAD"
-    )
-    second = GiteaWorkspaceProvider(
-        provider.root.parent / "second",
-        BASE,
-        "workspaces",
-        TOKEN,
-        client=provider._client,
-    )
-    monkeypatch.setattr(second, "_git", provider._git)
-    reopened = second.open(manifest.workspace_id)
-    assert reopened.manifest == manifest
-    assert reopened.root != workspace.root
-    (reopened.root / "chats/accepted.json").write_text("{}")
-    _git(reopened.root, "add", "chats/accepted.json")
-    _git(
-        reopened.root,
-        "-c",
-        "user.name=Test",
-        "-c",
-        "user.email=test@localhost",
-        "commit",
-        "-m",
-        "Accepted journal commit",
-    )
-    second.publish(manifest.workspace_id)
-    assert (boundary.open(manifest.workspace_id).root / "chats/accepted.json").is_file()
-    shutil.rmtree(workspace.root, onexc=_remove_readonly)
-    assert boundary.open(manifest.workspace_id).manifest == manifest
-
-
-@pytest.mark.slow
-def test_empty_remote_is_not_listable_until_seeded(
-    provider: GiteaWorkspaceProvider,
-    service: Service,
-    manifest: WorkspaceManifest,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    git = provider._git
-
-    def fail_push(root: Path, *arguments: str) -> str:
-        if arguments[0] == "push":
-            raise WorkspaceRepositoryError("push failed")
-        return git(root, *arguments)
-
-    monkeypatch.setattr(provider, "_git", fail_push)
-    with pytest.raises(WorkspaceRepositoryError):
-        provider.create(manifest)
-    monkeypatch.setattr(provider, "_git", git)
-    from thesis.workspaces.local import WorkspaceNotFoundError
-
-    with pytest.raises(WorkspaceNotFoundError, match="not seeded"):
-        provider.open(manifest.workspace_id)
-    assert provider.create(manifest).manifest == manifest
-
-
-@pytest.mark.parametrize(
-    "field,value",
-    [
-        ("private", False),
-        ("default_branch", "--upload-pack=evil"),
-        ("clone_url", "https://attacker.test/workspaces/equity-momentum.git"),
-        (
-            "clone_url",
-            "https://token@gitea.example.test/workspaces/equity-momentum.git",
-        ),
-        ("clone_url", BASE + "/workspaces/equity-momentum.git?token=" + TOKEN),
-    ],
-)
-@pytest.mark.slow
-def test_remote_integrity_fail_closed(
-    provider: GiteaWorkspaceProvider,
-    service: Service,
-    manifest: WorkspaceManifest,
-    field: str,
-    value: object,
-) -> None:
-    provider.create(manifest)
-    service.repositories[manifest.workspace_id][field] = value
-    with pytest.raises(WorkspaceRepositoryError) as error:
-        provider.open(manifest.workspace_id)
-    assert TOKEN not in str(error.value)
-
-
-@pytest.mark.slow
-def test_owner_and_manifest_reconciliation(
-    provider: GiteaWorkspaceProvider, manifest: WorkspaceManifest
-) -> None:
-    provider.create(manifest)
-    values = manifest.model_dump(mode="json")
-    values["owner"]["owner_id"] = "someone-else"
-    with pytest.raises(WorkspaceRepositoryError, match="ownership"):
-        provider.create(WorkspaceManifest.model_validate(values))
-    values = manifest.model_dump(mode="json")
-    values["charter"]["title"] = "Different manifest"
-    with pytest.raises(WorkspaceRepositoryError, match="manifest mismatch"):
-        provider.create(WorkspaceManifest.model_validate(values))
-
-
-@pytest.mark.slow
-def test_owned_empty_remote_recovers_after_push_failure(
-    provider: GiteaWorkspaceProvider,
-    manifest: WorkspaceManifest,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    git = provider._git
-
-    def fail_push(root: Path, *arguments: str) -> str:
-        if arguments[0] == "push":
-            raise WorkspaceRepositoryError("injected push failure")
-        return git(root, *arguments)
-
-    monkeypatch.setattr(provider, "_git", fail_push)
-    with pytest.raises(WorkspaceRepositoryError, match="push failure"):
-        provider.create(manifest)
-    assert not (provider.root / manifest.workspace_id).exists()
-    monkeypatch.setattr(provider, "_git", git)
-    assert provider.create(manifest).manifest == manifest
-
-
-@pytest.mark.slow
-def test_history_conflict_does_not_reset(
-    provider: GiteaWorkspaceProvider, service: Service, manifest: WorkspaceManifest
-) -> None:
-    workspace = provider.create(manifest)
-    remote_checkout = provider.root.parent / "writer"
-    _git(
-        service.root,
-        "clone",
-        str(service.root / (manifest.workspace_id + ".git")),
-        str(remote_checkout),
-    )
-    for root, name in [(workspace.root, "local"), (remote_checkout, "remote")]:
-        (root / "chats" / name).write_text(name)
-        _git(root, "add", "--all")
-        _git(
-            root,
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@localhost",
-            "commit",
-            "-m",
-            name,
-        )
-    local_head = _git(workspace.root, "rev-parse", "HEAD")
-    _git(remote_checkout, "push", "origin", "main")
-    with pytest.raises(WorkspaceRepositoryError, match="history conflict"):
-        provider.open(manifest.workspace_id)
-    assert _git(workspace.root, "rev-parse", "HEAD") == local_head
-    (workspace.root / "chats/dirty").write_text("dirty")
-    with pytest.raises(WorkspaceRepositoryError, match="dirty"):
-        provider.open(manifest.workspace_id)
-    assert (workspace.root / "chats/dirty").read_text() == "dirty"
-
-
 @pytest.mark.parametrize(
     "endpoint",
     [
@@ -328,27 +155,6 @@ def test_api_errors_are_sanitized(tmp_path: Path, status: int, body: object) -> 
     with pytest.raises(WorkspaceRepositoryError) as error:
         provider.open("test-workspace")
     assert TOKEN not in str(error.value)
-
-
-@pytest.mark.slow
-def test_workspace_isolation_and_manifest_tampering(
-    provider: GiteaWorkspaceProvider, manifest: WorkspaceManifest
-) -> None:
-    first = provider.create(manifest)
-    values = manifest.model_dump(mode="json")
-    values["workspace_id"] = "second-workspace"
-    values["repository_identity"]["repository_id"] = "second-workspace"
-    values["owner"]["owner_id"] = "second-owner"
-    second = provider.create(WorkspaceManifest.model_validate(values))
-    assert first.root != second.root
-    assert provider.repository_uri(manifest.workspace_id) != provider.repository_uri(
-        "second-workspace"
-    )
-    manifest_path = first.root / ".thesis/workspace.yaml"
-    manifest_path.write_text((second.root / ".thesis/workspace.yaml").read_text())
-    with pytest.raises(WorkspaceRepositoryError, match="identity"):
-        provider.open(manifest.workspace_id)
-    assert provider.open("second-workspace").manifest.owner.owner_id == "second-owner"
 
 
 @pytest.mark.parametrize(

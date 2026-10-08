@@ -19,13 +19,21 @@ pre-existing baseline. Live smoke after restarting the local stack: verifier
 and **zero artifacts**; a failed job's materialization card returned
 `{"job_id", "state": "failed"}` with no redundant `status` alias.
 
-Open findings (pre-existing, not introduced by this cleanup): the workspace
-launch path stores a non-terminal projection before the harness import, so a
-launched job's report card can remain `state: queued` after terminal failure
-until a terminal import refresh is added; the sample local backtest fails on a
-lake `/v1/read` decode error (lake/harness local contract), which the verifier's
-launch-acknowledgement stage does not cover. Neither affects the contracts or
-tests above.
+Resolved since the first verification pass: the workspace launch path no longer
+persists a non-terminal projection (`BacktestDataService.launch` stores only
+`succeeded`/`failed`/`cancelled`), so the materialize endpoint imports the
+terminal harness result and the card reports the real job state. The sample
+local backtest now uses three sessions of MSFT quotes
+(`config/harness/backtest.yaml`), and a live run completed `succeeded` with 15
+artifacts under `jobs/<job_id>/...` and a terminal card.
+
+Remaining known limitation (pre-existing, not introduced here): the harness
+lake client buffers the entire Arrow IPC body before decoding
+(`read_arrow` -> `response.bytes()`), so a large quote window can exhaust
+memory; the original 13-session SPY sample attempted a 10 GB allocation and
+terminated the harness process. The sample change avoids it, but the durable
+fix is to decode the Arrow stream incrementally with a bounded read timeout.
+The verifier's launch-acknowledgement stage still does not exercise data reads.
 
 Retain one execution `job_id`. Do not restore `tool_job_id`, execution
 `study_id`, `run_id`, or an operation-level correlation ID. Provider tool-call,

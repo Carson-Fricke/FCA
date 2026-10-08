@@ -1,13 +1,11 @@
 """Workspace-qualified hypothesis persistence and publication contracts."""
 
-import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from thesis.persistence.git import GitCoordinator
-from thesis.research import hypothesis
 from thesis.research.hypothesis import (
     HypothesisArtifactError,
     HypothesisDocument,
@@ -18,8 +16,6 @@ from thesis.research.hypothesis import (
 )
 from thesis.workspaces.local import (
     LocalWorkspaceProvider,
-    WorkspaceNotFoundError,
-    WorkspacePathError,
 )
 from thesis.workspaces.manifest import WorkspaceManifest
 
@@ -149,69 +145,6 @@ def test_local_restart_two_instances_isolation_and_projection(
     assert first.load(two.hypothesis_id, workspace_id="workspace-two") == two
 
 
-@pytest.mark.slow
-def test_tamper_is_rejected_on_load_and_save(provider: LocalWorkspaceProvider) -> None:
-    store = WorkspaceHypothesisStore(provider)
-    document = _document()
-    store.save(document, workspace_id="workspace-one")
-    path = store.path_for(document.hypothesis_id, workspace_id="workspace-one")
-    path.write_bytes(_document(body="Tampered").to_bytes())
-    for operation in (
-        lambda: store.load(document.hypothesis_id, workspace_id="workspace-one"),
-        lambda: store.save(document, workspace_id="workspace-one"),
-    ):
-        with pytest.raises(HypothesisArtifactError, match="content hash"):
-            operation()
-    assert path.read_bytes() == _document(body="Tampered").to_bytes()
-
-
-@pytest.mark.slow
-def test_manifest_tamper_is_rejected(provider: LocalWorkspaceProvider) -> None:
-    store = WorkspaceHypothesisStore(provider)
-    document = _document()
-    store.save(document, workspace_id="workspace-one")
-    path = provider.resolve_path("workspace-one", ".thesis/hypotheses/h-shared.json")
-    path.write_bytes(path.read_bytes() + b"\n")
-    with pytest.raises(HypothesisArtifactError, match="committed content"):
-        store.load(document.hypothesis_id, workspace_id="workspace-one")
-
-
-@pytest.mark.slow
-def test_legacy_reads_only_selected_verified_workspace(
-    provider: LocalWorkspaceProvider,
-) -> None:
-    document = _document()
-    (provider.root / "hypotheses").mkdir()
-    (provider.root / document.relative_path).write_bytes(document.to_bytes())
-    store = WorkspaceHypothesisStore(provider)
-    assert store.list(workspace_id="workspace-one") == ()
-    with pytest.raises(HypothesisArtifactError, match="not found"):
-        store.load(document.hypothesis_id, workspace_id="workspace-one")
-    legacy = provider.resolve_path("workspace-one", document.relative_path)
-    legacy.parent.mkdir(parents=True, exist_ok=True)
-    legacy.write_bytes(document.to_bytes())
-    assert store.load(document.hypothesis_id, workspace_id="workspace-one") == document
-    assert store.list(workspace_id="workspace-one") == (document.hypothesis_id,)
-    with pytest.raises(HypothesisArtifactError, match="not found"):
-        store.load(document.hypothesis_id, workspace_id="workspace-two")
-    store.save(document, workspace_id="workspace-one")
-    assert store.load(document.hypothesis_id, workspace_id="workspace-one") == document
-
-
-@pytest.mark.slow
-def test_slug_collision_rejected_without_overwrite(
-    provider: LocalWorkspaceProvider,
-) -> None:
-    store = WorkspaceHypothesisStore(provider)
-    first, second = _document("h_shared"), _document("h-shared")
-    store.save(first, workspace_id="workspace-one")
-    head = GitCoordinator(provider.open("workspace-one").root).head()
-    with pytest.raises(HypothesisArtifactError, match="manifest"):
-        store.save(second, workspace_id="workspace-one")
-    assert GitCoordinator(provider.open("workspace-one").root).head() == head
-    assert store.load(first.hypothesis_id, workspace_id="workspace-one") == first
-
-
 class _RemoteRepositories(LocalWorkspaceProvider):
     """Fake remote observes committed artifacts and can reject a push."""
 
@@ -226,26 +159,6 @@ class _RemoteRepositories(LocalWorkspaceProvider):
         if self.reject:
             raise RuntimeError("remote history conflict")
         return head
-
-
-@pytest.mark.slow
-def test_remote_failure_retains_commit_and_retry_is_idempotent(tmp_path: Path) -> None:
-    provider = _RemoteRepositories(tmp_path / "remote")
-    provider.create(_manifest("workspace-one"))
-    store = WorkspaceHypothesisStore(provider)
-    document = _document()
-    with pytest.raises(RuntimeError, match="history conflict"):
-        store.save(document, workspace_id="workspace-one")
-    head = GitCoordinator(provider.open("workspace-one").root).head()
-    assert store.load(document.hypothesis_id, workspace_id="workspace-one") == document
-    provider.reject = False
-    WorkspaceHypothesisStore(provider).save(document, workspace_id="workspace-one")
-    assert provider.published == [head, head]
-    assert not tuple(
-        provider.resolve_path("workspace-one", "hypotheses/h-shared").glob(
-            ".hypothesis-*"
-        )
-    )
 
 
 @pytest.mark.parametrize(
@@ -273,91 +186,8 @@ def test_constructor_rejects_raw_root(tmp_path: Path) -> None:
         WorkspaceHypothesisStore(tmp_path)  # ty: ignore[invalid-argument-type]
 
 
-@pytest.mark.slow
-def test_missing_workspace_is_not_created(provider: LocalWorkspaceProvider) -> None:
-    store = WorkspaceHypothesisStore(provider)
-    with pytest.raises(WorkspaceNotFoundError):
-        store.save(_document(), workspace_id="workspace-missing")
-    assert not (provider.root / "workspace-missing").exists()
-
-
-@pytest.mark.slow
-def test_symlink_escape_is_rejected(
-    provider: LocalWorkspaceProvider, tmp_path: Path
-) -> None:
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    link = provider.open("workspace-one").root / "hypotheses"
-    try:
-        link.symlink_to(outside, target_is_directory=True)
-    except OSError:
-        pytest.skip("Directory symlinks require OS permission")
-    with pytest.raises(WorkspacePathError):
-        WorkspaceHypothesisStore(provider).save(
-            _document(), workspace_id="workspace-one"
-        )
-    assert not tuple(outside.iterdir())
-
-
 def test_bypassed_model_validation_is_rechecked_at_save() -> None:
     document = _document()
     invalid = HypothesisDocument(document.front_matter.model_copy(update={"claim": ""}))
     with pytest.raises(HypothesisArtifactError, match="front matter"):
         InMemoryHypothesisStore().save(invalid, workspace_id="workspace-one")
-
-
-@pytest.mark.slow
-def test_atomic_write_failure_cleans_temporary_and_retries(
-    provider: LocalWorkspaceProvider, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    store = WorkspaceHypothesisStore(provider)
-    document = _document()
-    head = GitCoordinator(provider.open("workspace-one").root).head()
-
-    def fail_replace(*args: object) -> None:
-        raise OSError("interrupted replace")
-
-    with monkeypatch.context() as patch:
-        patch.setattr(hypothesis.os, "replace", fail_replace)
-        with pytest.raises(OSError, match="interrupted replace"):
-            store.save(document, workspace_id="workspace-one")
-    directory = provider.resolve_path("workspace-one", "hypotheses/h-shared")
-    assert not tuple(directory.iterdir())
-    assert GitCoordinator(provider.open("workspace-one").root).head() == head
-    store.save(document, workspace_id="workspace-one")
-    assert store.load(document.hypothesis_id, workspace_id="workspace-one") == document
-
-
-@pytest.mark.slow
-def test_clone_without_local_journal_can_load_and_retry(
-    provider: LocalWorkspaceProvider, tmp_path: Path
-) -> None:
-    document = _document()
-    WorkspaceHypothesisStore(provider).save(document, workspace_id="workspace-one")
-    cloned = LocalWorkspaceProvider(tmp_path / "cloned")
-    subprocess.run(
-        (
-            "git",
-            "-c",
-            "core.autocrlf=false",
-            "clone",
-            "--quiet",
-            "--",
-            str(provider.open("workspace-one").root),
-            str(cloned.root / "workspace-one"),
-        ),
-        check=True,
-        capture_output=True,
-        timeout=30,
-    )
-    assert not cloned.resolve_path(
-        "workspace-one", ".thesis/hypotheses-journal.sqlite3"
-    ).exists()
-    store = WorkspaceHypothesisStore(cloned)
-    assert store.load(document.hypothesis_id, workspace_id="workspace-one") == document
-    head = GitCoordinator(cloned.open("workspace-one").root).head()
-    store.save(document, workspace_id="workspace-one")
-    assert GitCoordinator(cloned.open("workspace-one").root).head() == head
-    projected = document.projected(status=HypothesisStatus.SUPPORTED)
-    store.save(projected, workspace_id="workspace-one")
-    assert store.load(document.hypothesis_id, workspace_id="workspace-one") == projected

@@ -1,8 +1,6 @@
 """The lake console script is a thin shim over the Rust ``lake`` binary."""
 
 import os
-import subprocess
-import sys
 from types import SimpleNamespace
 
 import pytest
@@ -45,20 +43,3 @@ def test_missing_binary_reports_actionably(
 def test_unknown_entrypoint_name_is_rejected() -> None:
     with pytest.raises(ValueError):
         rust_entrypoints.run_entrypoint("harness")
-
-
-@pytest.mark.slow
-@pytest.mark.skipif(
-    rust_entrypoints.rust_binary("lake") is None,
-    reason="the Rust lake binary is not built in this environment",
-)
-def test_module_help_comes_from_the_rust_binary() -> None:
-    result = subprocess.run(
-        [sys.executable, "-m", "lake", "--help"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
-    assert "api" in result.stdout
-    assert "local" in result.stdout

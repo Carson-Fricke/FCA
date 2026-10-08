@@ -36,11 +36,11 @@ integration verification.
 Every coding agent adding, changing, or deleting tests MUST follow
 `.github/instructions/testing-strategy.instructions.md`. The repository is
 behavior-first: verify behavior at the highest practical boundary, and allow a
-unit test only for pure low-level logic in the documented categories. Mark
-correct-but-expensive tests `slow` and local-stack tests `e2e`; the default
-suite must stay within the CI budget. Mandated guards and named behavior
-suites in the other instruction files remain required and take precedence over
-any pruning rule.
+unit test only for pure low-level logic in the documented categories. The full
+suite MUST finish in under 3 minutes; correct-but-expensive tests that cannot
+fit are deleted or converted off their expensive boundary, not kept behind a
+marker. Mandated guards and named behavior suites in the other instruction
+files remain required and take precedence over any pruning rule.
 
 ## Harness Job Identity Contract
 

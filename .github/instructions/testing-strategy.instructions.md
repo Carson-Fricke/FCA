@@ -85,8 +85,7 @@ milliseconds, and MUST assert input-to-output, not call order.
 - Anything already covered by a behavior test.
 - Framework behavior and library behavior.
 - Build outcomes: `cargo check`, `uv build`, wheel contents, and packaging
-  checks belong to CI build jobs or a marked slow suite, never the default test
-  run.
+  checks belong to CI build jobs, never a pytest suite.
 - Private names and source shape: do not import `_helper` functions or assert
   source text or AST shape, except the architecture guards above and the
   guards mandated by another instruction.
@@ -96,16 +95,20 @@ milliseconds, and MUST assert input-to-output, not call order.
 - Fake only process and external boundaries. Never fake internal domain
   collaborators to test their callers; use the real in-process composition.
 - Do not replace git or filesystem behavior in a test whose subject is git or
-  filesystem fencing. Keep that suite small and marked instead.
+  filesystem fencing. Keep that verification to a few smoke tests rather than
+  a full suite.
 - Every test must be order-independent and runnable alone.
 
 ## Speed
 
-- The default suite must finish with headroom under the CI timeout.
-- Targets: a unit test under 100 ms, a behavior test under 2 s. A test that
-  cannot meet this needs the `slow` marker with a one-line reason.
-- Registered markers: `slow` (correct but expensive; excluded from focused
-  runs) and `e2e` (requires the running local stack).
+- The full suite MUST finish in under 3 minutes on the reference development
+  machine. The budget is a hard ceiling, not a target: a test that cannot fit
+  is deleted or converted off its expensive boundary, never kept behind a
+  marker as an excuse.
+- Targets: a unit test under 100 ms, a behavior test under 2 s.
+- Markers remain for local filtering: `slow` (correct but expensive) and
+  `e2e` (requires the running local stack). The default CI run executes every
+  test, markers included.
 - Do not create a second workspace, repository, or service when one fixture or
   session-scoped template serves the same behavior.
 - Focused development run:

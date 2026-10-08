@@ -75,11 +75,8 @@ jobs:
       - name: ty type check
         run: uv run --extra dev ty check
 
-      - name: Run fast tests
-        run: uv run --extra dev pytest -p no:cacheprovider -m "not slow" --durations=25
-
-      - name: Run slow tests
-        run: uv run --extra dev pytest -p no:cacheprovider -m slow --durations=25
+      - name: Run tests
+        run: uv run --extra dev pytest -p no:cacheprovider --durations=25
 
       - name: Build package
         run: uv build --python 3.12 --wheel --force-pep517 --out-dir dist-ci --clear --no-create-gitignore .
