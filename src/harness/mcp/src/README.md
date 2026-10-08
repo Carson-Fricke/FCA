@@ -13,7 +13,11 @@ opaque provenance, structured diagnostics, and complete-result reuse metadata.
   tool arguments to local or remote boundaries. `validate_study` and
   `validate_strategy` take authored model documents; compilation comes from the
   injected validator, with no structural-only strategy fallback.
-- `store.rs` defines durable run and job repositories and their adapters.
+- `store.rs` defines the authoritative durable job store: one `JobRecord` per
+  `job_id` (`jobs/<job_id>.json`), artifact payloads under the `jobs/<job_id>/`
+  object prefix, and adapters. Failed and cancelled jobs publish terminal
+  records with an empty artifact set and their truthful `error_message`; a
+  successful result still requires at least one artifact.
 - `transport.rs` serves the composed protocol through stdio and HTTP transports.
 
 Focused protocol tests live in the sibling `tests/` folder. The API crate

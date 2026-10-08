@@ -182,8 +182,8 @@ impl Default for DeploymentConfig {
 /// The resolved fields the backtest kernel reads from configuration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BacktestConfig {
-    /// Run identifier.
-    pub run_id: String,
+    /// Job identifier.
+    pub job_id: String,
     /// Configuration shell (`backtest`).
     pub shell: String,
     /// Schema version.
@@ -233,15 +233,15 @@ impl BacktestConfig {
     ///
     /// Returns [`BacktestError::Configuration`] when the window is empty.
     pub fn new(
-        run_id: impl Into<String>,
+        job_id: impl Into<String>,
         start_ns: i64,
         end_ns: i64,
         seed: u64,
     ) -> Result<Self, BacktestError> {
-        let run_id = run_id.into();
-        if run_id.trim().is_empty() {
+        let job_id = job_id.into();
+        if job_id.trim().is_empty() {
             return Err(BacktestError::Configuration(
-                "run_id must be a non-empty string".to_string(),
+                "job_id must be a non-empty string".to_string(),
             ));
         }
         if end_ns <= start_ns {
@@ -250,7 +250,7 @@ impl BacktestConfig {
             ));
         }
         Ok(Self {
-            run_id,
+            job_id,
             shell: "backtest".to_string(),
             schema_version: 1,
             clock: "event_time".to_string(),
@@ -307,7 +307,7 @@ impl BacktestConfig {
         JsonValue::object([
             ("schema_version", JsonValue::UInt(self.schema_version)),
             ("shell", JsonValue::String(self.shell.clone())),
-            ("run_id", JsonValue::String(self.run_id.clone())),
+            ("job_id", JsonValue::String(self.job_id.clone())),
             (
                 "start",
                 JsonValue::object([(
@@ -475,7 +475,7 @@ impl BacktestConfig {
                 "configuration shell must be 'backtest' or 'study', not '{shell}'"
             )));
         }
-        let run_id = string_field(root, "run_id")?;
+        let job_id = string_field(root, "job_id")?;
         let start_ns =
             datetime_field(root, "start")?.unwrap_or(crate::backtest::job::DEFAULT_START_NS);
         let end_ns = datetime_field(root, "end")?.unwrap_or(crate::backtest::job::DEFAULT_END_NS);
@@ -485,7 +485,7 @@ impl BacktestConfig {
                 "seed must be non-negative".to_string(),
             ));
         }
-        let mut config = Self::new(run_id, start_ns, end_ns, seed as u64)?;
+        let mut config = Self::new(job_id, start_ns, end_ns, seed as u64)?;
         config.shell = shell;
         config.schema_version = int_field(root, "schema_version").unwrap_or(1) as u64;
         if let Some(clock) = root.get("clock").and_then(YamlValue::as_str) {

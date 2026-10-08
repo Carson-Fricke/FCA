@@ -70,10 +70,10 @@ revision health as a distinct status instead of failing:
       `.github/runbooks/key-vault-runtime-secrets.md`). Unresolved Key Vault
       references stop replica startup, which appears as an unhealthy revision
       for the always-on crypto trader.
-  2. The harness trader runtime is deployed. `harness trader` runs one
-      supervised session (`harness.cli.supervisor`) and exits outside its
-      KEDA session window; a stale revision from before the trader runtime
-      landed appears unhealthy.
+  2. The harness trader runtime is deployed. `harness trader` runs one native
+      supervision session (`src/harness/live/src/supervision.rs`) and exits
+      outside its KEDA session window; an unhealthy revision points at
+      configuration or credentials rather than a missing runtime.
 
 Degraded traders produce a `::warning` annotation and a summary note; they do
 not fail the workflow. Fail the pipeline on trader status only after the

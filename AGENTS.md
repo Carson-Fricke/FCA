@@ -4,6 +4,7 @@
 @.github/instructions/market-lake-local.instructions.md
 @.github/instructions/thesis-workflow-development.instructions.md
 @.github/instructions/agent-session-delivery.instructions.md
+@.github/instructions/testing-strategy.instructions.md
 
 ## Agent Session Delivery Contract
 
@@ -29,6 +30,31 @@ The source guard is mandatory and MUST fail for missing required modules, with
 no hidden optional bypass. `REQ-DEL` in the runtime architecture names the
 delivery assertions and verification paths; the coordinator owns test edits and
 integration verification.
+
+## Testing Strategy Contract
+
+Every coding agent adding, changing, or deleting tests MUST follow
+`.github/instructions/testing-strategy.instructions.md`. The repository is
+behavior-first: verify behavior at the highest practical boundary, and allow a
+unit test only for pure low-level logic in the documented categories. Mark
+correct-but-expensive tests `slow` and local-stack tests `e2e`; the default
+suite must stay within the CI budget. Mandated guards and named behavior
+suites in the other instruction files remain required and take precedence over
+any pruning rule.
+
+## Harness Job Identity Contract
+
+Every coding agent changing harness, Thesis submission, job tracking, or job
+report code MUST follow the "Execution Job Contract" in
+`.github/instructions/copilot-instructions.md` and, for workflow code, item 11
+of `.github/instructions/thesis-workflow-development.instructions.md`. One
+execution has exactly one `job_id`; submission composition allocates and
+durably retains it before dispatch, harness admission owns join/conflict,
+client adapters own acknowledgement validation, and callers own waiting.
+Unknown outcomes are reconciled by the retained ID, never auto-replayed.
+Instructions and prompts are not proof of compliance: the integration owner
+MUST retain and run interruption, acknowledgement-mismatch, and
+duplicate-admission behavior tests.
 
 ## FCA Execution Policy
 

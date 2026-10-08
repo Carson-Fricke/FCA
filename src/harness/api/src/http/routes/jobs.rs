@@ -1,4 +1,4 @@
-//! Authenticated backtest run query routes.
+//! Authenticated job query and artifact routes.
 
 use std::collections::HashMap;
 
@@ -9,24 +9,23 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::json;
 
-use crate::http::models::{ApiError, ArtifactListResponse, ArtifactSummary, RunListResponse};
+use crate::http::models::{
+    ApiError, ArtifactListResponse, ArtifactSummary, JobListResponse, JobStatusResponse,
+};
 use crate::http::state::AppState;
-use crate::http::store::{artifact_digest, run_prefix, RunCatalogRecord, RunStatus};
+use crate::http::store::{artifact_digest, artifact_prefix, JobKind, JobState};
 
 const IDENTIFIER_MAX: usize = 128;
 const ARTIFACT_NAME_MAX: usize = 512;
 
-/// Build the run query routes without binding them to a store.
-pub fn runs_router() -> Router<AppState> {
+/// Build the job query routes without binding them to a store.
+pub fn jobs_router() -> Router<AppState> {
     Router::new()
-        .route("/v1/backtests/runs", get(list_runs))
+        .route("/v1/jobs", get(list_jobs))
+        .route("/v1/jobs/{job_id}", get(get_job).delete(delete_job))
+        .route("/v1/jobs/{job_id}/artifacts", get(list_artifacts))
         .route(
-            "/v1/backtests/runs/{run_id}",
-            get(get_run).delete(delete_run),
-        )
-        .route("/v1/backtests/runs/{run_id}/artifacts", get(list_artifacts))
-        .route(
-            "/v1/backtests/runs/{run_id}/artifacts/{*artifact_name}",
+            "/v1/jobs/{job_id}/artifacts/{*artifact_name}",
             get(download_artifact),
         )
 }
@@ -39,15 +38,24 @@ fn identifier(value: &str) -> Result<&str, ApiError> {
     Ok(value)
 }
 
-async fn list_runs(
+async fn list_jobs(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
-) -> Result<Json<RunListResponse>, ApiError> {
-    let status = match params.get("status") {
-        Some(value) => Some(RunStatus::parse(value).map_err(|_| {
+) -> Result<Json<JobListResponse>, ApiError> {
+    let kind = match params.get("kind") {
+        Some(value) => Some(JobKind::parse(value).map_err(|_| {
             ApiError::validation_error("request validation failed").with_details(json!({
-                "loc": ["query", "status"],
-                "msg": "unknown run status",
+                "loc": ["query", "kind"],
+                "msg": "unknown job kind",
+            }))
+        })?),
+        None => None,
+    };
+    let state_filter = match params.get("state") {
+        Some(value) => Some(JobState::parse(value).map_err(|_| {
+            ApiError::validation_error("request validation failed").with_details(json!({
+                "loc": ["query", "state"],
+                "msg": "unknown job state",
             }))
         })?),
         None => None,
@@ -58,46 +66,48 @@ async fn list_runs(
                 .with_details(json!({"loc": ["query", "strategy_id"]})));
         }
     }
-    let runs = state
-        .run_store
-        .list(status, params.get("strategy_id").map(String::as_str));
-    Ok(Json(RunListResponse { runs }))
+    let jobs = state.job_store.list(
+        kind,
+        state_filter,
+        params.get("strategy_id").map(String::as_str),
+    );
+    Ok(Json(JobListResponse { jobs }))
 }
 
-async fn get_run(
+async fn get_job(
     State(state): State<AppState>,
-    Path(run_id): Path<String>,
-) -> Result<Json<RunCatalogRecord>, ApiError> {
-    identifier(&run_id)?;
+    Path(job_id): Path<String>,
+) -> Result<Json<JobStatusResponse>, ApiError> {
+    identifier(&job_id)?;
     state
-        .run_store
-        .get(&run_id)
+        .job_store
+        .get(&job_id)
         .map(Json)
-        .ok_or_else(ApiError::run_not_found)
+        .ok_or_else(ApiError::job_not_found)
 }
 
-async fn delete_run(
+async fn delete_job(
     State(state): State<AppState>,
-    Path(run_id): Path<String>,
+    Path(job_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    identifier(&run_id)?;
-    if state.run_store.delete(&run_id) {
+    identifier(&job_id)?;
+    if state.job_store.delete(&job_id) {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(ApiError::run_not_found())
+        Err(ApiError::job_not_found())
     }
 }
 
 async fn list_artifacts(
     State(state): State<AppState>,
-    Path(run_id): Path<String>,
+    Path(job_id): Path<String>,
 ) -> Result<Json<ArtifactListResponse>, ApiError> {
-    identifier(&run_id)?;
+    identifier(&job_id)?;
     let stored = state
-        .run_store
-        .fetch(&run_id)
-        .ok_or_else(ApiError::run_not_found)?;
-    let prefix = run_prefix(&stored.record.run_id).map_err(|_| ApiError::run_not_found())?;
+        .job_store
+        .fetch(&job_id)
+        .ok_or_else(ApiError::job_not_found)?;
+    let prefix = artifact_prefix(&stored.record.job_id).map_err(|_| ApiError::job_not_found())?;
     let artifacts = stored
         .artifacts
         .iter()
@@ -117,23 +127,23 @@ async fn list_artifacts(
         })
         .collect();
     Ok(Json(ArtifactListResponse {
-        run_id: stored.record.run_id,
+        job_id: stored.record.job_id,
         artifacts,
     }))
 }
 
 async fn download_artifact(
     State(state): State<AppState>,
-    Path((run_id, artifact_name)): Path<(String, String)>,
+    Path((job_id, artifact_name)): Path<(String, String)>,
 ) -> Result<Response, ApiError> {
-    identifier(&run_id)?;
+    identifier(&job_id)?;
     if artifact_name.is_empty() || artifact_name.len() > ARTIFACT_NAME_MAX {
         return Err(ApiError::artifact_not_found());
     }
     let stored = state
-        .run_store
-        .fetch(&run_id)
-        .ok_or_else(ApiError::run_not_found)?;
+        .job_store
+        .fetch(&job_id)
+        .ok_or_else(ApiError::job_not_found)?;
     let payload = stored
         .artifacts
         .get(&artifact_name)

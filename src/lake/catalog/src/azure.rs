@@ -365,7 +365,7 @@ pub fn run_to_entity(record: &RunRecord) -> TableEntity {
     let mut entity = TableEntity::new();
     entity.insert("PartitionKey".to_string(), Value::from(RUN_PARTITION_KEY));
     entity.insert("RowKey".to_string(), Value::String(record.row_key()));
-    entity.insert("RunId".to_string(), Value::String(record.run_id.clone()));
+    entity.insert("JobId".to_string(), Value::String(record.job_id.clone()));
     entity.insert(
         "Status".to_string(),
         Value::String(record.status.value().to_string()),
@@ -422,7 +422,7 @@ pub fn run_from_entity(entity: &TableEntity) -> Result<RunRecord, DataError> {
         metrics.insert(key.clone(), text.to_string());
     }
     RunRecord::new(
-        entity_string(entity, "RunId")?,
+        entity_string(entity, "JobId")?,
         enum_value::<RunState>(entity, "Status", "RunState", RunState::from_value)?,
         entity_string(entity, "StrategyId")?,
         data_start,
@@ -797,9 +797,9 @@ impl AzureTableRunRepository {
 }
 
 impl RunRepository for AzureTableRunRepository {
-    fn get(&self, run_id: &str) -> Result<Option<RunRecord>, DataError> {
-        let run_id = run_id.trim();
-        match self.table.get_entity(RUN_PARTITION_KEY, &table_key(run_id)) {
+    fn get(&self, job_id: &str) -> Result<Option<RunRecord>, DataError> {
+        let job_id = job_id.trim();
+        match self.table.get_entity(RUN_PARTITION_KEY, &table_key(job_id)) {
             Ok(entity) => Ok(Some(run_from_entity(&entity)?)),
             Err(DataError::NotFound(_)) => Ok(None),
             Err(error) => Err(error),
@@ -822,7 +822,7 @@ impl RunRepository for AzureTableRunRepository {
             .iter()
             .map(run_from_entity)
             .collect::<Result<Vec<_>, _>>()?;
-        records.sort_by(|left, right| left.run_id.cmp(&right.run_id));
+        records.sort_by(|left, right| left.job_id.cmp(&right.job_id));
         let strategy_id = strategy_id.map(str::trim);
         records.retain(|record| {
             status.is_none_or(|filter| record.status == filter)
@@ -831,9 +831,9 @@ impl RunRepository for AzureTableRunRepository {
         Ok(records)
     }
 
-    fn delete(&self, run_id: &str) -> Result<bool, DataError> {
-        let run_id = run_id.trim();
-        let row_key = table_key(run_id);
+    fn delete(&self, job_id: &str) -> Result<bool, DataError> {
+        let job_id = job_id.trim();
+        let row_key = table_key(job_id);
         match self.table.get_entity(RUN_PARTITION_KEY, &row_key) {
             Ok(_) => {}
             Err(DataError::NotFound(_)) => return Ok(false),

@@ -5,6 +5,7 @@
 # compile work starts.
 schema_version: 1
 shell: screen
+job_id: job-screen-example
 name: close-screen-example
 as_of: "2024-01-19"
 bar_interval: 1d

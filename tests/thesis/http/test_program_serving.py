@@ -73,9 +73,11 @@ def test_serving_authors_template_validates_and_runs_by_id(tmp_path: Path) -> No
             self, name: str, arguments: Mapping[str, object] | None = None
         ) -> HarnessToolResult:
             calls.append((name, arguments or {}))
-            return HarnessToolResult(
-                name, True, {"valid": True, "run_id": "fake-study-run"}
-            )
+            structured: dict[str, object] = {"valid": True}
+            config = (arguments or {}).get("config")
+            job_id = config.get("job_id") if isinstance(config, Mapping) else None
+            structured["job_id"] = job_id if isinstance(job_id, str) else "job-one"
+            return HarnessToolResult(name, True, structured)
 
     class Provider:
         def complete(

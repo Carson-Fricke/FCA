@@ -80,7 +80,7 @@ def test_every_edge_live_and_replay_use_declared_pipe_once(
             "gitCommit": "a" * 40,
             "version": "b" * 64,
         },
-        "backtest": {"jobId": "run-one", "state": "complete"},
+        "backtest": {"jobId": "job-one", "state": "succeeded"},
     }
     counts = []
     original = kit.workflow.spec.piping[edge]

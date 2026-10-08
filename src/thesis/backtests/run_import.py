@@ -1,10 +1,11 @@
-"""Map one completed harness run into a workspace :class:`BacktestRecord`.
+"""Map one completed harness job into a workspace :class:`BacktestRecord`.
 
-The importer reads a run's catalog row (``get_run``) and its
+The importer reads a job's result (``get_job_result``) and its
 ``backtest.json``/``metrics.json`` artifacts (``read_artifact``) through the
 harness MCP tool provider, reconstructs a canonical equity curve and FIFO
 trade log, and projects the metrics into the snake_case/camelCase stat keys the
-workspace detail and the UI backtest report both consume.
+workspace detail and the UI backtest report both consume.  The record is keyed
+by the same ``job_id`` the submission allocated.
 
 The equity curve prefers the harness ``artifacts/equity.parquet`` artifact and
 falls back to a step curve derived from ``backtest.json`` fills and portfolio
@@ -16,7 +17,6 @@ from __future__ import annotations
 import io
 import json
 import math
-import uuid
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -24,11 +24,11 @@ from datetime import UTC, datetime
 from thesis.agent.harness_tools import HarnessToolProvider, HarnessToolResult
 from thesis.backtests.artifacts import ArtifactReader, HarnessArtifactReader
 from thesis.http.backtests import BacktestRecord
-from thesis.integrations.mcp import TOOL_GET_JOB_STATUS, TOOL_GET_RUN
+from thesis.integrations.mcp import TOOL_GET_JOB_RESULT, TOOL_GET_JOB_STATUS
 
-_PENDING_STATES = frozenset({"queued", "running", "pending", "submitted", "created"})
-_FAILED_STATES = frozenset({"failed", "cancelled", "canceled", "error", "errored"})
-_COMPLETE_STATES = frozenset({"complete", "completed", "succeeded", "success"})
+_PENDING_STATES = frozenset({"queued", "running"})
+_FAILED_STATES = frozenset({"failed", "cancelled"})
+_COMPLETE_STATES = frozenset({"succeeded"})
 
 _EQUITY_ARTIFACT = "artifacts/equity.parquet"
 _BACKTEST_ARTIFACT = "backtest.json"
@@ -39,18 +39,27 @@ _ANNUALIZATION = math.sqrt(252.0)
 
 
 class BacktestRunError(RuntimeError):
-    """A harness run cannot be imported (missing, failed, or unusable)."""
+    """A harness job cannot be imported (missing, failed, or unusable).
+
+    ``state`` carries the harness-observed terminal state when one was read, so
+    a report consumer can distinguish an observed harness failure from a job
+    the harness could not resolve at all.
+    """
+
+    def __init__(self, message: str, *, state: str | None = None) -> None:
+        super().__init__(message)
+        self.state = state
 
 
 class BacktestRunPending(RuntimeError):
-    """A harness run is still queued or running; the caller may retry."""
+    """A harness job is still queued or running; the caller may retry."""
 
 
 def import_backtest_run(
     *,
     tools: HarnessToolProvider,
     workspace_id: str,
-    run_id: str,
+    job_id: str,
     chat_id: str | None = None,
     execution_id: str | None = None,
     strategy_id: str | None = None,
@@ -58,28 +67,29 @@ def import_backtest_run(
     artifact_reader: ArtifactReader | None = None,
     http_get: Callable[[str], bytes] | None = None,
     clock: Callable[[], datetime] | None = None,
-    id_factory: Callable[[str], str] | None = None,
 ) -> BacktestRecord:
-    """Import one completed harness run as a workspace backtest record.
+    """Import one completed harness job as a workspace backtest record.
 
-    Raises :class:`BacktestRunPending` when the run is still queued/running and
-    :class:`BacktestRunError` when the run is missing, failed, or has no usable
+    Raises :class:`BacktestRunPending` when the job is still queued/running and
+    :class:`BacktestRunError` when the job is missing, failed, or has no usable
     status.  A missing or unreadable equity parquet is tolerated.
     """
     reader = artifact_reader or HarnessArtifactReader(tools, http_get=http_get)
-    _require_terminal(tools, run_id)
-    catalog = _get_run(tools, run_id)
+    _require_terminal(tools, job_id)
+    catalog = _get_job_result(tools, job_id)
     status = _status_of(catalog)
     if status is None:
-        raise BacktestRunError(f"harness run {run_id!r} reported no status")
+        raise BacktestRunError(f"harness job {job_id!r} reported no state")
     if status in _PENDING_STATES:
-        raise BacktestRunPending(f"harness run {run_id!r} is still {status}")
+        raise BacktestRunPending(f"harness job {job_id!r} is still {status}")
     if status not in _COMPLETE_STATES:
-        raise BacktestRunError(f"harness run {run_id!r} ended in state {status!r}")
+        raise BacktestRunError(
+            f"harness job {job_id!r} ended in state {status!r}", state=status
+        )
 
-    backtest = _read_json(reader, run_id, _BACKTEST_ARTIFACT)
-    metrics = _read_json(reader, run_id, _METRICS_ARTIFACT)
-    configuration = _read_text(reader, run_id, _CONFIG_ARTIFACT)
+    backtest = _read_json(reader, job_id, _BACKTEST_ARTIFACT)
+    metrics = _read_json(reader, job_id, _METRICS_ARTIFACT)
+    configuration = _read_text(reader, job_id, _CONFIG_ARTIFACT)
     manifest_document = _mapping(backtest.get("manifest"))
     portfolio = _mapping(backtest.get("portfolio"))
     fills = _sequence(backtest.get("fills"))
@@ -88,7 +98,7 @@ def import_backtest_run(
         portfolio.get("initial_cash"),
         manifest_document.get("initial_cash"),
     )
-    equity_points = _equity_from_parquet(reader, run_id)
+    equity_points = _equity_from_parquet(reader, job_id)
     if not equity_points:
         equity_points = _equity_from_fills(fills, manifest_document, initial_capital)
     equity_values = [float(point["v"]) for point in equity_points]
@@ -104,21 +114,18 @@ def import_backtest_run(
         strategy_id
         or _text(catalog.get("strategy_id"))
         or _text(manifest_document.get("strategy_id"))
-        or f"strategy-{run_id}"
+        or f"strategy-{job_id}"
     )
-    resolved_name = name or f"Backtest {run_id}"
+    resolved_name = name or f"Backtest {job_id}"
     period_start = _first_text(
         catalog.get("data_start"), manifest_document.get("start")
     )
     period_end = _first_text(catalog.get("data_end"), manifest_document.get("end"))
     created_at = _iso_z((clock or _utc_now)())
-    resolved_status = _text(backtest.get("status")) or (
-        "completed" if status in _COMPLETE_STATES else status
-    )
 
     manifest_entry: dict[str, object] = {
-        "run_id": run_id,
-        "status": resolved_status,
+        "job_id": job_id,
+        "status": status,
         "run_digest": _text(catalog.get("run_digest")),
         "configuration_digest": _text(catalog.get("configuration_digest")),
         "data_start": _text(catalog.get("data_start")),
@@ -132,7 +139,7 @@ def import_backtest_run(
     }
 
     return BacktestRecord(
-        id=(id_factory or _new_record_id)("bt"),
+        job_id=job_id,
         workspace_id=workspace_id,
         strategy_id=resolved_strategy_id,
         name=resolved_name,
@@ -150,8 +157,7 @@ def import_backtest_run(
         equity=tuple(equity_points),
         trade_log=tuple(trades),
         stats=stats,
-        status=resolved_status,
-        run_id=run_id,
+        status=status,
         chat_id=chat_id,
         execution_id=execution_id,
         config_path=_CONFIG_ARTIFACT if configuration is not None else None,
@@ -162,47 +168,45 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def _new_record_id(prefix: str) -> str:
-    return f"{prefix}-{uuid.uuid4().hex}"
-
-
-def _get_run(tools: HarnessToolProvider, run_id: str) -> dict[str, object]:
-    result = tools.call_tool(TOOL_GET_RUN, {"run_id": run_id})
+def _get_job_result(tools: HarnessToolProvider, job_id: str) -> dict[str, object]:
+    result = tools.call_tool(TOOL_GET_JOB_RESULT, {"job_id": job_id})
     if not result.ok:
-        raise BacktestRunError(_failure_message(result, run_id))
+        raise BacktestRunError(_failure_message(result, job_id))
     return dict(result.structured)
 
 
-def _failure_message(result: HarnessToolResult, run_id: str) -> str:
+def _failure_message(result: HarnessToolResult, job_id: str) -> str:
     if result.failure is not None and result.failure.message:
         return result.failure.message
-    return f"harness run {run_id!r} could not be read"
+    return f"harness job {job_id!r} could not be read"
 
 
 def _status_of(catalog: Mapping[str, object]) -> str | None:
-    status = _text(catalog.get("status")) or _text(catalog.get("state"))
+    status = _text(catalog.get("state"))
     return status.lower() if status is not None else None
 
 
-def _require_terminal(tools: HarnessToolProvider, run_id: str) -> None:
-    """Fail fast on a pending/failed job before the run catalog row exists.
+def _require_terminal(tools: HarnessToolProvider, job_id: str) -> None:
+    """Fail fast on a pending/failed job before the result record exists.
 
-    The async submitter writes the run catalog row only when the worker
-    finishes, so a still-running run is distinguishable from a missing one only
+    The async submitter writes the result record only when the worker
+    finishes, so a still-running job is distinguishable from a missing one only
     through ``get_job_status``.
     """
-    result = tools.call_tool(TOOL_GET_JOB_STATUS, {"job_id": run_id})
+    result = tools.call_tool(TOOL_GET_JOB_STATUS, {"job_id": job_id})
     if not result.ok:
         return
     state = _status_of(result.structured)
     if state in _PENDING_STATES:
-        raise BacktestRunPending(f"harness run {run_id!r} is still {state}")
+        raise BacktestRunPending(f"harness job {job_id!r} is still {state}")
     if state in _FAILED_STATES:
-        raise BacktestRunError(f"harness run {run_id!r} ended in state {state!r}")
+        raise BacktestRunError(
+            f"harness job {job_id!r} ended in state {state!r}", state=state
+        )
 
 
-def _read_json(reader: ArtifactReader, run_id: str, name: str) -> dict[str, object]:
-    data = reader.read(run_id, name)
+def _read_json(reader: ArtifactReader, job_id: str, name: str) -> dict[str, object]:
+    data = reader.read(job_id, name)
     if data is None:
         return {}
     try:
@@ -212,8 +216,8 @@ def _read_json(reader: ArtifactReader, run_id: str, name: str) -> dict[str, obje
     return dict(document) if isinstance(document, Mapping) else {}
 
 
-def _read_text(reader: ArtifactReader, run_id: str, name: str) -> str | None:
-    data = reader.read(run_id, name)
+def _read_text(reader: ArtifactReader, job_id: str, name: str) -> str | None:
+    data = reader.read(job_id, name)
     if data is None:
         return None
     try:
@@ -223,9 +227,9 @@ def _read_text(reader: ArtifactReader, run_id: str, name: str) -> str | None:
 
 
 def _equity_from_parquet(
-    reader: ArtifactReader, run_id: str
+    reader: ArtifactReader, job_id: str
 ) -> tuple[dict[str, float | int], ...]:
-    data = reader.read(run_id, _EQUITY_ARTIFACT)
+    data = reader.read(job_id, _EQUITY_ARTIFACT)
     if data is None:
         return ()
     try:

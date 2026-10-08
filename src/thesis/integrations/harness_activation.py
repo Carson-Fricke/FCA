@@ -42,6 +42,8 @@ _TRADER_CAPABILITY: Mapping[ActivationEnvironment, CapabilityName] = {
 class HarnessActivationError(RuntimeError):
     """Base error for a failed or misused harness activation."""
 
+    job_id: str | None = None
+
 
 class CapabilityUnavailableError(HarnessActivationError):
     """Raised before any invocation when the harness lacks the capability."""
@@ -108,12 +110,16 @@ class HarnessActivationRequest:
 
     ``bundle_ref`` is the content-addressed strategy bundle identity (plain
     hash text; grant semantics live in the consent layer above this module).
+    ``job_id`` is the execution identity the caller allocates before submission;
+    it is required for backtest activation and absent for live trader sessions,
+    which resolve their own persisted identity.
     """
 
     bundle_ref: str
     config_path: str
     action: ActivationAction
     environment: ActivationEnvironment = "paper"
+    job_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "bundle_ref", _text(self.bundle_ref, "bundle_ref"))
@@ -127,16 +133,21 @@ class HarnessActivationRequest:
                 "activation environment must be 'paper', 'shadow', or 'live', "
                 f"got {self.environment!r}"
             )
+        if self.job_id is not None:
+            object.__setattr__(self, "job_id", _text(self.job_id, "job_id"))
 
     def to_payload(self) -> dict[str, object]:
         """Serialize the published activation fields, identically per boundary."""
-        return {
+        payload: dict[str, object] = {
             "schema_version": 1,
             "bundle_ref": self.bundle_ref,
             "environment": self.environment,
             "action": self.action,
             "config_path": self.config_path,
         }
+        if self.job_id is not None:
+            payload["job_id"] = self.job_id
+        return payload
 
     def required_capability(self) -> CapabilityName:
         """Return the harness capability this request needs."""
@@ -306,6 +317,7 @@ class ActivationAdapter:
         bundle_ref: str,
         config_path: str,
         *,
+        job_id: str,
         environment: ActivationEnvironment = "paper",
         bearer_token: str | None = None,
     ) -> ActivationOutcome:
@@ -315,6 +327,7 @@ class ActivationAdapter:
             config_path=config_path,
             action="backtest",
             environment=environment,
+            job_id=job_id,
         )
         return self._boundary.run_backtest(request, bearer_token=bearer_token)
 
@@ -374,12 +387,18 @@ def _accepted_outcome(
         raise HarnessActivationProtocolError(
             "remote harness launch response requires a non-empty 'state' string"
         )
+    resolved_job_id = job_id.strip()
+    if request.job_id is not None and resolved_job_id != request.job_id:
+        raise HarnessActivationProtocolError(
+            "remote harness launch acknowledged job_id "
+            f"{resolved_job_id!r} for submitted job_id {request.job_id!r}"
+        )
     return ActivationOutcome(
         action=request.action,
         bundle_ref=request.bundle_ref,
         environment=request.environment,
         request_payload=request.to_payload(),
-        job_id=job_id.strip(),
+        job_id=resolved_job_id,
         state=state.strip(),
         raw=dict(body),
     )

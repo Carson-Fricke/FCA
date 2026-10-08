@@ -11,6 +11,7 @@ from typing import Any, cast
 import pytest
 
 from thesis.agent.runtime.context import ToolContext
+from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.session import ToolExecution
 from thesis.agent.runtime.store import PersistenceSubAgentStore
 from thesis.chat import ChatService
@@ -176,32 +177,31 @@ def test_session_policy_is_workflow_owned_and_authoring_is_anchor_scoped(
     assert service.resolve(context).programs is None
 
 
-def test_runtime_caches_default_workflow_per_chat(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_runtime_caches_default_workflow_per_chat() -> None:
     from thesis.agent.skills import SkillRegistry
+    from thesis.workflows.core.execution_store import InMemoryExecutionStore
     from thesis.workflows.runtime import build_model_router
 
+    from ._support import FakeValidator
+
+    chat = ChatService()
+    conversations = Conversations(chat=chat)
     router = build_model_router(
         role_policies={}, model_profiles={}, providers={}, skills=SkillRegistry()
     )
     runtime = WorkflowRuntime(
-        router=router, runner=cast("Any", SimpleNamespace(run=lambda request: None))
+        router=router,
+        runner=cast("Any", SimpleNamespace(run=lambda request: None)),
+        validator=FakeValidator(),
+        conversations=conversations,
+        execution_store=InMemoryExecutionStore(),
     )
-    builds: list[ChatService] = []
-
-    def build(*, chat: ChatService, **kwargs: object) -> Any:
-        builds.append(chat)
-        return object()
-
-    monkeypatch.setattr(runtime, "_build_hypothesis_development", build)
-    first, second = ChatService(), ChatService()
-    assert runtime.build_hypothesis_development(
-        chat=first
-    ) is runtime.build_hypothesis_development(chat=first)
-    runtime.build_hypothesis_development(chat=second)
-    runtime.build_hypothesis_development(chat=first, experiment_id="explicit")
-    assert builds == [first, second, first]
+    second = ChatService()
+    default = runtime.build_hypothesis_development(chat=chat)
+    assert runtime.build_hypothesis_development(chat=chat) is default
+    assert runtime.build_hypothesis_development(chat=second) is not default
+    explicit = runtime.build_hypothesis_development(chat=chat, experiment_id="explicit")
+    assert explicit is not default
 
 
 def test_helper_knowledge_tracks_persisted_execution_not_parent_attempt() -> None:
@@ -270,72 +270,3 @@ def test_helper_knowledge_tracks_persisted_execution_not_parent_attempt() -> Non
     assert (
         service.resolve(replace(context, chat_id="foreign")).knowledge_collections == ()
     )
-
-
-def test_completion_and_failure_delegate_to_the_workflow() -> None:
-    from thesis.chat.contracts import WorkflowDefinition
-
-    chat = ChatService()
-    thread = chat.create_chat("workspace", title="Services", owner_actor_id="operator")
-    execution = chat.launch_workflow(
-        "workspace",
-        thread.chat_id,
-        actor_id="operator",
-        body="Develop an idea",
-        workflow=WorkflowDefinition(
-            workflow_id="hypothesis-development",
-            version="1.0.0",
-            title="Development",
-            phases=("model_creation",),
-        ),
-    )
-    record = SubAgentRecord(
-        workspace_id="workspace",
-        chat_id=thread.chat_id,
-        sub_agent_id="author",
-        role="coding",
-        created_by="actor",
-        created_at=datetime.now(UTC),
-        phase="model_creation",
-        workflow_execution_id=execution.execution_id,
-        phase_executor=True,
-        phase_attempt_id="attempt",
-        parent_sub_agent_id="owner",
-    )
-    calls: list[object] = []
-    result = {"applied": True}
-
-    def apply(
-        request: Any, node_id: str, completion: Mapping[str, object]
-    ) -> Mapping[str, object]:
-        calls.append((request.execution_id, node_id, completion))
-        return result
-
-    def fail(request: Any, *, reason: str) -> None:
-        calls.append((request.execution_id, reason))
-
-    workflow = SimpleNamespace(
-        apply_phase_completion=apply,
-        fail_execution=fail,
-        _reconstruct_state=lambda request: SimpleNamespace(
-            phase=SimpleNamespace(value="model_creation")
-        ),
-        _workflow_node_id=lambda request: "owner",
-        _phase_attempt_id=lambda request, phase: "attempt",
-    )
-    store = PersistenceSubAgentStore(chat.persistence)
-    store.save_sub_agent(record)
-    service = HypothesisSessionServices(
-        chat=chat,
-        store=store,
-        workflow=cast("Any", lambda: workflow),
-        harness_tools=None,
-        activity=lambda context, tool, arguments, execute: execute(),
-    )
-    completion = {"summary": "Accepted", "intentEpoch": 0}
-    assert service.apply_completion("workspace", record, completion) is result
-    service.fail(record, ValueError("deterministic failure"))
-    assert calls == [
-        (execution.execution_id, record.sub_agent_id, completion),
-        (execution.execution_id, "deterministic failure"),
-    ]

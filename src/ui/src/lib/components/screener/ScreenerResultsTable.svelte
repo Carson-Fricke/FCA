@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
 	 * Screening run results: the full provenance strip (result id, definition
-	 * id/hash, run id, as-of, terminal status, data window when published)
+	 * id/hash, job id, as-of, artifact status, data window when published)
 	 * plus a rank/symbol table whose metric columns come from the first row's
 	 * recorded metrics. Loading, empty and error states follow the shared
 	 * visual language.
@@ -54,8 +54,7 @@
 		<h3 class="text-sm font-semibold text-slate-800">Results</h3>
 		{#if result}
 			<span
-				class="rounded-full border px-2 py-0.5 text-[10px] {result.status === 'complete' ||
-				result.status === 'completed'
+				class="rounded-full border px-2 py-0.5 text-[10px] {result.status === 'succeeded'
 					? 'border-profit/40 bg-profit/10 text-profit'
 					: 'border-warn/40 bg-warn/10 text-warn'}"
 				data-testid="screener-status"
@@ -88,7 +87,7 @@
 			data-testid="screener-provenance"
 		>
 			<span data-testid="provenance-result-id">result {result.result_id}</span>
-			<span data-testid="provenance-run-id">run {result.run_id}</span>
+			<span data-testid="provenance-job-id">job {result.job_id}</span>
 			<span data-testid="provenance-as-of">as of {result.as_of}</span>
 			<span data-testid="provenance-definition-id">definition {result.definition_id}</span>
 			<span data-testid="provenance-definition-hash" title={result.definition_hash}>

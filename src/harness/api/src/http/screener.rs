@@ -1,8 +1,8 @@
 //! Screening job launching for the harness HTTP boundary.
 //!
 //! `POST /v1/screeners/jobs` validates one `shell: screen` configuration,
-//! records a queued job, and hands the work to an injected [`ScreenLauncher`].
-//! The default [`InProcessScreenLauncher`] runs the injected
+//! admits an authoritative job, and hands the work to an injected
+//! [`ScreenLauncher`]. The default [`InProcessScreenLauncher`] runs the injected
 //! [`ScreeningRunner`] on a detached worker so the async route never blocks;
 //! a job guard fails the job if the worker exits without recording a terminal
 //! state, mirroring the MCP study submitter.
@@ -17,12 +17,12 @@ use chrono::{DateTime, NaiveDate, Utc};
 
 use super::clock::Clock;
 use super::launcher::LaunchError;
-use super::store::{JobRecord, JobRepository, JobState, RunCatalogRecord, RunStatus, RunStore};
+use super::store::{JobKind, JobRecord, JobState, JobStore};
 
 /// Work description passed to an injected screening launcher.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScreenLaunchJob {
-    /// Job identifier (equal to the configuration's derived run ID).
+    /// Job identifier.
     pub job_id: String,
     /// Validated `shell: screen` configuration.
     pub configuration: ScreenConfig,
@@ -35,7 +35,7 @@ pub struct ScreenRunOutcome {
     pub completed: bool,
     /// Number of ranked rows.
     pub rows: u64,
-    /// Complete immutable result set keyed by run-relative artifact name.
+    /// Complete immutable result set keyed by job-relative artifact name.
     pub artifacts: BTreeMap<String, Vec<u8>>,
     /// Failure reason, present when the run did not complete.
     pub error: Option<String>,
@@ -86,8 +86,7 @@ impl ScreeningRunner for UnavailableScreeningRunner {
 
 /// Launcher that runs one screening job on a detached worker in this process.
 pub struct InProcessScreenLauncher {
-    run_store: Arc<dyn RunStore>,
-    jobs: Arc<dyn JobRepository>,
+    jobs: Arc<dyn JobStore>,
     runner: Arc<dyn ScreeningRunner>,
     clock: Arc<dyn Clock>,
 }
@@ -96,13 +95,11 @@ impl InProcessScreenLauncher {
     /// Compose an in-process launcher over the injected boundaries.
     #[must_use]
     pub fn new(
-        run_store: Arc<dyn RunStore>,
-        jobs: Arc<dyn JobRepository>,
+        jobs: Arc<dyn JobStore>,
         runner: Arc<dyn ScreeningRunner>,
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
-            run_store,
             jobs,
             runner,
             clock,
@@ -113,13 +110,6 @@ impl InProcessScreenLauncher {
 impl ScreenLauncher for InProcessScreenLauncher {
     fn launch(&self, job: &ScreenLaunchJob) -> Result<(), LaunchError> {
         let started = self.clock.now();
-        self.jobs.upsert(JobRecord::new(
-            &job.job_id,
-            JobState::Running,
-            started,
-            started,
-        ));
-        let run_store = self.run_store.clone();
         let jobs = self.jobs.clone();
         let runner = self.runner.clone();
         let job_id = job.job_id.clone();
@@ -130,14 +120,9 @@ impl ScreenLauncher for InProcessScreenLauncher {
                 let guard = ScreenJobGuard::new(jobs.clone(), &job_id, started);
                 let result = catch_unwind(AssertUnwindSafe(|| runner.run(&configuration, None)));
                 match result {
-                    Ok(Ok(outcome)) => {
-                        finish_run(&run_store, &jobs, &job_id, &configuration, outcome, started)
-                    }
-                    Ok(Err(message)) => {
-                        fail_run(&run_store, &jobs, &job_id, &configuration, started, message)
-                    }
+                    Ok(Ok(outcome)) => finish_run(&jobs, &job_id, &configuration, outcome, started),
+                    Ok(Err(message)) => fail_run(&jobs, &job_id, &configuration, started, message),
                     Err(payload) => fail_run(
-                        &run_store,
                         &jobs,
                         &job_id,
                         &configuration,
@@ -159,63 +144,72 @@ impl ScreenLauncher for InProcessScreenLauncher {
 
 /// Record one completed or domain-failed screening run.
 fn finish_run(
-    run_store: &Arc<dyn RunStore>,
-    jobs: &Arc<dyn JobRepository>,
+    jobs: &Arc<dyn JobStore>,
     job_id: &str,
     configuration: &ScreenConfig,
     outcome: ScreenRunOutcome,
     started: DateTime<Utc>,
 ) {
-    let status = if outcome.completed {
-        RunStatus::Complete
-    } else {
-        RunStatus::Failed
-    };
-    let mut artifacts = outcome.artifacts;
-    if artifacts.is_empty() {
-        artifacts = error_artifact(
-            outcome
-                .error
-                .as_deref()
-                .unwrap_or("the screening run produced no artifacts"),
-        );
-    }
-    let record = screen_record(job_id, configuration, status, outcome.rows);
-    if let Err(error) = run_store.put(record, artifacts) {
-        fail_job(jobs, job_id, started, error.to_string());
+    let Some(mut record) = result_record(
+        jobs,
+        job_id,
+        configuration,
+        if outcome.completed {
+            JobState::Succeeded
+        } else {
+            JobState::Failed
+        },
+        outcome.rows,
+        started,
+    ) else {
         return;
+    };
+    record.error_message = outcome.error;
+    if let Err(error) = jobs.put_result(record, outcome.artifacts) {
+        fail_job(jobs, job_id, started, error.to_string());
     }
-    let mut job = job_record(job_id, job_state(outcome.completed), started);
-    job.error_message = outcome.error;
-    jobs.upsert(job);
 }
 
 /// Record one screening run whose worker could not produce a result set.
 fn fail_run(
-    run_store: &Arc<dyn RunStore>,
-    jobs: &Arc<dyn JobRepository>,
+    jobs: &Arc<dyn JobStore>,
     job_id: &str,
     configuration: &ScreenConfig,
     started: DateTime<Utc>,
     message: String,
 ) {
-    let record = screen_record(job_id, configuration, RunStatus::Failed, 0);
-    let _ = run_store.put(record, error_artifact(&message));
-    fail_job(jobs, job_id, started, message);
+    let Some(mut record) = result_record(jobs, job_id, configuration, JobState::Failed, 0, started)
+    else {
+        return;
+    };
+    record.error_message = Some(message);
+    let _ = jobs.put_result(record, BTreeMap::new());
 }
 
-/// Build the results-store catalog row for one screening run.
-fn screen_record(
+/// Build the authoritative job record for one screening terminal state.
+fn result_record(
+    jobs: &Arc<dyn JobStore>,
     job_id: &str,
     configuration: &ScreenConfig,
-    status: RunStatus,
+    state: JobState,
     rows: u64,
-) -> RunCatalogRecord {
-    let mut record = RunCatalogRecord::new(job_id, status, &configuration.definition_id);
-    record.configuration_digest = Some(configuration.configuration_digest());
+    started: DateTime<Utc>,
+) -> Option<JobRecord> {
+    let mut record = jobs.get(job_id)?;
+    record.kind = JobKind::Screen;
+    record.state = state;
+    record.updated_at = Utc::now().max(started);
+    record.strategy_id = configuration.definition_id.clone();
     record.data_start = parse_date(&configuration.window_start());
     record.data_end = parse_date(&configuration.window_end());
-    record.metrics = BTreeMap::from([
+    record.configuration_digest = Some(configuration.configuration_digest());
+    record.metrics = screen_metrics(configuration, rows);
+    Some(record)
+}
+
+/// Extract the headline screening fields into the job metrics.
+fn screen_metrics(configuration: &ScreenConfig, rows: u64) -> BTreeMap<String, String> {
+    BTreeMap::from([
         ("as_of".to_string(), configuration.as_of.clone()),
         (
             "bar_interval".to_string(),
@@ -227,52 +221,33 @@ fn screen_record(
         ),
         ("rank_metric".to_string(), configuration.rank_metric.clone()),
         ("row_count".to_string(), rows.to_string()),
-    ]);
-    record
+    ])
 }
 
 fn parse_date(value: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()
 }
 
-fn error_artifact(message: &str) -> BTreeMap<String, Vec<u8>> {
-    let mut artifacts = BTreeMap::new();
-    artifacts.insert(
-        "error.json".to_string(),
-        serde_json::to_vec(&serde_json::json!({ "error": message }))
-            .unwrap_or_else(|_| b"{}".to_vec()),
-    );
-    artifacts
-}
-
-fn job_record(job_id: &str, state: JobState, started: DateTime<Utc>) -> JobRecord {
-    JobRecord::new(job_id, state, started, Utc::now())
-}
-
-fn fail_job(jobs: &Arc<dyn JobRepository>, job_id: &str, started: DateTime<Utc>, message: String) {
-    let mut record = job_record(job_id, JobState::Failed, started);
+fn fail_job(jobs: &Arc<dyn JobStore>, job_id: &str, started: DateTime<Utc>, message: String) {
+    let Some(mut record) = jobs.get(job_id) else {
+        return;
+    };
+    record.state = JobState::Failed;
+    record.updated_at = Utc::now().max(started);
     record.error_message = Some(message);
-    jobs.upsert(record);
-}
-
-fn job_state(completed: bool) -> JobState {
-    if completed {
-        JobState::Succeeded
-    } else {
-        JobState::Failed
-    }
+    let _ = jobs.put_result(record, BTreeMap::new());
 }
 
 /// Mark one background job failed when its worker exits without a terminal
 /// record: an early return that forgot to record a state, or a panic.
 struct ScreenJobGuard {
-    jobs: Arc<dyn JobRepository>,
+    jobs: Arc<dyn JobStore>,
     job_id: String,
     started: DateTime<Utc>,
 }
 
 impl ScreenJobGuard {
-    fn new(jobs: Arc<dyn JobRepository>, job_id: &str, started: DateTime<Utc>) -> Self {
+    fn new(jobs: Arc<dyn JobStore>, job_id: &str, started: DateTime<Utc>) -> Self {
         Self {
             jobs,
             job_id: job_id.to_string(),

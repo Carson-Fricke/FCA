@@ -52,7 +52,7 @@ impl PaperSessionPolicy {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PaperOptions {
     /// Run identifier.
-    pub run_id: String,
+    pub job_id: String,
     /// String-exact initial cash.
     pub initial_cash: String,
     /// Selected fill model.
@@ -74,9 +74,9 @@ pub struct PaperOptions {
 impl PaperOptions {
     /// Build options with the Python defaults for one run.
     #[must_use]
-    pub fn new(run_id: impl Into<String>) -> Self {
+    pub fn new(job_id: impl Into<String>) -> Self {
         Self {
-            run_id: run_id.into(),
+            job_id: job_id.into(),
             initial_cash: "1000000".to_string(),
             fill_model: FillModel::LatencySize,
             fill_options: None,
@@ -207,7 +207,7 @@ impl PaperBook {
 /// The shell supervision surface the state store captures through.
 pub trait PaperShell {
     /// The shell's run identifier.
-    fn run_id(&self) -> &str;
+    fn job_id(&self) -> &str;
     /// The shell's deterministic options.
     fn options(&self) -> &PaperOptions;
     /// The virtual books in configuration order.
@@ -360,8 +360,8 @@ impl PaperRuntimeShell {
 }
 
 impl PaperShell for PaperRuntimeShell {
-    fn run_id(&self) -> &str {
-        &self.options.run_id
+    fn job_id(&self) -> &str {
+        &self.options.job_id
     }
 
     fn options(&self) -> &PaperOptions {

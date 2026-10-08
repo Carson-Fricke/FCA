@@ -30,6 +30,8 @@ from thesis.workflows.core.execution_store import InMemoryExecutionStore
 from thesis.workspaces.local import LocalWorkspaceProvider
 from thesis.workspaces.manifest import load_workspace_manifest
 
+pytestmark = pytest.mark.slow
+
 
 class Harness(HarnessToolProvider):
     """Both harness ports share the same observable transport fixture."""
@@ -60,12 +62,12 @@ class Harness(HarnessToolProvider):
         return tuple(
             HarnessToolSpec(
                 name=name,
-                description="Inspect run evidence",
+                description="Inspect job evidence",
                 input_schema={"type": "object"},
             )
             for name in (
                 "get_job_status",
-                "get_run",
+                "get_job_result",
                 "list_artifacts",
                 "read_artifact",
             )
@@ -97,7 +99,7 @@ class Harness(HarnessToolProvider):
                 return HarnessToolResult(
                     tool=name,
                     ok=True,
-                    structured={"job_id": arguments["job_id"], "state": "complete"},
+                    structured={"job_id": arguments["job_id"], "state": "succeeded"},
                 )
             return HarnessToolResult(
                 tool=name,
@@ -111,18 +113,33 @@ class Harness(HarnessToolProvider):
             return HarnessToolResult(
                 tool=name,
                 ok=True,
-                structured={"job_id": "study-run", "state": "running"},
+                structured={
+                    "job_id": self._submitted_job_id(arguments),
+                    "state": "running",
+                },
             )
         return HarnessToolResult(
             tool=name,
             ok=True,
             structured={
-                "job_id": "study-run",
-                "state": "complete",
+                "job_id": self._submitted_job_id(arguments),
+                "state": "succeeded",
                 "metrics": {"sharpe": 1.0, "fit.baseline": 0.5},
                 "artifacts": [],
             },
         )
+
+    @staticmethod
+    def _submitted_job_id(arguments):
+        config = arguments.get("config")
+        if isinstance(config, Mapping):
+            candidate = config.get("job_id")
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        candidate = arguments.get("job_id")
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+        return "job-study-run"
 
 
 def setup_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -548,10 +565,10 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         == "strategy_backtesting"
     )
     for tool, arguments in (
-        ("get_job_status", {"job_id": "study-run"}),
-        ("get_run", {"run_id": "study-run"}),
-        ("list_artifacts", {"run_id": "study-run"}),
-        ("read_artifact", {"run_id": "study-run", "name": "metrics.json"}),
+        ("get_job_status", {"job_id": "job-study-run"}),
+        ("get_job_result", {"job_id": "job-study-run"}),
+        ("list_artifacts", {"job_id": "job-study-run"}),
+        ("read_artifact", {"job_id": "job-study-run", "name": "metrics.json"}),
         ("read_sdk_reference", {"topic": "strategy"}),
     ):
         assert backtest_registry.dispatch(tool, arguments).ok
@@ -594,10 +611,10 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
     ).ok
     assert optimization_registry.dispatch("run_backtest", {"program_id": "alpha"}).ok
     for tool, arguments in (
-        ("get_job_status", {"job_id": "study-run"}),
-        ("get_run", {"run_id": "study-run"}),
-        ("list_artifacts", {"run_id": "study-run"}),
-        ("read_artifact", {"run_id": "study-run", "name": "metrics.json"}),
+        ("get_job_status", {"job_id": "job-study-run"}),
+        ("get_job_result", {"job_id": "job-study-run"}),
+        ("list_artifacts", {"job_id": "job-study-run"}),
+        ("read_artifact", {"job_id": "job-study-run", "name": "metrics.json"}),
     ):
         assert optimization_registry.dispatch(tool, arguments).ok
     assert (

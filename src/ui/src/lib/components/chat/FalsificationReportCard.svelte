@@ -156,11 +156,11 @@
 							{trial.detail}
 						</p>
 					{/if}
-					{#if trial.runState || trial.runId}
+					{#if trial.runState || trial.jobId}
 						<p class="mt-1 font-mono text-[10px] text-slate-500" data-testid="trial-run">
 							{#if trial.runState}<span class="font-semibold text-slate-600 uppercase">{trial.runState}</span>{/if}
-							{#if trial.runState && trial.runId}<span class="mx-1">·</span>{/if}
-							{#if trial.runId}<span>run {trial.runId}</span>{/if}
+							{#if trial.runState && trial.jobId}<span class="mx-1">·</span>{/if}
+							{#if trial.jobId}<span>job {trial.jobId}</span>{/if}
 						</p>
 					{/if}
 				</div>

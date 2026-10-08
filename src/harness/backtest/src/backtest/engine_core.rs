@@ -1455,7 +1455,7 @@ fn fees_json(assessments: &[FeeAssessment], totals: &FeeAggregation) -> JsonValu
                                 JsonValue::String(assessment.schedule_id.clone()),
                             ),
                             ("currency", JsonValue::String(assessment.currency.clone())),
-                            ("run_id", JsonValue::String(assessment.run_id.clone())),
+                            ("job_id", JsonValue::String(assessment.job_id.clone())),
                             (
                                 "strategy_id",
                                 JsonValue::String(assessment.strategy_id.clone()),
@@ -1743,7 +1743,7 @@ pub fn run_native_engine(
         "harness-config",
     )?;
     let rules = resolve_risk_rules(configuration)?;
-    let mut hub = PortfolioHub::new(&configuration.run_id);
+    let mut hub = PortfolioHub::new(&configuration.job_id);
     for instance in &strategies {
         let capital_fraction = capital_fraction(configuration, &instance.instance_id);
         let initial_cash = configuration
@@ -1762,7 +1762,7 @@ pub fn run_native_engine(
             .unwrap_or(configuration.initial_cash_decimal);
         let start = StrategyStart {
             instance_id: instance.instance_id.clone(),
-            account_id: configuration.run_id.clone(),
+            account_id: configuration.job_id.clone(),
             symbols: configuration.symbols.clone(),
             seed: configuration.seed,
             initial_cash,
@@ -2025,7 +2025,7 @@ fn dispatch_event(
             };
             let assessment = schedule.calculate(
                 &fee_fill,
-                &configuration.run_id,
+                &configuration.job_id,
                 &strategy_id,
                 &options.asset_class,
             );

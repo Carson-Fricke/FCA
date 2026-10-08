@@ -58,7 +58,7 @@ _DISCOVERY_COMPLETION_PROTOCOL = (
     "and call validate_study once per changed input to compile-check it. After "
     "success, immediately call run_study with that program_id; do not "
     "validate identical input again (a reused result is the same evidence, not "
-    "a new attempt). Use get_run, "
+    "a new attempt). Use get_job_result, "
     "list_artifacts and read_artifact to inspect what a run produced. Each "
     "study is evidence for an attempt. Never call run_backtest, "
     "backtest_config_template, or any other backtest or strategy tool: "
@@ -101,7 +101,7 @@ _DISCOVERY_TURN_INSTRUCTIONS = (
     "slice that can answer it, and a comparable no-structure baseline. Declare "
     "the data types (bars, quote or trade), exact symbols and sample window "
     "explicitly; prefer inputs the platform can actually fetch.",
-    "3. Record every attempt, changed or not: its purpose, study id, data "
+    "3. Record every attempt, changed or not: its purpose, data "
     "types, window and result. A failed or inconclusive study is a finding — "
     "never hide it.",
     "4. Look for a candidate: an opportunity with a plausible signal, the time "
@@ -133,9 +133,9 @@ _DISCOVERY_FINALIZE_INSTRUCTIONS = (
     "the effect should persist), profitSource (who pays and why), effect (the "
     "size you actually measured, as text), competingExplanation (the most "
     "plausible boring story), and evidence (what the studies showed).",
-    "- attempts: every study you ran, each with purpose, studyId, dataTypes "
+    "- attempts: every study you ran, each with purpose, dataTypes "
     "(non-empty), window, result, changed (true when the attempt changed your "
-    "mind), and runId when a run exists. At least one attempt is required.",
+    "mind), and jobId when the study executed. At least one attempt is required.",
     "- untouchedData: which data you deliberately did not touch so later "
     "validation stays honest; write that none remains only if you truly used "
     "everything available.",

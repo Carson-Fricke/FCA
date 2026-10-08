@@ -115,7 +115,7 @@ class ToolResultRequest(ChatHTTPModel):
 class SubmitToolJobRequest(ChatHTTPModel):
     tool_name: str = Field(min_length=1, max_length=128)
     actor_id: str = Field(min_length=1, max_length=128)
-    correlation_id: str | None = Field(default=None, max_length=128)
+    job_id: str | None = Field(default=None, max_length=128)
     investigation_id: str | None = None
     strategy_ids: tuple[str, ...] = ()
     experiment_ids: tuple[str, ...] = ()
@@ -584,7 +584,7 @@ def create_chat_router() -> APIRouter:
                 execution_id,
                 tool_name=request.tool_name,
                 actor_id=request.actor_id,
-                correlation_id=request.correlation_id,
+                job_id=request.job_id,
                 investigation_id=request.investigation_id,
                 strategy_ids=request.strategy_ids,
                 experiment_ids=request.experiment_ids,
@@ -612,17 +612,17 @@ def create_chat_router() -> APIRouter:
             raise _service_error(error) from error
         return replay.as_dict()
 
-    @router.post("/tool-jobs/{tool_job_id}/result")
+    @router.post("/tool-jobs/{job_id}/result")
     async def record_tool_result(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
-        tool_job_id: Annotated[str, Path(min_length=1, max_length=128)],
+        job_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: ToolResultRequest,
         chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             job = chat_service.record_tool_result(
                 workspace_id,
-                tool_job_id,
+                job_id,
                 result=request.result,
                 actor_id=request.actor_id,
                 success=request.success,
@@ -633,16 +633,16 @@ def create_chat_router() -> APIRouter:
             raise _service_error(error) from error
         return job.as_dict()
 
-    @router.post("/tool-jobs/{tool_job_id}/start")
+    @router.post("/tool-jobs/{job_id}/start")
     async def start_tool_job(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
-        tool_job_id: Annotated[str, Path(min_length=1, max_length=128)],
+        job_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: ActorRequest,
         chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
         try:
             job = chat_service.start_tool_job(
-                workspace_id, tool_job_id, actor_id=request.actor_id
+                workspace_id, job_id, actor_id=request.actor_id
             )
         except Exception as error:
             raise _service_error(error) from error

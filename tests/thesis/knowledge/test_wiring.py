@@ -196,17 +196,7 @@ def test_canonical_knowledge_result_decodes_to_neutral_input() -> None:
     assert projected[1].content == canonical[1].content.as_content()
 
 
-def test_workflow_configuration_validates_and_grants_retrieval() -> None:
-    workflow = build_hypothesis_development_workflow(knowledge_scope="workspace")
-    assert workflow.spec.knowledge_scope == "workspace"
-    assert workflow._doctrine is not None
-    assert {"search_knowledge", "read_knowledge"}.issubset(
-        workflow._doctrine.phase_tools["model_creation"]
-    )
-    with pytest.raises(ValueError, match="knowledge_scope"):
-        build_hypothesis_development_workflow(knowledge_scope=cast(Any, "unknown"))
-
-
+@pytest.mark.slow
 def test_new_workspace_scaffolds_knowledge(tmp_path: Path) -> None:
     provider = LocalWorkspaceProvider(tmp_path / "workspaces")
     workspace = provider.create(load_workspace_manifest("config/thesis/workspace.yaml"))

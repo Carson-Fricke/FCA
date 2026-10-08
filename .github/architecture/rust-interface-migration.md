@@ -33,7 +33,7 @@ runtime image puts the binaries on `PATH` under `/opt/rust/bin`.
 | `harness` | `harness` | `api` | flipped; facade dispatches `api`, `mcp`, `backtest-job`, `study-job`, `screen-job`, and `trader` |
 | `api` | `api` | `api` | flipped (axum HTTP boundary, bearer auth, provenance) |
 | `backtest-job` | `backtest-job` | `api` | flipped (native engine, parity-proven) |
-| `screen-job` | `screen-job` | `api` | flipped (JIT-authored screening programs, `screen.json`) |
+| `screen-job` | `screen-job` | `api` | flipped (JIT-authored screening programs, `screen.json` schema `fca-harness-screen-v2`) |
 | `trader` | `trader` | `live` | flipped (native supervision runner: config, sessions, feed supervision, reconciler, kill-switch, snapshots) |
 | `harness mcp` | `harness` | `api` | flipped (JSON-RPC dispatch, tool catalog, stdio transport) |
 

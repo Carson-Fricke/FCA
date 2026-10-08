@@ -15,7 +15,6 @@ from thesis.agent.harness_tools import HarnessToolProvider
 from thesis.agent.runtime.context import ToolContext
 from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.knowledge_tools import knowledge_registered_tools
-from thesis.agent.runtime.registry import build_session_registry
 from thesis.agent.runtime.session import SessionToolRegistry
 from thesis.chat import ChatService
 from thesis.chat.contracts import ChatThread, SubAgentRecord, WorkflowExecution
@@ -239,7 +238,7 @@ def test_read_rejects_references_outside_allowed_collections(environment) -> Non
         )
 
 
-def test_tool_description_and_dispatch_honor_collections(environment) -> None:
+def test_tool_dispatch_honors_collections(environment) -> None:
     service, shared = environment
     _write_scoped_pages(shared)
     context = ToolContext("alpha", "chat", "conversation", "actor")
@@ -248,12 +247,6 @@ def test_tool_description_and_dispatch_honor_collections(environment) -> None:
         context,
         allowed_scope="both",
         allowed_collections=("model-cards", "inference"),
-    )
-    description = _description(SessionToolRegistry(tools), "search_knowledge")
-    assert "collections: inference, model-cards" in description
-    unrestricted = knowledge_registered_tools(service, context)
-    assert "collections:" not in _description(
-        SessionToolRegistry(unrestricted), "search_knowledge"
     )
 
     registry = SessionToolRegistry(tools)
@@ -278,27 +271,6 @@ def test_tool_description_and_dispatch_honor_collections(environment) -> None:
     assert excluded.failure is not None
     assert "allowed collections" in cast(str, excluded.failure["message"])
     assert registry.dispatch("read_knowledge", {"reference": references["origin"]}).ok
-
-
-def test_build_session_registry_passes_knowledge_collections(environment) -> None:
-    service, shared = environment
-    _write_scoped_pages(shared)
-    registry = build_session_registry(
-        context=ToolContext("alpha", "chat", "chat", "agent"),
-        knowledge=service,
-        knowledge_collections=("model-cards",),
-    )
-    assert "collections: model-cards" in _description(registry, "search_knowledge")
-    result = registry.dispatch("search_knowledge", {"query": "momentum"})
-    assert result.ok
-    assert [hit["page_id"] for hit in hits(dict(result.structured))] == ["origin"]
-    assert "collections:" not in _description(
-        build_session_registry(
-            context=ToolContext("alpha", "chat", "chat", "agent"),
-            knowledge=service,
-        ),
-        "search_knowledge",
-    )
 
 
 class _Key:

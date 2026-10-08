@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 #[test]
 fn sweep_retains_its_shipped_utf8_v1_identity_through_shared_hasher() {
     let config = BacktestConfig::from_yaml(
-        "shell: backtest\nrun_id: sweep\ndata:\n  symbols: [\"caf\u{e9}\"]\n  subscriptions:\n    - data_type: quote\n      symbols: [\"caf\u{e9}\"]\n",
+        "shell: backtest\njob_id: sweep\ndata:\n  symbols: [\"caf\u{e9}\"]\n  subscriptions:\n    - data_type: quote\n      symbols: [\"caf\u{e9}\"]\n",
     )
     .unwrap();
     let parameters = BTreeMap::new();
@@ -26,7 +26,7 @@ fn sweep_retains_its_shipped_utf8_v1_identity_through_shared_hasher() {
 
 #[test]
 fn adjacent_nanosecond_bounds_have_distinct_resolved_hashes() {
-    let first = BacktestConfig::from_yaml("shell: backtest\nrun_id: nanos\nstart: 2024-01-02T14:30:00.123456788Z\nend: 2024-01-02T14:30:00.123456789Z\ndata:\n  symbols: [SPY]\n  subscriptions:\n    - data_type: quote\n      symbols: [SPY]\n").unwrap();
+    let first = BacktestConfig::from_yaml("shell: backtest\njob_id: nanos\nstart: 2024-01-02T14:30:00.123456788Z\nend: 2024-01-02T14:30:00.123456789Z\ndata:\n  symbols: [SPY]\n  subscriptions:\n    - data_type: quote\n      symbols: [SPY]\n").unwrap();
     let mut second = first.clone();
     second.end_ns += 1;
     assert_ne!(first.configuration_hash(), second.configuration_hash());

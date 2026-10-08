@@ -1,42 +1,44 @@
-﻿//! Authenticated backtest launch and job polling routes.
+//! Authenticated kind-specific job submission routes.
 
 use axum::body::Bytes;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::json;
 
 use crate::http::launcher::{mark_failed, LaunchJob};
-use crate::http::models::{ApiError, BacktestJobStatusResponse, LaunchAcceptedResponse};
+use crate::http::models::{ApiError, LaunchAcceptedResponse};
 use crate::http::state::AppState;
-use crate::http::store::{JobRecord, JobState};
+use crate::http::store::{Admission, JobKind, JobRecord, StoreError};
 
-/// Build the launch and polling routes without binding them to a queue.
+/// Build the submission routes without binding them to a queue.
 pub fn launch_router() -> Router<AppState> {
     Router::new()
-        .route("/v1/backtests/jobs", post(launch_job))
-        .route("/v1/backtests/jobs/{job_id}", get(job_status))
+        .route("/v1/backtests/jobs", post(launch_backtest_job))
         .route("/v1/studies/jobs", post(launch_study_job))
 }
 
-async fn launch_job(State(state): State<AppState>, body: Bytes) -> Result<Response, ApiError> {
-    launch_with_shell(&state, &body, "backtest", "/v1/backtests/jobs").await
+async fn launch_backtest_job(
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    launch_with_shell(&state, &body, "backtest", JobKind::Backtest).await
 }
 
 async fn launch_study_job(
     State(state): State<AppState>,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    launch_with_shell(&state, &body, "study", "/v1/studies/jobs").await
+    launch_with_shell(&state, &body, "study", JobKind::Study).await
 }
 
 async fn launch_with_shell(
     state: &AppState,
     body: &[u8],
     expected_shell: &str,
-    location_prefix: &str,
+    kind: JobKind,
 ) -> Result<Response, ApiError> {
     let configuration = state.configuration_parser.parse(body).map_err(|error| {
         ApiError::validation_error(&format!(
@@ -57,50 +59,50 @@ async fn launch_with_shell(
             "configuration shell must be '{expected_shell}', not '{shell}'"
         ))));
     }
-    let job_id = configuration.run_id.clone();
+    let job_id = configuration.job_id.clone();
     let now = state.clock.now();
-    state
-        .job_repository
-        .upsert(JobRecord::new(&job_id, JobState::Queued, now, now));
+    let mut record = JobRecord::new(&job_id, kind, &configuration.configuration_digest, now);
+    record.strategy_id = configuration.strategy_ids.join(",");
+    record.data_start = configuration.data_start;
+    record.data_end = configuration.data_end;
+    record.configuration_digest = Some(configuration.configuration_digest.clone());
+    match state.job_store.admit(record) {
+        Err(StoreError::Conflict(detail)) => return Err(ApiError::job_conflict(&detail)),
+        Err(error) => return Err(ApiError::store_error(&error.to_string())),
+        Ok(Admission::Joined(existing)) => return accepted(&existing),
+        Ok(Admission::Created(_)) => {}
+    }
 
     let job = LaunchJob {
         job_id: job_id.clone(),
+        kind,
         configuration,
     };
     if let Err(error) = state.launcher.launch(&job) {
         mark_failed(
-            state.job_repository.as_ref(),
+            state.job_store.as_ref(),
             &job_id,
             state.clock.as_ref(),
             &error,
-        );
+        )
+        .map_err(|error| ApiError::store_error(&error.to_string()))?;
     }
 
     let record = state
-        .job_repository
+        .job_store
         .get(&job_id)
-        .unwrap_or_else(|| JobRecord::new(&job_id, JobState::Queued, now, now));
+        .ok_or_else(ApiError::job_not_found)?;
+    accepted(&record)
+}
+
+fn accepted(record: &JobRecord) -> Result<Response, ApiError> {
     let response = LaunchAcceptedResponse {
         job_id: record.job_id.clone(),
         state: record.state,
     };
-    let location = HeaderValue::from_str(&format!("{location_prefix}/{job_id}"))
+    let location = HeaderValue::from_str(&format!("/v1/jobs/{}", record.job_id))
         .map_err(|_| ApiError::validation_error("job_id is not a valid header value"))?;
     let mut http = (StatusCode::ACCEPTED, Json(response)).into_response();
     http.headers_mut().insert(header::LOCATION, location);
     Ok(http)
-}
-
-async fn job_status(
-    State(state): State<AppState>,
-    Path(job_id): Path<String>,
-) -> Result<Json<BacktestJobStatusResponse>, ApiError> {
-    if job_id.is_empty() || job_id.len() > 128 {
-        return Err(ApiError::validation_error("request validation failed"));
-    }
-    state
-        .job_repository
-        .get(&job_id)
-        .map(Json)
-        .ok_or_else(ApiError::job_not_found)
 }

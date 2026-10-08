@@ -89,7 +89,7 @@ impl StudyJobRunner for NativeStudyJobRunner {
 #[must_use]
 fn summary_from_outcome(outcome: &BacktestOutcome, artifact_path: PathBuf) -> BacktestRunSummary {
     BacktestRunSummary {
-        run_id: outcome.manifest.run_id.clone(),
+        job_id: outcome.manifest.job_id.clone(),
         status: outcome.status.value().to_string(),
         manifest_hash: outcome.manifest.manifest_hash(),
         artifact_digest: outcome.artifact_digest(),
@@ -130,7 +130,7 @@ impl ScreenJobRunner for NativeScreenJobRunner {
         )
         .map_err(|error| ScreenJobError::Engine(error.to_string()))?;
         Ok(ScreenRunSummary {
-            run_id: outcome.run_id.clone(),
+            job_id: outcome.job_id.clone(),
             status: outcome.status.value().to_string(),
             rows: outcome.row_count() as u64,
             artifact_path,

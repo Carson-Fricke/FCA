@@ -121,10 +121,6 @@ def test_builtin_definition_is_available_without_execution_services(
     assert definition["transitions"]["failed"] == []
 
 
-def test_breaking_builtin_topology_has_a_new_major_version() -> None:
-    assert _WORKFLOW_VERSION == "2.0.0"
-
-
 @pytest.mark.parametrize("prefix", ["", "/api"])
 @pytest.mark.parametrize("version", ["1.0.0", "99.0.0", ""])
 def test_builtin_definition_rejects_unsupported_versions(

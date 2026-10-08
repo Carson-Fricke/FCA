@@ -9,7 +9,7 @@
 //!
 //! A run never fails silently. Program or data failures still write
 //! `screen.json` with `status: "failed"` and an `error` string, and return the
-//! failed outcome so the caller records a failed job/run exactly like a study
+//! failed outcome so the caller records a failed job exactly like a study
 //! failure. Only an artifact write failure is a hard [`ScreenRunError`].
 
 use std::collections::BTreeMap;
@@ -31,16 +31,16 @@ use crate::workspace::ManagedWorkspace;
 pub const SCREEN_ARTIFACT: &str = "screen.json";
 
 /// The artifact schema identifier.
-pub const SCREEN_SCHEMA: &str = "fca-harness-screen-v1";
+pub const SCREEN_SCHEMA: &str = "fca-harness-screen-v2";
 
-/// The domain separator for the screening run digest.
-const SCREEN_RUN_DOMAIN: &[u8] = b"fca:harness-screen-run:v1\0";
+/// The domain separator for the screening job digest.
+const SCREEN_JOB_DOMAIN: &[u8] = b"fca:harness-screen-job:v1\0";
 
 /// Terminal states of one screening run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScreenStatus {
     /// The program ran and the rows are ranked.
-    Complete,
+    Succeeded,
     /// The run ended with an error; `screen.json` carries the reason.
     Failed,
 }
@@ -50,7 +50,7 @@ impl ScreenStatus {
     #[must_use]
     pub const fn value(self) -> &'static str {
         match self {
-            Self::Complete => "complete",
+            Self::Succeeded => "succeeded",
             Self::Failed => "failed",
         }
     }
@@ -59,8 +59,8 @@ impl ScreenStatus {
 /// One screening run result.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScreenOutcome {
-    /// The deterministic run identifier.
-    pub run_id: String,
+    /// The execution job identifier.
+    pub job_id: String,
     /// Terminal status.
     pub status: ScreenStatus,
     /// Ranked rows; empty for a failed run.
@@ -72,8 +72,8 @@ pub struct ScreenOutcome {
 impl ScreenOutcome {
     /// Whether the run completed successfully.
     #[must_use]
-    pub fn completed(&self) -> bool {
-        self.status == ScreenStatus::Complete
+    pub fn succeeded(&self) -> bool {
+        self.status == ScreenStatus::Succeeded
     }
 
     /// The number of ranked rows.
@@ -132,9 +132,9 @@ pub fn run_screening_configuration(
     options: &ScreenRunOptions,
     output_dir: Option<&Path>,
 ) -> Result<(ScreenOutcome, PathBuf), ScreenRunError> {
-    let run_id = configuration.run_id();
+    let job_id = configuration.job_id.clone();
     let directory = output_dir.map_or_else(
-        || PathBuf::from(".local").join("screens").join(&run_id),
+        || PathBuf::from(".local").join("screens").join(&job_id),
         Path::to_path_buf,
     );
     std::fs::create_dir_all(&directory)
@@ -167,11 +167,11 @@ pub fn run_screening_configuration(
     let status = if failure.is_some() {
         ScreenStatus::Failed
     } else {
-        ScreenStatus::Complete
+        ScreenStatus::Succeeded
     };
     let error = failure;
     let run_digest = run_digest(
-        &run_id,
+        &job_id,
         &source_digest,
         &toolchain_digest,
         configuration,
@@ -179,7 +179,7 @@ pub fn run_screening_configuration(
     );
     let document = artifact_document(
         configuration,
-        &run_id,
+        &job_id,
         status,
         error.as_deref(),
         &rows,
@@ -196,7 +196,7 @@ pub fn run_screening_configuration(
 
     Ok((
         ScreenOutcome {
-            run_id,
+            job_id,
             status,
             rows,
             error,
@@ -248,14 +248,14 @@ fn screen_rows(
     Ok(rank_rows(rows, &configuration.rank_metric))
 }
 
-/// The screening run digest, domain-separated over the run identity.
+/// The screening job digest, domain-separated over the job identity.
 ///
-/// `sha256("fca:harness-screen-run:v1\0" || canonical_json({as_of,
-/// definition_id, rank_metric, run_id, source_digest, status,
+/// `sha256("fca:harness-screen-job:v1\0" || canonical_json({as_of,
+/// definition_id, job_id, rank_metric, source_digest, status,
 /// toolchain_digest}))`, with object keys sorted. The digest binds the result
 /// to the configuration, the compiled source, and the toolchain that built it.
 fn run_digest(
-    run_id: &str,
+    job_id: &str,
     source_digest: &str,
     toolchain_digest: &str,
     configuration: &ScreenConfig,
@@ -264,15 +264,15 @@ fn run_digest(
     let payload = serde_json::json!({
         "as_of": configuration.as_of,
         "definition_id": configuration.definition_id,
+        "job_id": job_id,
         "rank_metric": configuration.rank_metric,
-        "run_id": run_id,
         "source_digest": source_digest,
         "status": status.value(),
         "toolchain_digest": toolchain_digest,
     });
     let text = serde_json::to_string(&payload).unwrap_or_else(|_| String::new());
-    let mut bytes = Vec::with_capacity(SCREEN_RUN_DOMAIN.len() + text.len());
-    bytes.extend_from_slice(SCREEN_RUN_DOMAIN);
+    let mut bytes = Vec::with_capacity(SCREEN_JOB_DOMAIN.len() + text.len());
+    bytes.extend_from_slice(SCREEN_JOB_DOMAIN);
     bytes.extend_from_slice(text.as_bytes());
     digest_hex(&bytes)
 }
@@ -281,7 +281,7 @@ fn run_digest(
 #[allow(clippy::too_many_arguments)]
 fn artifact_document(
     configuration: &ScreenConfig,
-    run_id: &str,
+    job_id: &str,
     status: ScreenStatus,
     error: Option<&str>,
     rows: &[ScreenRow],
@@ -294,7 +294,7 @@ fn artifact_document(
     let mut object = serde_json::Map::new();
     object.insert("schema".to_string(), serde_json::json!(SCREEN_SCHEMA));
     object.insert("status".to_string(), serde_json::json!(status.value()));
-    object.insert("run_id".to_string(), serde_json::json!(run_id));
+    object.insert("job_id".to_string(), serde_json::json!(job_id));
     object.insert("as_of".to_string(), serde_json::json!(configuration.as_of));
     object.insert(
         "definition_id".to_string(),
@@ -341,3 +341,7 @@ fn artifact_document(
     );
     Ok(serde_json::Value::Object(object))
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/screen_run.rs"]
+mod tests;

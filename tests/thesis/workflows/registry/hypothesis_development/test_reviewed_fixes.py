@@ -185,9 +185,9 @@ def test_live_accepted_contract_sequence_matches_replay(
     trial = {
         "testId": "t1",
         "falsifierId": "f1",
-        "runId": "run-1",
+        "jobId": "job-1",
         "digest": "a" * 64,
-        "runState": "complete",
+        "runState": "succeeded",
         "observed": 1.0,
         "falsified": False,
     }

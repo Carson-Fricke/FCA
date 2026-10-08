@@ -69,7 +69,7 @@ class StatusSurface[T]:
 class RuntimeStatus:
     """One harness job status row, with published timestamp text preserved."""
 
-    request_ref: str
+    job_id: str
     state: str
     created_at: str
     updated_at: str
@@ -78,10 +78,10 @@ class RuntimeStatus:
 
 @dataclass(frozen=True, slots=True)
 class ManifestSummary:
-    """One harness run row: opaque digests, metrics, and artifact totals."""
+    """One harness job record: opaque digests, metrics, and artifact totals."""
 
-    run_id: str
-    status: str
+    job_id: str
+    state: str
     strategy_id: str
     data_start: str | None = None
     data_end: str | None = None
@@ -158,31 +158,31 @@ class RuntimeStatusClient:
         self._transport = transport
 
     def status(
-        self, request_ref: str, *, bearer_token: str | None = None
+        self, job_id: str, *, bearer_token: str | None = None
     ) -> StatusSurface[RuntimeStatus]:
         """Consume one harness job status row."""
         return self._fetch(
-            f"/v1/backtests/jobs/{_reference(request_ref, 'request_ref')}",
+            f"/v1/jobs/{_reference(job_id, 'job_id')}",
             bearer_token,
             _runtime_status,
         )
 
     def manifests(
-        self, bundle_ref: str, *, bearer_token: str | None = None
+        self, job_id: str, *, bearer_token: str | None = None
     ) -> StatusSurface[ManifestSummary]:
-        """Consume one harness run row as the bundle's manifest summary."""
+        """Consume one harness job record as the job's manifest summary."""
         return self._fetch(
-            f"/v1/backtests/runs/{_reference(bundle_ref, 'bundle_ref')}",
+            f"/v1/jobs/{_reference(job_id, 'job_id')}",
             bearer_token,
             _manifest_summary,
         )
 
     def artifacts(
-        self, bundle_ref: str, *, bearer_token: str | None = None
+        self, job_id: str, *, bearer_token: str | None = None
     ) -> StatusSurface[tuple[ArtifactEntry, ...]]:
-        """Consume the artifact summaries stored below one run prefix."""
+        """Consume the artifact summaries stored for one job."""
         return self._fetch(
-            f"/v1/backtests/runs/{_reference(bundle_ref, 'bundle_ref')}/artifacts",
+            f"/v1/jobs/{_reference(job_id, 'job_id')}/artifacts",
             bearer_token,
             _artifact_entries,
         )
@@ -194,11 +194,11 @@ class RuntimeStatusClient:
         return self._fetch("/v1/runtime/portfolio", bearer_token, _portfolio_summary)
 
     def risk_decisions(
-        self, request_ref: str, *, bearer_token: str | None = None
+        self, job_id: str, *, bearer_token: str | None = None
     ) -> StatusSurface[tuple[RiskDecisionRecord, ...]]:
-        """Consume the audited risk decisions recorded for one request."""
+        """Consume the audited risk decisions recorded for one job."""
         return self._fetch(
-            f"/v1/runtime/risk-decisions/{_reference(request_ref, 'request_ref')}",
+            f"/v1/runtime/risk-decisions/{_reference(job_id, 'job_id')}",
             bearer_token,
             _risk_decisions,
         )
@@ -311,7 +311,7 @@ def _entries(body: Mapping[str, object], key: str) -> tuple[Mapping[str, object]
 
 def _runtime_status(body: Mapping[str, object]) -> RuntimeStatus:
     return RuntimeStatus(
-        request_ref=_required_text(body, "job_id"),
+        job_id=_required_text(body, "job_id"),
         state=_required_text(body, "state"),
         created_at=_required_text(body, "created_at"),
         updated_at=_required_text(body, "updated_at"),
@@ -321,8 +321,8 @@ def _runtime_status(body: Mapping[str, object]) -> RuntimeStatus:
 
 def _manifest_summary(body: Mapping[str, object]) -> ManifestSummary:
     return ManifestSummary(
-        run_id=_required_text(body, "run_id"),
-        status=_required_text(body, "status"),
+        job_id=_required_text(body, "job_id"),
+        state=_required_text(body, "state"),
         strategy_id=_required_text(body, "strategy_id"),
         data_start=_optional_text(body, "data_start"),
         data_end=_optional_text(body, "data_end"),

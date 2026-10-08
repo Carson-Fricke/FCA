@@ -4,7 +4,7 @@ Thesis owns screener definitions as content-addressed workspace artifacts and
 delegates execution to the harness-hosted MCP server.  The package has zero
 market-data access: it never imports the lake, the lake client, or the
 harness, and it never evaluates a screen itself.  It launches ``run_screener``
-through the typed MCP client, polls ``get_screener_status`` to terminal, and
+through the typed MCP client, polls ``get_job_status`` to terminal, and
 imports the harness ``screen.json`` artifact as a workspace result.
 """
 

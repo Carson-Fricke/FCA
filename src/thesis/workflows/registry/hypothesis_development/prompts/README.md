@@ -5,7 +5,8 @@ sibling transcripts, perform publication, or enforce operator approval in code.
 
 - `__init__.py` identifies the prompt package.
 - `discovery.py` prompts cheap, targeted candidate discovery and the
-  operator-confirmed discovery contract using committed, validated study IDs.
+  operator-confirmed discovery contract using committed, validated program
+  references and job IDs.
 - `model_creation.py` prompts statistical model creation and revision from the
   selected discovery candidate and explicit surviving evidence.
 - `verdict.py` prompts the operator-facing interpretation of recorded trials.

@@ -33,6 +33,7 @@ from thesis.chat.contracts import (
     SubAgentRecord,
     SubAgentStatus,
     ToolJob,
+    ToolJobConflictError,
     ToolJobState,
     TranscriptItemKind,
     WorkflowDefinition,
@@ -256,7 +257,7 @@ def _record_id(record: Record) -> str:
         Attachment: "attachment_id",
         Investigation: "investigation_id",
         WorkflowExecution: "execution_id",
-        ToolJob: "tool_job_id",
+        ToolJob: "job_id",
         SubAgentRecord: "sub_agent_id",
         AgentInvocation: "invocation_id",
     }.get(type(record))
@@ -1732,21 +1733,41 @@ class ChatService:
         *,
         tool_name: str,
         actor_id: str,
-        correlation_id: str | None = None,
+        job_id: str | None = None,
         investigation_id: str | None = None,
         strategy_ids: tuple[str, ...] = (),
         experiment_ids: tuple[str, ...] = (),
+        attribution: Mapping[str, object] | None = None,
     ) -> ToolJob:
-        """Submit a tool job while preserving its execution correlation."""
+        """Submit a tool job under one stable job identity.
+
+        The record is Thesis's tracking attribution, submission certainty, and
+        late-result observation boundary.  For a harness-backed operation the
+        harness job record under the same ``job_id`` remains the execution-state
+        and result authority.
+
+        An explicit job id that is already registered joins the existing record
+        only when its execution, operation, and attribution match; registration
+        never resets timestamps, duplicates links, or overwrites a prior
+        result.  Any mismatch fails as an explicit conflict.
+        """
         if investigation_id is not None:
             self.get_investigation(workspace_id, investigation_id)
         now = self._now()
-        tool_job_id = self._id_factory("tool-job")
-        correlation_id = (
-            self._id_factory("correlation")
-            if correlation_id is None
-            else correlation_id
+        submitted_job_id = self._id_factory("job") if job_id is None else job_id
+        resolved_attribution: Mapping[str, object] = (
+            {} if attribution is None else attribution
         )
+        if job_id is not None:
+            existing = self.find_tool_job(workspace_id, job_id)
+            if existing is not None:
+                return _join_tool_job(
+                    existing,
+                    execution_id=execution_id,
+                    tool_name=tool_name,
+                    attribution=resolved_attribution,
+                    investigation_id=investigation_id,
+                )
         with self.execution_guard(workspace_id, execution_id):
             execution = self.get_execution(workspace_id, execution_id)
             if execution.state not in _STEERABLE_EXECUTION_STATES:
@@ -1764,14 +1785,14 @@ class ChatService:
                 workspace_id=workspace_id,
                 created_at=now,
                 created_by=actor_id,
-                tool_job_id=tool_job_id,
+                job_id=submitted_job_id,
                 execution_id=execution_id,
                 chat_id=execution.chat_id,
                 conversation_id=execution.conversation_id,
                 parent_conversation_id=execution.parent_conversation_id,
-                correlation_id=correlation_id,
                 tool_name=tool_name,
                 submitted_by=actor_id,
+                attribution=resolved_attribution,
                 investigation_id=investigation_id or execution.investigation_id,
                 strategy_ids=strategy_ids,
                 experiment_ids=experiment_ids,
@@ -1784,7 +1805,7 @@ class ChatService:
                     execution,
                     strategy_ids=(*execution.strategy_ids, *strategy_ids),
                     experiment_ids=(*execution.experiment_ids, *experiment_ids),
-                    tool_job_ids=(*execution.tool_job_ids, job.tool_job_id),
+                    job_ids=(*execution.job_ids, job.job_id),
                     updated_at=now,
                 )
             )
@@ -1796,7 +1817,7 @@ class ChatService:
                 replace_record(
                     investigation,
                     links=investigation.links.add(
-                        tool_job_ids=(job.tool_job_id,),
+                        job_ids=(job.job_id,),
                         strategy_ids=strategy_ids,
                         experiment_ids=experiment_ids,
                     ),
@@ -1811,7 +1832,7 @@ class ChatService:
                 links=current.links.add(
                     strategy_ids=strategy_ids,
                     experiment_ids=experiment_ids,
-                    tool_job_ids=(job.tool_job_id,),
+                    job_ids=(job.job_id,),
                 ),
                 updated_at=now,
             ),
@@ -1819,23 +1840,69 @@ class ChatService:
         self._append_event(
             updated,
             ExecutionEventType.TOOL_SUBMITTED,
-            correlation_id=job.correlation_id,
+            correlation_id=job.job_id,
             actor_id=actor_id,
             actor_scope=ActorScope.WORKFLOW,
-            payload={"toolJobId": job.tool_job_id, "toolName": tool_name},
+            payload={"jobId": job.job_id, "toolName": tool_name},
             intent_epoch=job.intent_epoch,
         )
         return job
 
-    def get_tool_job(self, workspace_id: str, tool_job_id: str) -> ToolJob:
-        return self._require(ToolJob, workspace_id, tool_job_id)
+    def get_tool_job(self, workspace_id: str, job_id: str) -> ToolJob:
+        return self._require(ToolJob, workspace_id, job_id)
+
+    def find_tool_job(self, workspace_id: str, job_id: str) -> ToolJob | None:
+        """Return the tracking record for one job id, or ``None`` when untracked.
+
+        Report and status readers use this boundary to distinguish a non-harness
+        tool job, which must never be presented as a harness execution, from an
+        untracked job the harness may still own.
+        """
+        record = self._persistence.get(ToolJob, workspace_id, job_id)
+        if record is None:
+            return None
+        if record.workspace_id != workspace_id:
+            raise CrossWorkspaceLinkError("record belongs to another workspace")
+        return record
+
+    def find_execution_tool_job(
+        self,
+        workspace_id: str,
+        execution_id: str,
+        *,
+        tool_name: str,
+        attribution: Mapping[str, object] | None = None,
+    ) -> ToolJob | None:
+        """Return the execution's tracked job matching operation and attribution.
+
+        The execution's durable job links are the submission reference: resume
+        and recovery rejoin the matching tracked job instead of allocating a
+        replacement.  A stale job from another revision does not match and is
+        left untouched.  More than one match is an ambiguous prior reference
+        and fails closed rather than being guessed.
+        """
+        execution = self.get_execution(workspace_id, execution_id)
+        expected = {} if attribution is None else dict(attribution)
+        matches = [
+            job
+            for job in self._existing_many(ToolJob, workspace_id, execution.job_ids)
+            if job.execution_id == execution_id
+            and job.tool_name == tool_name
+            and dict(job.attribution) == expected
+        ]
+        if len(matches) > 1:
+            raise ToolJobConflictError(
+                f"execution {execution_id!r} has {len(matches)} tracked "
+                f"{tool_name!r} jobs with identical attribution"
+            )
+        return matches[0] if matches else None
 
     def start_tool_job(
-        self, workspace_id: str, tool_job_id: str, *, actor_id: str
+        self, workspace_id: str, job_id: str, *, actor_id: str
     ) -> ToolJob:
-        job = self.get_tool_job(workspace_id, tool_job_id)
+        job = self.get_tool_job(workspace_id, job_id)
         with self.execution_guard(workspace_id, job.execution_id):
-            job = self.get_tool_job(workspace_id, tool_job_id)
+            job = self.get_tool_job(workspace_id, job_id)
             if job.state is ToolJobState.RUNNING:
                 return job
             if job.state is not ToolJobState.SUBMITTED:
@@ -1849,10 +1916,10 @@ class ChatService:
         self._append_event(
             execution,
             ExecutionEventType.TOOL_STARTED,
-            correlation_id=job.correlation_id,
+            correlation_id=job.job_id,
             actor_id=actor_id,
             actor_scope=ActorScope.TOOL,
-            payload={"toolJobId": job.tool_job_id, "toolName": job.tool_name},
+            payload={"jobId": job.job_id, "toolName": job.tool_name},
             intent_epoch=job.intent_epoch,
         )
         return updated
@@ -1860,7 +1927,7 @@ class ChatService:
     def record_tool_result(
         self,
         workspace_id: str,
-        tool_job_id: str,
+        job_id: str,
         *,
         result: Mapping[str, object] | None = None,
         actor_id: str | None = None,
@@ -1869,9 +1936,9 @@ class ChatService:
         intent_epoch: int | None = None,
     ) -> ToolJob:
         """Attach a result even when steering, stop, or cancel happened first."""
-        job = self.get_tool_job(workspace_id, tool_job_id)
+        job = self.get_tool_job(workspace_id, job_id)
         with self.execution_guard(workspace_id, job.execution_id):
-            job = self.get_tool_job(workspace_id, tool_job_id)
+            job = self.get_tool_job(workspace_id, job_id)
             execution = self.get_execution(workspace_id, job.execution_id)
             if job.state is ToolJobState.SUCCEEDED:
                 return job
@@ -1900,11 +1967,11 @@ class ChatService:
             ExecutionEventType.TOOL_RESULT
             if success
             else ExecutionEventType.TOOL_FAILED,
-            correlation_id=job.correlation_id,
+            correlation_id=job.job_id,
             actor_id=actor_id or job.tool_name,
             actor_scope=ActorScope.TOOL,
             payload={
-                "toolJobId": job.tool_job_id,
+                "jobId": job.job_id,
                 "result": None if result is None else dict(result),
                 "errorMessage": error_message,
             },
@@ -2086,6 +2153,31 @@ class ChatService:
             self._require(record_type, workspace_id, record_id)
             for record_id in record_ids
         )
+
+
+def _join_tool_job(
+    existing: ToolJob,
+    *,
+    execution_id: str,
+    tool_name: str,
+    attribution: Mapping[str, object],
+    investigation_id: str | None,
+) -> ToolJob:
+    """Return an already-registered job, or fail closed on any mismatch."""
+    if (
+        existing.execution_id != execution_id
+        or existing.tool_name != tool_name
+        or dict(existing.attribution) != dict(attribution)
+        or (
+            investigation_id is not None
+            and existing.investigation_id != investigation_id
+        )
+    ):
+        raise ToolJobConflictError(
+            f"tool job {existing.job_id!r} is already registered with a different "
+            "execution, operation, attribution, or investigation"
+        )
+    return existing
 
 
 __all__ = [

@@ -167,7 +167,7 @@
 				definition_id: definition.definitionId,
 				as_of: asOf
 			});
-			notify(`Screener run ${result.run_id} · ${result.status}`);
+			notify(`Screener job ${result.job_id} · ${result.status}`);
 		} catch (error) {
 			serverError = describeScreenerError(error);
 		} finally {

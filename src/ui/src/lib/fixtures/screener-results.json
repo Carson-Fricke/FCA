@@ -6,8 +6,8 @@
 				"workspace_id": "alpha-lab",
 				"definition_id": "sha256:1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
 				"definition_hash": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
-				"run_id": "screen-7a8b9c0d1e2f3041",
-				"status": "complete",
+				"job_id": "job-5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d",
+				"status": "succeeded",
 				"as_of": "2026-09-25",
 				"rows": [
 					{
@@ -67,14 +67,14 @@
 						}
 					],
 					"catalog": {
-						"run_id": "screen-7a8b9c0d1e2f3041",
-						"status": "complete",
+						"job_id": "job-5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d",
+						"state": "succeeded",
 						"strategy_id": "screener"
 					},
 					"screen": {
-						"schema": "fca-harness-screen-v1",
-						"status": "complete",
-						"run_id": "screen-7a8b9c0d1e2f3041",
+						"schema": "fca-harness-screen-v2",
+						"status": "succeeded",
+						"job_id": "job-5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d",
 						"as_of": "2026-09-25",
 						"definition_id": "sha256:1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
 						"definition_hash": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
@@ -103,8 +103,8 @@
 				"workspace_id": "beta-quant",
 				"definition_id": "sha256:5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
 				"definition_hash": "5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
-				"run_id": "screen-9d0e1f2a3b4c5d6e",
-				"status": "complete",
+				"job_id": "job-6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e",
+				"status": "succeeded",
 				"as_of": "2026-09-25",
 				"rows": [
 					{
@@ -149,14 +149,14 @@
 						}
 					],
 					"catalog": {
-						"run_id": "screen-9d0e1f2a3b4c5d6e",
-						"status": "complete",
+						"job_id": "job-6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e",
+						"state": "succeeded",
 						"strategy_id": "screener"
 					},
 					"screen": {
-						"schema": "fca-harness-screen-v1",
-						"status": "complete",
-						"run_id": "screen-9d0e1f2a3b4c5d6e",
+						"schema": "fca-harness-screen-v2",
+						"status": "succeeded",
+						"job_id": "job-6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e",
 						"as_of": "2026-09-25",
 						"definition_id": "sha256:5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
 						"definition_hash": "5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",

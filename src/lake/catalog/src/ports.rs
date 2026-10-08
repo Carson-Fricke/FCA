@@ -69,7 +69,7 @@ pub trait JobRepository: Send + Sync {
 /// Persistence contract for stored backtest run metadata.
 pub trait RunRepository: Send + Sync {
     /// Return one run by identifier.
-    fn get(&self, run_id: &str) -> Result<Option<RunRecord>, DataError>;
+    fn get(&self, job_id: &str) -> Result<Option<RunRecord>, DataError>;
 
     /// Replace the run stored under the record's identifier.
     fn upsert(&self, record: &RunRecord) -> Result<(), DataError>;
@@ -82,7 +82,7 @@ pub trait RunRepository: Send + Sync {
     ) -> Result<Vec<RunRecord>, DataError>;
 
     /// Remove a run, reporting whether it existed.
-    fn delete(&self, run_id: &str) -> Result<bool, DataError>;
+    fn delete(&self, job_id: &str) -> Result<bool, DataError>;
 }
 
 /// Persistence contract for option contract metadata.

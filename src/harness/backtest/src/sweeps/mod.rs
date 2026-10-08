@@ -20,6 +20,6 @@ pub use sensitivity::{
     RankedRun, RunRecord, SensitivityError, SweepSensitivity,
 };
 pub use spec::{
-    configuration_digest, configuration_json, derive_run_id, SweepError, SweepMode, SweepPoint,
+    configuration_digest, configuration_json, derive_job_id, SweepError, SweepMode, SweepPoint,
     SweepSpec, SWEEP_VERSION,
 };

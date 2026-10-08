@@ -23,7 +23,7 @@ fn existing_configuration_hashes_match_the_goldens() {
     let cases = [
         (
             "backtest.yaml",
-            "0df9f731373560fd88847f433d672c76cee02c0d5f0cbd3f2884585adee1b167",
+            "bd33134861bca6425d1ac3476b9b6a8358551a3f7d78129183f8168da00a4f09",
         ),
         (
             "api.yaml",
@@ -58,27 +58,27 @@ fn backtest_canonical_json_is_pinned() {
     let expected = concat!(
         r#"{"base_currency":"USD","clock":"event_time","data":{"fingerprint":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","#,
         r#""snapshot_id":"market-lake-equities-2024-01-v1","#,
-        r#""subscriptions":[{"data_type":"quote","symbols":["SPY"]}],"symbols":["SPY"]},"#,
+        r#""subscriptions":[{"data_type":"quote","symbols":["MSFT"]}],"symbols":["MSFT"]},"#,
         r#""deployment":{"environment":"local","image":null,"name":"backtest-job-local","#,
         r#""network_access":"disabled","replicas":1,"resources":{"cpu_cores":{"$decimal":"1"},"#,
         r#""memory_mib":1024},"restart_policy":"never","target":"local"},"#,
-        r#""end":{"$datetime":"2024-01-19T21:00:00.000000Z"},"#,
+        r#""end":{"$datetime":"2024-01-04T21:00:00.000000Z"},"#,
         r#""event_ordering":"timestamp_then_sequence_then_class_then_feed","#,
         r#""fees":{"currency":"USD","rounding":"half_even","rules":[{"basis":"per_unit","#,
         r#""fee_id":"commission","minimum":{"$decimal":"0.01"},"rate":{"$decimal":"0.005"},"#,
         r#""side":"both"}]},"initial_cash":{"$decimal":"100000"},"#,
-        r#""risk_pipeline":{"on_reject":"reject_order","rules":[{"#,
+        r#""job_id":"job-momentum-msft-2024-01","risk_pipeline":{"on_reject":"reject_order","rules":[{"#,
         r#""implementation":"harness.risk.limits:MaxOrderNotional","#,
         r#""parameters":{"limit":{"$decimal":"10000"}},"rule_id":"max-order-notional"},"#,
         r#"{"implementation":"harness.risk.limits:MaxPositionNotional","#,
         r#""parameters":{"limit":{"$decimal":"50000"}},"rule_id":"max-position-notional"}]},"#,
-        r#""run_id":"momentum-spy-2024-01","schema_version":1,"seed":1729,"shell":"backtest","#,
+        r#""schema_version":1,"seed":1729,"shell":"backtest","#,
         r#""start":{"$datetime":"2024-01-02T14:30:00.000000Z"},"strategy_instances":[{"#,
         r#""bundle_hash":"dca3e6dda63c83d8a9d7cc0688e180a42e3d3e0dd502c3d4d731db505c2d8998","#,
         r#""capital_fraction":{"$decimal":"1"},"#,
         r#""implementation":"jit","#,
-        r#""instance_id":"spy-momentum","parameters":{"lookback":4,"quantity":20,"#,
-        r#""source_path":"momentum.rs"},"symbols":["SPY"]}]}"#
+        r#""instance_id":"msft-momentum","parameters":{"lookback":4,"quantity":20,"#,
+        r#""source_path":"momentum.rs"},"symbols":["MSFT"]}]}"#
     );
     assert_eq!(canonical_json(configuration.canonical_value()), expected);
 }
@@ -118,7 +118,7 @@ fn subscription_snapshot_is_strict_and_canonical() {
     let canonical = build_backtest(&original).unwrap();
     assert_eq!(
         canonical["data"]["subscriptions"],
-        serde_json::json!([{"data_type": "quote", "symbols": ["SPY"]}])
+        serde_json::json!([{"data_type": "quote", "symbols": ["MSFT"]}])
     );
     assert!(canonical["data"].get("bar_interval").is_none());
     let mut interval_only = original.clone();

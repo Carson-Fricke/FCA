@@ -384,7 +384,7 @@ A new workspace should start from a versioned scaffold similar to:
 |-- investigations/               Objectives, decisions, and finding indexes
 |-- strategies/                      Rust strategy code and tests
 |-- experiments/                   Contracts, analysis, and evidence claims
-|-- backtests/                     Manifests, metrics, traces, and reports
+|-- jobs/                          Imported job manifests, metrics, traces, and reports
 |-- uploads/                       Hashed user-provided evidence and metadata
 |-- activations/                   Bundles, consent references, and outcomes
 `-- README.md                      Workspace purpose and navigation
@@ -622,7 +622,7 @@ Tools are narrow capabilities rather than arbitrary credentials:
 | --- | --- |
 | Workspace Git | Read, branch, edit, test, checkpoint, and publish within the selected workspace. |
 | Market lake | Ensure and query point-in-time equity, option, and crypto data through published contracts. |
-| Quant harness | Validate strategy code, launch deterministic backtests/sweeps, and query complete result artifacts. |
+| Quant harness | Validate program code, launch deterministic backtests, studies, and screens, and query job status and result artifacts. |
 | Code sandbox | Run generated Rust programs and their tests with bounded CPU, memory, filesystem, and no implicit network or secrets. |
 | Knowledge search | Retrieve global versioned pages and citations under trust-tier rules. |
 | Web research | Search current or archived sources only in workflow contexts whose policy allows it. |
@@ -638,8 +638,9 @@ supported market, horizon, and strategy direction only within those bounds.
 
 The quant-harness tool family is implemented as an MCP (JSON-RPC 2.0) tool
 gateway rather than a planned capability. The harness publishes its backtest,
-sweep, run-query, artifact, and supervised-trader operations through MCP; Thesis
-consumes them through `thesis.integrations.mcp` and `thesis.agent.harness_tools`.
+study, screening, job-query, artifact, and supervised-trader operations through
+MCP; Thesis consumes them through `thesis.integrations.mcp` and
+`thesis.agent.harness_tools`.
 The client discovers the catalog with `tools/list` and executes it with
 `tools/call`, so a launch can only route through a tool the harness actually
 publishes.
@@ -666,7 +667,7 @@ there is no second policy-enforcing dispatcher.
 
 Backtest launches route through the MCP `run_backtest` tool; capabilities derive
 from the discovered catalog. The local harness HTTP `/mcp` endpoint composes
-`NativeBacktestSubmitter` over the same durable run/job stores as REST. Thesis
+`NativeBacktestSubmitter` over the same authoritative job store as REST. Thesis
 does not spawn a harness process or fall back to local execution when MCP is
 unavailable. Workflow execution is composed only with the harness tool provider;
 spec-only session policy and knowledge tools still work without it.
@@ -674,10 +675,18 @@ spec-only session policy and knowledge tools still work without it.
 `McpBacktestRunner` and `McpStudyRunner` send configuration mappings inline;
 explicit path strings name a file on the harness host. A confirmed domain
 not-found response permits a new launch; transport/auth/protocol failures and
-unknown states do not count as absence. Pending jobs are joined, terminal jobs
-can be relaunched for revised artifacts, and polling uses a monotonic deadline,
+unknown states do not count as absence. Pending jobs are joined and polled, and
+a terminal job's stored result is returned under its submitted `job_id` rather
+than relaunched; an explicit rerun allocates a fresh job. Submission
+composition allocates the id and durably retains the recoverable submission
+reference with immutable program attribution before dispatch; a transport
+interruption after possible dispatch is an unknown outcome reconciled by that
+retained id, never an automatic replay. Polling uses a monotonic deadline,
 bounded backoff, and cancellation checks. Deterministic run failures fail the
-owning workflow rather than sending it into an agent recovery loop.
+owning workflow rather than sending it into an agent recovery loop. The
+"Execution Job Contract" in `.github/instructions/copilot-instructions.md` is
+the normative policy for submission identity, admission, acknowledgement, and
+recovery.
 
 The harness owns study validation reuse. Its local `StudyValidator` uses the
 JIT service's bounded 64-entry full-input cache and compiler identity, with
@@ -689,24 +698,38 @@ identity probes, or regex diagnostic inference. Infrastructure errors are never
 cached as deterministic compiler errors. See `rust-native-authoring-plan.md`.
 
 The local harness submitter is asynchronous like the remote one: `run_backtest`
-returns a `run_id` with `state: running` immediately and completes on a worker,
-so the caller follows `get_job_status` to a terminal state, then `get_run`
-and `list_artifacts`. A run's result set (`backtest.json`, `metrics.json`,
+returns an accepted `job_id` and state immediately and completes on a worker,
+so the caller follows `get_job_status` to a terminal state, then `get_job_result`
+and `list_artifacts`. A job's result set (`backtest.json`, `metrics.json`,
 `report.html`, and the recorded Parquet trail such as `artifacts/equity.parquet`)
-is registered in the durable run store, and `read_artifact` returns any artifact's
-bytes (UTF-8 or hex) through the same boundary in both local and remote modes.
+is registered as one authoritative job record (`jobs/<job_id>.json`) with
+artifact payloads under the `jobs/<job_id>/` object prefix, and `read_artifact`
+returns any artifact's bytes (UTF-8 or hex) through the same boundary in both
+local and remote modes. The public job vocabulary is `queued`, `running`,
+`succeeded`, `failed`, and `cancelled`; engine-internal completion states are
+translated once per adapter and never surface as public aliases. A failed or
+cancelled job publishes its terminal record with the truthful message in
+`error_message` and may carry no artifacts, and no synthetic failure artifact
+is fabricated. Thesis's workspace-scoped tracking records reuse the same
+`job_id` while remaining attribution, submission certainty, and late-result
+observation, not a second execution-state authority; non-harness tool jobs are
+explicitly classified and are never presented as harness executions. The
+result digest is domain-separated over a payload keyed by
+`job_id` (`fca:harness-results:job:v1` / `harness.results.job.v1`); screening's
+run digest uses its own job-based domain (`fca:harness-screen-job:v1`).
 Artifact bytes are read through the harness boundary when available and
 otherwise via the artifact's published SAS/object URL, so one importer serves
-local and Azure runs. A materialization route
-(`GET /v1/workspaces/{ws}/backtests/runs/{run_id}`) lets the UI fetch the card
-data once the tool returns, so neither side blocks on a long poll.
+local and Azure jobs. A materialization
+route (`GET /v1/workspaces/{ws}/backtests/jobs/{job_id}`) lets the UI fetch the
+card data once the tool returns, so neither side blocks on a long poll;
+`GET /v1/workspaces/{ws}/backtests/{job_id}` serves the imported detail.
 `thesis.backtests` coordinates this lifecycle: on a terminal success it imports
-the run into the workspace backtest store as a `BacktestRecord` carrying the
-equity curve, FIFO-paired trades, and stats, linked to the originating
-`chat_id` and `execution_id`. The chat tool loop attaches the resulting
-`backtest_id` to the tool message so the UI renders the report inline where the
-run happened, and the backtests page surfaces the run with a link back to its
-chat and workflow.
+the job into the workspace backtest store as a `BacktestRecord` keyed by
+`(workspace_id, job_id)` carrying the equity curve, FIFO-paired trades, and
+stats, linked to the originating `chat_id` and `execution_id`. The chat tool
+loop attaches the `job_id` to the tool message so the UI renders the report
+inline where the job ran, and the backtests page surfaces the job with a link
+back to its chat and workflow.
 
 ## Research Workflows
 
@@ -872,7 +895,7 @@ Every request for operator input or direction is model-authored from a structure
    replay orders by availability, with ticks, completed frames, then generated
    execution events at equal time. Bars are available at interval end, not bar
    start. Thesis writes a workspace evidence
-   record under `models/runs/` containing the model ref, run ID, state,
+   record under `models/runs/` containing the model ref, `jobId`, state,
     metrics, and result artifacts. This is a deterministic phase in topology
     `2.0.0`: `run_falsification_trials` resolves the recorded result and returns
     the trials contract without creating a phase agent or model turn. The report

@@ -166,10 +166,10 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each filtered as backtest (backtest.id)}
+					{#each filtered as backtest (backtest.job_id)}
 						<tr class="border-t border-surface-700 hover:bg-surface-900">
 							<td class="px-4 py-2">
-								<a href="/w/{workspaceId}/backtests/{backtest.id}" class="text-accent hover:underline">
+								<a href="/w/{workspaceId}/backtests/{backtest.job_id}" class="text-accent hover:underline">
 									{backtest.name}
 								</a>
 							</td>

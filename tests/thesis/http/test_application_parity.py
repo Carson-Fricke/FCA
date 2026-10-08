@@ -8,9 +8,7 @@ from thesis.agent.runtime.conversation import Conversations
 from thesis.chat import ChatService
 from thesis.http.application import create_app
 from thesis.http.chat import create_chat_router
-from thesis.http.errors import service_error
 from thesis.http.workspaces import build_local_workspace_data
-from thesis.integrations.mcp import HarnessMcpToolError
 from thesis.workflows.core.registry import WorkflowRegistry
 
 HEADERS = {"Authorization": "Bearer test-token"}
@@ -67,17 +65,6 @@ def test_missing_services_fail_closed_without_mutating_state(prefix: str) -> Non
     assert not hasattr(app.state, "chat_service")
     assert client.get(prefix + "/healthz").status_code == 200
     assert client.get(prefix + "/v1/auth/check").status_code == 401
-
-
-def test_defaults_are_composed_at_construction_once() -> None:
-    app = create_app(bearer_token="test-token", workflow_registry=WorkflowRegistry())
-    chat = app.state.chat_service
-    workspace = app.state.workspace_service
-    client = TestClient(app)
-    for prefix in ("", "/api"):
-        assert client.get(prefix + "/v1/workspaces", headers=HEADERS).status_code == 200
-    assert app.state.chat_service is chat
-    assert app.state.workspace_service is workspace
 
 
 def test_missing_chat_never_creates_a_thread_through_conversations() -> None:
@@ -158,18 +145,6 @@ def test_errors_preserve_details_and_hide_unknown_causes(
         assert invalid.status_code == 422
         assert invalid.json()["error"]["details"][0]["input"] == ""
     assert "secret-api-key" in caplog.text
-
-
-def test_harness_error_does_not_infer_not_found_from_prose() -> None:
-    error = service_error(
-        HarnessMcpToolError("get_run", "does not exist", {"run_id": "r"})
-    )
-    assert error.status_code == 502
-    assert error.detail == {
-        "code": "harness_tool_error",
-        "message": "harness MCP tool 'get_run' failed: does not exist",
-        "details": {"run_id": "r"},
-    }
 
 
 def test_snapshot_only_reports_screeners_with_real_count_source() -> None:

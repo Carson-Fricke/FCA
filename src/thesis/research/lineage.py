@@ -1,7 +1,7 @@
 """Append-only revision lineage for strategy research iterations.
 
 Every recorded backtest or revision cycle becomes one immutable
-:class:`RevisionNode` keyed by the run manifest identity.  Nodes chain to
+:class:`RevisionNode` keyed by the job manifest identity.  Nodes chain to
 their parent through the parent's content digest, so the lineage is
 tamper-evident and append-only: an existing node is never rewritten, and a
 revision must record a new experiment contract.  A failed hypothesis can
@@ -58,15 +58,15 @@ class RevisionOutcome(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class RunIdentity:
-    """The durable identity of one harness run or its reproducibility manifest."""
+class JobIdentity:
+    """The durable identity of one harness job or its reproducibility manifest."""
 
-    run_id: str
+    job_id: str
     manifest_id: str | None = None
     manifest_sha256: str | None = None
 
     def __post_init__(self) -> None:
-        _identifier(self.run_id, "run_id")
+        _identifier(self.job_id, "job_id")
         if self.manifest_id is not None:
             _identifier(self.manifest_id, "manifest_id")
         if self.manifest_sha256 is not None:
@@ -77,21 +77,21 @@ class RunIdentity:
         """Return the content-addressed key when a manifest digest exists."""
         if self.manifest_id is not None and self.manifest_sha256 is not None:
             return f"{self.manifest_id}@sha256:{self.manifest_sha256}"
-        return f"run:{self.run_id}"
+        return f"job:{self.job_id}"
 
     def as_dict(self) -> dict[str, object]:
-        """Return the detached run identity representation."""
+        """Return the detached job identity representation."""
         return {
             "identityKey": self.identity_key,
+            "jobId": self.job_id,
             "manifestId": self.manifest_id,
             "manifestSha256": self.manifest_sha256,
-            "runId": self.run_id,
         }
 
 
 @dataclass(frozen=True, slots=True)
 class RevisionNode:
-    """One immutable lineage record for a run or a revision of the strategy.
+    """One immutable lineage record for a job or a revision of the strategy.
 
     Root nodes carry ``revision=0`` and no parent.  Every revision node
     chains to its parent through ``parent_node_sha256``, continues the
@@ -102,7 +102,7 @@ class RevisionNode:
 
     node_id: str
     revision: int
-    run: RunIdentity
+    job: JobIdentity
     strategy_id: str
     strategy_version: str
     strategy_lineage_version: str
@@ -125,7 +125,7 @@ class RevisionNode:
         _identifier(self.node_id, "node_id")
         if isinstance(self.revision, bool) or self.revision < 0:
             raise LineageError("revision must be a non-negative integer")
-        object.__setattr__(self, "run", _run_identity(self.run))
+        object.__setattr__(self, "job", _job_identity(self.job))
         _identifier(self.strategy_id, "strategy_id")
         _identifier(self.strategy_version, "strategy_version")
         _identifier(self.strategy_lineage_version, "strategy_lineage_version")
@@ -203,7 +203,7 @@ class RevisionNode:
             "previousContractSha256": self.previous_contract_sha256,
             "rationale": self.rationale,
             "revision": self.revision,
-            "run": self.run.as_dict(),
+            "job": self.job.as_dict(),
             "strategyId": self.strategy_id,
             "strategyLineageVersion": self.strategy_lineage_version,
             "strategyVersion": self.strategy_version,
@@ -215,20 +215,20 @@ class RevisionNode:
         return {
             **self.document,
             "contentSha256": self.content_sha256,
-            "runIdentityKey": self.run.identity_key,
+            "jobIdentityKey": self.job.identity_key,
         }
 
 
-def _run_identity(value: object) -> RunIdentity:
-    if isinstance(value, RunIdentity):
+def _job_identity(value: object) -> JobIdentity:
+    if isinstance(value, JobIdentity):
         return value
     if isinstance(value, Mapping):
-        return RunIdentity(
-            run_id=str(value.get("runId", "")),
+        return JobIdentity(
+            job_id=str(value.get("jobId", "")),
             manifest_id=_optional(value.get("manifestId")),
             manifest_sha256=_optional(value.get("manifestSha256")),
         )
-    raise LineageError("run must be a RunIdentity")
+    raise LineageError("job must be a JobIdentity")
 
 
 def _optional(value: object) -> str | None:
@@ -373,9 +373,9 @@ class RevisionLineage:
 
 
 __all__ = [
+    "JobIdentity",
     "LineageError",
     "RevisionLineage",
     "RevisionNode",
     "RevisionOutcome",
-    "RunIdentity",
 ]

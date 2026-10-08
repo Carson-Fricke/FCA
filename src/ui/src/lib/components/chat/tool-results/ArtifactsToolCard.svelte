@@ -14,7 +14,7 @@
 	let { result }: { result: ToolResult; workspaceId: string } = $props();
 
 	const data = $derived(isRecord(result.structured) ? result.structured : {});
-	const runId = $derived(readString(data, 'run_id'));
+	const jobId = $derived(readString(data, 'job_id'));
 	const artifacts = $derived(readArray<ArtifactRow>(data, 'artifacts'));
 	const rows = $derived(
 		artifacts.map((artifact) => {
@@ -31,8 +31,8 @@
 </script>
 
 <div class="space-y-2" data-testid="artifacts-tool-card">
-	{#if runId}
-		<p class="font-mono text-[11px] text-slate-500">run {runId}</p>
+	{#if jobId}
+		<p class="font-mono text-[11px] text-slate-500">job {jobId}</p>
 	{/if}
 
 	{#if rows.length}

@@ -5,10 +5,17 @@ from __future__ import annotations
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
+from typing import cast
 
 import pytest
 
-from thesis.agent.harness_tools import HarnessToolError, HarnessToolProvider
+from thesis.agent.harness_tools import (
+    GetJobResultArgs,
+    HarnessToolError,
+    HarnessToolProvider,
+    ListArtifactsArgs,
+    ReadArtifactArgs,
+)
 from thesis.integrations.mcp import (
     ExecutionCertainty,
     HarnessMcpAuthError,
@@ -242,8 +249,49 @@ def test_unrelated_call_is_not_blocked_by_provider_validation_lock() -> None:
         validation = executor.submit(provider.validate_study, model={})
         try:
             assert started.wait(timeout=5)
-            unrelated = executor.submit(provider.call_tool, "get_run", {"run_id": "1"})
+            unrelated = executor.submit(
+                provider.call_tool, "get_job_result", {"job_id": "1"}
+            )
             assert unrelated.result(timeout=2).ok
         finally:
             release.set()
         assert validation.result(timeout=5).ok
+
+
+def test_typed_job_arguments_use_one_job_id() -> None:
+    transport = Transport()
+    transport.result = {
+        "isError": False,
+        "structuredContent": {"job_id": "job-1", "state": "succeeded"},
+        "content": [],
+    }
+    provider = HarnessToolProvider(HarnessMcpClient(transport))
+    assert provider.get_job_result(GetJobResultArgs("job-1")).ok
+    assert provider.list_artifacts(ListArtifactsArgs("job-1")).ok
+    assert provider.read_artifact(ReadArtifactArgs("job-1", "metrics.json")).ok
+    calls = [
+        cast(Mapping[str, object], call["params"])["arguments"]
+        for call in transport.calls
+        if call["method"] == "tools/call"
+    ]
+    assert calls == [
+        {"job_id": "job-1"},
+        {"job_id": "job-1"},
+        {"job_id": "job-1", "name": "metrics.json"},
+    ]
+
+
+def test_mismatched_returned_job_id_fails_closed() -> None:
+    transport = Transport()
+    transport.result = {
+        "isError": False,
+        "structuredContent": {"job_id": "job-other", "state": "succeeded"},
+        "content": [],
+    }
+    provider = HarnessToolProvider(HarnessMcpClient(transport))
+    result = provider.get_job_result(GetJobResultArgs("job-1"))
+    assert not result.ok
+    assert result.failure is not None
+    assert result.failure.kind == "protocol"
+    assert result.failure.execution_certainty == "unknown_outcome"
+    assert result.structured["job_id"] == "job-other"

@@ -635,8 +635,8 @@ def _run_record(
 ) -> tuple[str, bytes]:
     if not isinstance(run, Mapping):
         raise ResearchModelError("research model run must be a mapping")
-    run_id = run.get("jobId")
-    if not isinstance(run_id, str) or not run_id.strip():
+    job_id = run.get("jobId")
+    if not isinstance(job_id, str) or not job_id.strip():
         raise ResearchModelError("research model run requires a jobId")
     body = {
         "modelReference": reference.key,

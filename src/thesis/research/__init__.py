@@ -1,7 +1,7 @@
 """Research-domain records for the Thesis vertical.
 
 The first capability in this package is the append-only strategy revision
-lineage (:mod:`thesis.research.lineage`) that records which run and revision
+lineage (:mod:`thesis.research.lineage`) that records which job and revision
 descended from which, with the rationale and the experiment-contract
 transition for every material adaptation.
 """
@@ -25,11 +25,11 @@ from thesis.research.hypothesis import (
     slugify,
 )
 from thesis.research.lineage import (
+    JobIdentity,
     LineageError,
     RevisionLineage,
     RevisionNode,
     RevisionOutcome,
-    RunIdentity,
 )
 from thesis.research.models import (
     MODEL_DIRECTORY,
@@ -59,6 +59,7 @@ __all__ = [
     "LineageError",
     "MODEL_DIRECTORY",
     "InMemoryResearchModelStore",
+    "JobIdentity",
     "RevisionLineage",
     "RevisionNode",
     "RevisionOutcome",
@@ -66,7 +67,6 @@ __all__ = [
     "ResearchModelError",
     "ResearchModelRef",
     "ResearchModelStore",
-    "RunIdentity",
     "WorkspaceResearchModelStore",
     "WorkspaceHypothesisStore",
     "parse_hypothesis",

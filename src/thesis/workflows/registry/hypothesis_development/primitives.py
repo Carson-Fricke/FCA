@@ -37,9 +37,6 @@ _WORKFLOW_VERSION = "2.0.0"
 _WORKFLOW_TITLE = "Hypothesis development"
 
 
-_MODEL_TOOL_NAME = "harness.research_model"
-
-
 _WORKFLOW_ACTOR = "thesis-workflow"
 
 

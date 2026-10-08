@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
-import subprocess
-import tempfile
 import tomllib
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Protocol, cast
 from uuid import uuid4
 
 from thesis.integrations.mcp import HarnessMcpError, McpToolResult
-from thesis.persistence.git import GitCoordinator, GitPublicationError
+from thesis.persistence.git import (
+    GitCoordinator,
+    GitMaterializationError,
+    GitPublicationError,
+)
 from thesis.research.models import (
     MARKET_SUBSCRIPTIONS_SCHEMA,
     ResearchModelError,
@@ -27,6 +29,51 @@ from thesis.workspaces.local import WorkspaceRepositoryError
 from thesis.workspaces.repository import WorkspaceRepositoryProvider
 
 ProgramKind = Literal["study", "strategy", "indicator"]
+
+
+class ProgramGit(Protocol):
+    """The Git surface program operations require, as an injected storage port."""
+
+    @property
+    def repository(self) -> Path: ...
+
+    def head(self) -> str | None: ...
+
+    def publication_lock(self) -> AbstractContextManager[None]: ...
+
+    def tracked_paths(self, prefix: str) -> tuple[str, ...]: ...
+
+    def file_matches(self, commit_hash: str, path: str, payload: bytes) -> bool: ...
+
+    def is_ancestor(self, commit_hash: str) -> bool: ...
+
+    def read_blobs(
+        self, commit_hash: str, paths: Sequence[str]
+    ) -> dict[str, bytes]: ...
+
+    def read_file(self, commit_hash: str, path: str) -> bytes: ...
+
+    def path_revisions(self, prefix: str) -> tuple[tuple[str, str], ...]: ...
+
+    def path_revisions_many(
+        self, prefixes: Sequence[str]
+    ) -> dict[str, tuple[tuple[str, str], ...]]: ...
+
+    def has_staged_changes(self, paths: Sequence[str]) -> bool: ...
+
+    def commit_exact_files(
+        self,
+        head: str | None,
+        files: Mapping[str, bytes],
+        destinations: Mapping[str, Path],
+        message: str,
+    ) -> str: ...
+
+
+def _default_git_factory(root: Path) -> ProgramGit:
+    return GitCoordinator(root)
+
+
 _DIRECTORIES = {"study": "studies", "strategy": "strategies", "indicator": "indicators"}
 _RESERVED_IDS = {"con", "prn", "aux", "nul"} | {
     f"{prefix}{i}" for prefix in ("com", "lpt") for i in range(1, 10)
@@ -262,15 +309,20 @@ class WorkspacePrograms:
         harness: ProgramHarness | None = None,
         *,
         sdk_root: Path | None = None,
+        git_factory: Callable[[Path], ProgramGit] = _default_git_factory,
     ) -> None:
         self.repositories = repositories
         self.harness = harness
         self.sdk_root = (
             sdk_root or Path(__file__).resolve().parents[2] / "harness" / "strategy-sdk"
         )
+        self._git_factory = git_factory
         self._catalog_cache: dict[
             tuple[str, str], tuple[str, tuple[dict[str, object], ...]]
         ] = {}
+
+    def _git(self, root: Path) -> ProgramGit:
+        return self._git_factory(root)
 
     def _path(
         self,
@@ -333,7 +385,7 @@ class WorkspacePrograms:
     ) -> dict[str, object]:
         relative = self._path(workspace_id, kind, program_id)
         root = self.repositories.open(workspace_id).root
-        git = GitCoordinator(root)
+        git = self._git(root)
         with git.publication_lock():
             head = git.head()
             if any(
@@ -379,7 +431,7 @@ class WorkspacePrograms:
         indicator_ids: Sequence[str] | None = None,
     ) -> dict[str, object]:
         relative = self._path(workspace_id, kind, program_id)
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        git = self._git(self.repositories.open(workspace_id).root)
         with git.publication_lock():
             head = self._head(git)
             snapshot = self._snapshot(workspace_id, kind, program_id, head)
@@ -429,7 +481,7 @@ class WorkspacePrograms:
         studies/strategies. Every dependency is read from the same commit, never
         from the working tree or a newer dependency revision.
         """
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        git = self._git(self.repositories.open(workspace_id).root)
         selected = self._head(git) if commit is None else commit
         if (
             not isinstance(selected, str)
@@ -535,7 +587,7 @@ class WorkspacePrograms:
         commit: str | None = None,
     ) -> dict[str, object]:
         """Explicitly retry repository publication after a known local commit."""
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        git = self._git(self.repositories.open(workspace_id).root)
         with git.publication_lock():
             selected = self._head(git) if commit is None else commit
             if (
@@ -566,7 +618,7 @@ class WorkspacePrograms:
         end_line: int | None = None,
         max_chars: int = MAX_READ_CHARS,
     ) -> dict[str, object]:
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        git = self._git(self.repositories.open(workspace_id).root)
         head = self._head(git)
         snapshot = self._snapshot(workspace_id, kind, program_id, head)
         result = self._receipt(workspace_id, kind, program_id, head)
@@ -607,7 +659,7 @@ class WorkspacePrograms:
             raise ProgramArtifactError(
                 f"limit must be an integer from 1 to {MAX_LIST_RESULTS}"
             )
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        git = self._git(self.repositories.open(workspace_id).root)
         head = git.head()
         response: dict[str, object] = {
             "workspaceId": workspace_id,
@@ -657,7 +709,7 @@ class WorkspacePrograms:
         """
         if kind not in _DIRECTORIES:
             raise ProgramArtifactError("kind must be study, strategy, or indicator")
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        git = self._git(self.repositories.open(workspace_id).root)
         commit = git.head()
         if commit is None:
             return ()
@@ -775,7 +827,7 @@ class WorkspacePrograms:
         """Read one committed program file by its declared name."""
         if relative_path not in ("program.rs", "manifest.json"):
             raise KeyError(relative_path)
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        git = self._git(self.repositories.open(workspace_id).root)
         head = self._head(git)
         relative = self._path(workspace_id, kind, program_id)
         if f"{relative}/{relative_path}" not in git.tracked_paths(relative):
@@ -789,7 +841,7 @@ class WorkspacePrograms:
         program_id: str,
         commit: str,
         snapshot: Mapping[str, object],
-        git: GitCoordinator,
+        git: ProgramGit,
         history: _HistoryEntries | None = None,
     ) -> dict[str, object]:
         manifest = cast(dict[str, object], snapshot["manifest"])
@@ -837,7 +889,7 @@ class WorkspacePrograms:
             "preview": _program_preview(kind, manifest, configuration),
         }
 
-    def _revision_history(self, git: GitCoordinator, relative: str) -> _HistoryEntries:
+    def _revision_history(self, git: ProgramGit, relative: str) -> _HistoryEntries:
         return self._history_entries(git.path_revisions(relative))
 
     @staticmethod
@@ -856,7 +908,7 @@ class WorkspacePrograms:
     def validate(
         self, workspace_id: str, kind: ProgramKind, program_id: str
     ) -> dict[str, object]:
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        git = self._git(self.repositories.open(workspace_id).root)
         head = self._head(git)
         snapshot = self._snapshot(workspace_id, kind, program_id, head)
         source = self._assembled_source(snapshot, kind)
@@ -930,7 +982,7 @@ class WorkspacePrograms:
             raise ProgramArtifactError(
                 "indicators execute only as owned study/strategy dependencies"
             )
-        git = GitCoordinator(self.repositories.open(workspace_id).root)
+        git = self._git(self.repositories.open(workspace_id).root)
         head = self._head(git)
         snapshot = self._snapshot(workspace_id, kind, program_id, head)
         relative = self._path(workspace_id, kind, program_id)
@@ -981,11 +1033,8 @@ class WorkspacePrograms:
         for key in ("requiredSymbols", "required_symbols", "interval", "bar_interval"):
             data.pop(key, None)
         configuration["data"] = data
-        scope = _hash(_bytes([workspace_id, kind, program_id, snapshot["version"]]))[
-            :16
-        ]
-        run_id = f"{kind}-{program_id}-{scope}-{uuid4().hex}"
-        configuration["run_id"] = run_id
+        job_id = f"job-{uuid4().hex}"
+        configuration["job_id"] = job_id
         configuration.update(
             {
                 "shell": "study" if kind == "study" else "backtest",
@@ -1016,25 +1065,27 @@ class WorkspacePrograms:
                     ),
                 },
             )
+        acknowledged = result.structured.get("job_id")
+        if isinstance(acknowledged, str) and acknowledged and acknowledged != job_id:
+            result = McpToolResult(
+                tool=tool,
+                is_error=True,
+                structured={
+                    "error": (
+                        "Harness acknowledged a different job_id than the "
+                        "submitted execution."
+                    ),
+                    "executionCertainty": "observed_failure",
+                },
+            )
         receipt.update(
             {
                 "ok": not result.is_error,
-                "submittedRunId": run_id,
+                "job_id": job_id,
                 "result": {
-                    "run_id": run_id,
-                    **{
-                        key: result.structured[key]
-                        for key in (
-                            "job_id",
-                            "run_id",
-                            "study_id",
-                            "state",
-                            "status",
-                            "metrics",
-                            "artifacts",
-                        )
-                        if key in result.structured
-                    },
+                    key: result.structured[key]
+                    for key in ("state", "status", "metrics", "artifacts")
+                    if key in result.structured
                 },
                 **self._outcome(result),
             }
@@ -1261,11 +1312,11 @@ class WorkspacePrograms:
         kind: ProgramKind,
         program_id: str,
         commit: str,
-        git: GitCoordinator | None = None,
+        git: ProgramGit | None = None,
         fetched: Mapping[str, bytes] | None = None,
     ) -> dict[str, object]:
         if git is None:
-            git = GitCoordinator(self.repositories.open(workspace_id).root)
+            git = self._git(self.repositories.open(workspace_id).root)
         dependencies: dict[str, str] = {}
         files: dict[str, str] = {}
         sizes: dict[str, int] = {}
@@ -1418,7 +1469,7 @@ class WorkspacePrograms:
             self._path(workspace_id, "indicator", dependency)
             if manifest["kind"] == "indicator" and dependency == manifest["id"]:
                 raise ProgramArtifactError("indicator cannot depend on itself")
-            git = GitCoordinator(self.repositories.open(workspace_id).root)
+            git = self._git(self.repositories.open(workspace_id).root)
             snapshot = self._snapshot(
                 workspace_id, "indicator", dependency, self._head(git)
             )
@@ -1505,7 +1556,7 @@ class WorkspacePrograms:
         return source.encode()
 
     @staticmethod
-    def _head(git: GitCoordinator) -> str:
+    def _head(git: ProgramGit) -> str:
         head = git.head()
         if head is None:
             raise ProgramArtifactError("workspace has no committed artifacts")
@@ -1670,14 +1721,14 @@ export_study_program!(IndicatorValidation);
             or (
                 "Fix the committed source/configuration and validate again."
                 if validation
-                else "Inspect job/run state before an explicit retry; never automatically replay execution."
+                else "Inspect job state before an explicit retry; never automatically replay execution."
             ),
         }
 
     def _commit(
         self,
         workspace_id: str,
-        git: GitCoordinator,
+        git: ProgramGit,
         head: str | None,
         files: Mapping[str, bytes],
         message: str,
@@ -1701,103 +1752,10 @@ export_study_program!(IndicatorValidation);
                         "artifact has uncommitted changes; refusing to overwrite"
                     )
             destinations[relative] = path
-        environment = {
-            key: value
-            for key, value in os.environ.items()
-            if not key.upper().startswith(("GIT_", "GCM_"))
-        }
-        environment.update(
-            {
-                "GIT_CONFIG_GLOBAL": os.devnull,
-                "GIT_CONFIG_NOSYSTEM": "1",
-                "GIT_AUTHOR_NAME": "FCA Thesis",
-                "GIT_AUTHOR_EMAIL": "thesis@localhost",
-                "GIT_COMMITTER_NAME": "FCA Thesis",
-                "GIT_COMMITTER_EMAIL": "thesis@localhost",
-                "GIT_LITERAL_PATHSPECS": "1",
-                "GIT_TERMINAL_PROMPT": "0",
-            }
-        )
-
-        def run(*args: str, payload: bytes | None = None) -> str:
-            try:
-                result = subprocess.run(
-                    ["git", *args],
-                    cwd=root,
-                    env=environment,
-                    input=payload,
-                    capture_output=True,
-                    timeout=30,
-                    check=False,
-                )
-            except (OSError, subprocess.TimeoutExpired) as error:
-                raise GitPublicationError(
-                    "program Git publication outcome is unknown"
-                ) from error
-            if result.returncode:
-                raise GitPublicationError("program Git publication failed")
-            return result.stdout.decode().strip()
-
-        for relative in files:
-            if run("diff", "--cached", "--name-only", "--", relative):
-                raise ProgramArtifactError(
-                    "artifact has staged changes; refusing to overwrite"
-                )
-
-        git_dir = Path(run("rev-parse", "--absolute-git-dir"))
-        with tempfile.TemporaryDirectory(
-            prefix="program-index-", dir=git_dir
-        ) as temporary:
-            environment["GIT_INDEX_FILE"] = str(Path(temporary) / "index")
-            run("read-tree", head or "--empty")
-            blobs = {}
-            for relative, payload in files.items():
-                blob = run("hash-object", "-w", "--stdin", payload=payload)
-                blobs[relative] = blob
-                run("update-index", "--add", "--cacheinfo", "100644", blob, relative)
-            tree = run("write-tree")
-            commit = run(
-                "commit-tree",
-                tree,
-                *(["-p", head] if head else []),
-                "-m",
-                "thesis: " + message,
+        if git.has_staged_changes(tuple(files)):
+            raise ProgramArtifactError(
+                "artifact has staged changes; refusing to overwrite"
             )
-            run("update-ref", "HEAD", commit, head or "0" * len(commit))
-            environment.pop("GIT_INDEX_FILE")
-            try:
-                for relative, path in destinations.items():
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    descriptor, name = tempfile.mkstemp(
-                        prefix=".program-", dir=path.parent
-                    )
-                    staged = Path(name)
-                    try:
-                        with os.fdopen(descriptor, "wb") as stream:
-                            stream.write(files[relative])
-                            stream.flush()
-                            os.fsync(stream.fileno())
-                        os.replace(staged, path)
-                    finally:
-                        staged.unlink(missing_ok=True)
-                run(
-                    "update-index",
-                    "--index-info",
-                    payload="".join(
-                        f"100644 {blobs[relative]}\t{relative}\n" for relative in files
-                    ).encode(),
-                )
-            except (OSError, GitPublicationError) as error:
-                parts = next(iter(files)).split("/")
-                kind = cast(
-                    ProgramKind,
-                    next(
-                        key for key, value in _DIRECTORIES.items() if value == parts[0]
-                    ),
-                )
-                raise ProgramPublicationError(
-                    self._receipt(workspace_id, kind, parts[1], commit)
-                ) from error
         # Publication failure must retain the known local commit for explicit
         # reconciliation, not report a mutation as if nothing happened.
         parts = next(iter(files)).split("/")
@@ -1805,6 +1763,12 @@ export_study_program!(IndicatorValidation);
             ProgramKind,
             next(key for key, value in _DIRECTORIES.items() if value == parts[0]),
         )
+        try:
+            commit = git.commit_exact_files(head, files, destinations, message)
+        except GitMaterializationError as error:
+            raise ProgramPublicationError(
+                self._receipt(workspace_id, kind, parts[1], error.commit_hash)
+            ) from error
         receipt = self._receipt(workspace_id, kind, parts[1], commit)
         try:
             self.repositories.publish(workspace_id)

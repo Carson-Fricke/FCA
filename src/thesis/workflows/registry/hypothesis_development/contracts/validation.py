@@ -153,7 +153,6 @@ DISCOVERY_PAYLOAD_SCHEMA: dict[str, Any] = {
                         "maxLength": 4096,
                         "pattern": r"\S",
                     },
-                    "studyId": {"type": "string", "pattern": IDENTIFIER_PATTERN},
                     "dataTypes": {
                         "type": "array",
                         "minItems": 1,
@@ -172,12 +171,12 @@ DISCOVERY_PAYLOAD_SCHEMA: dict[str, Any] = {
                         "pattern": r"\S",
                     },
                     "changed": {"type": "boolean"},
-                    "runId": {
+                    "jobId": {
                         "type": ["string", "null"],
                         "pattern": IDENTIFIER_PATTERN,
                     },
                 },
-                "required": ["purpose", "studyId", "dataTypes", "window", "result"],
+                "required": ["purpose", "dataTypes", "window", "result"],
             },
         },
         "untouchedData": {

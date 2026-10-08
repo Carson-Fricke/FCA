@@ -40,16 +40,14 @@ class DiscoveryAttempt:
     """One study the discovery phase ran, including its negative results."""
 
     purpose: str
-    study_id: str
     data_types: tuple[str, ...]
     window: str
     result: str
     changed: bool = False
-    run_id: str | None = None
+    job_id: str | None = None
 
     def __post_init__(self) -> None:
         _text(self.purpose, "attempt purpose", max_length=_MAX_ATTEMPT_TEXT)
-        _identifier(self.study_id, "attempt study_id")
         if isinstance(self.data_types, str) or not isinstance(
             self.data_types, Sequence
         ):
@@ -64,18 +62,17 @@ class DiscoveryAttempt:
         _text(self.result, "attempt result", max_length=_MAX_ATTEMPT_TEXT)
         if not isinstance(self.changed, bool):
             raise WorkflowError("attempt changed must be a boolean")
-        if self.run_id is not None:
-            _identifier(self.run_id, "attempt run_id")
+        if self.job_id is not None:
+            _identifier(self.job_id, "attempt job_id")
 
     def as_dict(self) -> dict[str, object]:
         """Return the portable attempt representation."""
         return {
             "changed": self.changed,
             "dataTypes": list(self.data_types),
+            "jobId": self.job_id,
             "purpose": self.purpose,
             "result": self.result,
-            "runId": self.run_id,
-            "studyId": self.study_id,
             "window": self.window,
         }
 
@@ -150,12 +147,11 @@ def _attempt_from_dict(payload: object) -> DiscoveryAttempt:
         raise WorkflowError("discovery attempt requires dataTypes")
     return DiscoveryAttempt(
         purpose=_field(payload, "purpose"),
-        study_id=_field(payload, "studyId", "study_id"),
         data_types=tuple(data_types),
         window=_field(payload, "window"),
         result=_field(payload, "result"),
         changed=_field(payload, "changed") if "changed" in payload else False,
-        run_id=_field(payload, "runId", "run_id"),
+        job_id=_field(payload, "jobId"),
     )
 
 

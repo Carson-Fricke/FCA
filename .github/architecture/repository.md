@@ -93,8 +93,11 @@ pipe once. Acceptance checks epoch and current executor/attempt, commits with
 execution-store revision CAS, projects the phase, and closes its executor under
 the shared steering/cancellation/job guard. Events and successor entry run outside
 that guard. Deterministic executor failures fail the workflow.
-Harness runners submit mappings inline, distinguish confirmed absence from
-unavailable status, and poll with a monotonic deadline and cancellation.
+Harness submissions allocate one `job_id` that is durably registered with
+immutable program attribution before dispatch, distinguish confirmed absence
+from unavailable status, and poll with a monotonic deadline and cancellation;
+recovery reconciles the retained id instead of replaying. See the "Execution
+Job Contract" in `.github/instructions/copilot-instructions.md`.
 
 Cosmos keeps one authoritative conversation store in the workspace-partitioned
 catalog: records, messages, events, and per-chat sequence counters share the
@@ -126,7 +129,9 @@ kernel, OMS, strategy contract with CI-gated sandbox lint and the structural
 look-ahead boundary, venues,
 fees, portfolio, risk, bars/scheduler, bounded lake replay, the deterministic
 backtest runner with reproducibility manifest, the streaming run recorder, the
-backtest results store with its run catalog, standard metrics and attribution,
+backtest results store and its authoritative job store (one `JobRecord` per
+`job_id`, artifact payloads under the `jobs/` object prefix), standard metrics
+and attribution,
 the point-in-time option contract universe, the capability-scoped strategy
 boundary (read-only clock, opaque StrategyHistory data capability, one-way
 venue commands, provenance-restricted scheduling), live-feed gap healing, the
@@ -164,8 +169,8 @@ through `harness-strategy-jit` when a configuration runs (see
 interpreter is no longer a harness build or test dependency. The Python engine
 paths were removed in the final decommission wave, and the Python authoring
 surface (host adapter, `py` extension, and the harness Python packages) was
-removed in the native-authoring deletion; only the `trader` supervision
-runner remains deferred (see below).
+removed in the native-authoring deletion; the `trader` binary now runs the
+native Rust supervision runner (see below).
 
 ## Product Boundaries
 
@@ -249,9 +254,10 @@ routes with JIT-authored programs, streaming market data through
 
 The `harness`, `api`, `mcp`, `backtest-job`, and `screen-job` processes are
 served by the Rust binaries directly; the Python console-script shims were
-deleted with the harness Python packages. `trader` is the one
-deferred process: the Rust binary runs the deterministic live-core session demo
-until the configured supervision runner is ported.
+deleted with the harness Python packages. `trader` runs the native Rust
+supervision runner: it loads the configured shell, resolves one execution job
+id, and runs one supervised paper or shadow session over an injected market
+feed and kill switch.
 
 ## Quant-Harness Rust Workspace
 
@@ -358,8 +364,7 @@ src/harness/
   the lake's ad-hoc closures and early closes. `backtest` backs the flipped
   `backtest-job` and replays exact consumer requirements for `study` shells,
   adding quote/trade execution feeds for backtests; `live` provides the
-  deterministic live core the deferred `trader` binary runs, but its configured
-  supervision runner is not yet ported.
+  deterministic live core and the supervision runner the `trader` binary drives.
 
 The workspace is gated by `cargo fmt --all --check`, `cargo clippy --workspace
 --all-targets -- -D warnings`, and `cargo test --workspace`; no Python
@@ -486,18 +491,21 @@ The implemented contract is:
   `harness-lakeclient` data source over the lake routes, runs the program
   once, and ranks rows by `rank_metric` descending with symbol ascending on
   ties. The result is written as `screen.json` (schema
-  `fca-harness-screen-v1`) carrying the ranked rows, bundle hash, rank
-  metric, data window, definition provenance, and the source/toolchain/run
-  digests; a failed run records its reason. The same path is published as
-  `POST /v1/screeners/jobs` / `GET /v1/screeners/jobs/{job_id}` and as the
-  `run_screener`, `get_screener_status`, and `screener_config_template` MCP
-  tools.
+  `fca-harness-screen-v2`) carrying the ranked rows, bundle hash, rank
+  metric, data window, definition provenance, and the source/toolchain/job
+  digests; its closed `status` is `succeeded` or `failed`, a failed run
+  records its reason in the artifact, and Thesis imports v2 only. The same
+  path is published as `POST /v1/screeners/jobs`, with status, results, and
+  artifacts on the neutral `/v1/jobs/{job_id}` routes, and as the
+  `run_screener` and `screener_config_template` MCP tools; `get_job_status`,
+  `get_job_result`, `list_artifacts`, and `read_artifact` consume the
+  resulting job.
 - Metrics. `MetricPublisher::publish(name, value)` accepts a finite numeric
   value under a non-reserved stable name; every rejection is recorded
   host-side and fails the run even when the author ignores the returned
   error. Repeated publication replaces the prior value; final values are
   written to `metrics.json.custom`, the canonical run artifact, the
-  recorder's `emissions.parquet`, and the local/HTTP run catalog. Metric
+  recorder's `emissions.parquet`, and the local/HTTP job store. Metric
   names are run outputs, not indicator registrations.
 - Guidance. The plan and status live in
   `.github/architecture/rust-native-authoring-plan.md`; the screener
@@ -530,14 +538,16 @@ harness build or test needs a Python interpreter.
    `screen-job`) are the only serving surfaces; the Python console-script
    shims were deleted with no dangling harness imports.
 
-### Deferred: `trader`
+### Trader supervision
 
-The Rust `trader` binary composes the deterministic live core but does not yet
-load configuration or supervise a paper/shadow session, so the configured
-supervision runner is deferred. The Python supervision runtime was deleted with
-the engine; restoring full trader function requires porting the supervision
-runner (config loading, session resolution, feed supervision, boot reconciler,
-kill-switch polling, and state snapshots) into `live`.
+The Rust `trader` binary composes the deterministic live core with the native
+supervision runner: it loads the trader configuration, resolves one execution
+job id, and runs one supervised paper or shadow session through config loading,
+session resolution, feed supervision, the boot reconciler, the kill-switch
+gate, and durable state snapshots. The process composition currently injects
+the deterministic in-process market feed and an in-process kill switch;
+composing the configured Alpaca feed and the table-backed operator kill switch
+remains deployment work.
 
 ### Retained Python products
 
@@ -577,7 +587,7 @@ excluding unrelated staged and dirty files. Completion verifies the persisted
 receipt; structural checks are not compilation or a security sandbox.
 `thesis.artifacts`
 owns reproducibility-critical result imports; `thesis.backtests` imports
-completed harness runs into workspace backtest records (equity, trades, stats)
+completed harness jobs into workspace backtest records (equity, trades, stats)
 linked to the originating chat and workflow execution; `thesis.screening` owns
 content-addressed screener definitions and imports harness screening runs as
 workspace results — it launches `run_screener` through the harness MCP and

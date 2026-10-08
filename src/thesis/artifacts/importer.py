@@ -558,7 +558,7 @@ class ArtifactImporter:
                 "manifest has no reproducibility-critical artifacts to import"
             )
 
-        artifact_root = PurePosixPath("backtests", experiment_id, "artifacts")
+        artifact_root = PurePosixPath("jobs", experiment_id, "artifacts")
         artifact_locations: list[tuple[HarnessArtifact, str]] = []
         writes: list[tuple[str, Path, bytes]] = []
         for artifact, payload in verified:
@@ -591,7 +591,7 @@ class ArtifactImporter:
             for artifact, relative in artifact_locations
         )
         provenance_relative = PurePosixPath(
-            "backtests",
+            "jobs",
             experiment_id,
             "imports",
             f"{workflow_execution_id}-{manifest.sha256}.json",

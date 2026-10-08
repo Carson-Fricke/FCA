@@ -2,9 +2,11 @@
 //!
 //! These adapters are composed by [`crate::mcp_cli`] so that the MCP
 //! `run_backtest` tool works in local mode. They drive the
-//! native Rust engine with JIT-authored Rust programs, persist every run and
-//! artifact into the shared durable results store, and return the same
-//! payload shapes the remote API would return.
+//! native Rust engine with JIT-authored Rust programs, persist every job and
+//! artifact into the shared durable job store, and return the same
+//! payload shapes the remote API would return. Each submission parses its
+//! configuration exactly once and passes the parsed value to background
+//! execution; the mutable configuration path is never reloaded.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -21,180 +23,228 @@ use backtest::backtest::screen::ScreenConfig;
 
 use crate::http::screener::ScreeningRunner;
 use harness_lakeclient::BlockingLakeClient;
-use mcp::store::{JobRepository, JobState, RunCatalogRecord, RunStatus, RunStore};
+use mcp::store::{Admission, JobKind, JobRecord, JobState, JobStore};
 
-/// Local backtest submitter that runs the native engine and records the run.
+/// One submission receipt shared by every local surface.
+fn receipt(record: &JobRecord) -> Value {
+    json!({
+        "boundary": "local",
+        "job_id": record.job_id,
+        "state": record.state.as_str(),
+        "kind": record.kind.as_str(),
+    })
+}
+
+/// The receipt for a job this submission created.
+fn created_receipt(job_id: &str, kind: JobKind) -> Value {
+    json!({
+        "boundary": "local",
+        "job_id": job_id,
+        "state": JobState::Queued.as_str(),
+        "kind": kind.as_str(),
+    })
+}
+
+/// Local backtest submitter that runs the native engine and records the job.
 pub struct NativeBacktestSubmitter {
-    run_store: Arc<dyn RunStore>,
-    jobs: Arc<dyn JobRepository>,
+    job_store: Arc<dyn JobStore>,
 }
 
 impl NativeBacktestSubmitter {
-    /// Compose a submitter over the shared durable store.
+    /// Compose a submitter over the shared durable job store.
     #[must_use]
-    pub fn new(run_store: Arc<dyn RunStore>, jobs: Arc<dyn JobRepository>) -> Self {
-        Self { run_store, jobs }
+    pub fn new(job_store: Arc<dyn JobStore>) -> Self {
+        Self { job_store }
     }
 }
 
 impl mcp::tools::BacktestSubmitter for NativeBacktestSubmitter {
-    fn submit(&self, config_path: &str, workspace: Option<&str>) -> Result<Value, String> {
-        let configuration = backtest::backtest::job::load_backtest_config(Path::new(config_path))
-            .map_err(|error| error.to_string())?;
-        let run_id = configuration.run_id.clone();
+    fn submit(
+        &self,
+        config_path: &str,
+        workspace: Option<&str>,
+        job_id: Option<&str>,
+    ) -> Result<Value, String> {
+        let configuration = backtest::backtest::job::load_backtest_config_with_job_id(
+            Path::new(config_path),
+            job_id,
+        )
+        .map_err(|error| error.to_string())?;
+        let job_id = configuration.job_id.clone();
         let started = Utc::now();
-        self.jobs.upsert(mcp::store::JobRecord::new(
-            &run_id,
-            JobState::Running,
+        let mut record = JobRecord::new(
+            &job_id,
+            JobKind::Backtest,
+            configuration.configuration_hash(),
             started,
-            started,
-        ));
+        );
+        populate_replay_record(&mut record, &configuration);
+        match self
+            .job_store
+            .admit(record)
+            .map_err(|error| error.to_string())?
+        {
+            Admission::Joined(existing) => return Ok(receipt(&existing)),
+            Admission::Created(_) => {}
+        }
         let output_dir = workspace.map(PathBuf::from).unwrap_or_else(|| {
             std::env::temp_dir()
                 .join("harness-mcp-backtests")
-                .join(&run_id)
+                .join(&job_id)
         });
-        let run_store = self.run_store.clone();
-        let jobs = self.jobs.clone();
-        let config_path = config_path.to_string();
-        let background_run_id = run_id.clone();
+        let job_store = self.job_store.clone();
+        let background_job_id = job_id.clone();
         let _handle = std::thread::spawn(move || {
             run_background_backtest(
-                run_store,
-                jobs,
-                background_run_id,
-                config_path,
-                output_dir,
-                started,
-            );
-        });
-        Ok(json!({
-            "boundary": "local",
-            "run_id": run_id,
-            "state": "running",
-        }))
-    }
-}
-
-/// Local study submitter that runs the native engine study path and records it.
-pub struct NativeStudySubmitter {
-    run_store: Arc<dyn RunStore>,
-    jobs: Arc<dyn JobRepository>,
-}
-
-impl NativeStudySubmitter {
-    /// Compose a submitter over the shared durable store.
-    #[must_use]
-    pub fn new(run_store: Arc<dyn RunStore>, jobs: Arc<dyn JobRepository>) -> Self {
-        Self { run_store, jobs }
-    }
-}
-
-impl mcp::tools::StudySubmitter for NativeStudySubmitter {
-    fn submit(&self, config_path: &str, workspace: Option<&str>) -> Result<Value, String> {
-        let configuration = backtest::backtest::job::load_study_config(Path::new(config_path))
-            .map_err(|error| error.to_string())?;
-        let run_id = configuration.run_id.clone();
-        let started = Utc::now();
-        self.jobs.upsert(mcp::store::JobRecord::new(
-            &run_id,
-            JobState::Running,
-            started,
-            started,
-        ));
-        let output_dir = workspace.map(PathBuf::from).unwrap_or_else(|| {
-            std::env::temp_dir()
-                .join("harness-mcp-studies")
-                .join(&run_id)
-        });
-        let run_store = self.run_store.clone();
-        let jobs = self.jobs.clone();
-        let config_path = config_path.to_string();
-        let background_run_id = run_id.clone();
-        let _handle = std::thread::spawn(move || {
-            run_background_study(
-                run_store,
-                jobs,
-                background_run_id,
-                config_path,
-                output_dir,
-                started,
-            );
-        });
-        Ok(json!({
-            "boundary": "local",
-            "study_id": run_id.clone(),
-            "job_id": run_id.clone(),
-            "run_id": run_id,
-            "state": "running",
-            "kind": "study",
-        }))
-    }
-}
-
-/// Local screening submitter that runs the injected screening runner and
-/// records the run.
-pub struct NativeScreeningSubmitter {
-    run_store: Arc<dyn RunStore>,
-    jobs: Arc<dyn JobRepository>,
-    runner: Arc<dyn ScreeningRunner>,
-}
-
-impl NativeScreeningSubmitter {
-    /// Compose a submitter over the shared durable store and runner.
-    #[must_use]
-    pub fn new(
-        run_store: Arc<dyn RunStore>,
-        jobs: Arc<dyn JobRepository>,
-        runner: Arc<dyn ScreeningRunner>,
-    ) -> Self {
-        Self {
-            run_store,
-            jobs,
-            runner,
-        }
-    }
-}
-
-impl mcp::tools::ScreeningSubmitter for NativeScreeningSubmitter {
-    fn submit(&self, config_path: &str, workspace: Option<&str>) -> Result<Value, String> {
-        let configuration = backtest::backtest::job::load_screen_config(Path::new(config_path))
-            .map_err(|error| error.to_string())?;
-        let run_id = configuration.run_id();
-        let started = Utc::now();
-        self.jobs.upsert(mcp::store::JobRecord::new(
-            &run_id,
-            JobState::Running,
-            started,
-            started,
-        ));
-        let output_dir = workspace.map(PathBuf::from).unwrap_or_else(|| {
-            std::env::temp_dir()
-                .join("harness-mcp-screens")
-                .join(&run_id)
-        });
-        let run_store = self.run_store.clone();
-        let jobs = self.jobs.clone();
-        let runner = self.runner.clone();
-        let background_run_id = run_id.clone();
-        let _handle = std::thread::spawn(move || {
-            run_background_screen(
-                run_store,
-                jobs,
-                runner,
-                background_run_id,
+                job_store,
+                background_job_id,
                 configuration,
                 output_dir,
                 started,
             );
         });
-        Ok(json!({
-            "boundary": "local",
-            "run_id": run_id,
-            "state": "running",
-            "kind": "screening",
-        }))
+        Ok(created_receipt(&job_id, JobKind::Backtest))
     }
+}
+
+/// Local study submitter that runs the native engine study path and records it.
+pub struct NativeStudySubmitter {
+    job_store: Arc<dyn JobStore>,
+}
+
+impl NativeStudySubmitter {
+    /// Compose a submitter over the shared durable job store.
+    #[must_use]
+    pub fn new(job_store: Arc<dyn JobStore>) -> Self {
+        Self { job_store }
+    }
+}
+
+impl mcp::tools::StudySubmitter for NativeStudySubmitter {
+    fn submit(
+        &self,
+        config_path: &str,
+        workspace: Option<&str>,
+        job_id: Option<&str>,
+    ) -> Result<Value, String> {
+        let configuration =
+            backtest::backtest::job::load_study_config_with_job_id(Path::new(config_path), job_id)
+                .map_err(|error| error.to_string())?;
+        let job_id = configuration.job_id.clone();
+        let started = Utc::now();
+        let mut record = JobRecord::new(
+            &job_id,
+            JobKind::Study,
+            configuration.configuration_hash(),
+            started,
+        );
+        populate_replay_record(&mut record, &configuration);
+        match self
+            .job_store
+            .admit(record)
+            .map_err(|error| error.to_string())?
+        {
+            Admission::Joined(existing) => return Ok(receipt(&existing)),
+            Admission::Created(_) => {}
+        }
+        let output_dir = workspace.map(PathBuf::from).unwrap_or_else(|| {
+            std::env::temp_dir()
+                .join("harness-mcp-studies")
+                .join(&job_id)
+        });
+        let job_store = self.job_store.clone();
+        let background_job_id = job_id.clone();
+        let _handle = std::thread::spawn(move || {
+            run_background_study(
+                job_store,
+                background_job_id,
+                configuration,
+                output_dir,
+                started,
+            );
+        });
+        Ok(created_receipt(&job_id, JobKind::Study))
+    }
+}
+
+/// Local screening submitter that runs the injected screening runner and
+/// records the job.
+pub struct NativeScreeningSubmitter {
+    job_store: Arc<dyn JobStore>,
+    runner: Arc<dyn ScreeningRunner>,
+}
+
+impl NativeScreeningSubmitter {
+    /// Compose a submitter over the shared durable job store and runner.
+    #[must_use]
+    pub fn new(job_store: Arc<dyn JobStore>, runner: Arc<dyn ScreeningRunner>) -> Self {
+        Self { job_store, runner }
+    }
+}
+
+impl mcp::tools::ScreeningSubmitter for NativeScreeningSubmitter {
+    fn submit(
+        &self,
+        config_path: &str,
+        workspace: Option<&str>,
+        job_id: Option<&str>,
+    ) -> Result<Value, String> {
+        let configuration =
+            backtest::backtest::job::load_screen_config_with_job_id(Path::new(config_path), job_id)
+                .map_err(|error| error.to_string())?;
+        let job_id = configuration.job_id.clone();
+        let started = Utc::now();
+        let mut record = JobRecord::new(
+            &job_id,
+            JobKind::Screen,
+            configuration.configuration_digest(),
+            started,
+        );
+        populate_screen_record(&mut record, &configuration);
+        match self
+            .job_store
+            .admit(record)
+            .map_err(|error| error.to_string())?
+        {
+            Admission::Joined(existing) => return Ok(receipt(&existing)),
+            Admission::Created(_) => {}
+        }
+        let output_dir = workspace.map(PathBuf::from).unwrap_or_else(|| {
+            std::env::temp_dir()
+                .join("harness-mcp-screens")
+                .join(&job_id)
+        });
+        let job_store = self.job_store.clone();
+        let runner = self.runner.clone();
+        let background_job_id = job_id.clone();
+        let _handle = std::thread::spawn(move || {
+            run_background_screen(
+                job_store,
+                runner,
+                background_job_id,
+                configuration,
+                output_dir,
+                started,
+            );
+        });
+        Ok(created_receipt(&job_id, JobKind::Screen))
+    }
+}
+
+/// Populate the replay job fields shared by backtests and studies.
+fn populate_replay_record(record: &mut JobRecord, configuration: &BacktestConfig) {
+    record.strategy_id = strategy_id(configuration);
+    record.data_start = date_of(configuration.start_ns);
+    record.data_end = date_of(configuration.end_ns.saturating_sub(1));
+    record.configuration_digest = Some(configuration.configuration_hash());
+}
+
+/// Populate the screening job fields.
+fn populate_screen_record(record: &mut JobRecord, configuration: &ScreenConfig) {
+    record.strategy_id = configuration.definition_id.clone();
+    record.data_start = date_of_text(&configuration.window_start());
+    record.data_end = date_of_text(&configuration.window_end());
+    record.configuration_digest = Some(configuration.configuration_digest());
 }
 
 /// Local program validator that compiles, loads, and constructs without a replay.
@@ -207,7 +257,7 @@ mod validation_tests;
 /// Build the runtime study job document from one authored model document.
 ///
 /// The model's fields are exactly what the agent drafts; everything the
-/// runtime job needs beyond them (the study shell, run id, JIT instance,
+/// runtime job needs beyond them (the study shell, JIT instance,
 /// bundle hash) is derived here, so no impossible field is ever part of the
 /// tool contract.
 ///
@@ -357,7 +407,7 @@ fn authored_program_document(model: &Value, shell: &str) -> Result<Value, String
         );
     }
     let digest = backtest::sha256::digest_hex(source.as_bytes());
-    let run_id = format!("validate-{shell}-{}", &digest[..16]);
+    let instance_id = format!("validate-{shell}-{}", &digest[..16]);
     data.insert("symbols".to_string(), json!(&symbols));
     if let Some(echo) = subscription_echo {
         // Preserve the authored echo's exact tagged shape; normalization is validation only.
@@ -370,18 +420,18 @@ fn authored_program_document(model: &Value, shell: &str) -> Result<Value, String
         "symbols",
         "requiredSymbols",
         "required_symbols",
+        "job_id",
     ] {
         document.remove(key);
     }
     document.insert("shell".to_string(), json!(shell));
-    document.insert("run_id".to_string(), json!(&run_id));
     document.insert("start".to_string(), json!(start));
     document.insert("end".to_string(), json!(end));
     document.insert("data".to_string(), Value::Object(data));
     document.insert(
         "strategy_instances".to_string(),
         json!([{
-            "instance_id": &run_id,
+            "instance_id": &instance_id,
             "implementation": "jit",
             "bundle_hash": &digest,
             "capital_fraction": "1.0",
@@ -438,8 +488,13 @@ fn validate_authored_program(
     let cache_input = json!({"kind": kind, "model": model});
     harness_strategy_jit::validation_service()
         .validate(&cache_input, || {
-            let document = authored_program_document(model, shell)
+            let mut document = authored_program_document(model, shell)
                 .map_err(ValidationFailure::configuration)?;
+            backtest::backtest::job::overlay_job_id_json(
+                &mut document,
+                Some(backtest::backtest::job::VALIDATION_JOB_ID),
+            )
+            .map_err(|error| ValidationFailure::configuration(error.to_string()))?;
             let configuration = if shell == "study" {
                 backtest::backtest::job::parse_study_document(&document)
                     .map_err(|error| ValidationFailure::configuration(error.to_string()))?
@@ -478,37 +533,27 @@ fn validate_authored_program(
 
 /// Run one screening job on a detached worker and persist its result set.
 fn run_background_screen(
-    run_store: Arc<dyn RunStore>,
-    jobs: Arc<dyn JobRepository>,
+    job_store: Arc<dyn JobStore>,
     runner: Arc<dyn ScreeningRunner>,
-    run_id: String,
+    job_id: String,
     configuration: ScreenConfig,
     output_dir: PathBuf,
     started: DateTime<Utc>,
 ) {
-    let guard = BackgroundJobGuard::new(jobs.clone(), &run_id, started);
+    let guard = BackgroundJobGuard::new(job_store.clone(), &job_id, started);
     let outcome = catch_unwind(AssertUnwindSafe({
-        let run_store = run_store.clone();
-        let jobs = jobs.clone();
+        let job_store = job_store.clone();
         let runner = runner.clone();
-        let run_id = run_id.clone();
+        let job_id = job_id.clone();
         let output_dir = output_dir.clone();
         move || {
-            run_background_screen_inner(
-                run_store,
-                jobs,
-                runner,
-                run_id,
-                configuration,
-                output_dir,
-                started,
-            );
+            run_background_screen_inner(job_store, runner, job_id, configuration, output_dir);
         }
     }));
     if let Err(payload) = outcome {
         fail_job(
-            &jobs,
-            &run_id,
+            &job_store,
+            &job_id,
             started,
             format!(
                 "the background screening run panicked: {}",
@@ -521,70 +566,40 @@ fn run_background_screen(
 
 /// The screening body. Every exit path writes a terminal job record.
 fn run_background_screen_inner(
-    run_store: Arc<dyn RunStore>,
-    jobs: Arc<dyn JobRepository>,
+    job_store: Arc<dyn JobStore>,
     runner: Arc<dyn ScreeningRunner>,
-    run_id: String,
+    job_id: String,
     configuration: ScreenConfig,
     output_dir: PathBuf,
-    started: DateTime<Utc>,
 ) {
-    let definition_id = configuration.definition_id.clone();
-    let configuration_digest = configuration.configuration_digest();
-    let data_start = date_of_text(&configuration.window_start());
-    let data_end = date_of_text(&configuration.window_end());
     match runner.run(&configuration, Some(output_dir.as_path())) {
         Ok(outcome) => {
             let rows = outcome.rows;
-            let mut artifacts = outcome.artifacts;
-            if artifacts.is_empty() {
-                artifacts.insert(
-                    "error.json".to_string(),
-                    serde_json::to_vec(&json!({
-                        "error": outcome
-                            .error
-                            .clone()
-                            .unwrap_or_else(|| "the screening run produced no artifacts".to_string())
-                    }))
-                    .unwrap_or_else(|_| b"{}".to_vec()),
-                );
-            }
-            let mut record =
-                RunCatalogRecord::new(&run_id, run_status(outcome.completed), &definition_id);
-            record.configuration_digest = Some(configuration_digest);
-            record.data_start = data_start;
-            record.data_end = data_end;
-            record.metrics = screen_metrics(&configuration, rows);
-            if let Err(error) = run_store.put(record, artifacts) {
-                fail_job(&jobs, &run_id, started, error.to_string());
-                return;
-            }
-            let mut job = mcp::store::JobRecord::new(
-                &run_id,
-                job_state(outcome.completed),
-                started,
-                Utc::now(),
+            publish_result(
+                &job_store,
+                &job_id,
+                outcome.completed,
+                screen_metrics(&configuration, rows),
+                None,
+                outcome.error,
+                outcome.artifacts,
             );
-            job.error_message = outcome.error;
-            jobs.upsert(job);
         }
         Err(message) => {
-            let mut artifacts = BTreeMap::new();
-            artifacts.insert(
-                "error.json".to_string(),
-                serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
+            publish_result(
+                &job_store,
+                &job_id,
+                false,
+                screen_metrics(&configuration, 0),
+                None,
+                Some(message),
+                BTreeMap::new(),
             );
-            let mut record = RunCatalogRecord::new(&run_id, RunStatus::Failed, &definition_id);
-            record.configuration_digest = Some(configuration_digest);
-            record.data_start = data_start;
-            record.data_end = data_end;
-            let _ = run_store.put(record, artifacts);
-            fail_job(&jobs, &run_id, started, message);
         }
     }
 }
 
-/// Extract the headline screening fields into the catalog row.
+/// Extract the headline screening fields into the job metrics.
 fn screen_metrics(configuration: &ScreenConfig, rows: u64) -> BTreeMap<String, String> {
     BTreeMap::from([
         ("as_of".to_string(), configuration.as_of.clone()),
@@ -608,28 +623,25 @@ fn date_of_text(value: &str) -> Option<NaiveDate> {
 
 /// Run one study on a detached worker and persist its complete result set.
 fn run_background_study(
-    run_store: Arc<dyn RunStore>,
-    jobs: Arc<dyn JobRepository>,
-    run_id: String,
-    config_path: String,
+    job_store: Arc<dyn JobStore>,
+    job_id: String,
+    configuration: BacktestConfig,
     output_dir: PathBuf,
     started: DateTime<Utc>,
 ) {
-    let guard = BackgroundJobGuard::new(jobs.clone(), &run_id, started);
+    let guard = BackgroundJobGuard::new(job_store.clone(), &job_id, started);
     let outcome = catch_unwind(AssertUnwindSafe({
-        let run_store = run_store.clone();
-        let jobs = jobs.clone();
-        let run_id = run_id.clone();
-        let config_path = config_path.clone();
+        let job_store = job_store.clone();
+        let job_id = job_id.clone();
         let output_dir = output_dir.clone();
         move || {
-            run_background_study_inner(run_store, jobs, run_id, config_path, output_dir, started);
+            run_background_study_inner(job_store, job_id, configuration, output_dir);
         }
     }));
     if let Err(payload) = outcome {
         fail_job(
-            &jobs,
-            &run_id,
+            &job_store,
+            &job_id,
             started,
             format!(
                 "the background study panicked: {}",
@@ -642,38 +654,19 @@ fn run_background_study(
 
 /// The study body. Every exit path writes a terminal job record.
 fn run_background_study_inner(
-    run_store: Arc<dyn RunStore>,
-    jobs: Arc<dyn JobRepository>,
-    run_id: String,
-    config_path: String,
+    job_store: Arc<dyn JobStore>,
+    job_id: String,
+    mut configuration: BacktestConfig,
     output_dir: PathBuf,
-    started: DateTime<Utc>,
 ) {
-    let configuration = match backtest::backtest::job::load_study_config(Path::new(&config_path)) {
-        Ok(configuration) => configuration,
-        Err(error) => {
-            let message = error.to_string();
-            let mut artifacts = BTreeMap::new();
-            artifacts.insert(
-                "error.json".to_string(),
-                serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
-            );
-            let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, "study");
-            let _ = run_store.put(record, artifacts);
-            fail_job(&jobs, &run_id, started, message);
-            return;
-        }
-    };
     let client = match BlockingLakeClient::from_env() {
         Ok(client) => client,
         Err(error) => {
             let message = format!("market-lake client: {error}");
-            record_failed_run(&run_store, &jobs, &run_id, "study", started, message);
+            record_failed_run(&job_store, &job_id, message);
             return;
         }
     };
-    let configuration_digest = configuration.configuration_hash();
-    let mut configuration = configuration;
     let mut actual_data_start = None;
     let mut actual_data_end = None;
     if !configuration.symbols.is_empty() {
@@ -683,7 +676,7 @@ fn run_background_study_inner(
                 actual_data_end = Some(end);
             }
             Err(message) => {
-                record_failed_run(&run_store, &jobs, &run_id, "study", started, message);
+                record_failed_run(&job_store, &job_id, message);
                 return;
             }
         }
@@ -695,9 +688,6 @@ fn run_background_study_inner(
         &client,
     ) {
         Ok((outcome, _artifact_path)) => {
-            if let Ok(text) = fs::read(&config_path) {
-                let _ = fs::write(output_dir.join("config.yaml"), text);
-            }
             let mut artifacts = BTreeMap::new();
             collect_artifacts(&output_dir, &output_dir, &mut artifacts);
             if artifacts.is_empty() {
@@ -706,36 +696,19 @@ fn run_background_study_inner(
                     outcome.artifact_json().into_bytes(),
                 );
             }
-            let mut record =
-                RunCatalogRecord::new(&run_id, run_status(outcome.completed()), "study");
-            record.configuration_digest = Some(configuration_digest);
-            record.data_start = actual_data_start;
-            record.data_end = actual_data_end;
-            record.metrics = headline_metrics(&artifacts, &configuration);
-            if let Err(error) = run_store.put(record, artifacts) {
-                fail_job(&jobs, &run_id, started, error.to_string());
-                return;
-            }
-            let mut job = mcp::store::JobRecord::new(
-                &run_id,
-                job_state(outcome.completed()),
-                started,
-                Utc::now(),
+            let metrics = headline_metrics(&artifacts, &configuration);
+            publish_result(
+                &job_store,
+                &job_id,
+                outcome.completed(),
+                metrics,
+                Some((actual_data_start, actual_data_end)),
+                outcome.reason.clone(),
+                artifacts,
             );
-            job.error_message = outcome.reason.clone();
-            jobs.upsert(job);
         }
         Err(error) => {
-            let message = error.to_string();
-            let mut artifacts = BTreeMap::new();
-            artifacts.insert(
-                "error.json".to_string(),
-                serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
-            );
-            let mut record = RunCatalogRecord::new(&run_id, RunStatus::Failed, "study");
-            record.configuration_digest = Some(configuration_digest);
-            let _ = run_store.put(record, artifacts);
-            fail_job(&jobs, &run_id, started, message);
+            record_failed_run(&job_store, &job_id, error.to_string());
         }
     }
 }
@@ -743,39 +716,29 @@ fn run_background_study_inner(
 /// Run one backtest on a detached worker and persist its complete result set.
 ///
 /// Every file the native engine writes under `output_dir` is registered with the
-/// run store keyed by its `/`-separated relative path, so `list_artifacts` and
+/// job store keyed by its `/`-separated relative path, so `list_artifacts` and
 /// `read_artifact` observe `backtest.json`, `metrics.json`, `report.html`, and
 /// the recorded Parquet trail rather than only the canonical manifest.
 fn run_background_backtest(
-    run_store: Arc<dyn RunStore>,
-    jobs: Arc<dyn JobRepository>,
-    run_id: String,
-    config_path: String,
+    job_store: Arc<dyn JobStore>,
+    job_id: String,
+    configuration: BacktestConfig,
     output_dir: PathBuf,
     started: DateTime<Utc>,
 ) {
-    let guard = BackgroundJobGuard::new(jobs.clone(), &run_id, started);
+    let guard = BackgroundJobGuard::new(job_store.clone(), &job_id, started);
     let outcome = catch_unwind(AssertUnwindSafe({
-        let run_store = run_store.clone();
-        let jobs = jobs.clone();
-        let run_id = run_id.clone();
-        let config_path = config_path.clone();
+        let job_store = job_store.clone();
+        let job_id = job_id.clone();
         let output_dir = output_dir.clone();
         move || {
-            run_background_backtest_inner(
-                run_store,
-                jobs,
-                run_id,
-                config_path,
-                output_dir,
-                started,
-            );
+            run_background_backtest_inner(job_store, job_id, configuration, output_dir);
         }
     }));
     if let Err(payload) = outcome {
         fail_job(
-            &jobs,
-            &run_id,
+            &job_store,
+            &job_id,
             started,
             format!(
                 "the background backtest panicked: {}",
@@ -788,41 +751,16 @@ fn run_background_backtest(
 
 /// The backtest body. Every exit path writes a terminal job record.
 fn run_background_backtest_inner(
-    run_store: Arc<dyn RunStore>,
-    jobs: Arc<dyn JobRepository>,
-    run_id: String,
-    config_path: String,
+    job_store: Arc<dyn JobStore>,
+    job_id: String,
+    configuration: BacktestConfig,
     output_dir: PathBuf,
-    started: DateTime<Utc>,
 ) {
-    let configuration = match backtest::backtest::job::load_backtest_config(Path::new(&config_path))
-    {
-        Ok(configuration) => configuration,
-        Err(error) => {
-            let message = error.to_string();
-            let mut artifacts = BTreeMap::new();
-            artifacts.insert(
-                "error.json".to_string(),
-                serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
-            );
-            let record = RunCatalogRecord::new(&run_id, RunStatus::Failed, "");
-            let _ = run_store.put(record, artifacts);
-            fail_job(&jobs, &run_id, started, message);
-            return;
-        }
-    };
     let client = match BlockingLakeClient::from_env() {
         Ok(client) => client,
         Err(error) => {
             let message = format!("market-lake client: {error}");
-            record_failed_run(
-                &run_store,
-                &jobs,
-                &run_id,
-                &strategy_id(&configuration),
-                started,
-                message,
-            );
+            record_failed_run(&job_store, &job_id, message);
             return;
         }
     };
@@ -833,11 +771,6 @@ fn run_background_backtest_inner(
         &client,
     ) {
         Ok((outcome, _artifact_path)) => {
-            // Persist the configuration that produced the run beside the result
-            // set so the run is reproducible and the document is retrievable.
-            if let Ok(text) = fs::read(&config_path) {
-                let _ = fs::write(output_dir.join("config.yaml"), text);
-            }
             let mut artifacts = BTreeMap::new();
             collect_artifacts(&output_dir, &output_dir, &mut artifacts);
             if artifacts.is_empty() {
@@ -846,59 +779,60 @@ fn run_background_backtest_inner(
                     outcome.artifact_json().into_bytes(),
                 );
             }
-            let mut record = RunCatalogRecord::new(
-                &run_id,
-                run_status(outcome.completed()),
-                strategy_id(&configuration),
+            let metrics = headline_metrics(&artifacts, &configuration);
+            publish_result(
+                &job_store,
+                &job_id,
+                outcome.completed(),
+                metrics,
+                None,
+                outcome.reason.clone(),
+                artifacts,
             );
-            record.configuration_digest = Some(configuration.configuration_hash());
-            record.metrics = headline_metrics(&artifacts, &configuration);
-            if let Err(error) = run_store.put(record, artifacts) {
-                fail_job(&jobs, &run_id, started, error.to_string());
-                return;
-            }
-            let mut job = mcp::store::JobRecord::new(
-                &run_id,
-                job_state(outcome.completed()),
-                started,
-                Utc::now(),
-            );
-            job.error_message = outcome.reason.clone();
-            jobs.upsert(job);
         }
         Err(error) => {
-            let message = error.to_string();
-            let mut artifacts = BTreeMap::new();
-            artifacts.insert(
-                "error.json".to_string(),
-                serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
-            );
-            let mut record =
-                RunCatalogRecord::new(&run_id, RunStatus::Failed, strategy_id(&configuration));
-            record.configuration_digest = Some(configuration.configuration_hash());
-            let _ = run_store.put(record, artifacts);
-            fail_job(&jobs, &run_id, started, message);
+            record_failed_run(&job_store, &job_id, error.to_string());
+        }
+    }
+}
+
+/// Publish one terminal job result, preserving admitted provenance fields.
+fn publish_result(
+    job_store: &Arc<dyn JobStore>,
+    job_id: &str,
+    completed: bool,
+    metrics: BTreeMap<String, String>,
+    data_bounds: Option<(Option<NaiveDate>, Option<NaiveDate>)>,
+    error_message: Option<String>,
+    artifacts: BTreeMap<String, Vec<u8>>,
+) -> bool {
+    let Some(mut record) = job_store.get(job_id) else {
+        return false;
+    };
+    record.state = if completed {
+        JobState::Succeeded
+    } else {
+        JobState::Failed
+    };
+    record.updated_at = Utc::now();
+    record.metrics = metrics;
+    if let Some((data_start, data_end)) = data_bounds {
+        record.data_start = data_start;
+        record.data_end = data_end;
+    }
+    record.error_message = error_message;
+    match job_store.put_result(record, artifacts) {
+        Ok(_) => true,
+        Err(error) => {
+            fail_job(job_store, job_id, Utc::now(), error.to_string());
+            false
         }
     }
 }
 
 /// Record one pre-run failure and fail the job in one place.
-fn record_failed_run(
-    run_store: &Arc<dyn RunStore>,
-    jobs: &Arc<dyn JobRepository>,
-    run_id: &str,
-    definition_id: &str,
-    started: DateTime<Utc>,
-    message: String,
-) {
-    let mut artifacts = BTreeMap::new();
-    artifacts.insert(
-        "error.json".to_string(),
-        serde_json::to_vec(&json!({"error": message})).unwrap_or_else(|_| b"{}".to_vec()),
-    );
-    let record = RunCatalogRecord::new(run_id, RunStatus::Failed, definition_id);
-    let _ = run_store.put(record, artifacts);
-    fail_job(jobs, run_id, started, message);
+fn record_failed_run(job_store: &Arc<dyn JobStore>, job_id: &str, message: String) {
+    fail_job(job_store, job_id, Utc::now(), message);
 }
 
 /// Retain the operator's study window without acquiring implicit bar inputs.
@@ -923,16 +857,16 @@ pub(crate) fn clamp_study_window(
 /// Mark one background job failed when its worker exits without a terminal
 /// record: an early return that forgot to record a state, or a panic.
 struct BackgroundJobGuard {
-    jobs: Arc<dyn JobRepository>,
-    run_id: String,
+    job_store: Arc<dyn JobStore>,
+    job_id: String,
     started: DateTime<Utc>,
 }
 
 impl BackgroundJobGuard {
-    fn new(jobs: Arc<dyn JobRepository>, run_id: &str, started: DateTime<Utc>) -> Self {
+    fn new(job_store: Arc<dyn JobStore>, job_id: &str, started: DateTime<Utc>) -> Self {
         Self {
-            jobs,
-            run_id: run_id.to_string(),
+            job_store,
+            job_id: job_id.to_string(),
             started,
         }
     }
@@ -941,15 +875,15 @@ impl BackgroundJobGuard {
 impl Drop for BackgroundJobGuard {
     fn drop(&mut self) {
         let in_flight = self
-            .jobs
-            .get(&self.run_id)
+            .job_store
+            .get(&self.job_id)
             .is_some_and(|record| matches!(record.state, JobState::Queued | JobState::Running));
         if in_flight {
             fail_job(
-                &self.jobs,
-                &self.run_id,
+                &self.job_store,
+                &self.job_id,
                 self.started,
-                "the background run ended without recording a terminal state".to_string(),
+                "the background job ended without recording a terminal state".to_string(),
             );
         }
     }
@@ -972,10 +906,14 @@ fn date_of(nanos: i64) -> Option<NaiveDate> {
     chrono::DateTime::from_timestamp(seconds, 0).map(|value| value.date_naive())
 }
 
-fn fail_job(jobs: &Arc<dyn JobRepository>, run_id: &str, started: DateTime<Utc>, message: String) {
-    let mut job = mcp::store::JobRecord::new(run_id, JobState::Failed, started, Utc::now());
-    job.error_message = Some(message);
-    jobs.upsert(job);
+fn fail_job(job_store: &Arc<dyn JobStore>, job_id: &str, started: DateTime<Utc>, message: String) {
+    let Some(mut record) = job_store.get(job_id) else {
+        return;
+    };
+    record.state = JobState::Failed;
+    record.updated_at = Utc::now().max(started);
+    record.error_message = Some(message);
+    let _ = job_store.put_result(record, BTreeMap::new());
 }
 
 /// Read every file under `directory` into `output` keyed by relative path.
@@ -999,7 +937,7 @@ fn collect_artifacts(base: &Path, directory: &Path, output: &mut BTreeMap<String
     }
 }
 
-/// Extract the headline `metrics.json` fields into the catalog row.
+/// Extract the headline `metrics.json` fields into the job metrics.
 fn headline_metrics(
     artifacts: &BTreeMap<String, Vec<u8>>,
     configuration: &BacktestConfig,
@@ -1007,22 +945,6 @@ fn headline_metrics(
     let mut metrics = crate::http::launcher::artifact_metrics(artifacts);
     metrics.insert("strategy_id".to_string(), strategy_id(configuration));
     metrics
-}
-
-fn run_status(completed: bool) -> RunStatus {
-    if completed {
-        RunStatus::Complete
-    } else {
-        RunStatus::Failed
-    }
-}
-
-fn job_state(completed: bool) -> JobState {
-    if completed {
-        JobState::Succeeded
-    } else {
-        JobState::Failed
-    }
 }
 
 fn strategy_id(configuration: &BacktestConfig) -> String {

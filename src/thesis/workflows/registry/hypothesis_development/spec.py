@@ -154,7 +154,7 @@ def _discovery_handoff(
     return {
         "candidate": draft.candidate.as_dict(),
         "attempts": [
-            f"{attempt.study_id}: {attempt.result}" for attempt in draft.attempts
+            f"{attempt.purpose}: {attempt.result}" for attempt in draft.attempts
         ],
         "untouchedData": draft.untouched_data,
         "limitations": draft.limitations,
@@ -559,7 +559,7 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
     )
     run_evidence_tools = (
         "get_job_status",
-        "get_run",
+        "get_job_result",
         "list_artifacts",
         "read_artifact",
     )
@@ -571,13 +571,14 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
         "rejected, report the blocker rather than supplying inline source or "
         "bypassing validation. Launch acceptance is not a successful completed run: "
         "never assume launch success means results are available. Retain the returned "
-        "job_id/run_id and inspect get_job_status {job_id: ...} while queued or "
-        "running. After terminal status, call get_run {run_id: ...}, list_artifacts "
-        "{run_id: ...} and read_artifact {run_id: ..., name: ...} to inspect actual "
+        "job_id and inspect get_job_status {job_id: ...} while queued or "
+        "running. After terminal status, call get_job_result {job_id: ...}, "
+        "list_artifacts {job_id: ...} and read_artifact {job_id: ..., name: ...} to "
+        "inspect actual "
         "metrics and evidence. Record terminal failures honestly; do not fabricate "
         "metrics or artifacts. Include strategy.programId and the actual executed "
         "version/gitCommit from the launch receipt in the completion handoff so the "
-        "next phase can identify the latest-ID run. Request phase completion yourself "
+        "next phase can identify the latest job. Request phase completion yourself "
         "only after inspecting the terminal outcome. These are agent instructions, "
         "not runtime polling or repair caps."
     )
@@ -635,7 +636,7 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
             _fold_discovery,
             (
                 "get_job_status",
-                "get_run",
+                "get_job_result",
                 "list_artifacts",
                 "read_artifact",
             ),

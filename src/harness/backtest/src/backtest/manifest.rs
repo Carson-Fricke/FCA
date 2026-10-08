@@ -22,11 +22,10 @@ pub const ENGINE_ID: &str = "harness.backtest";
 /// Stable engine version.
 pub const ENGINE_VERSION: &str = "1";
 
-/// Domain prefix used by `harness.configuration.hashing`.
-/// Domain prefix used by `harness.configuration.hashing` run digests.
-pub const RUN_DIGEST_DOMAIN: &[u8] = b"fca:harness-results:run:v1\0";
-/// Run digest version tag.
-pub const RUN_DIGEST_VERSION: &str = "harness.results.run.v1";
+/// Domain prefix used by `harness.configuration.hashing` job result digests.
+pub const JOB_DIGEST_DOMAIN: &[u8] = b"fca:harness-results:job:v1\0";
+/// Job result digest version tag.
+pub const JOB_DIGEST_VERSION: &str = "harness.results.job.v1";
 
 /// Return a domain-separated SHA-256 hash of canonical configuration.
 #[must_use]
@@ -43,9 +42,28 @@ pub fn artifact_digest(payload: &[u8]) -> String {
     digest_bytes(payload)
 }
 
-/// Return the domain-separated digest over one run's artifact digests.
+/// Generate one bounded, path-safe opaque job identifier.
 #[must_use]
-pub fn run_digest(run_id: &str, digests: &std::collections::BTreeMap<String, String>) -> String {
+pub fn generate_job_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let mut hasher = Sha256::new();
+    hasher.update(&nanos.to_le_bytes());
+    hasher.update(&sequence.to_le_bytes());
+    hasher.update(&std::process::id().to_le_bytes());
+    let digest = hasher.finalize_hex();
+    format!("job-{}", &digest[..32])
+}
+
+/// Return the domain-separated digest over one job's artifact digests.
+#[must_use]
+pub fn run_digest(job_id: &str, digests: &std::collections::BTreeMap<String, String>) -> String {
     let artifacts: JsonValue = JsonValue::Object(
         digests
             .iter()
@@ -53,12 +71,12 @@ pub fn run_digest(run_id: &str, digests: &std::collections::BTreeMap<String, Str
             .collect(),
     );
     let payload = JsonValue::object([
-        ("domain", JsonValue::string(RUN_DIGEST_VERSION)),
-        ("run_id", JsonValue::String(run_id.to_string())),
+        ("domain", JsonValue::string(JOB_DIGEST_VERSION)),
+        ("job_id", JsonValue::String(job_id.to_string())),
         ("artifacts", artifacts),
     ]);
     let mut hasher = Sha256::new();
-    hasher.update(RUN_DIGEST_DOMAIN);
+    hasher.update(JOB_DIGEST_DOMAIN);
     hasher.update(payload.to_canonical_string().as_bytes());
     hasher.finalize_hex()
 }
@@ -178,8 +196,8 @@ pub struct BacktestManifest {
     pub engine_version: String,
     /// Code fingerprint.
     pub code_fingerprint: String,
-    /// Run identifier.
-    pub run_id: String,
+    /// Job identifier.
+    pub job_id: String,
     /// Configuration shell.
     pub shell: String,
     /// Schema version.
@@ -252,7 +270,7 @@ impl BacktestManifest {
                 "code_fingerprint",
                 JsonValue::String(self.code_fingerprint.clone()),
             ),
-            ("run_id", JsonValue::String(self.run_id.clone())),
+            ("job_id", JsonValue::String(self.job_id.clone())),
             ("shell", JsonValue::String(self.shell.clone())),
             ("schema_version", JsonValue::UInt(self.schema_version)),
             (
@@ -486,7 +504,7 @@ pub fn build_manifest(
         engine_id: ENGINE_ID.to_string(),
         engine_version: ENGINE_VERSION.to_string(),
         code_fingerprint: code_fingerprint(),
-        run_id: configuration.run_id.clone(),
+        job_id: configuration.job_id.clone(),
         shell: configuration.shell.clone(),
         schema_version: configuration.schema_version,
         configuration_hash: configuration.configuration_hash(),
@@ -551,7 +569,7 @@ pub fn configuration_timestamp(timestamp_ns: i64) -> String {
 #[must_use]
 pub fn configuration_to_json(configuration: &BacktestConfig) -> JsonValue {
     JsonValue::object([
-        ("run_id", JsonValue::String(configuration.run_id.clone())),
+        ("job_id", JsonValue::String(configuration.job_id.clone())),
         ("shell", JsonValue::String(configuration.shell.clone())),
         (
             "schema_version",

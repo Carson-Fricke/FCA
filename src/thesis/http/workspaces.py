@@ -658,7 +658,6 @@ def build_local_workspace_data(
         harness=harness,
         importer=artifact_importer,
         clock=resolved_clock,
-        id_factory=ids,
     )
     deployments = DeploymentDataService(status_client=status_client)
     dashboards = DashboardDataService(

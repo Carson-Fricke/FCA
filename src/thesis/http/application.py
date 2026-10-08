@@ -251,7 +251,12 @@ def _environment_value(name: str) -> str | None:
 def _backtest_tool_observer(
     coordinator: BacktestRunCoordinator,
 ) -> ToolResultObserver:
-    """Build the tool-result observer that imports finished harness runs."""
+    """Build the tool-result observer that imports finished harness jobs.
+
+    The coordinator owns harness-versus-tracking classification, so this
+    observer forwards every successful tool result and never duplicates the
+    harness tool-name filter.
+    """
 
     def observe(
         workspace_id: str,
@@ -259,7 +264,7 @@ def _backtest_tool_observer(
         execution_id: str | None,
         chunk: ToolResultChunk,
     ) -> ToolResultChunk:
-        if chunk.tool not in ("run_backtest", "get_run") or not chunk.ok:
+        if not chunk.ok:
             return chunk
         result = HarnessToolResult(
             tool=chunk.tool,
@@ -469,7 +474,9 @@ def create_app(
         from thesis.backtests import BacktestRunCoordinator
 
         backtest_coordinator = BacktestRunCoordinator(
-            workspace_data.backtests, harness_tool_provider
+            workspace_data.backtests,
+            harness_tool_provider,
+            tracking=None if chat_service is None else chat_service.find_tool_job,
         )
         application.state.backtest_run_coordinator = backtest_coordinator
     tool_result_observer = (

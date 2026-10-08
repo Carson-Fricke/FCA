@@ -976,11 +976,17 @@ agent's tool error or an interrupted model turn.
 
 `McpBacktestRunner` and `McpStudyRunner` send configuration mappings inline;
 explicit path strings refer to the harness host. They join only confirmed
-in-flight jobs. The exact domain not-found response permits a launch; an
-unavailable transport, authentication/protocol error, or unknown state is not
-evidence of absence and fails the deterministic call. Terminal jobs may be
-relaunched for revised artifacts. Polling has a monotonic deadline, bounded
-backoff, and cancellation checks before launch and around status queries.
+in-flight jobs and return a terminal job's stored result instead of relaunching
+it under the same `job_id`; an explicit rerun allocates a fresh job. A submitter
+allocates one `job_id` and durably registers the submission with immutable
+program/model attribution before dispatch, so an interruption after harness
+acceptance is reconciled by that retained reference even before trial or report
+evidence exists, and a stale revision's reference is never reused. The exact
+domain not-found response permits a launch; an unavailable transport,
+authentication/protocol error, or unknown state is not evidence of absence and
+fails the deterministic call. Polling has a monotonic deadline, bounded backoff,
+and cancellation checks before launch and around status queries. See the
+"Execution Job Contract" in `.github/instructions/copilot-instructions.md`.
 
 Workflow failure outcomes are delivered to the launching anchor and wake that
 conversation so its agent can surface the failure to the operator. Whether a
@@ -1103,7 +1109,7 @@ the SHA-256 of that source:
 
 ```yaml
 shell: study
-run_id: study-...
+job_id: job-...
 start: "2020-01-01T00:00:00Z"
 end: "2025-12-31T00:00:00Z"
 data:
@@ -1215,7 +1221,7 @@ metrics.
 The result names the study run, its state, and the recorded metric references.
 A large parameter or sample value MAY be omitted in favor of an immutable
 reference. The completion gate MUST resolve refs and metrics from the durable
-run store; it MUST NOT trust copied values in model prose or completion JSON.
+job store; it MUST NOT trust copied values in model prose or completion JSON.
 The workflow's falsification trials bind every falsifier and control to a
 recorded metric reference from a successful or explicitly failed study, never
 to a backtest run.
@@ -1227,7 +1233,7 @@ verdict -> the strategy chain. Phase wiring is as follows.
 
 | Phase | Kind | Agent behavior | Completion contract and deterministic action |
 | --- | --- | --- | --- |
-| `discovery` | conversation | Run small targeted studies (`validate_study`, `run_study`, `get_run`, `list_artifacts`, `read_artifact`) on the starting premise, record every attempt including negative results, and identify ONE candidate opportunity with its signal, information timing, direction, holding period, profit source, expected effect, and main competing explanation. Stop when nothing is worth pursuing. | Construct the discovery completion (`candidate`, `attempts`, `untouchedData`, `limitations`); advance to model creation. A verdict restart re-enters the same durable conversation with only the superseding verdict brief. |
+| `discovery` | conversation | Run small targeted studies (`validate_study`, `run_study`, `get_job_status`, `get_job_result`, `list_artifacts`, `read_artifact`) on the starting premise, record every attempt including negative results, and identify ONE candidate opportunity with its signal, information timing, direction, holding period, profit source, expected effect, and main competing explanation. Stop when nothing is worth pursuing. | Construct the discovery completion (`candidate`, `attempts`, `untouchedData`, `limitations`); advance to model creation. A verdict restart re-enters the same durable conversation with only the superseding verdict brief. |
 | `model_creation` | conversation | Turn the accepted discovery candidate into ONE statistical model, pre-register the falsifier tests and controls from the knowledge cards, author the research model, and call `validate_study` to compile-check it. Yield so the operator can confirm or revise. After clear confirmation, call `request_phase_completion`. | Construct the model-creation completion; apply falsifiability, model-output, and plan gates; advance to trials or remain. |
 | `falsification_trials` | deterministic | `run_falsification_trials` executes the accepted model through the study runner, binds recorded evidence, and returns the trials contract; no phase agent or model turn. | Validate the trials contract and advance to verdict; executor faults or invalid contracts fail the workflow durably. |
 | `verdict` | conversation | Present the recorded deterministic verdict and ask whether to continue or loop back. After the operator replies, submit interpreted intent. | Construct `VerdictCompletion`; verify it refers to the latest operator message and verdict; map `continue` to strategy design and `loop_back` to model creation (same premise, revise the model) or discovery (premise not worth pursuing) through the transition table. |

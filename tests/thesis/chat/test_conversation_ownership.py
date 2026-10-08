@@ -88,9 +88,8 @@ def owned_records() -> tuple[OwnedRecord, ...]:
         ToolJob(
             **COMMON,
             chat_id="root",
-            tool_job_id="job",
+            job_id="job",
             execution_id="execution",
-            correlation_id="correlation",
             tool_name="tool",
             submitted_by="operator",
         ),

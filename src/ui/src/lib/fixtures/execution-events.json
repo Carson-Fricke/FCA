@@ -73,7 +73,7 @@
 				"lateResult": true,
 				"occurredAt": "2026-09-08T17:52:10Z",
 				"cursor": 5,
-				"payload": { "tool": "backtest.submit", "backtestId": "bt-204", "superseded": false }
+				"payload": { "tool": "backtest.submit", "jobId": "job-1f2e3d4c5b6a798807162534a5b6c7d8", "superseded": false }
 			}
 		]
 	},

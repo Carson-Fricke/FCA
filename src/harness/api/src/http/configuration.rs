@@ -9,7 +9,7 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValidatedConfiguration {
-    pub run_id: String,
+    pub job_id: String,
     pub strategy_ids: Vec<String>,
     pub data_start: Option<NaiveDate>,
     pub data_end: Option<NaiveDate>,
@@ -46,7 +46,7 @@ pub(crate) fn parse_subscriptions(
 ) -> Result<Vec<MarketSubscription>, ConfigurationError> {
     // Tagged contract decoding rejects unknown types and interval on non-bars, including null.
     config::replay::validate_document(&serde_json::json!({
-        "shell":"backtest", "run_id":"subscriptions",
+        "shell":"backtest", "job_id":"subscriptions",
         "data":{"subscriptions":value, "symbols":["SPY"]}
     }))
     .map_err(|e| ConfigurationError(e.0))?;
@@ -63,11 +63,11 @@ impl ConfigurationParser for StrictJsonConfigurationParser {
             .get("shell")
             .and_then(Value::as_str)
             .ok_or_else(|| ConfigurationError("configuration has no 'shell' key".into()))?;
-        let (run_id, mut strategy_ids, data_start, data_end, screen) = if shell == "screen" {
+        let (job_id, mut strategy_ids, data_start, data_end, screen) = if shell == "screen" {
             let screen = ScreenConfig::from_json_value(&document)
                 .map_err(|e| ConfigurationError(e.to_string()))?;
             (
-                screen.run_id(),
+                screen.job_id.clone(),
                 vec![screen.definition_id.clone()],
                 NaiveDate::parse_from_str(&screen.window_start(), "%Y-%m-%d").ok(),
                 NaiveDate::parse_from_str(&screen.window_end(), "%Y-%m-%d").ok(),
@@ -84,7 +84,7 @@ impl ConfigurationParser for StrictJsonConfigurationParser {
                     .map(|v| v.with_timezone(&Utc).date_naive())
             };
             (
-                configuration.run_id,
+                configuration.job_id,
                 configuration
                     .strategy_instances
                     .into_iter()
@@ -97,7 +97,7 @@ impl ConfigurationParser for StrictJsonConfigurationParser {
         };
         strategy_ids.sort();
         Ok(ValidatedConfiguration {
-            run_id,
+            job_id,
             strategy_ids,
             data_start,
             data_end,

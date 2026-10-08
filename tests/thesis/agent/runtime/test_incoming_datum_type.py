@@ -92,7 +92,7 @@ def test_structured_datums_survive_restart_and_replay(tmp_path: Path) -> None:
         {
             "datumType": "read_artifact",
             "ok": True,
-            "structured": {"run_id": "study-1", "name": "metrics.json"},
+            "structured": {"job_id": "study-1", "name": "metrics.json"},
             "text": "",
             "failure": None,
             "summary": None,

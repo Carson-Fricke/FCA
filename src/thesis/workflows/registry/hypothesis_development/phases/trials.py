@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import replace
 
+from thesis.chat.contracts import HARNESS_RESEARCH_MODEL_TOOL
 from thesis.experiments.ledger import AttemptKind
 from thesis.research.hypothesis import HypothesisDocument
+from thesis.research.models import ResearchModel
 from thesis.workflows.core.phase import HandoffContext
 from thesis.workflows.research_models import (
     ResearchModelRunResult,
@@ -34,7 +36,7 @@ from ..errors import (
     FalsificationComposeError,
     WorkflowError,
 )
-from ..jobs import run_research_model
+from ..jobs import research_model_attribution, run_research_model
 from ..ledger import append_attempt
 from ..primitives import (
     _DEFAULT_HORIZON,
@@ -208,18 +210,17 @@ def run_trials(
     runtime_configuration = state.research_model_runtime_configuration
     fitted_reference = state.fitted_model_reference
     model_run: ResearchModelRunResult | None = None
-    # Scope the run id to the hypothesis revision so a revised model never
-    # adopts or overwrites the previous revision's run.
-    from thesis.research.models import ResearchModel
-
+    # One execution identity per falsification run: the persisted trial
+    # reference is reused on resume; a fresh job is allocated on first run.
     if not isinstance(state.draft.model, ResearchModel):
         raise WorkflowError("trials require a resolved committed study")
-    model_run_id = (
-        f"falsify-{request.execution_id}-{document.content_sha256[:12]}-"
-        f"{state.draft.model.content_sha256[:12]}-model"
+    persisted_job_id = next(
+        (trial.job_id for trial in state.trials if trial.job_id), None
     )
     pending = [test for test in plan.tests if test.test_id not in retained]
     if pending:
+        if persisted_job_id is None:
+            persisted_job_id = _recover_submission_job_id(workflow, request, state)
         # The study runs to completion — the research runner polls until the
         # harness reports the job terminal — and a harness failure or an
         # unusable study result is the phase's failure: the exception (or the
@@ -231,7 +232,7 @@ def run_trials(
             request,
             state,
             model=state.draft.model,
-            correlation_id=model_run_id,
+            job_id=persisted_job_id,
             label="layer-a-model",
         )
         result = model_run.backtest
@@ -277,7 +278,7 @@ def run_trials(
             FalsificationTrial(
                 test_id=test.test_id,
                 falsifier_id=test.falsifier_id,
-                run_id=result.job_id,
+                job_id=result.job_id,
                 digest=_digest(result.as_dict()),
                 run_state=result.state,
                 observed=observed,
@@ -296,8 +297,8 @@ def run_trials(
             {
                 "detail": result.error,
                 "falsifierId": test.falsifier_id,
+                "jobId": result.job_id,
                 "observed": observed,
-                "runId": result.job_id,
                 "runState": result.state,
             },
         )
@@ -311,3 +312,29 @@ def run_trials(
         research_model_runtime_configuration=runtime_configuration,
     )
     return project_hypothesis(workflow, request, state)
+
+
+def _recover_submission_job_id(
+    workflow: DevelopmentEngine,
+    request: HypothesisDevelopmentRequest,
+    state: HypothesisDevelopmentState,
+) -> str | None:
+    """Recover the execution's tracked submission for the current model revision.
+
+    An interrupt after harness acceptance leaves the submission only in the
+    execution's durable job links.  The tracked job whose attribution equals
+    the current model revision is the same execution and is rejoined; a stale
+    job from another revision does not match, so a fresh id is allocated
+    instead of replaying an outdated submission.
+    """
+    chat = workflow.chat
+    model = state.draft.model if state.draft is not None else None
+    if chat is None or not isinstance(model, ResearchModel):
+        return None
+    tracked = chat.find_execution_tool_job(
+        request.workspace_id,
+        request.execution_id,
+        tool_name=HARNESS_RESEARCH_MODEL_TOOL,
+        attribution=research_model_attribution(model),
+    )
+    return None if tracked is None else tracked.job_id

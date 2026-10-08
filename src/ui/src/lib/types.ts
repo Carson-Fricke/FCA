@@ -40,7 +40,7 @@ export interface RuntimeStatusRecord {
 }
 
 export interface ManifestSummary {
-	run_id: string;
+	job_id: string;
 	status: string;
 	strategy_id: string;
 	data_start: string | null;
@@ -251,14 +251,14 @@ export type ToolResult = ToolResultWire & {
 	startedAt?: string;
 };
 
-/** Response from the Thesis backtest-run materialization endpoint. */
+/** Response from the Thesis backtest-job materialization endpoint. */
 export interface BacktestRunCard {
-	status: 'pending' | 'complete' | 'failed';
-	run_id: string;
+	job_id: string;
 	state?: string | null;
-	backtest_id?: string | null;
 	backtest?: BacktestDetail | null;
 	error?: string | null;
+	executionCertainty?: string | null;
+	harness_execution?: boolean;
 }
 
 // ---------- Workspace product records ----------
@@ -363,7 +363,7 @@ export interface TradeRecord {
 }
 
 export interface BacktestSummaryRow {
-	id: string;
+	job_id: string;
 	workspace_id: string;
 	strategy_id: string;
 	name: string;
@@ -377,13 +377,12 @@ export interface BacktestSummaryRow {
 	trades: number;
 	split_declared: boolean;
 	created_at: string;
-	run_id?: string | null;
 	chat_id?: string | null;
 	execution_id?: string | null;
 }
 
 export interface BacktestDetail {
-	id: string;
+	job_id: string;
 	workspace_id: string;
 	strategy_id: string;
 	name: string;
@@ -397,7 +396,7 @@ export interface BacktestDetail {
 	stats: Record<string, number>;
 	split: DeclaredSplit | null;
 	manifest: {
-		run_id: string;
+		job_id: string;
 		status: string;
 		run_digest: string | null;
 		configuration_digest: string | null;
@@ -411,7 +410,6 @@ export interface BacktestDetail {
 	 * name/size/digest from this list and never fabricates entries.
 	 */
 	artifacts?: ArtifactEntry[];
-	run_id?: string | null;
 	chat_id?: string | null;
 	execution_id?: string | null;
 }
@@ -473,20 +471,7 @@ export interface HarnessStatus {
 	error: string | null;
 }
 
-/** Canonical launch result from `POST /v1/backtests/jobs`. */
-export interface HarnessJobResult {
-	action: string;
-	config_path: string;
-	workspace: string | null;
-	boundary: HarnessLocation | null;
-	job_id: string | null;
-	state: string | null;
-	exit_code: number | null;
-	location: string | null;
-	result: Record<string, unknown>;
-}
-
-/** One harness job row from `GET /v1/backtests/jobs/{id}`. */
+/** One harness job row from `GET /v1/jobs/{job_id}`. */
 export interface HarnessJobStatus {
 	job_id: string;
 	state: string;
@@ -496,10 +481,10 @@ export interface HarnessJobStatus {
 	[key: string]: unknown;
 }
 
-/** One stored run row from `GET /v1/backtests/runs/{id}`. */
-export interface HarnessRunRecord {
-	run_id: string;
-	status?: string;
+/** One job result row from `GET /v1/jobs/{job_id}/result`. */
+export interface HarnessJobResult {
+	job_id: string;
+	state?: string;
 	strategy_id?: string;
 	[key: string]: unknown;
 }
@@ -513,9 +498,9 @@ export interface HarnessArtifact {
 	sasUrl: string | null;
 }
 
-/** The artifact manifest from `GET /v1/backtests/runs/{id}/artifacts`. */
+/** The artifact manifest from `GET /v1/jobs/{job_id}/artifacts`. */
 export interface HarnessArtifactManifest {
-	run_id: string;
+	job_id: string;
 	artifacts: HarnessArtifact[];
 }
 
@@ -597,7 +582,7 @@ export interface ScreenRow {
 /**
  * One imported screening result (`ScreeningRecord.document()`) with its
  * definition and run provenance. `status` is the terminal harness state the
- * importer accepted (for example `complete`); a result exists only for a
+ * importer accepted (for example `succeeded`); a result exists only for a
  * terminal run whose `screen.json` artifact was readable.
  */
 export interface ScreeningResult {
@@ -605,7 +590,7 @@ export interface ScreeningResult {
 	workspace_id: string;
 	definition_id: string;
 	definition_hash: string;
-	run_id: string;
+	job_id: string;
 	status: string;
 	as_of: string;
 	rows: ScreenRow[];

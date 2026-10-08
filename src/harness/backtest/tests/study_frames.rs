@@ -335,7 +335,7 @@ fn study_documents_require_explicit_subscriptions() {
         serde_json::json!("1d"),
     ] {
         let mut document =
-            serde_json::json!({"shell": "study", "run_id": "test", "data": {"symbols": ["SPY"]}});
+            serde_json::json!({"shell": "study", "job_id": "test", "data": {"symbols": ["SPY"]}});
         if !interval.is_null() {
             document["data"]["bar_interval"] = interval.clone();
         }
@@ -343,7 +343,7 @@ fn study_documents_require_explicit_subscriptions() {
         std::fs::write(&path, document.to_string()).unwrap();
         assert!(load_study_config(&path).is_err());
     }
-    let valid = serde_json::json!({"shell": "study", "run_id": "test",
+    let valid = serde_json::json!({"shell": "study", "job_id": "test",
         "data": {"symbols": ["SPY"],
             "subscriptions": [{"data_type": "bars", "symbols": ["SPY"], "interval": "1min"}]}});
     assert!(parse_study_document(&valid).is_ok());
@@ -577,7 +577,7 @@ fn mixed_replay_routes_each_consumer_and_never_dispatches_future_frames_ahead_of
 
 #[test]
 fn tick_only_study_parses_without_bar_interval_and_rejects_invalid_echoes() {
-    let document = serde_json::json!({"shell":"study", "run_id":"ticks", "data":{"symbols":["SPY"],"subscriptions":[{"data_type":"trade", "symbols":["SPY"]}]}});
+    let document = serde_json::json!({"shell":"study", "job_id":"ticks", "data":{"symbols":["SPY"],"subscriptions":[{"data_type":"trade", "symbols":["SPY"]}]}});
     let parsed = parse_study_document(&document).unwrap();
     assert_eq!(
         parsed.data_subscriptions,
@@ -987,7 +987,7 @@ fn rfc3339_bounds_preserve_nanoseconds_offsets_and_reject_provided_invalid_value
         parse_timestamp_ns("1969-12-31T23:59:59.999999999Z"),
         Some(-1)
     );
-    let document = serde_json::json!({"shell":"study", "run_id":"bounds", "start":"2024-01-02T16:30:00.123456789+02:00", "end":"2024-01-02T14:30:00.123456790Z", "data":{"symbols":["SPY"],"subscriptions":[{"data_type":"quote","symbols":["SPY"]}]}});
+    let document = serde_json::json!({"shell":"study", "job_id":"bounds", "start":"2024-01-02T16:30:00.123456789+02:00", "end":"2024-01-02T14:30:00.123456790Z", "data":{"symbols":["SPY"],"subscriptions":[{"data_type":"quote","symbols":["SPY"]}]}});
     let parsed = parse_study_document(&document).unwrap();
     assert_eq!(
         (parsed.start_ns, parsed.end_ns),
@@ -1024,7 +1024,7 @@ fn rfc3339_bounds_preserve_nanoseconds_offsets_and_reject_provided_invalid_value
             assert!(parse_study_document(&bad).is_err());
         }
     }
-    assert!(BacktestConfig::from_yaml("shell: backtest\nrun_id: defaults\n").is_err());
+    assert!(BacktestConfig::from_yaml("shell: backtest\njob_id: defaults\n").is_err());
 }
 
 #[test]

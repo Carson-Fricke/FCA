@@ -1,6 +1,6 @@
 {
-	"bt-101": {
-		"id": "bt-101",
+	"job-0a1b2c3d4e5f60718293a4b5c6d7e8f9": {
+		"job_id": "job-0a1b2c3d4e5f60718293a4b5c6d7e8f9",
 		"workspace_id": "alpha-lab",
 		"strategy_id": "str-1",
 		"name": "Momentum Breakout v3.1 baseline",
@@ -11,8 +11,8 @@
 		"net_pnl": 12100,
 		"split": null,
 		"manifest": {
-			"run_id": "run-20260715-a1",
-			"status": "completed",
+			"job_id": "job-0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+			"status": "succeeded",
 			"run_digest": "9f2c1d4b7e8a30c5f6d1b2a4e8c7d0f3a5b6c9d2e1f4a7b8c3d6e9f0a1b2c3d4",
 			"configuration_digest": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
 			"data_start": "2022-01-03",
@@ -21,8 +21,8 @@
 			"total_bytes": 1048576
 		}
 	},
-	"bt-204": {
-		"id": "bt-204",
+	"job-1f2e3d4c5b6a798807162534a5b6c7d8": {
+		"job_id": "job-1f2e3d4c5b6a798807162534a5b6c7d8",
 		"workspace_id": "alpha-lab",
 		"strategy_id": "str-1",
 		"name": "Momentum Breakout v3.2 — declared split",
@@ -37,8 +37,8 @@
 			"outOfSample": { "returnPct": 7.0, "sharpe": 1.18, "maxDrawdown": -4.9, "trades": 17 }
 		},
 		"manifest": {
-			"run_id": "run-20260908-b4",
-			"status": "completed",
+			"job_id": "job-1f2e3d4c5b6a798807162534a5b6c7d8",
+			"status": "succeeded",
 			"run_digest": "c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3",
 			"configuration_digest": "5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5",
 			"data_start": "2024-01-02",
@@ -47,8 +47,8 @@
 			"total_bytes": 2097152
 		}
 	},
-	"bt-b1": {
-		"id": "bt-b1",
+	"job-4e5d6c7b8a90817263544536271809ab": {
+		"job_id": "job-4e5d6c7b8a90817263544536271809ab",
 		"workspace_id": "beta-quant",
 		"strategy_id": "str-b1",
 		"name": "Term carry first pass",
@@ -63,8 +63,8 @@
 			"outOfSample": { "returnPct": 0.6, "sharpe": 0.41, "maxDrawdown": -2.1, "trades": 22 }
 		},
 		"manifest": {
-			"run_id": "run-20260907-c2",
-			"status": "completed",
+			"job_id": "job-4e5d6c7b8a90817263544536271809ab",
+			"status": "succeeded",
 			"run_digest": "e1f4a7b8c3d6e9f0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718",
 			"configuration_digest": "708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7",
 			"data_start": "2023-01-02",

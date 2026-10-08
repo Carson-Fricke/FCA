@@ -59,6 +59,10 @@ exclude = ["*.target*", "*.tests*", "*.src", "*.src.*"]
 [tool.pytest.ini_options]
 addopts = ["--strict-config", "--strict-markers", "--import-mode=importlib", "-ra"]
 testpaths = ["tests"]
+markers = [
+    "slow: correct but expensive; excluded from focused runs",
+    "e2e: requires the running local stack",
+]
 
 [tool.ruff]
 line-length = 88

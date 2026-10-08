@@ -149,11 +149,17 @@ persisted_enum! {
 
 persisted_enum! {
     /// Lifecycle states for one stored backtest run.
+    ///
+    /// Deliberately distinct from [`JobState`]: jobs track asynchronous
+    /// ensure and backfill work, while runs mirror the harness job result
+    /// catalog with the locked `queued`, `running`, `succeeded`, `failed`,
+    /// and `cancelled` vocabulary.
     RunState {
         Queued => "queued",
         Running => "running",
-        Complete => "complete",
+        Succeeded => "succeeded",
         Failed => "failed",
+        Cancelled => "cancelled",
     }
 }
 
@@ -721,8 +727,8 @@ impl<'de> Deserialize<'de> for JobRecord {
 /// Catalog row for one stored backtest run.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunRecord {
-    /// Stable run identifier.
-    pub run_id: String,
+    /// Stable job identifier.
+    pub job_id: String,
     /// Lifecycle state of the run artifact.
     pub status: RunState,
     /// Strategy that produced the run.
@@ -746,12 +752,12 @@ pub struct RunRecord {
 impl RunRecord {
     /// Build a validated run record.
     ///
-    /// The run and strategy identifiers are trimmed and must be non-empty, the
+    /// The job and strategy identifiers are trimmed and must be non-empty, the
     /// date bounds must be ordered, and counts are unsigned. Mirrors Python's
     /// `RunRecord.__post_init__`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        run_id: impl Into<String>,
+        job_id: impl Into<String>,
         status: RunState,
         strategy_id: impl Into<String>,
         data_start: Option<Date>,
@@ -762,9 +768,9 @@ impl RunRecord {
         total_bytes: u64,
         metrics: BTreeMap<String, String>,
     ) -> Result<Self, DataError> {
-        let run_id = run_id.into().trim().to_string();
-        if run_id.is_empty() {
-            return Err(DataError::value("run_id must not be empty"));
+        let job_id = job_id.into().trim().to_string();
+        if job_id.is_empty() {
+            return Err(DataError::value("job_id must not be empty"));
         }
         let strategy_id = strategy_id.into().trim().to_string();
         if strategy_id.is_empty() {
@@ -776,7 +782,7 @@ impl RunRecord {
             }
         }
         Ok(Self {
-            run_id,
+            job_id,
             status,
             strategy_id,
             data_start,
@@ -791,13 +797,13 @@ impl RunRecord {
 
     /// The Azure Table row key for this run.
     pub fn row_key(&self) -> String {
-        table_key(&self.run_id)
+        table_key(&self.job_id)
     }
 }
 
 #[derive(Deserialize)]
 struct RunJson {
-    run_id: String,
+    job_id: String,
     status: RunState,
     strategy_id: String,
     #[serde(default, with = "optional_date")]
@@ -826,9 +832,9 @@ impl Serialize for RunRecord {
         state.serialize_field("configuration_digest", &self.configuration_digest)?;
         state.serialize_field("data_end", &self.data_end.map(Date::isoformat))?;
         state.serialize_field("data_start", &self.data_start.map(Date::isoformat))?;
+        state.serialize_field("job_id", &self.job_id)?;
         state.serialize_field("metrics", &self.metrics)?;
         state.serialize_field("run_digest", &self.run_digest)?;
-        state.serialize_field("run_id", &self.run_id)?;
         state.serialize_field("status", &self.status)?;
         state.serialize_field("strategy_id", &self.strategy_id)?;
         state.serialize_field("total_bytes", &self.total_bytes)?;
@@ -843,7 +849,7 @@ impl<'de> Deserialize<'de> for RunRecord {
     {
         let raw = RunJson::deserialize(deserializer)?;
         RunRecord::new(
-            raw.run_id,
+            raw.job_id,
             raw.status,
             raw.strategy_id,
             raw.data_start,

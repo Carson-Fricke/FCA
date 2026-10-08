@@ -145,7 +145,7 @@ _SAFE_STRATEGY_ID = re.compile(r"[^A-Za-z0-9._:@-]+")
 class ResearchModelRunRequest:
     """One workspace-bound historical model evaluation."""
 
-    run_id: str
+    job_id: str
     workspace_id: str
     model: ResearchModel
     workflow_execution_id: str
@@ -197,7 +197,7 @@ class BacktestResearchModelRunner:
         bundle = _adapter_bundle(request, model_reference)
         backtest = self._backtests.run(
             BacktestRunRequest(
-                run_id=request.run_id,
+                job_id=request.job_id,
                 workspace_id=request.workspace_id,
                 bundle=bundle,
                 workflow_execution_id=request.workflow_execution_id,
@@ -291,13 +291,13 @@ def _window_bound(
 def study_configuration(
     model: ResearchModel,
     *,
-    run_id: str,
+    job_id: str,
     universe: Sequence[str] = (),
 ) -> dict[str, object]:
     """Materialize the harness study configuration for one research model.
 
     The model's harness configuration is piped through unchanged except for the
-    fields the run owns: the study shell, run id, resolved symbol set, and the
+    fields the run owns: the study shell, job id, resolved symbol set, and the
     authored program instance.  ``start``/``end`` keep exactly the bounds the
     model declared; the same function backs both validation and execution, so
     the validated document is the one that runs.
@@ -333,7 +333,7 @@ def study_configuration(
     configuration["start"] = window_start
     configuration["end"] = window_end
     configuration["shell"] = "study"
-    configuration["run_id"] = run_id
+    configuration["job_id"] = job_id
     source = model.source.replace("\r\n", "\n")
     configuration["strategy_instances"] = [
         {
@@ -356,7 +356,7 @@ def _adapter_bundle(
 ) -> StrategyBundle:
     model = request.model
     configuration = study_configuration(
-        model, run_id=request.run_id, universe=request.universe
+        model, job_id=request.job_id, universe=request.universe
     )
     return StrategyBundle.create(
         strategy_id=_instance_id(f"research-{model.model_id}"),

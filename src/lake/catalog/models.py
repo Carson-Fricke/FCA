@@ -38,17 +38,17 @@ class RunState(StrEnum):
     """Lifecycle states for one stored backtest run.
 
     Deliberately distinct from :class:`JobState`: jobs track asynchronous
-    ensure and backfill work, while runs are stored artifacts of completed
-    simulations with no launcher, retries, or cancellation semantics. The
-    values intentionally mirror the harness ``RunStatus`` vocabulary so run
-    rows map between the harness results store and this port without
-    translation.
+    ensure and backfill work, while runs mirror the harness job result
+    catalog. The values intentionally mirror the harness job state
+    vocabulary so run rows map between the harness results store and this
+    port without translation.
     """
 
     QUEUED = "queued"
     RUNNING = "running"
-    COMPLETE = "complete"
+    SUCCEEDED = "succeeded"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class OptionType(StrEnum):
@@ -179,13 +179,13 @@ class JobRecord:
 class RunRecord:
     """Catalog row for one stored backtest run.
 
-    Mirrors the harness ``RunCatalogRecord`` row so the results store maps
+    Mirrors the harness job result catalog row so the results store maps
     to and from this lake-side record without information loss. ``metrics``
     stay string-exact; the harness record keeps the stricter non-empty and
     whitespace rules for metric names and values.
     """
 
-    run_id: str
+    job_id: str
     status: RunState
     strategy_id: str
     data_start: date | None = None
@@ -199,9 +199,9 @@ class RunRecord:
     def __post_init__(self) -> None:
         if isinstance(self.data_start, datetime) or isinstance(self.data_end, datetime):
             raise TypeError("run data bounds must be dates, not datetimes")
-        run_id = self.run_id.strip()
-        if not run_id:
-            raise ValueError("run_id must not be empty")
+        job_id = self.job_id.strip()
+        if not job_id:
+            raise ValueError("job_id must not be empty")
         strategy_id = self.strategy_id.strip()
         if not strategy_id:
             raise ValueError("strategy_id must not be empty")
@@ -218,14 +218,14 @@ class RunRecord:
         for key, value in self.metrics.items():
             if not isinstance(key, str) or not isinstance(value, str):
                 raise TypeError("metric names and values must be strings")
-        object.__setattr__(self, "run_id", run_id)
+        object.__setattr__(self, "job_id", job_id)
         object.__setattr__(self, "status", RunState(self.status))
         object.__setattr__(self, "strategy_id", strategy_id)
         object.__setattr__(self, "metrics", MappingProxyType(dict(self.metrics)))
 
     @property
     def row_key(self) -> str:
-        return table_key(self.run_id)
+        return table_key(self.job_id)
 
 
 @dataclass(frozen=True, slots=True)

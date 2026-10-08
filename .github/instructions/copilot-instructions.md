@@ -21,6 +21,38 @@ Use Python 3.12 with uv, Ruff, ty, and pytest. Do not use MyPy.
 - If removal exposes a scope or data-impact decision that needs authorization,
   surface it to the user rather than silently preserving behavior or deleting data.
 
+## Execution Job Contract
+
+Applies to harness-backed work: backtests, studies, screening, paper, and live
+sessions. One execution has exactly one `job_id`; do not reintroduce `run_id`,
+execution `study_id`, `tool_job_id`, report/backtest ids, or operation-level
+correlation ids for the same operation.
+
+- Submission composition allocates the ID once and durably retains the
+  recoverable submission reference, with immutable input/program-version
+  attribution, before any external mutation. Engines, workers, importers, and
+  renderers never allocate a replacement.
+- Harness admission owns uniqueness: the same ID with the same accepted input
+  joins; the same ID with different input conflicts; terminal results are never
+  overwritten. A client-side lookup may optimize a join but is not admission
+  authority.
+- Client adapters own acknowledgement validation; missing or mismatched ids are
+  protocol failures. Never adopt another id or infer one from aliases or prose.
+- Transport interruption after possible dispatch is unknown outcome, not
+  absence: inspect and reconcile the retained ID. Never auto-replay or allocate
+  a replacement.
+- Resume reuses the durable submission reference even before result or trial
+  evidence exists. An intentional new execution allocates a fresh ID.
+- Waiting is caller-specific: HTTP returns acceptance, deterministic code may
+  wait, agents inspect conversationally. Do not add a universal
+  submission/polling service or move polling policy into the workflow engine.
+- Thesis tracking and harness execution share the `job_id`; non-harness tool
+  jobs are explicitly distinguishable from harness executions. Job events may
+  be correlated by the same ID; provider tool-call/message correlations remain
+  separate.
+- New submission paths require interruption, mismatch, and duplicate-admission
+  behavior tests. Instructions and prompts are not proof of compliance.
+
 ## Required Tooling
 
 - Lint and format with `ruff` only. Do not introduce or use `flake8`,
@@ -68,6 +100,14 @@ Use repository-relative paths in every command and recorded command string.
 Prefer `uv run --extra dev` for verification after `uv sync --locked --extra
 dev`; use `uv run --python 3.12 --extra dev` only when explicitly installing
 or bootstrapping the environment.
+
+## Testing Strategy
+
+Read and follow `.github/instructions/testing-strategy.instructions.md` for
+every test change. Behavior tests at the highest practical boundary are the
+default; unit tests are limited to the documented pure-logic categories. Mark
+correct-but-expensive tests `slow` and local-stack tests `e2e`. Focused runs:
+`uv run --extra dev pytest -p no:cacheprovider -m "not slow" <paths>`.
 
 ## Architecture Documentation
 

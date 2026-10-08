@@ -5,8 +5,8 @@
 	let { result }: { result: ToolResult; workspaceId: string } = $props();
 
 	const data = $derived(isRecord(result.structured) ? result.structured : {});
-	const runId = $derived(readString(data, 'run_id'));
-	const status = $derived(readString(data, 'status'));
+	const jobId = $derived(readString(data, 'job_id'));
+	const state = $derived(readString(data, 'state'));
 	const strategyId = $derived(readString(data, 'strategy_id'));
 	const artifactCount = $derived(readNumber(data, 'artifact_count'));
 	const totalBytes = $derived(readNumber(data, 'total_bytes'));
@@ -16,8 +16,8 @@
 
 <div class="space-y-2" data-testid="run-tool-card">
 	<dl class="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 font-mono text-[11px]">
-		{#if runId}<dt class="text-slate-500">run_id</dt><dd class="text-slate-800">{runId}</dd>{/if}
-		{#if status}<dt class="text-slate-500">status</dt><dd class="text-slate-800">{status}</dd>{/if}
+		{#if jobId}<dt class="text-slate-500">job_id</dt><dd class="text-slate-800">{jobId}</dd>{/if}
+		{#if state}<dt class="text-slate-500">state</dt><dd class="text-slate-800">{state}</dd>{/if}
 		{#if strategyId}<dt class="text-slate-500">strategy_id</dt><dd class="text-slate-800">{strategyId}</dd>{/if}
 		{#if artifactCount !== null}<dt class="text-slate-500">artifacts</dt><dd class="text-slate-800">{artifactCount}</dd>{/if}
 		{#if totalBytes !== null}<dt class="text-slate-500">total bytes</dt><dd class="text-slate-800">{totalBytes}</dd>{/if}

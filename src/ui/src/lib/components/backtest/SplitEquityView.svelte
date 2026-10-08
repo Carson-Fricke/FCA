@@ -164,5 +164,5 @@
 {/if}
 
 <p class="mt-2 font-mono text-[10px] text-slate-500">
-	run {backtest.manifest.run_id} · digest {backtest.manifest.run_digest?.slice(0, 16) ?? '—'}…
+	job {backtest.job_id} · digest {backtest.manifest.run_digest?.slice(0, 16) ?? '—'}…
 </p>

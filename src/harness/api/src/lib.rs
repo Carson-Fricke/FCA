@@ -109,7 +109,7 @@ pub struct BacktestJobArgs {
     pub config: Option<PathBuf>,
 
     /// Directory for the canonical run artifact document. Defaults to
-    /// `.local/backtests/<run_id>`.
+    /// `.local/backtests/<job_id>`.
     #[arg(long = "output-dir", value_name = "PATH")]
     pub output_dir: Option<PathBuf>,
 }
@@ -127,7 +127,7 @@ pub struct StudyJobArgs {
     pub config: Option<PathBuf>,
 
     /// Directory for the canonical study artifact document. Defaults to
-    /// `.local/studies/<run_id>`.
+    /// `.local/studies/<job_id>`.
     #[arg(long = "output-dir", value_name = "PATH")]
     pub output_dir: Option<PathBuf>,
 }
@@ -145,7 +145,7 @@ pub struct ScreenJobArgs {
     pub config: Option<PathBuf>,
 
     /// Directory for the canonical `screen.json` artifact. Defaults to
-    /// `.local/screens/<run_id>`.
+    /// `.local/screens/<job_id>`.
     #[arg(long = "output-dir", value_name = "PATH")]
     pub output_dir: Option<PathBuf>,
 }
@@ -265,7 +265,7 @@ pub struct ScreenJobCli {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BacktestRunSummary {
     /// Run identifier from the configuration document.
-    pub run_id: String,
+    pub job_id: String,
     /// Terminal status (`completed` for a successful run).
     pub status: String,
     /// Canonical manifest hash.
@@ -291,7 +291,7 @@ impl BacktestRunSummary {
     #[must_use]
     pub fn stdout_lines(&self) -> Vec<String> {
         vec![
-            format!("run_id: {}", self.run_id),
+            format!("job_id: {}", self.job_id),
             format!("status: {}", self.status),
             format!("manifest_hash: {}", self.manifest_hash),
             format!("artifact_digest: {}", self.artifact_digest),
@@ -377,9 +377,9 @@ impl StudyJobRunner for UnportedStudyJobRunner {
 /// The canonical summary the `screen-job` surface prints after a run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScreenRunSummary {
-    /// Deterministic run identifier derived from the configuration content.
-    pub run_id: String,
-    /// Terminal status (`complete` or `failed`).
+    /// Execution job identifier from the configuration document.
+    pub job_id: String,
+    /// Terminal status (`succeeded` or `failed`).
     pub status: String,
     /// Number of ranked rows.
     pub rows: u64,
@@ -394,7 +394,7 @@ impl ScreenRunSummary {
     #[must_use]
     pub fn stdout_lines(&self) -> Vec<String> {
         vec![
-            format!("run_id: {}", self.run_id),
+            format!("job_id: {}", self.job_id),
             format!("status: {}", self.status),
             format!("rows: {}", self.rows),
             format!("artifacts: {}", self.artifact_path.display()),
@@ -663,7 +663,7 @@ pub fn execute_screen_job(args: &ScreenJobArgs, runner: &dyn ScreenJobRunner) ->
     match runner.run(args) {
         Ok(summary) => {
             let stdout = summary.stdout_lines().join("\n");
-            if summary.status != "complete" {
+            if summary.status != "succeeded" {
                 let reason = summary.reason.unwrap_or_else(|| summary.status.clone());
                 return CommandResult::Failed {
                     stdout,

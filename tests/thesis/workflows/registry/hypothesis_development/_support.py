@@ -236,12 +236,11 @@ def _discovery_envelope() -> dict[str, object]:
         "attempts": [
             {
                 "purpose": "Check momentum continuation on SPY daily bars.",
-                "studyId": "study-momentum",
                 "dataTypes": ["bars"],
                 "window": "2024-01-01T00:00:00Z to 2024-03-01T00:00:00Z",
                 "result": "Positive continuation, weak but consistent.",
                 "changed": True,
-                "runId": "run-momentum",
+                "jobId": "job-momentum",
             }
         ],
         "untouchedData": "Quote and trade data were left untouched for validation.",
@@ -508,7 +507,7 @@ def _kit(
     journal = CommandJournal(tmp_path / "journal.sqlite3")
     runner_results = list(results)
     if insert_strategy_success and len(runner_results) >= 2:
-        runner_results.insert(1, ("completed", {"sharpe": 1.0}))
+        runner_results.insert(1, ("succeeded", {"sharpe": 1.0}))
     runner = FakeRunner(runner_results)
     sub_agent_store = PersistenceSubAgentStore(chat.persistence)
     lifecycle = SubAgentLifecycle(

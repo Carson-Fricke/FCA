@@ -92,13 +92,13 @@ class InMemoryJobRepository:
 
 class InMemoryRunRepository:
     def __init__(self, records: Iterable[RunRecord] = ()) -> None:
-        self._records = {record.run_id: record for record in records}
+        self._records = {record.job_id: record for record in records}
 
-    def get(self, run_id: str) -> RunRecord | None:
-        return self._records.get(run_id.strip())
+    def get(self, job_id: str) -> RunRecord | None:
+        return self._records.get(job_id.strip())
 
     def upsert(self, record: RunRecord) -> RunRecord:
-        self._records[record.run_id] = record
+        self._records[record.job_id] = record
         return record
 
     def put(self, record: RunRecord) -> RunRecord:
@@ -114,13 +114,13 @@ class InMemoryRunRepository:
         strategy_id = strategy_id.strip() if strategy_id is not None else None
         return tuple(
             record
-            for record in sorted(self._records.values(), key=lambda item: item.run_id)
+            for record in sorted(self._records.values(), key=lambda item: item.job_id)
             if (status is None or record.status == status)
             and (strategy_id is None or record.strategy_id == strategy_id)
         )
 
-    def delete(self, run_id: str) -> bool:
-        return self._records.pop(run_id.strip(), None) is not None
+    def delete(self, job_id: str) -> bool:
+        return self._records.pop(job_id.strip(), None) is not None
 
 
 class InMemoryContractRepository:

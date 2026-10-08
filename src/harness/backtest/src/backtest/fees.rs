@@ -58,7 +58,7 @@ pub struct FeeAssessment {
     /// Currency code.
     pub currency: String,
     /// Run attribution.
-    pub run_id: String,
+    pub job_id: String,
     /// Strategy attribution.
     pub strategy_id: String,
     /// Asset class (`equity`, `option`, `crypto`).
@@ -154,7 +154,7 @@ impl FeeSchedule {
     pub fn calculate(
         &self,
         fill: &FeeFill<'_>,
-        run_id: &str,
+        job_id: &str,
         strategy_id: &str,
         asset_class: &str,
     ) -> FeeAssessment {
@@ -244,7 +244,7 @@ impl FeeSchedule {
             fill_id: fill.fill_id.to_string(),
             schedule_id: self.schedule_id.clone(),
             currency: self.currency.clone(),
-            run_id: run_id.to_string(),
+            job_id: job_id.to_string(),
             strategy_id: strategy_id.to_string(),
             asset_class: asset_class.to_string(),
             components,
@@ -282,7 +282,7 @@ pub fn aggregate_fees(assessments: &[FeeAssessment]) -> FeeAggregation {
     let mut by_asset_class: BTreeMap<(String, String), Decimal> = BTreeMap::new();
     for assessment in assessments {
         let total = assessment.total();
-        add_total(&mut by_run, &assessment.run_id, &assessment.currency, total);
+        add_total(&mut by_run, &assessment.job_id, &assessment.currency, total);
         add_total(
             &mut by_strategy,
             &assessment.strategy_id,

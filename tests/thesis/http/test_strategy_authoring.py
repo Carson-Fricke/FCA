@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from tests.thesis.http.test_study_validation_recovery import Harness
 
@@ -32,6 +33,7 @@ class _Transport:
         raise AssertionError("no model invocation during composition")
 
 
+@pytest.mark.slow
 def test_design_tool_to_files_http_and_completion_isolation(
     tmp_path: Path, monkeypatch: Any
 ) -> None:

@@ -93,6 +93,7 @@ def test_page_titles_retrieve_themselves_with_the_offline_baseline(
     not _cached_model_available(),
     reason="the all-MiniLM-L6-v2 model is not cached on this machine",
 )
+@pytest.mark.slow
 def test_semantic_search_routes_paraphrased_questions(tmp_path: Path) -> None:
     try:
         embedder = MiniLmEmbedder.load()

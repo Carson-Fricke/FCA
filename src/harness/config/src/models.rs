@@ -691,7 +691,7 @@ pub fn build_backtest(mapping: &Mapping) -> Result<Value, ConfigError> {
     if version != 1 {
         return Err(ConfigError("schema_version must be 1".into()));
     }
-    let run_id = identifier(&as_str(take(&mut map, "run_id")?, "run_id")?, "run_id")?;
+    let job_id = identifier(&as_str(take(&mut map, "job_id")?, "job_id")?, "job_id")?;
     let start = datetime_value(&as_str(take(&mut map, "start")?, "start")?, "start")?;
     let end = datetime_value(&as_str(take(&mut map, "end")?, "end")?, "end")?;
     if DateTime::parse_from_rfc3339(start["$datetime"].as_str().unwrap_or_default()).unwrap()
@@ -740,10 +740,10 @@ pub fn build_backtest(mapping: &Mapping) -> Result<Value, ConfigError> {
             "backtest deployments must use exactly one replica".to_string(),
         ));
     }
-    Ok(json!({
+    let document = json!({
         "schema_version": 1,
         "shell": shell,
-        "run_id": run_id,
+        "job_id": job_id,
         "start": start,
         "end": end,
         "clock": clock,
@@ -756,7 +756,8 @@ pub fn build_backtest(mapping: &Mapping) -> Result<Value, ConfigError> {
         "risk_pipeline": risk_pipeline,
         "fees": fees,
         "deployment": deployment,
-    }))
+    });
+    Ok(document)
 }
 
 /// Build the canonical trader configuration tree.
@@ -786,8 +787,11 @@ pub fn build_trader(mapping: &Mapping) -> Result<Value, ConfigError> {
     let market_data = build_runtime_adapter(take(&mut map, "market_data")?, "market_data")?;
     let broker = build_runtime_adapter(take(&mut map, "broker")?, "broker")?;
     let deployment = build_deployment(take(&mut map, "deployment")?)?;
+    let job_id = take_opt(&mut map, "job_id")
+        .map(|value| as_str(value, "job_id").and_then(|text| identifier(&text, "job_id")))
+        .transpose()?;
     ensure_empty(&map, "trader configuration")?;
-    Ok(json!({
+    let mut document = json!({
         "schema_version": 1,
         "shell": "trader",
         "mode": mode,
@@ -799,5 +803,9 @@ pub fn build_trader(mapping: &Mapping) -> Result<Value, ConfigError> {
         "market_data": market_data,
         "broker": broker,
         "deployment": deployment,
-    }))
+    });
+    if let (Some(job_id), Some(entries)) = (job_id, document.as_object_mut()) {
+        entries.insert("job_id".to_string(), Value::String(job_id));
+    }
+    Ok(document)
 }

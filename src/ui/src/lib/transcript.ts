@@ -22,7 +22,7 @@ export interface FalsificationTrialItem {
 	falsified: boolean;
 	description?: string;
 	detail?: string;
-	runId?: string;
+	jobId?: string;
 	runState?: string;
 }
 

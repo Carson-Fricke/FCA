@@ -2,7 +2,6 @@ import type { Component } from 'svelte';
 import type { ToolResult } from '$lib/types';
 import GenericToolCard from './GenericToolCard.svelte';
 import BacktestToolCard from './BacktestToolCard.svelte';
-import SweepToolCard from './SweepToolCard.svelte';
 import RunToolCard from './RunToolCard.svelte';
 import JobToolCard from './JobToolCard.svelte';
 import ArtifactsToolCard from './ArtifactsToolCard.svelte';
@@ -35,9 +34,7 @@ export const TOOL_RESULT_RENDERERS: Record<string, Component<ToolResultCardProps
 	operator_question: OperatorQuestionCard,
 	// Harness tool names, doubling as their implicit datum types.
 	run_backtest: BacktestToolCard,
-	run_sweep: SweepToolCard,
-	get_run: RunToolCard,
-	get_backtest_status: JobToolCard,
+	get_job_result: RunToolCard,
 	get_job_status: JobToolCard,
 	list_artifacts: ArtifactsToolCard
 };

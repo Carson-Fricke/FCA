@@ -1,11 +1,19 @@
-"""Materialize harness backtest runs into the workspace backtest store.
+"""Materialize harness backtest jobs into the workspace backtest store.
 
 The chat tool loop emits a :class:`~thesis.chat.responder.ToolResultChunk` for
-every ``run_backtest``/``get_run`` call.  The coordinator recognizes those
-results and either imports an already-terminal run (attaching ``backtest_id`` to
-the tool message) or reports the run id and state so the UI can call the Thesis
-materialization endpoint once the run reaches a terminal state.  It never blocks
-the reply on a long poll, so local and remote (Azure) execution behave the same.
+every ``run_backtest``/``get_job_result`` call.  The coordinator recognizes
+those results and either imports an already-terminal job (attaching the
+``job_id`` to the tool message) or reports the job id and state so the UI can
+call the Thesis materialization endpoint once the job reaches a terminal state.
+It never blocks the reply on a long poll, so local and remote (Azure)
+execution behave the same.
+
+Harness job records own execution state and results; this coordinator only
+projects them into workspace reports.  The tracking classification from
+:mod:`thesis.chat.contracts` decides whether a job id may be treated as a
+harness execution at all, so a generic/non-harness tool job is never observed,
+queried, or reported here, and a pre-dispatch failure is never presented as a
+failed harness execution.
 """
 
 from __future__ import annotations
@@ -15,40 +23,48 @@ from datetime import UTC, datetime
 
 from thesis.agent.harness_tools import HarnessToolProvider, HarnessToolResult
 from thesis.backtests.run_import import (
+    _COMPLETE_STATES,
     _FAILED_STATES,
     BacktestRunError,
     BacktestRunPending,
     import_backtest_run,
 )
+from thesis.chat.contracts import ToolJob
 from thesis.http.backtests import BacktestDataService, BacktestRecord
-from thesis.integrations.mcp import (
-    TOOL_GET_JOB_STATUS,
-    TOOL_GET_RUN,
-    TOOL_RUN_BACKTEST,
-)
+from thesis.integrations.mcp import TOOL_GET_JOB_RESULT, TOOL_RUN_BACKTEST
 
-_OBSERVED_TOOLS = frozenset({TOOL_RUN_BACKTEST, TOOL_GET_RUN})
+#: Harness operations whose tool results can carry a backtest observation.
+_OBSERVED_TOOLS = frozenset({TOOL_RUN_BACKTEST, TOOL_GET_JOB_RESULT})
+
+#: Resolves one ``(workspace_id, job_id)`` to its Thesis tracking record.
+TrackingLookup = Callable[[str, str], ToolJob | None]
 
 
 class BacktestRunCoordinator:
-    """Import harness backtest runs and serve the materialization endpoint."""
+    """Import harness backtest jobs and serve the materialization endpoint."""
 
     def __init__(
         self,
         service: BacktestDataService,
         tools: HarnessToolProvider,
         *,
+        tracking: TrackingLookup | None = None,
         clock: Callable[[], datetime] | None = None,
-        id_factory: Callable[[str], str] | None = None,
     ) -> None:
         self._service = service
         self._tools = tools
+        self._tracking = tracking
         self._clock = clock if clock is not None else _utc_now
-        self._id_factory = id_factory
 
     @property
     def service(self) -> BacktestDataService:
         return self._service
+
+    def tracked_job(self, workspace_id: str, job_id: str) -> ToolJob | None:
+        """Return the tracking record for one job id, when the boundary knows it."""
+        if self._tracking is None:
+            return None
+        return self._tracking(workspace_id, job_id)
 
     def handle_tool_result(
         self,
@@ -58,39 +74,43 @@ class BacktestRunCoordinator:
         chat_id: str | None = None,
         execution_id: str | None = None,
     ) -> Mapping[str, object] | None:
-        """Enrich a backtest tool message; never blocks on a running run.
+        """Enrich a backtest tool message; never blocks on a running job.
 
-        Returns ``{"run_id","state",...}`` (plus ``backtest_id`` when the run is
-        already terminal) merged into the persisted tool message, or ``None``
-        when the tool result is not a backtest launch/read.
+        Returns ``{"job_id","state",...}`` merged into the persisted tool
+        message, or ``None`` when the tool result is not a backtest
+        launch/result read or the job is a non-harness tracking job.
         """
         if tool_result.tool not in _OBSERVED_TOOLS or not tool_result.ok:
             return None
         structured = tool_result.structured
-        run_id = _text(structured.get("run_id"))
-        job_id = _text(structured.get("job_id")) or run_id
+        job_id = _text(structured.get("job_id"))
         if job_id is None:
             return None
+        tracked = self.tracked_job(workspace_id, job_id)
+        if tracked is not None and not tracked.is_harness_execution:
+            return None
         state = _state_of(structured)
-        if run_id is None:
-            resolved = self._resolve_run(job_id)
-            if resolved is not None:
-                run_id, state = resolved
-        if run_id is None:
-            return {"job_id": job_id, "state": state or "running"}
+        if state is not None and state not in _COMPLETE_STATES:
+            enrichment: dict[str, object] = {
+                "job_id": job_id,
+                "state": state,
+            }
+            if chat_id is not None:
+                enrichment["chat_id"] = chat_id
+            if execution_id is not None:
+                enrichment["execution_id"] = execution_id
+            return enrichment
         card = self.materialize(
             workspace_id,
-            run_id,
+            job_id,
             chat_id=chat_id,
             execution_id=execution_id,
             state=state,
         )
-        enrichment: dict[str, object] = {
-            "run_id": run_id,
-            "state": card.get("state") or card.get("status"),
+        enrichment = {
+            "job_id": job_id,
+            "state": card.get("state"),
         }
-        if "backtest_id" in card:
-            enrichment["backtest_id"] = card["backtest_id"]
         if chat_id is not None:
             enrichment["chat_id"] = chat_id
         if execution_id is not None:
@@ -100,62 +120,77 @@ class BacktestRunCoordinator:
     def materialize(
         self,
         workspace_id: str,
-        run_id: str,
+        job_id: str,
         *,
         chat_id: str | None = None,
         execution_id: str | None = None,
         state: str | None = None,
     ) -> dict[str, object]:
-        """Return the card payload for one run, importing it when terminal.
+        """Return the card payload for one job, importing it when terminal.
 
-        ``status`` is ``pending``/``failed``/``complete``.  On ``complete`` the
-        payload carries ``backtest_id`` and the workspace ``backtest`` detail so
-        the UI renders the report; a repeated call returns the existing record.
+        The payload reports the job ``state`` (the single job vocabulary) and
+        the workspace ``backtest`` projection when one exists.  A tracked
+        non-harness job never consults the harness: it reports tracking
+        certainty instead of a fabricated harness outcome.  An unresolved
+        harness-backed job likewise reports its submission certainty rather
+        than claiming a failed execution; only a harness-observed terminal
+        failure produces ``state`` ``failed``.
         """
-        existing = self.find_by_run(workspace_id, run_id)
+        tracked = self.tracked_job(workspace_id, job_id)
+        if tracked is not None and not tracked.is_harness_execution:
+            return _tracking_card(tracked)
+        existing = self.find_by_job(workspace_id, job_id)
         if existing is not None:
-            return _complete_card(run_id, existing)
+            return _complete_card(job_id, existing)
         if state in _FAILED_STATES:
-            return {"status": "failed", "run_id": run_id, "state": state}
+            return {"job_id": job_id, "state": state}
         try:
             record = import_backtest_run(
                 tools=self._tools,
                 workspace_id=workspace_id,
-                run_id=run_id,
+                job_id=job_id,
                 chat_id=chat_id,
                 execution_id=execution_id,
                 clock=self._clock,
-                id_factory=self._id_factory,
             )
         except BacktestRunPending:
-            return {"status": "pending", "run_id": run_id, "state": "running"}
+            return {"job_id": job_id, "state": state or "running"}
         except BacktestRunError as error:
-            return {"status": "failed", "run_id": run_id, "error": str(error)}
-        self._service.store.add(record)
-        return _complete_card(run_id, record)
+            if error.state in _FAILED_STATES:
+                return {"job_id": job_id, "state": error.state}
+            if tracked is not None:
+                return _tracking_card(tracked, error=str(error))
+            return {"job_id": job_id, "state": "unknown", "error": str(error)}
+        record = self._service.store.add(record)
+        return _complete_card(job_id, record)
 
-    def find_by_run(self, workspace_id: str, run_id: str) -> BacktestRecord | None:
-        """Return the workspace record already imported for ``run_id``, if any."""
-        for record in self._service.store.list(workspace_id):
-            if record.run_id == run_id:
-                return record
-        return None
-
-    def _resolve_run(self, job_id: str) -> tuple[str | None, str | None] | None:
-        result = self._tools.call_tool(TOOL_GET_JOB_STATUS, {"job_id": job_id})
-        if not result.ok:
-            return None
-        return _text(result.structured.get("run_id")), _state_of(result.structured)
+    def find_by_job(self, workspace_id: str, job_id: str) -> BacktestRecord | None:
+        """Return the workspace record already imported for ``job_id``, if any."""
+        return self._service.store.get(workspace_id, job_id)
 
 
-def _complete_card(run_id: str, record: BacktestRecord) -> dict[str, object]:
+def _complete_card(job_id: str, record: BacktestRecord) -> dict[str, object]:
     return {
-        "status": "complete",
-        "run_id": run_id,
+        "job_id": job_id,
         "state": record.status,
-        "backtest_id": record.id,
         "backtest": record.detail(),
     }
+
+
+def _tracking_card(job: ToolJob, *, error: str | None = None) -> dict[str, object]:
+    """Return a truthful tracking projection that never claims harness execution."""
+    certainty = job.submission_certainty
+    document: dict[str, object] = {
+        "job_id": job.job_id,
+        "state": job.state.value,
+        "executionCertainty": certainty,
+        "harness_execution": job.is_harness_execution,
+    }
+    if job.error_message is not None:
+        document["error"] = job.error_message
+    elif error is not None:
+        document["error"] = error
+    return document
 
 
 def _utc_now() -> datetime:
@@ -163,7 +198,7 @@ def _utc_now() -> datetime:
 
 
 def _state_of(document: Mapping[str, object]) -> str | None:
-    state = _text(document.get("state")) or _text(document.get("status"))
+    state = _text(document.get("state"))
     return state.lower() if state is not None else None
 
 

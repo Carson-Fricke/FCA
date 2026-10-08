@@ -188,6 +188,9 @@ pub fn parse_timestamp_ns(value: &str) -> Option<i64> {
 pub(crate) const DEFAULT_START_NS: i64 = 19_723 * ONE_DAY_NS;
 pub(crate) const DEFAULT_END_NS: i64 = 19_725 * ONE_DAY_NS;
 
+/// The fixed identity used only for authored-program validation documents.
+pub const VALIDATION_JOB_ID: &str = "authored-validation";
+
 /// Load and validate the resolved fields one backtest job reads.
 ///
 /// The full Python loader in `harness.configuration` validates the whole schema
@@ -199,14 +202,34 @@ pub(crate) const DEFAULT_END_NS: i64 = 19_725 * ONE_DAY_NS;
 /// Returns [`BacktestJobError`] when the document is missing a `backtest`
 /// shell, carries an invalid window, or cannot be read.
 pub fn load_backtest_config(config_path: &Path) -> Result<BacktestConfig, BacktestJobError> {
+    load_backtest_config_with_job_id(config_path, None)
+}
+
+/// Load one backtest configuration with an explicit submission `job_id`.
+///
+/// The submitted `job_id` is applied to the raw document before validation;
+/// it replaces any value already present because one authored document can
+/// serve many executions.
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError`] under the same conditions as
+/// [`load_backtest_config`], and for an invalid submitted `job_id`.
+pub fn load_backtest_config_with_job_id(
+    config_path: &Path,
+    job_id: Option<&str>,
+) -> Result<BacktestConfig, BacktestJobError> {
     let text = std::fs::read_to_string(config_path)
         .map_err(|error| BacktestJobError::Io(error.to_string()))?;
     let shell = parse_shell(&text).ok_or(BacktestJobError::MissingShell)?;
     if shell != "backtest" {
         return Err(BacktestJobError::WrongShell(shell));
     }
+    let mut value = crate::backtest::yaml::load_yaml(&text)
+        .map_err(|error| BacktestJobError::from(BacktestError::Configuration(error.0)))?;
+    overlay_job_id_yaml(&mut value, job_id)?;
     resolve_authored_sources(
-        BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)?,
+        BacktestConfig::from_yaml_value(&value).map_err(BacktestJobError::from)?,
         config_path,
     )
 }
@@ -224,14 +247,30 @@ pub fn load_backtest_config(config_path: &Path) -> Result<BacktestConfig, Backte
 /// Returns [`BacktestJobError`] when the document is missing a `study` shell,
 /// omits `data.subscriptions`, carries an invalid window, or cannot be read.
 pub fn load_study_config(config_path: &Path) -> Result<BacktestConfig, BacktestJobError> {
+    load_study_config_with_job_id(config_path, None)
+}
+
+/// Load one study configuration with an explicit submission `job_id`.
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError`] under the same conditions as
+/// [`load_study_config`], and for an invalid submitted `job_id`.
+pub fn load_study_config_with_job_id(
+    config_path: &Path,
+    job_id: Option<&str>,
+) -> Result<BacktestConfig, BacktestJobError> {
     let text = std::fs::read_to_string(config_path)
         .map_err(|error| BacktestJobError::Io(error.to_string()))?;
     let shell = parse_shell(&text).ok_or(BacktestJobError::MissingShell)?;
     if shell != "study" {
         return Err(BacktestJobError::WrongShell(shell));
     }
+    let mut value = crate::backtest::yaml::load_yaml(&text)
+        .map_err(|error| BacktestJobError::from(BacktestError::Configuration(error.0)))?;
+    overlay_job_id_yaml(&mut value, job_id)?;
     resolve_authored_sources(
-        BacktestConfig::from_yaml(&text).map_err(BacktestJobError::from)?,
+        BacktestConfig::from_yaml_value(&value).map_err(BacktestJobError::from)?,
         config_path,
     )
 }
@@ -249,6 +288,19 @@ pub fn load_study_config(config_path: &Path) -> Result<BacktestConfig, BacktestJ
 /// Returns [`BacktestJobError`] when the document is missing a `screen` shell,
 /// carries an invalid or mismatched configuration, or cannot be read.
 pub fn load_screen_config(config_path: &Path) -> Result<ScreenConfig, BacktestJobError> {
+    load_screen_config_with_job_id(config_path, None)
+}
+
+/// Load one screening configuration with an explicit submission `job_id`.
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError`] under the same conditions as
+/// [`load_screen_config`], and for an invalid submitted `job_id`.
+pub fn load_screen_config_with_job_id(
+    config_path: &Path,
+    job_id: Option<&str>,
+) -> Result<ScreenConfig, BacktestJobError> {
     let text = std::fs::read_to_string(config_path)
         .map_err(|error| BacktestJobError::Io(error.to_string()))?;
     let shell = parse_shell(&text).ok_or(BacktestJobError::MissingShell)?;
@@ -257,14 +309,83 @@ pub fn load_screen_config(config_path: &Path) -> Result<ScreenConfig, BacktestJo
     }
     let base_dir = config_path.parent();
     if text.trim_start().starts_with('{') {
-        let document: serde_json::Value =
+        let mut document: serde_json::Value =
             serde_json::from_str(&text).map_err(|error| BacktestJobError::Io(error.to_string()))?;
+        overlay_job_id_json(&mut document, job_id)?;
         return ScreenConfig::from_json_value_with_base(&document, base_dir)
             .map_err(BacktestJobError::from);
     }
-    let value = crate::backtest::yaml::load_yaml(&text)
+    let mut value = crate::backtest::yaml::load_yaml(&text)
         .map_err(|error| BacktestJobError::from(BacktestError::Configuration(error.0)))?;
+    overlay_job_id_yaml(&mut value, job_id)?;
     ScreenConfig::from_yaml_value_with_base(&value, base_dir).map_err(BacktestJobError::from)
+}
+
+/// Apply an explicit submission `job_id` to a parsed JSON configuration.
+///
+/// The submission argument wins and replaces any value already present.
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError::Engine`] for an invalid submitted `job_id` or a
+/// non-mapping document.
+pub fn overlay_job_id_json(
+    document: &mut serde_json::Value,
+    job_id: Option<&str>,
+) -> Result<bool, BacktestJobError> {
+    let Some(job_id) = job_id else {
+        return Ok(false);
+    };
+    let job_id = validated_submitted_job_id(job_id)?;
+    let object = document.as_object_mut().ok_or_else(|| {
+        BacktestJobError::Engine("configuration root must be a mapping".to_string())
+    })?;
+    object.insert("job_id".to_string(), serde_json::Value::String(job_id));
+    Ok(true)
+}
+
+/// Apply an explicit submission `job_id` to a parsed YAML configuration.
+///
+/// The submission argument wins and replaces any value already present.
+///
+/// # Errors
+///
+/// Returns [`BacktestJobError::Engine`] under the same conditions as
+/// [`overlay_job_id_json`].
+pub fn overlay_job_id_yaml(
+    document: &mut crate::backtest::yaml::YamlValue,
+    job_id: Option<&str>,
+) -> Result<bool, BacktestJobError> {
+    let Some(job_id) = job_id else {
+        return Ok(false);
+    };
+    let job_id = validated_submitted_job_id(job_id)?;
+    let crate::backtest::yaml::YamlValue::Mapping(mapping) = document else {
+        return Err(BacktestJobError::Engine(
+            "configuration root must be a mapping".to_string(),
+        ));
+    };
+    mapping.insert(
+        "job_id".to_string(),
+        crate::backtest::yaml::YamlValue::String(job_id),
+    );
+    Ok(true)
+}
+
+fn validated_submitted_job_id(value: &str) -> Result<String, BacktestJobError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || trimmed.len() > 128
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed == "."
+        || trimmed == ".."
+    {
+        return Err(BacktestJobError::Engine(
+            "job_id must be a single safe path segment of at most 128 characters".to_string(),
+        ));
+    }
+    Ok(trimmed.to_string())
 }
 
 /// Parse one in-memory study configuration document (JSON tree, `study` shell).
@@ -440,7 +561,7 @@ fn write_run_artifacts(
         || {
             PathBuf::from(".local")
                 .join(default_subdir)
-                .join(&configuration.run_id)
+                .join(&configuration.job_id)
         },
         Path::to_path_buf,
     );
@@ -481,7 +602,7 @@ fn write_native_results(
     };
     write_metrics(
         directory,
-        &outcome.manifest.run_id,
+        &outcome.manifest.job_id,
         outcome.status.value(),
         &counts,
         &ledger,
@@ -489,7 +610,7 @@ fn write_native_results(
     )?;
     write_report(
         directory,
-        &outcome.manifest.run_id,
+        &outcome.manifest.job_id,
         configuration.seed,
         &ledger,
     )?;
@@ -962,7 +1083,7 @@ fn decimal_opt(value: Option<Decimal18>) -> JsonValue {
 }
 
 fn metrics_json(
-    run_id: &str,
+    job_id: &str,
     status: &str,
     counts: &JobCounts,
     ledger: &JobLedger,
@@ -983,7 +1104,7 @@ fn metrics_json(
         count_values.insert("bar_frames".to_string(), JsonValue::UInt(frames));
     }
     JsonValue::object([
-        ("run_id", JsonValue::String(run_id.to_string())),
+        ("job_id", JsonValue::String(job_id.to_string())),
         ("status", JsonValue::string(status)),
         ("counts", JsonValue::Object(count_values)),
         (
@@ -1055,14 +1176,14 @@ fn metrics_json(
 
 fn write_metrics(
     directory: &Path,
-    run_id: &str,
+    job_id: &str,
     status: &str,
     counts: &JobCounts,
     ledger: &JobLedger,
     custom_metrics: &BTreeMap<String, String>,
 ) -> Result<PathBuf, BacktestJobError> {
     let path = directory.join("metrics.json");
-    let mut payload = metrics_json(run_id, status, counts, ledger, custom_metrics)
+    let mut payload = metrics_json(job_id, status, counts, ledger, custom_metrics)
         .to_canonical_string()
         .into_bytes();
     payload.push(b'\n');
@@ -1073,11 +1194,11 @@ fn write_metrics(
 
 fn write_report(
     directory: &Path,
-    run_id: &str,
+    job_id: &str,
     seed: u64,
     ledger: &JobLedger,
 ) -> Result<PathBuf, BacktestJobError> {
-    let mut header = ReportHeader::new(run_id);
+    let mut header = ReportHeader::new(job_id);
     header.seed = seed.to_string();
     let trades = trade_stats(&[]);
     let document = render_report(&header, &ledger.equity, &trades);
@@ -1095,7 +1216,7 @@ fn record_artifacts(
     ledger: &JobLedger,
     custom_metrics: &BTreeMap<String, String>,
 ) -> Result<RunManifest, BacktestJobError> {
-    let config = RecorderConfig::new(&configuration.run_id, directory)
+    let config = RecorderConfig::new(&configuration.job_id, directory)
         .map_err(|error| BacktestJobError::Artifact(error.to_string()))?
         .with_seed(configuration.seed as i64)
         .with_account_id("backtest")

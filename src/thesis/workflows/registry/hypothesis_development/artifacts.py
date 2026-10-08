@@ -53,7 +53,7 @@ def project_hypothesis(
         return state
     projected_status = document.status if status is None else HypothesisStatus(status)
     links = HypothesisLinks(
-        runs=tuple(trial.run_id for trial in state.trials),
+        runs=tuple(trial.job_id for trial in state.trials),
         evidence=tuple(trial.digest for trial in state.trials),
     )
     projected = document.projected(status=projected_status, links=links)
@@ -99,7 +99,7 @@ def falsification_report_artifact(
             {
                 "testId": t.test_id,
                 "falsifierId": t.falsifier_id,
-                "runId": t.run_id,
+                "jobId": t.job_id,
                 "runState": t.run_state,
                 "detail": t.detail,
                 "observed": t.observed,

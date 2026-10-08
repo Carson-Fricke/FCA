@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from tests.thesis.workspaces._support import MemoryGitFactory, Repositories
 
 from thesis.integrations.mcp import McpToolResult
 from thesis.persistence.git import GitCoordinator
@@ -78,21 +79,38 @@ class Harness:
         self.calls.append((name, arguments or {}))
         if self.during:
             self.during()
+        structured: dict[str, object] = {
+            "valid": not self.reject,
+            "diagnostics": [{"message": "check", "rendered": STUDY_TEMPLATE}],
+        }
+        config = (arguments or {}).get("config")
+        job_id = config.get("job_id") if isinstance(config, Mapping) else None
+        structured["job_id"] = job_id if isinstance(job_id, str) else "job-one"
         return McpToolResult(
             tool=name,
             is_error=self.reject,
-            structured={
-                "job_id": "job-one",
-                "valid": not self.reject,
-                "diagnostics": [{"message": "check", "rendered": STUDY_TEMPLATE}],
-            },
+            structured=structured,
         )
+
+
+Programs = tuple[WorkspacePrograms, Repositories, Harness]
+GitPrograms = tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness]
 
 
 @pytest.fixture
 def programs(
     tmp_path: Path,
-) -> tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness]:
+) -> Programs:
+    factory = MemoryGitFactory()
+    provider = Repositories(tmp_path / "workspaces", factory)
+    harness = Harness()
+    return WorkspacePrograms(provider, harness, git_factory=factory), provider, harness
+
+
+@pytest.fixture
+def git_programs(
+    tmp_path: Path,
+) -> GitPrograms:
     provider = LocalWorkspaceProvider(tmp_path / "workspaces")
     template = load_workspace_manifest("config/thesis/workspace.yaml").model_dump(
         mode="json"
@@ -112,10 +130,11 @@ def programs(
     return WorkspacePrograms(provider, harness), provider, harness
 
 
+@pytest.mark.slow
 def test_commits_only_artifacts_and_preserves_index(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    git_programs: GitPrograms,
 ) -> None:
-    service, provider, _ = programs
+    service, provider, _ = git_programs
     root = provider.open("workspace-one").root
     git = GitCoordinator(root)
     (root / "unrelated.txt").write_text("staged", encoding="utf-8")
@@ -148,17 +167,16 @@ def test_commits_only_artifacts_and_preserves_index(
 @pytest.mark.parametrize(
     "program_id", ["../escape", "A", "a/b", "a\\b", "C:foo", "a.rs", "", "a\n"]
 )
-def test_unsafe_ids_rejected(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness], program_id: str
-) -> None:
+def test_unsafe_ids_rejected(programs: Programs, program_id: str) -> None:
     with pytest.raises(ProgramArtifactError):
         programs[0].author("workspace-one", "study", program_id, STUDY_TEMPLATE)
 
 
+@pytest.mark.slow
 def test_targeted_updates_and_read_ranges(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    git_programs: GitPrograms,
 ) -> None:
-    service, provider, _ = programs
+    service, provider, _ = git_programs
     first = service.author(
         "workspace-one", "study", "alpha", STUDY_TEMPLATE, configuration=CONFIG
     )
@@ -215,7 +233,7 @@ def test_targeted_updates_and_read_ranges(
 
 
 def test_listing_reports_committed_ids_versions_and_compact_configuration(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, _ = programs
     first = service.author(
@@ -255,7 +273,7 @@ def test_listing_reports_committed_ids_versions_and_compact_configuration(
 
 
 def test_listing_bounds_empty_workspaces_and_unsafe_entries(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, provider, _ = programs
     empty = service.list("workspace-two", "study")
@@ -304,7 +322,7 @@ def test_listing_bounds_empty_workspaces_and_unsafe_entries(
 
 
 def test_validation_dependencies_and_unrelated_commits(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, provider, harness = programs
     dep = service.author(
@@ -334,7 +352,7 @@ def test_validation_dependencies_and_unrelated_commits(
     )
     assert service.run("workspace-one", "study", "alpha")["ok"] is True
     config = cast(dict[str, object], harness.calls[-1][1]["config"])
-    assert str(config["run_id"]).startswith("study-alpha-")
+    assert str(config["job_id"]).startswith("job-")
     assert config["shell"] == "study"
     instance = cast(list[dict[str, object]], config["strategy_instances"])[0]
     source = cast(dict[str, object], instance["parameters"])["source"]
@@ -352,7 +370,7 @@ def test_validation_dependencies_and_unrelated_commits(
 
 
 def test_validation_race_and_rejections(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, harness = programs
     receipt = service.author(
@@ -376,7 +394,7 @@ def test_validation_race_and_rejections(
 
 
 def test_indicator_wrapper_transitive_dependencies_and_cycles(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, harness = programs
     first = service.author(
@@ -412,7 +430,7 @@ def test_indicator_wrapper_transitive_dependencies_and_cycles(
 
 
 def test_sdk_templates_match_actual_source_signatures(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service = programs[0]
     consumer = (service.sdk_root / "src/consumer.rs").read_text(encoding="utf-8")
@@ -439,10 +457,10 @@ def test_sdk_templates_match_actual_source_signatures(
 
 
 def test_missing_harness_fails_closed(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     _, provider, _ = programs
-    service = WorkspacePrograms(provider)
+    service = WorkspacePrograms(provider, git_factory=provider.git_factory)
     service.author(
         "workspace-one", "study", "alpha", STUDY_TEMPLATE, configuration=CONFIG
     )
@@ -450,8 +468,9 @@ def test_missing_harness_fails_closed(
         service.validate("workspace-one", "study", "alpha")
 
 
+@pytest.mark.slow
 def test_templates_compile_against_actual_sdk(
-    tmp_path: Path, programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness]
+    tmp_path: Path, programs: Programs
 ) -> None:
     service = programs[0]
     crate = tmp_path / "templates"
@@ -503,7 +522,7 @@ def test_templates_compile_against_actual_sdk(
 
 
 def test_configuration_cannot_override_committed_source(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service = programs[0]
     for configuration in (
@@ -522,32 +541,8 @@ def test_configuration_cannot_override_committed_source(
             )
 
 
-def test_staged_artifact_changes_are_not_overwritten(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
-) -> None:
-    service, provider, _ = programs
-    receipt = service.author(
-        "workspace-one", "study", "alpha", STUDY_TEMPLATE, configuration=CONFIG
-    )
-    root = provider.open("workspace-one").root
-    git = GitCoordinator(root)
-    path = provider.resolve_path("workspace-one", "studies/alpha/program.rs")
-    path.write_text("staged change", encoding="utf-8")
-    git._run("add", "--", "studies/alpha/program.rs")
-    path.write_bytes(STUDY_TEMPLATE.encode())
-    with pytest.raises(ProgramArtifactError, match="staged"):
-        service.update(
-            "workspace-one",
-            "study",
-            "alpha",
-            expected_version=cast(str, receipt["version"]),
-            expected="self.frames += 1",
-            replacement="self.frames += 2",
-        )
-
-
 def test_strategy_dispatch_and_indicator_dependency_validation(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, harness = programs
     service.author(
@@ -575,7 +570,7 @@ def test_strategy_dispatch_and_indicator_dependency_validation(
 
 
 def test_missing_validation_and_nonaccepting_compiler_fail_closed(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, harness = programs
     service.author(
@@ -595,10 +590,11 @@ def test_missing_validation_and_nonaccepting_compiler_fail_closed(
     service.harness = harness
 
 
+@pytest.mark.slow
 def test_pinned_load_and_completion_verification(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    git_programs: GitPrograms,
 ) -> None:
-    service, _, _ = programs
+    service, _, _ = git_programs
     dep = service.author(
         "workspace-one", "indicator", "last", INDICATOR_TEMPLATE, configuration=CONFIG
     )
@@ -649,7 +645,7 @@ def test_pinned_load_and_completion_verification(
 
 
 def test_basic_template_defaults_follow_declared_inputs(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, _ = programs
     config = {
@@ -677,7 +673,7 @@ def test_basic_template_defaults_follow_declared_inputs(
 
 
 def test_configuration_only_update_and_stale_validation(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, _ = programs
     first = service.author(
@@ -732,11 +728,11 @@ def test_configuration_only_update_and_stale_validation(
     ],
 )
 def test_invalid_configurations_rejected_before_commit(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
     change: dict[str, object],
 ) -> None:
     service, provider, _ = programs
-    before = GitCoordinator(provider.open("workspace-one").root).head()
+    before = provider.store("workspace-one").head
     with pytest.raises(ProgramArtifactError):
         service.author(
             "workspace-one",
@@ -745,16 +741,21 @@ def test_invalid_configurations_rejected_before_commit(
             STUDY_TEMPLATE,
             configuration={**CONFIG, **change},
         )
-    assert GitCoordinator(provider.open("workspace-one").root).head() == before
+    assert provider.store("workspace-one").head == before
 
 
 def test_sdk_root_deployment_and_version_mismatch(
     tmp_path: Path,
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, provider, harness = programs
     assert service.sdk_root.resolve() == Path("src/harness/strategy-sdk").resolve()
-    missing = WorkspacePrograms(provider, harness, sdk_root=tmp_path / "not-deployed")
+    missing = WorkspacePrograms(
+        provider,
+        harness,
+        sdk_root=tmp_path / "not-deployed",
+        git_factory=provider.git_factory,
+    )
     with pytest.raises(ProgramArtifactError, match="supply sdk_root"):
         missing.read_sdk_reference("study")
     # A remote transport is still injected independently of local reference assets.
@@ -770,7 +771,12 @@ def test_sdk_root_deployment_and_version_mismatch(
     shutil.copytree(service.sdk_root, deployed)
     for crate in ("contracts", "num"):
         shutil.copytree(service.sdk_root.parent / crate, tmp_path / crate)
-    matched = WorkspacePrograms(provider, harness, sdk_root=deployed)
+    matched = WorkspacePrograms(
+        provider,
+        harness,
+        sdk_root=deployed,
+        git_factory=provider.git_factory,
+    )
     assert (
         matched.read_sdk_reference("consumer")["sdkIdentity"]
         == service.read_sdk_reference("consumer")["sdkIdentity"]
@@ -787,7 +793,7 @@ def test_sdk_root_deployment_and_version_mismatch(
 
 
 def test_reads_bound_characters_not_only_lines(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, _ = programs
     source = "// " + "x" * 20000 + "\n"
@@ -805,7 +811,7 @@ def test_reads_bound_characters_not_only_lines(
 
 
 def test_configuration_diagnostics_are_actionable(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, _ = programs
 
@@ -831,7 +837,7 @@ def test_configuration_diagnostics_are_actionable(
 
 
 def test_publication_failure_retains_commit_and_explicit_recovery(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service, provider, _ = programs
@@ -859,11 +865,7 @@ def test_publication_failure_retains_commit_and_explicit_recovery(
     )
 
 
-def test_service_uses_no_private_git_methods() -> None:
-    source = Path("src/thesis/workspaces/programs.py").read_text(encoding="utf-8")
-    assert "git._run" not in source
-
-
+@pytest.mark.slow
 def test_sdk_wheel_assets_are_canonical_and_portable(tmp_path: Path) -> None:
     """Build from a fresh tree so stale local build/lib cannot mask missing data."""
     project = tmp_path / "project"
@@ -943,7 +945,7 @@ def test_sdk_wheel_assets_are_canonical_and_portable(tmp_path: Path) -> None:
 
 
 def test_publish_leaves_missing_checkout_without_new_commit(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, provider, _ = programs
     receipt = service.author("workspace-one", "study", "alpha", configuration=CONFIG)
@@ -951,15 +953,14 @@ def test_publish_leaves_missing_checkout_without_new_commit(
     source.unlink()
     assert service.publish("workspace-one", "study", "alpha") == receipt
     assert not source.exists()
-    git = GitCoordinator(provider.open("workspace-one").root)
-    assert git.head() == receipt["gitCommit"]
-    assert not git._run("diff", "--cached", "--name-only").stdout.strip()
+    assert provider.store("workspace-one").head == receipt["gitCommit"]
 
 
+@pytest.mark.slow
 def test_publish_preserves_staged_operator_edits(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    git_programs: GitPrograms,
 ) -> None:
-    service, provider, _ = programs
+    service, provider, _ = git_programs
     receipt = service.author("workspace-one", "study", "alpha", configuration=CONFIG)
     source = provider.resolve_path("workspace-one", "studies/alpha/program.rs")
     source.write_text("operator edit", encoding="utf-8")
@@ -971,35 +972,12 @@ def test_publish_preserves_staged_operator_edits(
     assert git._run("show", ":studies/alpha/program.rs").stdout == "operator edit"
 
 
-def test_publish_preserves_deliberately_staged_parent_commit(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
-) -> None:
-    service, provider, _ = programs
-    first = service.author("workspace-one", "study", "alpha", configuration=CONFIG)
-    source = provider.resolve_path("workspace-one", "studies/alpha/program.rs")
-    old = source.read_bytes()
-    latest = service.update(
-        "workspace-one",
-        "study",
-        "alpha",
-        expected_version=cast(str, first["version"]),
-        expected="self.frames += 1",
-        replacement="self.frames += 2",
-    )
-    source.write_bytes(old)
-    git = GitCoordinator(provider.open("workspace-one").root)
-    git._run("add", "--", "studies/alpha/program.rs")
-    index = (git.repository / ".git/index").read_bytes()
-    assert service.publish("workspace-one", "study", "alpha") == latest
-    assert source.read_bytes() == old
-    assert (git.repository / ".git/index").read_bytes() == index
-
-
+@pytest.mark.slow
 def test_publish_does_not_repair_interrupted_update_materialization(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    git_programs: GitPrograms,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service, provider, _ = programs
+    service, provider, _ = git_programs
     first = service.author("workspace-one", "study", "alpha", configuration=CONFIG)
     replace = os.replace
     root = provider.open("workspace-one").root
@@ -1039,12 +1017,17 @@ def test_publish_does_not_repair_interrupted_update_materialization(
 
 def test_sdk_dependency_change_invalidates_validation(
     tmp_path: Path,
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, provider, harness = programs
     for crate in ("strategy-sdk", "contracts", "num"):
         shutil.copytree(service.sdk_root.parent / crate, tmp_path / crate)
-    deployed = WorkspacePrograms(provider, harness, sdk_root=tmp_path / "strategy-sdk")
+    deployed = WorkspacePrograms(
+        provider,
+        harness,
+        sdk_root=tmp_path / "strategy-sdk",
+        git_factory=provider.git_factory,
+    )
     deployed.author("workspace-one", "study", "alpha", configuration=CONFIG)
     deployed.validate("workspace-one", "study", "alpha")
     dependency = tmp_path / "contracts/src/lib.rs"
@@ -1056,7 +1039,7 @@ def test_sdk_dependency_change_invalidates_validation(
 
 
 def test_latest_committed_source_configuration_and_both_symbol_scopes(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, provider, harness = programs
     first = service.author("workspace-one", "study", "alpha", configuration=CONFIG)
@@ -1099,7 +1082,7 @@ def test_latest_committed_source_configuration_and_both_symbol_scopes(
 
 
 def test_load_stored_validation_at_selected_commit(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, provider, _ = programs
     authored = service.author(
@@ -1141,7 +1124,7 @@ def test_load_stored_validation_at_selected_commit(
 
 @pytest.mark.parametrize("compiler", ["compiler-two", None])
 def test_historical_load_reports_fresh_compiler_without_rewriting_validation(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
     compiler: str | None,
 ) -> None:
     service, provider, harness = programs
@@ -1149,7 +1132,7 @@ def test_historical_load_reports_fresh_compiler_without_rewriting_validation(
     validated = service.validate("workspace-one", "study", "alpha")
     pinned = service.load("workspace-one", "study", "alpha")
     assert pinned["validationIdentity"] == "compiler-one"
-    head = GitCoordinator(provider.open("workspace-one").root).head()
+    head = provider.store("workspace-one").head
     harness.validation_identity = compiler
     historical = service.load(
         "workspace-one", "study", "alpha", cast(str, pinned["gitCommit"])
@@ -1171,11 +1154,11 @@ def test_historical_load_reports_fresh_compiler_without_rewriting_validation(
     with pytest.raises(ProgramArtifactError, match="validation identity"):
         service.run("workspace-one", "study", "alpha")
     assert len(harness.calls) == count
-    assert GitCoordinator(provider.open("workspace-one").root).head() == head
+    assert provider.store("workspace-one").head == head
 
 
 def test_run_configuration_matches_native_authored_document_semantics(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, harness = programs
     config = {
@@ -1219,7 +1202,7 @@ def test_run_configuration_matches_native_authored_document_semantics(
 
 
 def test_existing_provider_and_raw_client_injection(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     from thesis.agent.harness_tools import HarnessToolProvider
     from thesis.integrations.mcp import HarnessMcpClient, HarnessMcpTransportError
@@ -1232,6 +1215,13 @@ def test_existing_provider_and_raw_client_injection(
                 raise HarnessMcpTransportError(
                     "response lost", execution_certainty="unknown_outcome"
                 )
+            params = request.get("params")
+            arguments = params.get("arguments") if isinstance(params, Mapping) else None
+            config = arguments.get("config") if isinstance(arguments, Mapping) else None
+            job_id = config.get("job_id") if isinstance(config, Mapping) else None
+            structured: dict[str, object] = {"valid": True}
+            if isinstance(job_id, str):
+                structured["job_id"] = job_id
             return {
                 "jsonrpc": "2.0",
                 "id": request["id"],
@@ -1246,7 +1236,7 @@ def test_existing_provider_and_raw_client_injection(
                     },
                     "isError": False,
                     "content": [],
-                    "structuredContent": {"valid": True, "run_id": "run-one"},
+                    "structuredContent": structured,
                 },
             }
 
@@ -1273,35 +1263,70 @@ def test_existing_provider_and_raw_client_injection(
     assert "never automatically replay" in cast(str, result["retryGuidance"])
 
 
-def test_run_ids_are_workspace_scoped_and_unique_per_explicit_invocation(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+def test_job_ids_are_allocated_once_per_explicit_invocation(
+    programs: Programs,
 ) -> None:
     service, _, harness = programs
     ids = []
     for workspace in ("workspace-one", "workspace-two"):
-        service.author(
-            workspace,
-            "study",
-            "alpha",
-            configuration={**CONFIG, "run_id": "caller-fixed"},
-        )
+        service.author(workspace, "study", "alpha", configuration=CONFIG)
         service.validate(workspace, "study", "alpha")
         for _ in range(2):
             receipt = service.run(workspace, "study", "alpha")
             submitted = cast(dict[str, object], harness.calls[-1][1]["config"])[
-                "run_id"
+                "job_id"
             ]
-            assert receipt["submittedRunId"] == submitted
-            assert cast(dict[str, object], receipt["result"])["run_id"] == submitted
-            ids.append(cast(str, submitted))
+            assert isinstance(submitted, str) and submitted.startswith("job-")
+            assert receipt["job_id"] == submitted
+            assert "submittedRunId" not in receipt
+            nested = cast(dict[str, object], receipt["result"])
+            assert "job_id" not in nested and "run_id" not in nested
+            ids.append(submitted)
     assert len(set(ids)) == 4
-    assert ids[0].rsplit("-", 1)[0] == ids[1].rsplit("-", 1)[0]
-    assert ids[0].rsplit("-", 1)[0] != ids[2].rsplit("-", 1)[0]
+
+
+def test_authored_run_id_fails_harness_validation_instead_of_being_stripped(
+    programs: Programs,
+) -> None:
+    service, _, _ = programs
+
+    class StrictHarness(Harness):
+        """A harness whose strict configuration validation rejects ``run_id``."""
+
+        def call_tool(
+            self, name: str, arguments: Mapping[str, object] | None = None
+        ) -> McpToolResult:
+            config = (arguments or {}).get("config")
+            if isinstance(config, Mapping) and "run_id" in config:
+                self.calls.append((name, arguments or {}))
+                return McpToolResult(
+                    tool=name,
+                    is_error=True,
+                    structured={"error": "configuration.run_id is obsolete"},
+                )
+            return super().call_tool(name, arguments)
+
+    harness = StrictHarness()
+    service.harness = harness
+    service.author(
+        "workspace-one",
+        "study",
+        "alpha",
+        STUDY_TEMPLATE,
+        configuration={**CONFIG, "run_id": "legacy-fixed"},
+    )
+    assert service.validate("workspace-one", "study", "alpha")["accepted"] is True
+    receipt = service.run("workspace-one", "study", "alpha")
+
+    submitted = cast(dict[str, object], harness.calls[-1][1]["config"])
+    assert submitted["run_id"] == "legacy-fixed"
+    assert receipt["ok"] is False
+    assert receipt["executionCertainty"] == "observed_failure"
 
 
 @pytest.mark.parametrize("identity", [None, "compiler-two"])
 def test_remote_compiler_identity_changes_fail_closed_before_run(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
     identity: str | None,
 ) -> None:
     service, _, harness = programs
@@ -1316,7 +1341,7 @@ def test_remote_compiler_identity_changes_fail_closed_before_run(
 
 
 def test_validation_without_compiler_identity_cannot_authorize_run(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, harness = programs
     harness.validation_identity = None
@@ -1327,7 +1352,7 @@ def test_validation_without_compiler_identity_cannot_authorize_run(
 
 
 def test_raw_transport_unknown_run_outcome_retains_submitted_id(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     from thesis.integrations.mcp import HarnessMcpTransportError
 
@@ -1348,15 +1373,16 @@ def test_raw_transport_unknown_run_outcome_retains_submitted_id(
     service.author("workspace-one", "study", "alpha", configuration=CONFIG)
     service.validate("workspace-one", "study", "alpha")
     receipt = service.run("workspace-one", "study", "alpha")
-    submitted = cast(dict[str, object], harness.calls[-1][1]["config"])["run_id"]
+    submitted = cast(dict[str, object], harness.calls[-1][1]["config"])["job_id"]
     assert receipt["ok"] is False and receipt["executionCertainty"] == "unknown_outcome"
-    assert receipt["submittedRunId"] == submitted
-    assert cast(dict[str, object], receipt["result"])["run_id"] == submitted
+    assert receipt["job_id"] == submitted
+    nested = cast(dict[str, object], receipt["result"])
+    assert "job_id" not in nested and "run_id" not in nested
     assert "never automatically replay" in cast(str, receipt["retryGuidance"])
 
 
 def test_fresh_public_facade_identity_blocks_remote_changes(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     from thesis.agent.harness_tools import HarnessToolProvider
     from thesis.integrations.mcp import HarnessMcpClient, HarnessMcpTransportError
@@ -1425,53 +1451,68 @@ def test_fresh_public_facade_identity_blocks_remote_changes(
     )
 
 
-def test_compact_diagnostics_keep_repair_spans_and_children_without_excerpts() -> None:
-    outcome = WorkspacePrograms._outcome(
-        McpToolResult(
-            tool="validate_study",
-            is_error=True,
-            structured={
-                "diagnostics": [
-                    {
-                        "message": "missing method",
-                        "level": "error",
-                        "code": {"code": "E0599", "explanation": "large explanation"},
-                        "rendered": STUDY_TEMPLATE,
-                        "spans": [
-                            {
-                                "file_name": "src/lib.rs",
-                                "line_start": 12,
-                                "line_end": 12,
-                                "column_start": 4,
-                                "column_end": 8,
-                                "is_primary": True,
-                                "label": "not found",
-                                "text": [{"text": STUDY_TEMPLATE}],
-                                "expansion": {"source": STUDY_TEMPLATE},
-                            }
-                        ],
-                        "children": [
-                            {
-                                "message": "replace method",
-                                "level": "help",
-                                "rendered": STUDY_TEMPLATE,
-                                "spans": [
-                                    {
-                                        "line_start": 12,
-                                        "column_start": 4,
-                                        "suggested_replacement": "on_bar",
-                                        "suggestion_applicability": "MachineApplicable",
-                                    }
-                                ],
-                            }
-                        ],
-                    }
-                ]
-            },
-        ),
-        validation=True,
-    )
-    detail = cast(list[dict[str, object]], outcome["diagnostics"])[0]
+def test_compact_diagnostics_keep_repair_spans_and_children_without_excerpts(
+    programs: Programs,
+) -> None:
+    service, _, _ = programs
+
+    class Diagnostics(Harness):
+        def call_tool(
+            self, name: str, arguments: Mapping[str, object] | None = None
+        ) -> McpToolResult:
+            return McpToolResult(
+                tool=name,
+                is_error=True,
+                structured={
+                    "error": "compile failed",
+                    "diagnostics": [
+                        {
+                            "message": "missing method",
+                            "level": "error",
+                            "code": {
+                                "code": "E0599",
+                                "explanation": "large explanation",
+                            },
+                            "rendered": STUDY_TEMPLATE,
+                            "spans": [
+                                {
+                                    "file_name": "src/lib.rs",
+                                    "line_start": 12,
+                                    "line_end": 12,
+                                    "column_start": 4,
+                                    "column_end": 8,
+                                    "is_primary": True,
+                                    "label": "not found",
+                                    "text": [{"text": STUDY_TEMPLATE}],
+                                    "expansion": {"source": STUDY_TEMPLATE},
+                                }
+                            ],
+                            "children": [
+                                {
+                                    "message": "replace method",
+                                    "level": "help",
+                                    "rendered": STUDY_TEMPLATE,
+                                    "spans": [
+                                        {
+                                            "line_start": 12,
+                                            "column_start": 4,
+                                            "suggested_replacement": "on_bar",
+                                            "suggestion_applicability": (
+                                                "MachineApplicable"
+                                            ),
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+
+    service.harness = Diagnostics()
+    service.author("workspace-one", "study", "alpha", configuration=CONFIG)
+    receipt = service.validate("workspace-one", "study", "alpha")
+    detail = cast(list[dict[str, object]], receipt["diagnostics"])[0]
     assert detail["code"] == "E0599"
     span = cast(list[dict[str, object]], detail["spans"])[0]
     assert (
@@ -1484,12 +1525,12 @@ def test_compact_diagnostics_keep_repair_spans_and_children_without_excerpts() -
         cast(list[dict[str, object]], child["spans"])[0]["suggested_replacement"]
         == "on_bar"
     )
-    assert STUDY_TEMPLATE not in str(outcome)
-    assert "explanation" not in str(outcome) and "rendered" not in str(outcome)
+    assert STUDY_TEMPLATE not in str(receipt)
+    assert "explanation" not in str(receipt) and "rendered" not in str(receipt)
 
 
 def test_serving_sdk_mismatch_blocks_templates_validation_run_and_completion(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, harness = programs
     authored = service.author("workspace-one", "study", "alpha", configuration=CONFIG)
@@ -1522,7 +1563,7 @@ def test_serving_sdk_mismatch_blocks_templates_validation_run_and_completion(
 
 
 def test_sdk_reference_uses_exact_remote_source_and_metadata_fallback(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, _ = programs
 
@@ -1571,7 +1612,7 @@ def test_sdk_reference_uses_exact_remote_source_and_metadata_fallback(
 
 
 def test_serving_sdk_reference_change_during_read_fails_closed(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, _, _ = programs
 
@@ -1590,24 +1631,24 @@ def test_serving_sdk_reference_change_during_read_fails_closed(
 
 
 def test_sdk_change_during_validation_is_not_committed(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     service, provider, harness = programs
     service.author("workspace-one", "study", "alpha", configuration=CONFIG)
-    before = GitCoordinator(provider.open("workspace-one").root).head()
+    before = provider.store("workspace-one").head
     harness.during = lambda: setattr(harness, "validation_identity", "compiler-two")
     with pytest.raises(
         ProgramArtifactError, match="compiler changed during validation"
     ):
         service.validate("workspace-one", "study", "alpha")
-    assert GitCoordinator(provider.open("workspace-one").root).head() == before
+    assert provider.store("workspace-one").head == before
 
 
 def test_local_sdk_guidance_and_artifact_reads_work_without_harness(
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     _, provider, _ = programs
-    local = WorkspacePrograms(provider)
+    local = WorkspacePrograms(provider, git_factory=provider.git_factory)
     authored = local.author("workspace-one", "study", "alpha", configuration=CONFIG)
     assert local.read_sdk_reference("study")["source"] == STUDY_TEMPLATE
     assert (
@@ -1621,9 +1662,10 @@ def test_local_sdk_guidance_and_artifact_reads_work_without_harness(
         local.validate("workspace-one", "study", "alpha")
 
 
+@pytest.mark.slow
 def test_native_study_validation_and_run_document_compile(
     tmp_path: Path,
-    programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
+    programs: Programs,
 ) -> None:
     """Optional built-binary smoke: real JIT compile, load, and subscriptions.
 

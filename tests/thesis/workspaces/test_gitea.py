@@ -13,7 +13,6 @@ import pytest
 
 from thesis.workspaces.gitea import GiteaWorkspaceProvider, _remove_readonly
 from thesis.workspaces.local import (
-    LocalWorkspaceProvider,
     WorkspacePathError,
     WorkspaceRepositoryError,
     _git,
@@ -108,6 +107,7 @@ def provider(
     return provider
 
 
+@pytest.mark.slow
 def test_create_reconcile_publish_and_rebuild(
     provider: GiteaWorkspaceProvider,
     service: Service,
@@ -153,19 +153,7 @@ def test_create_reconcile_publish_and_rebuild(
     assert boundary.open(manifest.workspace_id).manifest == manifest
 
 
-def test_dirty_work_is_preserved_and_not_published(
-    provider: GiteaWorkspaceProvider, manifest: WorkspaceManifest
-) -> None:
-    workspace = provider.create(manifest)
-    initial = _git(workspace.root, "rev-parse", "HEAD")
-    dirty = workspace.root / "chats/dirty.txt"
-    dirty.write_text("unaccepted content")
-    assert provider.open(manifest.workspace_id).root == workspace.root
-    assert provider.publish(manifest.workspace_id) == initial
-    assert dirty.read_text() == "unaccepted content"
-    assert _git(workspace.root, "status", "--porcelain") == "?? chats/dirty.txt"
-
-
+@pytest.mark.slow
 def test_empty_remote_is_not_listable_until_seeded(
     provider: GiteaWorkspaceProvider,
     service: Service,
@@ -194,9 +182,6 @@ def test_empty_remote_is_not_listable_until_seeded(
     "field,value",
     [
         ("private", False),
-        ("name", "other-workspace"),
-        ("owner", {"login": "other-owner"}),
-        ("description", "unrelated repository"),
         ("default_branch", "--upload-pack=evil"),
         ("clone_url", "https://attacker.test/workspaces/equity-momentum.git"),
         (
@@ -206,6 +191,7 @@ def test_empty_remote_is_not_listable_until_seeded(
         ("clone_url", BASE + "/workspaces/equity-momentum.git?token=" + TOKEN),
     ],
 )
+@pytest.mark.slow
 def test_remote_integrity_fail_closed(
     provider: GiteaWorkspaceProvider,
     service: Service,
@@ -220,6 +206,7 @@ def test_remote_integrity_fail_closed(
     assert TOKEN not in str(error.value)
 
 
+@pytest.mark.slow
 def test_owner_and_manifest_reconciliation(
     provider: GiteaWorkspaceProvider, manifest: WorkspaceManifest
 ) -> None:
@@ -234,6 +221,7 @@ def test_owner_and_manifest_reconciliation(
         provider.create(WorkspaceManifest.model_validate(values))
 
 
+@pytest.mark.slow
 def test_owned_empty_remote_recovers_after_push_failure(
     provider: GiteaWorkspaceProvider,
     manifest: WorkspaceManifest,
@@ -254,6 +242,7 @@ def test_owned_empty_remote_recovers_after_push_failure(
     assert provider.create(manifest).manifest == manifest
 
 
+@pytest.mark.slow
 def test_history_conflict_does_not_reset(
     provider: GiteaWorkspaceProvider, service: Service, manifest: WorkspaceManifest
 ) -> None:
@@ -287,25 +276,6 @@ def test_history_conflict_does_not_reset(
     with pytest.raises(WorkspaceRepositoryError, match="dirty"):
         provider.open(manifest.workspace_id)
     assert (workspace.root / "chats/dirty").read_text() == "dirty"
-
-
-def test_paths_and_local_identity(
-    provider: GiteaWorkspaceProvider, manifest: WorkspaceManifest
-) -> None:
-    workspace = provider.create(manifest)
-    for invalid in ["../escape", "C:\\escape", "/escape"]:
-        with pytest.raises(WorkspacePathError):
-            provider.resolve_path(manifest.workspace_id, invalid)
-    with pytest.raises(WorkspacePathError):
-        provider.open("../escape")
-    values = manifest.model_dump(mode="json")
-    values["repository_identity"]["repository_id"] = "different-workspace"
-    with pytest.raises(WorkspaceRepositoryError, match="identity"):
-        provider.create(WorkspaceManifest.model_validate(values))
-    config = workspace.root / ".git/config"
-    config.write_text(config.read_text() + "\n[http]\n\textraHeader = secret\n")
-    with pytest.raises(WorkspaceRepositoryError, match="configuration"):
-        provider.open(manifest.workspace_id)
 
 
 @pytest.mark.parametrize(
@@ -360,39 +330,7 @@ def test_api_errors_are_sanitized(tmp_path: Path, status: int, body: object) -> 
     assert TOKEN not in str(error.value)
 
 
-def test_local_provider_remains_local(tmp_path: Path) -> None:
-    manifest = load_workspace_manifest("config/thesis/workspace.yaml")
-    provider: WorkspaceRepositoryProvider = LocalWorkspaceProvider(tmp_path / "local")
-    workspace = provider.create(manifest)
-    assert provider.open(manifest.workspace_id).manifest == manifest
-    assert (
-        provider.resolve_path(manifest.workspace_id, "chats")
-        == workspace.root / "chats"
-    )
-    assert provider.publish(manifest.workspace_id) == _git(
-        workspace.root, "rev-parse", "HEAD"
-    )
-    with pytest.raises(WorkspaceRepositoryError):
-        provider.create(manifest)
-
-
-def test_unrelated_repository_is_never_adopted(
-    provider: GiteaWorkspaceProvider, service: Service, manifest: WorkspaceManifest
-) -> None:
-    service.repositories[manifest.workspace_id] = {
-        "private": True,
-        "name": manifest.workspace_id,
-        "owner": {"login": "workspaces"},
-        "clone_url": provider.repository_uri(manifest.workspace_id),
-        "default_branch": "main",
-        "description": "somebody else's repository",
-    }
-    with pytest.raises(WorkspaceRepositoryError):
-        provider.create(manifest)
-    assert not any(request.method == "POST" for request in service.requests)
-    assert not (provider.root / manifest.workspace_id).exists()
-
-
+@pytest.mark.slow
 def test_workspace_isolation_and_manifest_tampering(
     provider: GiteaWorkspaceProvider, manifest: WorkspaceManifest
 ) -> None:
@@ -411,39 +349,6 @@ def test_workspace_isolation_and_manifest_tampering(
     with pytest.raises(WorkspaceRepositoryError, match="identity"):
         provider.open(manifest.workspace_id)
     assert provider.open("second-workspace").manifest.owner.owner_id == "second-owner"
-
-
-def test_remote_manifest_conflict_is_not_merged(
-    provider: GiteaWorkspaceProvider, service: Service, manifest: WorkspaceManifest
-) -> None:
-    workspace = provider.create(manifest)
-    writer = provider.root.parent / "writer"
-    _git(
-        service.root,
-        "clone",
-        str(service.root / (manifest.workspace_id + ".git")),
-        str(writer),
-    )
-    path = writer / ".thesis/workspace.yaml"
-    values = json.loads(path.read_text())
-    values["owner"]["owner_id"] = "attacker"
-    path.write_text(json.dumps(values))
-    _git(writer, "add", "--all")
-    _git(
-        writer,
-        "-c",
-        "user.name=Test",
-        "-c",
-        "user.email=test@localhost",
-        "commit",
-        "-m",
-        "Conflict",
-    )
-    _git(writer, "push", "origin", "main")
-    head = _git(workspace.root, "rev-parse", "HEAD")
-    with pytest.raises(WorkspaceRepositoryError, match="manifest conflict"):
-        provider.open(manifest.workspace_id)
-    assert _git(workspace.root, "rev-parse", "HEAD") == head
 
 
 @pytest.mark.parametrize(

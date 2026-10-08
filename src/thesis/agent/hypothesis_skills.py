@@ -168,7 +168,12 @@ HYPOTHESIS_DEVELOPMENT_SKILLS: tuple[ThesisSkill, ...] = (
         skill_id=DISCOVERY_SKILL_ID,
         version=HYPOTHESIS_DEVELOPMENT_SKILL_VERSION,
         instructions=_DISCOVERY,
-        allowed_tools=("read_workspace", "run_study", "get_job_status", "get_run"),
+        allowed_tools=(
+            "read_workspace",
+            "run_study",
+            "get_job_status",
+            "get_job_result",
+        ),
     ),
     ThesisSkill(
         skill_id=MODEL_CREATION_SKILL_ID,
@@ -186,7 +191,7 @@ HYPOTHESIS_DEVELOPMENT_SKILLS: tuple[ThesisSkill, ...] = (
         skill_id=FALSIFICATION_RCA_SKILL_ID,
         version=HYPOTHESIS_DEVELOPMENT_SKILL_VERSION,
         instructions=_FALSIFICATION_RCA,
-        allowed_tools=("read_workspace", "get_run", "run_backtest"),
+        allowed_tools=("read_workspace", "get_job_result", "run_backtest"),
     ),
     ThesisSkill(
         skill_id=STRATEGY_AUTHORING_SKILL_ID,

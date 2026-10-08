@@ -11,6 +11,9 @@ the phase name — never as orchestrator-attributed ``sub_agent.*`` events.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+from thesis.chat.contracts import HARNESS_RESEARCH_MODEL_TOOL, ToolJobState
 from thesis.research.models import ResearchModel
 from thesis.workflows.core.workflow import Workflow
 from thesis.workflows.research_models import (
@@ -20,15 +23,20 @@ from thesis.workflows.research_models import (
 
 from .contracts.creation import HypothesisDevelopmentRequest
 from .primitives import (
-    _MODEL_TOOL_NAME,
     _WORKFLOW_ACTOR,
 )
 from .services import services_of
 from .state import HypothesisDevelopmentState
 
 __all__ = [
+    "research_model_attribution",
     "run_research_model",
 ]
+
+
+def research_model_attribution(model: ResearchModel) -> Mapping[str, object]:
+    """Return the immutable revision attribution for one model execution."""
+    return {"modelSha256": model.content_sha256}
 
 
 def run_research_model(
@@ -41,23 +49,33 @@ def run_research_model(
     state: HypothesisDevelopmentState,
     *,
     model: ResearchModel,
-    correlation_id: str,
+    job_id: str | None = None,
     label: str,
 ) -> ResearchModelRunResult:
-    """Publish and run one workspace model behind a visible tool job."""
+    """Publish and run one workspace model behind one visible job id.
+
+    The job id is allocated here when the caller has no persisted value, then
+    passed unchanged to the tool job and the harness run so one execution has
+    exactly one identity.  Registration carries the model revision attribution
+    so a resumed submission joins the same tracked job instead of overwriting
+    it or allocating a replacement.
+    """
     chat = workflow.chat
     assert chat is not None
     services = services_of(workflow)
     assert services.research_runner is not None
     experiment_id = services.experiment_id or f"experiment-{request.execution_id}"
+    resolved_job_id = workflow.id_factory("job") if job_id is None else job_id
     job = chat.submit_tool_job(
         request.workspace_id,
         request.execution_id,
-        tool_name=_MODEL_TOOL_NAME,
+        tool_name=HARNESS_RESEARCH_MODEL_TOOL,
         actor_id=_WORKFLOW_ACTOR,
-        correlation_id=correlation_id,
+        job_id=resolved_job_id,
+        attribution=research_model_attribution(model),
     )
-    chat.start_tool_job(request.workspace_id, job.tool_job_id, actor_id=_WORKFLOW_ACTOR)
+    if job.state is ToolJobState.SUBMITTED:
+        chat.start_tool_job(request.workspace_id, job.job_id, actor_id=_WORKFLOW_ACTOR)
     workflow.emit_phase_progress(
         request,
         state.phase,
@@ -67,7 +85,7 @@ def run_research_model(
     try:
         model_run = services.research_runner.run(
             ResearchModelRunRequest(
-                run_id=job.correlation_id,
+                job_id=resolved_job_id,
                 workspace_id=request.workspace_id,
                 model=model,
                 workflow_execution_id=request.execution_id,
@@ -82,7 +100,7 @@ def run_research_model(
     except Exception as error:
         chat.record_tool_result(
             request.workspace_id,
-            job.tool_job_id,
+            job.job_id,
             result=None,
             actor_id=_WORKFLOW_ACTOR,
             success=False,
@@ -99,7 +117,7 @@ def run_research_model(
     result = model_run.backtest
     chat.record_tool_result(
         request.workspace_id,
-        job.tool_job_id,
+        job.job_id,
         result={
             **result.as_dict(),
             "researchModelReference": model_run.model_reference.key,

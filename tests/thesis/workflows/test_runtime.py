@@ -125,7 +125,7 @@ class FakeRunner:
         self,
         *,
         metrics: object | None = None,
-        state: str = "completed",
+        state: str = "succeeded",
         manifest: object | None = None,
         result_artifacts: object | None = None,
     ) -> None:
@@ -159,8 +159,8 @@ class FakeHarnessPort:
     def launch_backtest(self, request: BacktestRequest) -> HarnessBacktestResult:
         self.launched.append(request)
         return HarnessBacktestResult(
-            job_id="job-harness-1",
-            state="completed",
+            job_id=request.job_id,
+            state="succeeded",
             manifest={"manifestId": "manifest-1", "sha256": "c" * 64},
             metrics={"sharpe": 1.5},
             result_artifacts=[],
@@ -273,7 +273,7 @@ def test_build_workflow_runtime_composes_router_and_harness_runner() -> None:
 
     result = runtime.runner.run(
         BacktestRunRequest(
-            run_id="run-1",
+            job_id="job-1",
             workspace_id="workspace-demo",
             bundle=_bundle(),
             workflow_execution_id="execution-1",
@@ -283,19 +283,7 @@ def test_build_workflow_runtime_composes_router_and_harness_runner() -> None:
 
     assert result.succeeded is True
     assert len(port.launched) == 1
-    assert port.launched[0].run_id == "run-1"
-
-
-def test_build_workflow_runtime_accepts_injected_runner_override() -> None:
-    runner = FakeRunner(metrics={"sharpe": 1.0})
-    runtime = _runtime(
-        provider=FakeProvider(_hypothesis_envelope()),
-        clock=_clock(),
-        id_factory=_id_factory(),
-        runner=runner,
-    )
-
-    assert runtime.runner is runner
+    assert port.launched[0].job_id == "job-1"
 
 
 def test_build_workflow_runtime_requires_harness_or_runner() -> None:
@@ -305,38 +293,6 @@ def test_build_workflow_runtime_requires_harness_or_runner() -> None:
             clock=_clock(),
             id_factory=_id_factory(),
         )
-
-
-def test_build_model_router_wires_providers_and_skills() -> None:
-    provider = FakeProvider(_hypothesis_envelope())
-    skills = SkillRegistry(
-        (ThesisSkill("research", "1.0.0", "Analyze claims.", ("run_backtest",)),)
-    )
-    router = build_model_router(
-        role_policies={
-            "research": RolePolicy(
-                role="research",
-                version="1.0.0",
-                model_profile="research-profile",
-                skills=("research",),
-                allowed_tools=("run_backtest",),
-            )
-        },
-        model_profiles={
-            "research-profile": ModelProfile(
-                profile_id="research-profile",
-                version="1.0.0",
-                provider="fake",
-                model="research-model",
-            )
-        },
-        providers={"fake": provider},
-        skills=skills,
-    )
-
-    decision = router.resolve("research")
-    assert decision.role == "research"
-    assert decision.allowed_tools == ("run_backtest",)
 
 
 def test_workflow_runtime_rejects_runner_without_run_port() -> None:

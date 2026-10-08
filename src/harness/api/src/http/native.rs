@@ -75,10 +75,10 @@ impl BacktestRunner for NativeBacktestRunner {
             .map_err(|error| error.to_string())?;
         let client = self.resolved_lake_client()?;
         let directory = match &self.output_root {
-            Some(root) => root.join(&native.run_id),
+            Some(root) => root.join(&native.job_id),
             None => std::env::temp_dir()
                 .join("harness-api-native")
-                .join(&native.run_id),
+                .join(&native.job_id),
         };
         let (outcome, _artifact_path) =
             match configuration.document.get("shell").and_then(Value::as_str) {
@@ -152,9 +152,9 @@ impl ScreeningRunner for NativeScreenRunner {
                     || {
                         std::env::temp_dir()
                             .join("harness-api-native-screens")
-                            .join(configuration.run_id())
+                            .join(&configuration.job_id)
                     },
-                    |root| root.join(configuration.run_id()),
+                    |root| root.join(&configuration.job_id),
                 )
             },
             Path::to_path_buf,
@@ -174,7 +174,7 @@ impl ScreeningRunner for NativeScreenRunner {
         let mut artifacts = BTreeMap::new();
         collect_artifacts(&directory, &directory, &mut artifacts);
         Ok(ScreenRunOutcome {
-            completed: outcome.completed(),
+            completed: outcome.succeeded(),
             rows: outcome.row_count() as u64,
             artifacts,
             error: outcome.error().map(str::to_string),

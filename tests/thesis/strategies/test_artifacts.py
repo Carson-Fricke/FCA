@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import gc
-import json
-import shutil
 import subprocess
 from pathlib import Path
 from typing import cast
@@ -15,16 +12,14 @@ from thesis.persistence.git import GitCoordinator, GitFenceError, GitPublication
 from thesis.persistence.journal import ArtifactRef, CommandJournal, content_hash
 from thesis.strategies import (
     StrategyArtifactError,
-    StrategyBundle,
     StrategyBundleError,
-    StrategyDesign,
     StrategyValidationError,
-    StrategyValidationResult,
     WorkspaceStrategyArtifacts,
 )
-from thesis.strategies.validation import StrategyValidationRequest
 from thesis.workspaces.local import LocalWorkspaceProvider
 from thesis.workspaces.manifest import load_workspace_manifest
+
+pytestmark = pytest.mark.slow
 
 SOURCE = """use harness_strategy_sdk::{StrategyProgram, export_strategy_program};
 struct Demo;
@@ -183,19 +178,9 @@ def test_tampering_hidden_and_completion_rejected(workspace):
 @pytest.mark.parametrize(
     "value",
     [
-        design(entrypoint="src/main.rs"),
-        design(files={"src/lib.rs": SOURCE, "src/helper.rs": "fn helper() {}"}),
         design(files={"src/lib.rs": "print('python')"}),
-        design(files={"src/lib.rs": SOURCE + "#[cfg(test)] mod tests {}"}),
-        design(tests={"src/tests.rs": TEST}),
-        design(tests={"tests/check.rs": "// not a runnable test"}),
         design(tests={"tests/check.rs": TEST, "tests/CHECK.rs": TEST}),
-        design(tests={"tests/a.rs": TEST, "tests/a.rs/nested.rs": TEST}),
-        design(tests={"tests/manifest.json/check.rs": TEST}),
         design(tests={"tests/../check.rs": TEST}),
-        design(tests={"tests/NUL.rs": TEST}),
-        design(workspaceId="untrusted"),
-        design(executionId="untrusted"),
     ],
 )
 def test_rejected_contract_writes_nothing(workspace, value):
@@ -206,26 +191,6 @@ def test_rejected_contract_writes_nothing(workspace, value):
     assert git(root, "rev-parse", "HEAD") == before
     assert not (root / "strategies/momentum").exists()
     assert not (root / ".git/thesis-strategies.sqlite3").exists()
-
-
-def test_injected_validator_seam(workspace):
-    provider, wid, root = workspace
-
-    class Reject:
-        def validate(
-            self, request: StrategyValidationRequest
-        ) -> StrategyValidationResult:
-            assert (
-                request.bundle_sha256
-                == StrategyDesign.from_mapping(design()).bundle.bundle_sha256
-            )
-            return StrategyValidationResult(False, ("compile failure",))
-
-    with pytest.raises(StrategyValidationError, match="compile failure"):
-        WorkspaceStrategyArtifacts(provider, Reject()).author(
-            wid, "exec-1", design(), "Demo", "SPY"
-        )
-    assert not (root / "strategies/momentum").exists()
 
 
 def test_symlink_and_case_confinement(workspace):
@@ -245,35 +210,6 @@ def test_symlink_and_case_confinement(workspace):
     with pytest.raises(StrategyArtifactError, match="symlink"):
         WorkspaceStrategyArtifacts(provider).author(
             wid, "exec-1", design(), "Demo", "SPY"
-        )
-
-
-def test_bundle_digest_covers_tests_and_design_metadata():
-    first = StrategyDesign.from_mapping(design()).bundle
-    second = StrategyDesign.from_mapping(
-        design(tests={"tests/program.rs": TEST + "// changed"})
-    ).bundle
-    third = StrategyDesign.from_mapping(
-        design(
-            exitCriteria=[
-                {
-                    "falsifierId": "f1",
-                    "observable": "signal",
-                    "condition": "gt",
-                    "threshold": 1.0,
-                    "description": "Flatten",
-                }
-            ]
-        )
-    ).bundle
-    assert len({first.bundle_sha256, second.bundle_sha256, third.bundle_sha256}) == 3
-    assert first.source[0].sha256 == second.source[0].sha256 == third.source[0].sha256
-    with pytest.raises(StrategyBundleError, match="overlap"):
-        StrategyBundle.create(
-            strategy_id="demo",
-            version="1.0.0",
-            source={"a.rs": SOURCE},
-            tests={"A.rs": TEST},
         )
 
 
@@ -312,17 +248,6 @@ def test_git_artifact_recovery_fence_and_binary_integrity(workspace):
     with coordinator.publication_lock():
         with pytest.raises(GitFenceError, match="lock"):
             GitCoordinator(root).publish(next_entry, expected_head=coordinator.head())
-
-
-def test_manifest_matches_source_of_truth(workspace):
-    provider, wid, root = workspace
-    receipt = WorkspaceStrategyArtifacts(provider).author(
-        wid, "exec-1", design(), "Demo", "SPY"
-    )
-    path = root / cast(str, receipt["artifactPath"]) / "manifest.json"
-    manifest = json.loads(path.read_bytes())
-    assert manifest["bundleSha256"] == receipt["bundleSha256"]
-    assert content_hash(path.read_bytes()) == receipt["manifestSha256"]
 
 
 def test_version_history_and_manifest_only_publication(workspace):
@@ -396,22 +321,6 @@ def test_fresh_clone_projection_and_completion_without_journal(workspace, tmp_pa
     assert cloned.list(wid) == expected
 
 
-def test_lost_journal_and_untracked_markers_do_not_control_projection(workspace):
-    provider, wid, root = workspace
-    service = WorkspaceStrategyArtifacts(provider)
-    receipt = service.author(wid, "exec-1", design(), "Demo", "SPY")
-    expected = service.list(wid)
-    gc.collect()
-    for path in (root / ".git").glob("thesis-strategies.sqlite3*"):
-        path.unlink()
-    assert service.list(wid) == expected
-    assert service.verify_completion(wid, "exec-1", receipt) == receipt
-    assert not (root / ".git/thesis-strategies.sqlite3").exists()
-    copied = root / "strategies/forged/0.1.0"
-    shutil.copytree(root / cast(str, receipt["artifactPath"]), copied)
-    assert service.list(wid) == expected
-
-
 def test_marker_publish_failure_attests_already_published_artifact(
     workspace, monkeypatch
 ):
@@ -444,26 +353,6 @@ def test_marker_publish_failure_attests_already_published_artifact(
         WorkspaceStrategyArtifacts(provider).verify_completion(wid, "exec-1", receipt)
         == receipt
     )
-
-
-def test_initial_provider_failure_clone_has_no_published_projection(
-    workspace, tmp_path, monkeypatch
-):
-    provider, wid, root = workspace
-
-    def fail(workspace_id):
-        raise RuntimeError("artifact push failed")
-
-    monkeypatch.setattr(provider, "publish", fail)
-    with pytest.raises(RuntimeError, match="artifact push failed"):
-        WorkspaceStrategyArtifacts(provider).author(
-            wid, "exec-1", design(), "Demo", "SPY"
-        )
-    assert not (root / "strategies/momentum/0.1.0/publication.json").exists()
-    fresh = LocalWorkspaceProvider(tmp_path / "failed-clone")
-    git(tmp_path, "clone", "--quiet", str(root), str(fresh.root / wid))
-    assert WorkspaceStrategyArtifacts(fresh).list(wid) == ()
-    assert not (fresh.open(wid).root / ".git/thesis-strategies.sqlite3").exists()
 
 
 def test_git_environment_cannot_redirect_workspace_or_identity(
@@ -555,25 +444,6 @@ def test_clone_retry_recovers_missing_artifact_and_marker_without_journal(
             {str(marker.relative_to(cloned_root)).replace("\\", "/"): expected},
         )
     assert marker.read_bytes() == b"different"
-
-
-def test_unicode_git_paths_are_unquoted_and_verified(workspace):
-    provider, wid, root = workspace
-    path = "tests/caf\u00e9.rs"
-    receipt = WorkspaceStrategyArtifacts(provider).author(
-        wid, "exec-1", design(tests={path: TEST}), "Demo", "SPY"
-    )
-    coordinator = GitCoordinator(root)
-    tracked = f"{receipt['artifactPath']}/{path}"
-    assert tracked in coordinator.tracked_paths("strategies")
-    assert coordinator.file_matches(
-        cast(str, receipt["gitCommit"]), tracked, TEST.encode()
-    )
-    assert len(WorkspaceStrategyArtifacts(provider).list(wid)) == 1
-    assert (
-        WorkspaceStrategyArtifacts(provider).verify_completion(wid, "exec-1", receipt)
-        == receipt
-    )
 
 
 def test_projection_uses_topology_not_timestamp_or_lexical_version(

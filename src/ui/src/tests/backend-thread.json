@@ -17,7 +17,7 @@
     "strategy_ids": [],
     "experiment_ids": [],
     "workflow_execution_ids": [],
-    "tool_job_ids": []
+    "job_ids": []
   },
   "updated_at": "2026-01-01T00:00:00Z",
   "input_consumed_positions": {}

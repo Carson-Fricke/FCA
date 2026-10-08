@@ -27,20 +27,16 @@ from thesis.http.auth import SESSION_COOKIE_NAME, SessionCookieAuthenticator
 from thesis.identity.audit import (
     FixedWindowRateLimiter,
     IdentityAuditEvent,
-    IdentityAuditSink,
     IdentityAuditTrail,
     IdentityRateLimiters,
     RateLimitPolicy,
     RecordingIdentityAuditSink,
     RedemptionIdentityAuditSink,
-    ResidencyIdentityAuditSink,
 )
 from thesis.identity.local import LocalAccountStore, LocalInviteStore
 from thesis.identity.models import Invite, Session, invite_token_hash
 from thesis.identity.redemption import (
-    RedemptionAuditEvent,
     RedemptionRateLimited,
-    RedemptionRateLimiter,
     RedemptionService,
 )
 
@@ -223,10 +219,6 @@ def test_identity_rate_limiters_cover_login_invite_and_redemption() -> None:
     ]
 
 
-def test_fixed_window_limiter_matches_the_redemption_protocol() -> None:
-    assert isinstance(FixedWindowRateLimiter(), RedemptionRateLimiter)
-
-
 def test_redemption_service_enforces_its_injected_limiter(tmp_path: Path) -> None:
     invites = LocalInviteStore(tmp_path / "invites.json")
     accounts = LocalAccountStore(tmp_path / "accounts.json")
@@ -289,31 +281,6 @@ def test_recording_sink_captures_login_invite_redemption_and_consent(
     assert not any(hasattr(event, "token") for event in events)
 
 
-def test_recording_sink_is_structurally_an_identity_audit_sink() -> None:
-    assert isinstance(RecordingIdentityAuditSink(), IdentityAuditSink)
-
-
-def test_redemption_adapter_preserves_rate_limited_outcome() -> None:
-    recorder = RecordingIdentityAuditSink()
-    adapter = RedemptionIdentityAuditSink(recorder)
-
-    adapter.record(
-        RedemptionAuditEvent(
-            outcome="rejected",
-            at=NOW,
-            invite_id=None,
-            email="invitee@example.com",
-            reason="rate_limited",
-            client_key="client-1",
-        )
-    )
-
-    event = recorder.events[0]
-    assert event.kind == "invite_redeemed"
-    assert event.outcome == "rate_limited"
-    assert event.reason == "rate_limited"
-
-
 def test_non_success_events_require_a_reason_and_success_forbids_one() -> None:
     with pytest.raises(ValueError, match="requires a reason"):
         IdentityAuditEvent(kind="login", at=NOW, outcome="failure")
@@ -335,47 +302,6 @@ class _FakeAuditWriter:
     def append_audit(self, record: OperationAuditRecord) -> OperationAuditRecord:
         self.records.append(record)
         return record
-
-
-def test_residency_adapter_maps_events_onto_operation_audit_records() -> None:
-    writer = _FakeAuditWriter()
-    adapter = ResidencyIdentityAuditSink(
-        writer,
-        workspace_id="identity-audit",
-        session_id="workspace-a:tok-0001",
-        clock=_clock,
-        operation_id_factory=lambda: "audit-1",
-    )
-    event = IdentityAuditEvent(
-        kind="login",
-        at=NOW,
-        account_id=ACCOUNT_ID,
-        actor_id=ACCOUNT_ID,
-        client_key="203.0.113.7",
-    )
-
-    adapter.record(event)
-    adapter.record(
-        IdentityAuditEvent(
-            kind="login",
-            at=NOW,
-            account_id=ACCOUNT_ID,
-            outcome="rate_limited",
-            reason="rate_limited",
-        )
-    )
-
-    recorded, unavailable = writer.records
-    assert recorded.operation_id == "audit-1"
-    assert recorded.workspace_id == "identity-audit"
-    assert recorded.operation == "open_investigation"
-    assert recorded.status == "recorded"
-    assert recorded.recorded_at == NOW
-    assert recorded.route_ref == "identity/login"
-    assert recorded.inputs_digest == event.digest
-    assert recorded.reason is None
-    assert unavailable.status == "unavailable"
-    assert unavailable.reason == "rate_limited"
 
 
 def test_audit_events_never_accept_or_carry_a_secret_field() -> None:

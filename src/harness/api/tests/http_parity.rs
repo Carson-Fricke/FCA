@@ -6,6 +6,7 @@
 //! network access is required.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use api::http::clock::{Clock, SystemClock};
@@ -16,8 +17,8 @@ use api::http::launcher::{
 };
 use api::http::state::AppConfig;
 use api::http::store::{
-    artifact_digest, InMemoryJobRepository, InMemoryRunStore, RunCatalogRecord, RunStatus,
-    RunStore, SasIssuer,
+    artifact_digest, Admission, FileSystemJobStore, InMemoryJobStore, JobKind, JobRecord, JobState,
+    JobStore, SasIssuer, StoreError, StoredJob,
 };
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Request, StatusCode};
@@ -132,8 +133,8 @@ impl BacktestRunner for StubRunner {
             return Err("StrategyLoadError: MissingStrategy".to_string());
         }
         let body = format!(
-            "{{\"manifest\":{{\"run_id\":\"{}\"}},\"status\":\"completed\"}}",
-            configuration.run_id
+            "{{\"manifest\":{{\"job_id\":\"{}\"}},\"status\":\"completed\"}}",
+            configuration.job_id
         );
         let mut artifacts = BTreeMap::new();
         artifacts.insert("backtest.json".to_string(), body.into_bytes());
@@ -176,7 +177,7 @@ impl SasIssuer for RecordingSasIssuer {
 
 struct TestApp {
     router: Router,
-    store: Arc<InMemoryRunStore>,
+    store: Arc<InMemoryJobStore>,
 }
 
 fn build(
@@ -184,23 +185,15 @@ fn build(
     sas: Option<Arc<dyn SasIssuer>>,
     runner: Arc<dyn BacktestRunner>,
 ) -> TestApp {
-    let store = Arc::new(InMemoryRunStore::new());
-    let jobs = Arc::new(InMemoryJobRepository::new());
+    let store = Arc::new(InMemoryJobStore::new());
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-    let launcher = Arc::new(InProcessLauncher::new(
-        store.clone(),
-        jobs.clone(),
-        runner,
-        clock.clone(),
-    ));
+    let launcher = Arc::new(InProcessLauncher::new(store.clone(), runner, clock.clone()));
     let config = AppConfig {
         bearer_token: token.map(str::to_string),
-        run_store: store.clone(),
-        job_repository: jobs.clone(),
+        job_store: store.clone(),
         launcher,
         screener_launcher: Arc::new(api::http::screener::InProcessScreenLauncher::new(
             store.clone(),
-            jobs.clone(),
             Arc::new(api::http::screener::UnavailableScreeningRunner),
             clock.clone(),
         )),
@@ -220,13 +213,15 @@ fn app_with(token: Option<&str>, runner: Arc<dyn BacktestRunner>) -> TestApp {
 }
 
 fn seed(
-    store: &dyn RunStore,
-    run_id: &str,
-    status: RunStatus,
+    store: &dyn JobStore,
+    job_id: &str,
+    state: JobState,
     strategy_id: &str,
     artifacts: &[(&str, &[u8])],
 ) {
-    let mut record = RunCatalogRecord::new(run_id, status, strategy_id);
+    let now = Utc::now();
+    let mut record = JobRecord::new(job_id, JobKind::Backtest, "seed-input", now);
+    record.strategy_id = strategy_id.to_string();
     record.data_start = chrono::NaiveDate::from_ymd_opt(2024, 1, 2);
     record.data_end = chrono::NaiveDate::from_ymd_opt(2024, 1, 3);
     record
@@ -235,11 +230,14 @@ fn seed(
     record
         .metrics
         .insert("max_drawdown".to_string(), "-0.0825".to_string());
+    store.admit(record).expect("seed admit");
+    let mut record = store.get(job_id).expect("seeded job");
+    record.state = state;
     let mut map = BTreeMap::new();
     for (name, payload) in artifacts {
         map.insert((*name).to_string(), payload.to_vec());
     }
-    store.put(record, map).expect("seed");
+    store.put_result(record, map).expect("seed");
 }
 
 async fn send(router: &Router, request: Request<Body>) -> (StatusCode, HeaderMap, Vec<u8>) {
@@ -309,11 +307,11 @@ fn post_raw(path: &str, token: &str, body: &[u8]) -> Request<Body> {
         .expect("request")
 }
 
-fn backtest_document(run_id: &str) -> Value {
+fn backtest_document(job_id: &str) -> Value {
     json!({
         "schema_version": 1,
         "shell": "backtest",
-        "run_id": run_id,
+        "job_id": job_id,
         "start": "2024-01-02T14:30:00Z",
         "end": "2024-01-19T21:00:00Z",
         "data": {"symbols": ["SPY"],
@@ -339,10 +337,10 @@ async fn health_is_unauthenticated_and_has_probe_alias() {
 async fn routes_reject_missing_or_invalid_credentials() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
     let cases: Vec<Request<Body>> = vec![
-        get("/v1/backtests/runs"),
-        get("/v1/backtests/runs/run-1"),
-        get("/v1/backtests/runs/run-1/artifacts"),
-        delete_auth("/v1/backtests/runs/run-1", "wrong"),
+        get("/v1/jobs"),
+        get("/v1/jobs/run-1"),
+        get("/v1/jobs/run-1/artifacts"),
+        delete_auth("/v1/jobs/run-1", "wrong"),
     ];
     for request in cases {
         let (status, headers, body) = send(&test.router, request).await;
@@ -361,12 +359,12 @@ async fn routes_reject_missing_or_invalid_credentials() {
 }
 
 #[tokio::test]
-async fn list_runs_returns_catalog_rows_sorted_by_run_id() {
+async fn list_jobs_returns_records_sorted_by_job_id() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
     seed(
         test.store.as_ref(),
-        "run-1",
-        RunStatus::Complete,
+        "job-1",
+        JobState::Succeeded,
         "momentum",
         &[
             ("fills.parquet", b"fills-bytes"),
@@ -375,106 +373,105 @@ async fn list_runs_returns_catalog_rows_sorted_by_run_id() {
     );
     seed(
         test.store.as_ref(),
-        "run-2",
-        RunStatus::Failed,
+        "job-2",
+        JobState::Failed,
         "mean-reversion",
         &[("backtest.json", b"{}")],
     );
 
-    let (status, _, body) = send(&test.router, get_auth("/v1/backtests/runs", BEARER)).await;
+    let (status, _, body) = send(&test.router, get_auth("/v1/jobs", BEARER)).await;
     assert_eq!(status, StatusCode::OK);
-    let runs = &json_body(&body)["runs"];
-    assert_eq!(runs[0]["run_id"], "run-1");
-    assert_eq!(runs[1]["run_id"], "run-2");
-    assert_eq!(runs[0]["run_digest"].as_str().map(str::len), Some(64));
-    assert_eq!(runs[0]["status"], "complete");
-    assert_eq!(runs[0]["strategy_id"], "momentum");
-    assert_eq!(runs[0]["data_start"], "2024-01-02");
-    assert_eq!(runs[0]["artifact_count"], 2);
+    let jobs = &json_body(&body)["jobs"];
+    assert_eq!(jobs[0]["job_id"], "job-1");
+    assert_eq!(jobs[1]["job_id"], "job-2");
+    assert_eq!(jobs[0]["run_digest"].as_str().map(str::len), Some(64));
+    assert_eq!(jobs[0]["state"], "succeeded");
+    assert_eq!(jobs[0]["strategy_id"], "momentum");
+    assert_eq!(jobs[0]["data_start"], "2024-01-02");
+    assert_eq!(jobs[0]["artifact_count"], 2);
     assert_eq!(
-        runs[0]["total_bytes"],
+        jobs[0]["total_bytes"],
         (b"fills-bytes".len() + b"actions-bytes".len()) as u64
     );
-    assert_eq!(runs[0]["metrics"]["sharpe"], "1.2345");
+    assert_eq!(jobs[0]["metrics"]["sharpe"], "1.2345");
 }
 
 #[tokio::test]
-async fn list_runs_filters_by_status_and_strategy() {
+async fn list_jobs_filters_by_state_kind_and_strategy() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
     seed(
         test.store.as_ref(),
-        "run-1",
-        RunStatus::Complete,
+        "job-1",
+        JobState::Succeeded,
         "momentum",
         &[("a", b"a")],
     );
     seed(
         test.store.as_ref(),
-        "run-2",
-        RunStatus::Failed,
+        "job-2",
+        JobState::Failed,
         "mean-reversion",
         &[("a", b"a")],
     );
 
-    let (_, _, failed) = send(
-        &test.router,
-        get_auth("/v1/backtests/runs?status=failed", BEARER),
-    )
-    .await;
-    assert_eq!(json_body(&failed)["runs"][0]["run_id"], "run-2");
+    let (_, _, failed) = send(&test.router, get_auth("/v1/jobs?state=failed", BEARER)).await;
+    assert_eq!(json_body(&failed)["jobs"][0]["job_id"], "job-2");
 
     let (_, _, momentum) = send(
         &test.router,
-        get_auth("/v1/backtests/runs?strategy_id=momentum", BEARER),
+        get_auth("/v1/jobs?strategy_id=momentum", BEARER),
     )
     .await;
-    assert_eq!(json_body(&momentum)["runs"][0]["run_id"], "run-1");
+    assert_eq!(json_body(&momentum)["jobs"][0]["job_id"], "job-1");
 
     let (_, _, both) = send(
         &test.router,
-        get_auth(
-            "/v1/backtests/runs?status=failed&strategy_id=momentum",
-            BEARER,
-        ),
+        get_auth("/v1/jobs?state=failed&strategy_id=momentum", BEARER),
     )
     .await;
-    assert_eq!(json_body(&both)["runs"], json!([]));
+    assert_eq!(json_body(&both)["jobs"], json!([]));
+
+    let (_, _, backtests) = send(&test.router, get_auth("/v1/jobs?kind=backtest", BEARER)).await;
+    assert_eq!(json_body(&backtests)["jobs"].as_array().unwrap().len(), 2);
+
+    let (_, _, studies) = send(&test.router, get_auth("/v1/jobs?kind=study", BEARER)).await;
+    assert_eq!(json_body(&studies)["jobs"], json!([]));
 }
 
 #[tokio::test]
-async fn list_runs_rejects_an_unknown_status_value() {
+async fn list_jobs_rejects_an_unknown_state_value() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
-    let (status, _, body) = send(
-        &test.router,
-        get_auth("/v1/backtests/runs?status=archived", BEARER),
-    )
-    .await;
+    let (status, _, body) = send(&test.router, get_auth("/v1/jobs?state=archived", BEARER)).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(json_body(&body)["error"]["code"], "validation_error");
+
+    let (kind_status, _, kind_body) =
+        send(&test.router, get_auth("/v1/jobs?kind=sweep", BEARER)).await;
+    assert_eq!(kind_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(json_body(&kind_body)["error"]["code"], "validation_error");
 }
 
 #[tokio::test]
-async fn get_run_returns_the_catalog_row_or_404() {
+async fn get_job_returns_the_record_or_404() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
     seed(
         test.store.as_ref(),
-        "run-1",
-        RunStatus::Complete,
+        "job-1",
+        JobState::Succeeded,
         "momentum",
         &[("a", b"a")],
     );
 
-    let (found_status, _, found) =
-        send(&test.router, get_auth("/v1/backtests/runs/run-1", BEARER)).await;
+    let (found_status, _, found) = send(&test.router, get_auth("/v1/jobs/job-1", BEARER)).await;
     assert_eq!(found_status, StatusCode::OK);
-    assert_eq!(json_body(&found)["run_id"], "run-1");
+    assert_eq!(json_body(&found)["job_id"], "job-1");
 
     let (missing_status, _, missing) =
-        send(&test.router, get_auth("/v1/backtests/runs/unknown", BEARER)).await;
+        send(&test.router, get_auth("/v1/jobs/unknown", BEARER)).await;
     assert_eq!(missing_status, StatusCode::NOT_FOUND);
     assert_eq!(
         json_body(&missing),
-        json!({"error": {"code": "run_not_found", "message": "the requested backtest run does not exist"}})
+        json!({"error": {"code": "job_not_found", "message": "the requested job does not exist"}})
     );
 }
 
@@ -484,7 +481,7 @@ async fn list_artifacts_reports_the_reproducibility_manifest_shape() {
     seed(
         test.store.as_ref(),
         "run-1",
-        RunStatus::Complete,
+        JobState::Succeeded,
         "momentum",
         &[
             ("fills.parquet", b"fills-bytes"),
@@ -492,21 +489,28 @@ async fn list_artifacts_reports_the_reproducibility_manifest_shape() {
         ],
     );
 
-    let (status, _, body) = send(
-        &test.router,
-        get_auth("/v1/backtests/runs/run-1/artifacts", BEARER),
-    )
-    .await;
+    let (status, _, body) = send(&test.router, get_auth("/v1/jobs/run-1/artifacts", BEARER)).await;
     assert_eq!(status, StatusCode::OK);
     let artifacts = &json_body(&body)["artifacts"];
     assert_eq!(artifacts[0]["name"], "actions.parquet");
     assert_eq!(artifacts[1]["name"], "fills.parquet");
     assert_eq!(artifacts[0]["sizeBytes"], b"actions-bytes".len() as u64);
-    assert_eq!(artifacts[0]["uri"], "backtests/run-1/actions.parquet");
+    let uri = artifacts[0]["uri"].as_str().expect("artifact uri");
+    assert_eq!(uri, "jobs/run-1/actions.parquet");
+    let derived_name = uri.strip_prefix("jobs/run-1/").expect("job prefix");
+    assert_eq!(derived_name, "actions.parquet");
     assert_eq!(artifacts[0]["sha256"], artifact_digest(b"actions-bytes"));
     assert_eq!(artifacts[0]["sas_url"], Value::Null);
     assert!(artifacts[0].get("object_path").is_none());
     assert!(artifacts[0].get("size").is_none());
+
+    let (round_status, _, round_body) = send(
+        &test.router,
+        get_auth(&format!("/v1/jobs/run-1/artifacts/{derived_name}"), BEARER),
+    )
+    .await;
+    assert_eq!(round_status, StatusCode::OK);
+    assert_eq!(round_body, b"actions-bytes");
 }
 
 #[tokio::test]
@@ -520,7 +524,7 @@ async fn list_artifacts_issues_scoped_sas_urls_when_configured() {
     seed(
         test.store.as_ref(),
         "run-1",
-        RunStatus::Complete,
+        JobState::Succeeded,
         "momentum",
         &[
             ("fills.parquet", b"fills-bytes"),
@@ -528,22 +532,18 @@ async fn list_artifacts_issues_scoped_sas_urls_when_configured() {
         ],
     );
 
-    let (status, _, body) = send(
-        &test.router,
-        get_auth("/v1/backtests/runs/run-1/artifacts", BEARER),
-    )
-    .await;
+    let (status, _, body) = send(&test.router, get_auth("/v1/jobs/run-1/artifacts", BEARER)).await;
     assert_eq!(status, StatusCode::OK);
     let artifacts = &json_body(&body)["artifacts"];
     assert_eq!(
         artifacts[1]["sas_url"],
-        "https://storage.example/backtests/run-1/fills.parquet?sig=abc"
+        "https://storage.example/jobs/run-1/fills.parquet?sig=abc"
     );
     assert_eq!(
         *issuer.paths.lock().expect("paths"),
         vec![
-            "backtests/run-1/actions.parquet".to_string(),
-            "backtests/run-1/fills.parquet".to_string()
+            "jobs/run-1/actions.parquet".to_string(),
+            "jobs/run-1/fills.parquet".to_string()
         ]
     );
 }
@@ -554,14 +554,14 @@ async fn download_artifact_returns_exact_payload_bytes() {
     seed(
         test.store.as_ref(),
         "run-1",
-        RunStatus::Complete,
+        JobState::Succeeded,
         "momentum",
         &[("fills.parquet", b"fills-bytes")],
     );
 
     let (status, headers, body) = send(
         &test.router,
-        get_auth("/v1/backtests/runs/run-1/artifacts/fills.parquet", BEARER),
+        get_auth("/v1/jobs/run-1/artifacts/fills.parquet", BEARER),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -580,22 +580,22 @@ async fn download_artifact_rejects_unknown_runs_and_artifacts() {
     seed(
         test.store.as_ref(),
         "run-1",
-        RunStatus::Complete,
+        JobState::Succeeded,
         "momentum",
         &[("fills.parquet", b"fills-bytes")],
     );
 
     let (missing_run_status, _, missing_run) = send(
         &test.router,
-        get_auth("/v1/backtests/runs/unknown/artifacts/fills.parquet", BEARER),
+        get_auth("/v1/jobs/unknown/artifacts/fills.parquet", BEARER),
     )
     .await;
     assert_eq!(missing_run_status, StatusCode::NOT_FOUND);
-    assert_eq!(json_body(&missing_run)["error"]["code"], "run_not_found");
+    assert_eq!(json_body(&missing_run)["error"]["code"], "job_not_found");
 
     let (missing_artifact_status, _, missing_artifact) = send(
         &test.router,
-        get_auth("/v1/backtests/runs/run-1/artifacts/missing.parquet", BEARER),
+        get_auth("/v1/jobs/run-1/artifacts/missing.parquet", BEARER),
     )
     .await;
     assert_eq!(missing_artifact_status, StatusCode::NOT_FOUND);
@@ -611,41 +611,33 @@ async fn delete_run_removes_the_row_and_artifacts_together() {
     seed(
         test.store.as_ref(),
         "run-1",
-        RunStatus::Complete,
+        JobState::Succeeded,
         "momentum",
         &[("fills.parquet", b"fills-bytes")],
     );
     seed(
         test.store.as_ref(),
         "run-2",
-        RunStatus::Failed,
+        JobState::Failed,
         "mean-reversion",
         &[("backtest.json", b"{}")],
     );
 
-    let (removed_status, _, removed) = send(
-        &test.router,
-        delete_auth("/v1/backtests/runs/run-1", BEARER),
-    )
-    .await;
+    let (removed_status, _, removed) =
+        send(&test.router, delete_auth("/v1/jobs/run-1", BEARER)).await;
     assert_eq!(removed_status, StatusCode::NO_CONTENT);
     assert!(removed.is_empty());
 
-    let (gone_status, _, _) =
-        send(&test.router, get_auth("/v1/backtests/runs/run-1", BEARER)).await;
+    let (gone_status, _, _) = send(&test.router, get_auth("/v1/jobs/run-1", BEARER)).await;
     assert_eq!(gone_status, StatusCode::NOT_FOUND);
 
-    let (repeat_status, _, _) = send(
-        &test.router,
-        delete_auth("/v1/backtests/runs/run-1", BEARER),
-    )
-    .await;
+    let (repeat_status, _, _) = send(&test.router, delete_auth("/v1/jobs/run-1", BEARER)).await;
     assert_eq!(repeat_status, StatusCode::NOT_FOUND);
     assert_eq!(
         test.store
-            .list(None, None)
+            .list(None, None, None)
             .iter()
-            .map(|r| r.run_id.as_str())
+            .map(|r| r.job_id.as_str())
             .collect::<Vec<_>>(),
         vec!["run-2"]
     );
@@ -654,7 +646,7 @@ async fn delete_run_removes_the_row_and_artifacts_together() {
 #[tokio::test]
 async fn authenticator_fails_closed_without_a_configured_token() {
     let test = app_with(None, Arc::new(StubRunner { fail: false }));
-    let (status, _, _) = send(&test.router, get_auth("/v1/backtests/runs", "any-value")).await;
+    let (status, _, _) = send(&test.router, get_auth("/v1/jobs", "any-value")).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
@@ -680,12 +672,12 @@ async fn dev_launch_completes_and_becomes_queryable_end_to_end() {
     );
     assert_eq!(
         headers.get(header::LOCATION).and_then(|v| v.to_str().ok()),
-        Some("/v1/backtests/jobs/momentum-spy-2024-01")
+        Some("/v1/jobs/momentum-spy-2024-01")
     );
 
     let (job_status, _, job_body) = send(
         &test.router,
-        get_auth("/v1/backtests/jobs/momentum-spy-2024-01", BEARER),
+        get_auth("/v1/jobs/momentum-spy-2024-01", BEARER),
     )
     .await;
     assert_eq!(job_status, StatusCode::OK);
@@ -694,12 +686,12 @@ async fn dev_launch_completes_and_becomes_queryable_end_to_end() {
 
     let (run_status, _, run_body) = send(
         &test.router,
-        get_auth("/v1/backtests/runs/momentum-spy-2024-01", BEARER),
+        get_auth("/v1/jobs/momentum-spy-2024-01", BEARER),
     )
     .await;
     assert_eq!(run_status, StatusCode::OK);
     let row = json_body(&run_body);
-    assert_eq!(row["status"], "complete");
+    assert_eq!(row["state"], "succeeded");
     assert_eq!(row["strategy_id"], "spy-momentum");
     assert!(row["configuration_digest"].is_string());
     assert_eq!(row["artifact_count"], 1);
@@ -707,7 +699,7 @@ async fn dev_launch_completes_and_becomes_queryable_end_to_end() {
     let (_, _, artifact_body) = send(
         &test.router,
         get_auth(
-            "/v1/backtests/runs/momentum-spy-2024-01/artifacts/backtest.json",
+            "/v1/jobs/momentum-spy-2024-01/artifacts/backtest.json",
             BEARER,
         ),
     )
@@ -733,7 +725,7 @@ async fn failed_launch_is_recorded_on_the_job_and_leaves_no_run() {
 
     let (_, _, job_body) = send(
         &test.router,
-        get_auth("/v1/backtests/jobs/momentum-spy-2024-01", BEARER),
+        get_auth("/v1/jobs/momentum-spy-2024-01", BEARER),
     )
     .await;
     assert_eq!(json_body(&job_body)["state"], "failed");
@@ -742,13 +734,330 @@ async fn failed_launch_is_recorded_on_the_job_and_leaves_no_run() {
         .expect("message")
         .contains("StrategyLoadError"));
 
-    let (run_status, _, _) = send(
+    let stored = test
+        .store
+        .fetch("momentum-spy-2024-01")
+        .expect("failed job record");
+    assert_eq!(stored.record.state, JobState::Failed);
+    assert_eq!(
+        stored.record.artifact_count, 0,
+        "a failed launch publishes no synthetic artifact"
+    );
+    assert!(stored.artifacts.is_empty());
+
+    let (artifact_status, _, artifact_body) = send(
         &test.router,
-        get_auth("/v1/backtests/runs/momentum-spy-2024-01", BEARER),
+        get_auth("/v1/jobs/momentum-spy-2024-01/artifacts", BEARER),
     )
     .await;
-    assert_eq!(run_status, StatusCode::NOT_FOUND);
-    assert!(test.store.get("momentum-spy-2024-01").is_none());
+    assert_eq!(artifact_status, StatusCode::OK);
+    assert_eq!(
+        json_body(&artifact_body),
+        json!({"job_id": "momentum-spy-2024-01", "artifacts": []})
+    );
+}
+
+struct FailingLauncher;
+
+impl BacktestLauncher for FailingLauncher {
+    fn launch(&self, _job: &api::http::launcher::LaunchJob) -> Result<(), LaunchError> {
+        Err(LaunchError::Engine(
+            "the backtest worker could not be started".to_string(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn launch_failure_publishes_failed_metadata_without_artifacts() {
+    let store = Arc::new(InMemoryJobStore::new());
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+    let config = AppConfig {
+        bearer_token: Some(BEARER.to_string()),
+        job_store: store.clone(),
+        launcher: Arc::new(FailingLauncher),
+        screener_launcher: Arc::new(api::http::screener::InProcessScreenLauncher::new(
+            store.clone(),
+            Arc::new(api::http::screener::UnavailableScreeningRunner),
+            clock.clone(),
+        )),
+        sas_issuer: None,
+        clock,
+        configuration_parser: Arc::new(StrictJsonConfigurationParser),
+        mcp_server: None,
+    };
+    let router = create_app(config).expect("app");
+
+    let (status, _, body) = send(
+        &router,
+        post_json(
+            "/v1/backtests/jobs",
+            Some(BEARER),
+            backtest_document("job-launch-failure"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(
+        json_body(&body),
+        json!({"job_id": "job-launch-failure", "state": "failed"})
+    );
+
+    let stored = store.fetch("job-launch-failure").expect("failed record");
+    assert_eq!(stored.record.state, JobState::Failed);
+    assert_eq!(stored.record.artifact_count, 0);
+    assert!(stored.artifacts.is_empty());
+    assert!(stored
+        .record
+        .error_message
+        .as_deref()
+        .expect("message")
+        .contains("could not be started"));
+
+    let (list_status, _, list_body) = send(
+        &router,
+        get_auth("/v1/jobs/job-launch-failure/artifacts", BEARER),
+    )
+    .await;
+    assert_eq!(list_status, StatusCode::OK);
+    assert_eq!(
+        json_body(&list_body),
+        json!({"job_id": "job-launch-failure", "artifacts": []})
+    );
+}
+
+struct EmptyRunner;
+
+impl BacktestRunner for EmptyRunner {
+    fn run(&self, _configuration: &ValidatedConfiguration) -> Result<RunOutcome, String> {
+        Ok(RunOutcome {
+            completed: true,
+            artifacts: BTreeMap::new(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn successful_outcome_without_artifacts_is_not_published_as_succeeded() {
+    let test = app_with(Some(BEARER), Arc::new(EmptyRunner));
+    let (status, _, body) = send(
+        &test.router,
+        post_json(
+            "/v1/backtests/jobs",
+            Some(BEARER),
+            backtest_document("job-empty-success"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(
+        json_body(&body),
+        json!({"job_id": "job-empty-success", "state": "failed"})
+    );
+    let stored = test.store.fetch("job-empty-success").expect("record");
+    assert_eq!(stored.record.state, JobState::Failed);
+    assert!(stored.artifacts.is_empty());
+    assert!(stored
+        .record
+        .error_message
+        .as_deref()
+        .expect("message")
+        .contains("at least one artifact"));
+}
+
+struct FaultingPutResultStore {
+    inner: InMemoryJobStore,
+}
+
+impl JobStore for FaultingPutResultStore {
+    fn get(&self, job_id: &str) -> Option<JobRecord> {
+        self.inner.get(job_id)
+    }
+
+    fn admit(&self, record: JobRecord) -> Result<Admission, StoreError> {
+        self.inner.admit(record)
+    }
+
+    fn put_result(
+        &self,
+        record: JobRecord,
+        artifacts: BTreeMap<String, Vec<u8>>,
+    ) -> Result<JobRecord, StoreError> {
+        if !artifacts.is_empty() {
+            return Err(StoreError::Io("artifact publication fault".to_string()));
+        }
+        self.inner.put_result(record, artifacts)
+    }
+
+    fn list(
+        &self,
+        kind: Option<JobKind>,
+        state: Option<JobState>,
+        strategy_id: Option<&str>,
+    ) -> Vec<JobRecord> {
+        self.inner.list(kind, state, strategy_id)
+    }
+
+    fn fetch(&self, job_id: &str) -> Option<StoredJob> {
+        self.inner.fetch(job_id)
+    }
+
+    fn delete(&self, job_id: &str) -> bool {
+        self.inner.delete(job_id)
+    }
+}
+
+#[tokio::test]
+async fn memory_artifact_publication_fault_cannot_publish_success() {
+    let store = Arc::new(FaultingPutResultStore {
+        inner: InMemoryJobStore::new(),
+    });
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+    let config = AppConfig {
+        bearer_token: Some(BEARER.to_string()),
+        job_store: store.clone(),
+        launcher: Arc::new(InProcessLauncher::new(
+            store.clone(),
+            Arc::new(StubRunner { fail: false }),
+            clock.clone(),
+        )),
+        screener_launcher: Arc::new(api::http::screener::InProcessScreenLauncher::new(
+            store.clone(),
+            Arc::new(api::http::screener::UnavailableScreeningRunner),
+            clock.clone(),
+        )),
+        sas_issuer: None,
+        clock,
+        configuration_parser: Arc::new(StrictJsonConfigurationParser),
+        mcp_server: None,
+    };
+    let router = create_app(config).expect("app");
+
+    let (status, _, body) = send(
+        &router,
+        post_json(
+            "/v1/backtests/jobs",
+            Some(BEARER),
+            backtest_document("job-memory-fault"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(
+        json_body(&body),
+        json!({"job_id": "job-memory-fault", "state": "failed"})
+    );
+    let stored = store.fetch("job-memory-fault").expect("record");
+    assert_eq!(stored.record.state, JobState::Failed);
+    assert!(stored.artifacts.is_empty());
+    assert!(stored
+        .record
+        .error_message
+        .as_deref()
+        .expect("message")
+        .contains("artifact publication fault"));
+}
+
+struct PartialArtifactRunner;
+
+impl BacktestRunner for PartialArtifactRunner {
+    fn run(&self, _configuration: &ValidatedConfiguration) -> Result<RunOutcome, String> {
+        Ok(RunOutcome {
+            completed: true,
+            artifacts: BTreeMap::from([
+                ("a-ok.bin".to_string(), b"partial".to_vec()),
+                ("z-blocked.bin".to_string(), b"blocked".to_vec()),
+            ]),
+        })
+    }
+}
+
+#[tokio::test]
+async fn filesystem_artifact_publication_fault_preserves_partial_evidence() {
+    let root = temp_root("publication-fault");
+    let blocked = root
+        .join("objects")
+        .join("jobs")
+        .join("job-publication-fault")
+        .join("z-blocked.bin");
+    std::fs::create_dir_all(&blocked).expect("blocked artifact path");
+    let router = durable_router(&root, Arc::new(PartialArtifactRunner));
+
+    let (status, _, body) = send(
+        &router,
+        post_json(
+            "/v1/backtests/jobs",
+            Some(BEARER),
+            backtest_document("job-publication-fault"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(
+        json_body(&body),
+        json!({"job_id": "job-publication-fault", "state": "failed"})
+    );
+
+    let store = FileSystemJobStore::new(&root);
+    let stored = store.fetch("job-publication-fault").expect("record");
+    assert_eq!(stored.record.state, JobState::Failed);
+    assert!(stored
+        .record
+        .error_message
+        .as_deref()
+        .expect("message")
+        .contains("StoreError"));
+    assert_eq!(
+        stored.artifacts.get("a-ok.bin").map(Vec::as_slice),
+        Some(&b"partial"[..])
+    );
+    assert!(!stored.artifacts.contains_key("z-blocked.bin"));
+
+    let (list_status, _, list_body) = send(
+        &router,
+        get_auth("/v1/jobs/job-publication-fault/artifacts", BEARER),
+    )
+    .await;
+    assert_eq!(list_status, StatusCode::OK);
+    let artifacts = json_body(&list_body)["artifacts"].clone();
+    assert_eq!(artifacts.as_array().map(Vec::len), Some(1));
+    assert_eq!(artifacts[0]["name"], "a-ok.bin");
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test]
+async fn empty_artifact_listing_distinguishes_empty_from_absent() {
+    let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
+    seed(
+        test.store.as_ref(),
+        "job-empty",
+        JobState::Failed,
+        "momentum",
+        &[],
+    );
+
+    let (status, _, body) = send(
+        &test.router,
+        get_auth("/v1/jobs/job-empty/artifacts", BEARER),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        json_body(&body),
+        json!({"job_id": "job-empty", "artifacts": []})
+    );
+    let stored = test.store.fetch("job-empty").expect("existing job");
+    assert_eq!(stored.record.state, JobState::Failed);
+    assert!(stored.artifacts.is_empty());
+    assert!(test.store.fetch("job-absent").is_none());
+
+    let (missing_status, _, missing) = send(
+        &test.router,
+        get_auth("/v1/jobs/job-absent/artifacts", BEARER),
+    )
+    .await;
+    assert_eq!(missing_status, StatusCode::NOT_FOUND);
+    assert_eq!(json_body(&missing)["error"]["code"], "job_not_found");
 }
 
 #[tokio::test]
@@ -792,17 +1101,14 @@ async fn launch_rejects_a_wrong_shell_document() {
 #[tokio::test]
 async fn injected_launcher_keeps_asynchronous_job_semantics() {
     let launcher = Arc::new(RecordingLauncher::default());
-    let store = Arc::new(InMemoryRunStore::new());
-    let jobs = Arc::new(InMemoryJobRepository::new());
+    let store = Arc::new(InMemoryJobStore::new());
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let config = AppConfig {
         bearer_token: Some(BEARER.to_string()),
-        run_store: store.clone(),
-        job_repository: jobs.clone(),
+        job_store: store.clone(),
         launcher,
         screener_launcher: Arc::new(api::http::screener::InProcessScreenLauncher::new(
             store,
-            jobs,
             Arc::new(api::http::screener::UnavailableScreeningRunner),
             clock.clone(),
         )),
@@ -832,8 +1138,7 @@ async fn injected_launcher_keeps_asynchronous_job_semantics() {
 #[tokio::test]
 async fn job_status_returns_404_for_an_unknown_job() {
     let test = app_with(Some(BEARER), Arc::new(StubRunner { fail: false }));
-    let (status, _, body) =
-        send(&test.router, get_auth("/v1/backtests/jobs/unknown", BEARER)).await;
+    let (status, _, body) = send(&test.router, get_auth("/v1/jobs/unknown", BEARER)).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(
         json_body(&body),
@@ -854,18 +1159,18 @@ async fn auth_check_requires_credentials() {
 
 #[test]
 fn in_memory_store_helpers_are_deterministic() {
-    let store = InMemoryRunStore::new();
+    let store = InMemoryJobStore::new();
     let mut artifacts = BTreeMap::new();
     artifacts.insert("a".to_string(), vec![1, 2]);
-    let record = store
-        .put(
-            RunCatalogRecord::new("r", RunStatus::Complete, "s"),
-            artifacts,
-        )
-        .expect("put");
+    store
+        .admit(JobRecord::new("r", JobKind::Backtest, "input", Utc::now()))
+        .expect("admit");
+    let mut record = store.get("r").expect("admitted");
+    record.state = JobState::Succeeded;
+    let record = store.put_result(record, artifacts).expect("put");
     assert_eq!(record.total_bytes, 2);
-    assert_eq!(store.list(None, Some("s")).len(), 1);
-    assert_eq!(store.list(None, Some("other")).len(), 0);
+    assert_eq!(store.list(None, None, Some("s")).len(), 0);
+    assert_eq!(store.list(Some(JobKind::Backtest), None, None).len(), 1);
 }
 
 fn temp_root(tag: &str) -> std::path::PathBuf {
@@ -909,28 +1214,23 @@ async fn durable_launch_survives_a_process_restart() {
     // serve the run without re-executing it.
     let router = durable_router(&root, Arc::new(StubRunner { fail: true }));
 
-    let (run_status, _, run_body) =
-        send(&router, get_auth("/v1/backtests/runs/run-durable", BEARER)).await;
+    let (run_status, _, run_body) = send(&router, get_auth("/v1/jobs/run-durable", BEARER)).await;
     assert_eq!(run_status, StatusCode::OK);
-    assert_eq!(json_body(&run_body)["status"], "complete");
+    assert_eq!(json_body(&run_body)["state"], "succeeded");
     assert_eq!(json_body(&run_body)["strategy_id"], "spy-momentum");
 
-    let (job_status, _, job_body) =
-        send(&router, get_auth("/v1/backtests/jobs/run-durable", BEARER)).await;
+    let (job_status, _, job_body) = send(&router, get_auth("/v1/jobs/run-durable", BEARER)).await;
     assert_eq!(job_status, StatusCode::OK);
     assert_eq!(json_body(&job_body)["state"], "succeeded");
 
     let (artifact_status, _, artifact_body) = send(
         &router,
-        get_auth(
-            "/v1/backtests/runs/run-durable/artifacts/backtest.json",
-            BEARER,
-        ),
+        get_auth("/v1/jobs/run-durable/artifacts/backtest.json", BEARER),
     )
     .await;
     assert_eq!(artifact_status, StatusCode::OK);
     assert_eq!(
-        json_body(&artifact_body)["manifest"]["run_id"],
+        json_body(&artifact_body)["manifest"]["job_id"],
         "run-durable"
     );
 
@@ -952,7 +1252,7 @@ async fn native_engine_launch_reaches_a_terminal_state() {
     let document = json!({
         "schema_version": 1,
         "shell": "backtest",
-        "run_id": "native-api-run",
+        "job_id": "native-api-run",
         "start": "2024-01-02T14:30:00Z",
         "end": "2024-01-04T21:00:00Z",
         "seed": 7,
@@ -986,26 +1286,20 @@ async fn native_engine_launch_reaches_a_terminal_state() {
         String::from_utf8_lossy(&body)
     );
 
-    let (run_status, _, run_body) = send(
-        &router,
-        get_auth("/v1/backtests/runs/native-api-run", BEARER),
-    )
-    .await;
+    let (run_status, _, run_body) =
+        send(&router, get_auth("/v1/jobs/native-api-run", BEARER)).await;
     assert_eq!(run_status, StatusCode::OK);
-    assert_eq!(json_body(&run_body)["status"], "complete");
+    assert_eq!(json_body(&run_body)["state"], "succeeded");
 
     let (artifact_status, _, artifact_body) = send(
         &router,
-        get_auth(
-            "/v1/backtests/runs/native-api-run/artifacts/backtest.json",
-            BEARER,
-        ),
+        get_auth("/v1/jobs/native-api-run/artifacts/backtest.json", BEARER),
     )
     .await;
     assert_eq!(artifact_status, StatusCode::OK);
     assert_eq!(json_body(&artifact_body)["status"], "completed");
     assert_eq!(
-        json_body(&artifact_body)["manifest"]["run_id"],
+        json_body(&artifact_body)["manifest"]["job_id"],
         "native-api-run"
     );
 
@@ -1027,7 +1321,7 @@ async fn native_research_metrics_are_queryable_over_http() {
     let document = json!({
         "schema_version": 1,
         "shell": "study",
-        "run_id": "native-research-run",
+        "job_id": "native-research-run",
         "start": "2024-01-02T14:30:00Z",
         "end": "2024-01-04T21:00:00Z",
         "seed": 7,
@@ -1051,11 +1345,8 @@ async fn native_research_metrics_are_queryable_over_http() {
     assert_eq!(status, StatusCode::ACCEPTED);
     assert_eq!(json_body(&body)["state"], "succeeded");
 
-    let (run_status, _, run_body) = send(
-        &router,
-        get_auth("/v1/backtests/runs/native-research-run", BEARER),
-    )
-    .await;
+    let (run_status, _, run_body) =
+        send(&router, get_auth("/v1/jobs/native-research-run", BEARER)).await;
     assert_eq!(run_status, StatusCode::OK);
     let observed = json_body(&run_body)["metrics"]["bar_observations"]
         .as_str()
@@ -1066,7 +1357,7 @@ async fn native_research_metrics_are_queryable_over_http() {
     let (artifact_status, _, artifact_body) = send(
         &router,
         get_auth(
-            "/v1/backtests/runs/native-research-run/artifacts/metrics.json",
+            "/v1/jobs/native-research-run/artifacts/metrics.json",
             BEARER,
         ),
     )
@@ -1143,10 +1434,11 @@ fn authored_subscription_studies_validate_then_launch_exact_lake_inputs() {
             server.requests().is_empty(),
             "validation must not fetch data"
         );
-        let document = api::local::authored_study_document(&model).expect("authored document");
+        let mut document = api::local::authored_study_document(&model).expect("authored document");
         assert_eq!(document["data"]["subscriptions"], expected);
         assert!(document["data"].get("bar_interval").is_none());
-        let run_id = document["run_id"].as_str().unwrap().to_string();
+        document["job_id"] = json!("job-authored-subscription-study");
+        let job_id = document["job_id"].as_str().unwrap().to_string();
         let router = durable_router(
             &root,
             Arc::new(api::http::native::NativeBacktestRunner::with_lake_client(
@@ -1156,7 +1448,7 @@ fn authored_subscription_studies_validate_then_launch_exact_lake_inputs() {
         );
         runtime.block_on(async {
             let mut mismatch = document.clone();
-            mismatch["run_id"] = json!(format!("{run_id}-mismatch"));
+            mismatch["job_id"] = json!(format!("{job_id}-mismatch"));
             mismatch["data"]["subscriptions"] = json!([{"data_type": "trade", "symbols": ["SPY"]}]);
             let (status, _, body) = send(
                 &router,
@@ -1180,11 +1472,7 @@ fn authored_subscription_studies_validate_then_launch_exact_lake_inputs() {
                 "{}",
                 String::from_utf8_lossy(&body)
             );
-            let (_, _, job) = send(
-                &router,
-                get_auth(&format!("/v1/backtests/jobs/{run_id}"), BEARER),
-            )
-            .await;
+            let (_, _, job) = send(&router, get_auth(&format!("/v1/jobs/{job_id}"), BEARER)).await;
             assert_eq!(
                 json_body(&job)["state"],
                 "succeeded",
@@ -1193,19 +1481,12 @@ fn authored_subscription_studies_validate_then_launch_exact_lake_inputs() {
             );
             let (_, _, artifact) = send(
                 &router,
-                get_auth(
-                    &format!("/v1/backtests/runs/{run_id}/artifacts/study.json"),
-                    BEARER,
-                ),
+                get_auth(&format!("/v1/jobs/{job_id}/artifacts/study.json"), BEARER),
             )
             .await;
             let artifact = json_body(&artifact);
             assert_eq!(artifact["manifest"]["effective_subscriptions"], expected);
-            let (_, _, run) = send(
-                &router,
-                get_auth(&format!("/v1/backtests/runs/{run_id}"), BEARER),
-            )
-            .await;
+            let (_, _, run) = send(&router, get_auth(&format!("/v1/jobs/{job_id}"), BEARER)).await;
             let metrics = json_body(&run)["metrics"].clone();
             assert!(
                 metrics["quote_observations"]
@@ -1424,7 +1705,7 @@ fn nested_authored_configuration_preserves_runtime_fields_and_normalized_source(
             "subscriptions": [{"data_type": "bars", "symbols": ["QQQ"], "interval": "1min"}],
             "snapshot_id": "authored-snapshot", "fingerprint": "b".repeat(64)},
         "strategy_instances": [{"parameters": {"source": "stale"}}],
-        "shell": "backtest", "run_id": "stale"
+        "shell": "backtest", "job_id": "stale"
     }});
     let document = api::local::authored_study_document(&model).unwrap();
     for key in [
@@ -1439,7 +1720,10 @@ fn nested_authored_configuration_preserves_runtime_fields_and_normalized_source(
     }
     assert_eq!(document["data"]["symbols"], json!(["QQQ"]));
     assert_eq!(document["shell"], "study");
-    assert_ne!(document["run_id"], "stale");
+    assert!(
+        document.get("job_id").is_none(),
+        "authored documents never carry a stale execution identity"
+    );
     assert_eq!(
         document["strategy_instances"][0]["parameters"],
         json!({"source": source})
@@ -1523,4 +1807,192 @@ fn nested_and_shorthand_contracts_reject_contradictions_before_lake() {
             .is_err());
     }
     assert!(server.requests().is_empty());
+}
+
+struct IncompleteRunner;
+
+impl BacktestRunner for IncompleteRunner {
+    fn run(&self, _configuration: &ValidatedConfiguration) -> Result<RunOutcome, String> {
+        let mut artifacts = BTreeMap::new();
+        artifacts.insert(
+            "backtest.json".to_string(),
+            b"{\"status\":\"failed\"}".to_vec(),
+        );
+        Ok(RunOutcome {
+            completed: false,
+            artifacts,
+        })
+    }
+}
+
+struct CountingRunner {
+    runs: Arc<AtomicUsize>,
+}
+
+impl BacktestRunner for CountingRunner {
+    fn run(&self, _configuration: &ValidatedConfiguration) -> Result<RunOutcome, String> {
+        self.runs.fetch_add(1, Ordering::SeqCst);
+        let mut artifacts = BTreeMap::new();
+        artifacts.insert("backtest.json".to_string(), b"{}".to_vec());
+        Ok(RunOutcome {
+            completed: true,
+            artifacts,
+        })
+    }
+}
+
+#[tokio::test]
+async fn not_completed_outcome_is_recorded_as_failed() {
+    let test = app_with(Some(BEARER), Arc::new(IncompleteRunner));
+    let (status, _, body) = send(
+        &test.router,
+        post_json(
+            "/v1/backtests/jobs",
+            Some(BEARER),
+            backtest_document("job-incomplete"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(
+        json_body(&body),
+        json!({"job_id": "job-incomplete", "state": "failed"})
+    );
+    assert_eq!(
+        test.store.get("job-incomplete").expect("record").state,
+        JobState::Failed
+    );
+    let stored = test.store.fetch("job-incomplete").expect("stored job");
+    assert_eq!(stored.record.state, JobState::Failed);
+    assert_eq!(stored.record.artifact_count, 1);
+    assert!(stored.artifacts.contains_key("backtest.json"));
+}
+
+#[tokio::test]
+async fn duplicate_submission_joins_and_conflicting_input_fails_closed() {
+    let runs = Arc::new(AtomicUsize::new(0));
+    let test = app_with(
+        Some(BEARER),
+        Arc::new(CountingRunner { runs: runs.clone() }),
+    );
+    let document = backtest_document("job-duplicate");
+    let (_, _, first) = send(
+        &test.router,
+        post_json("/v1/backtests/jobs", Some(BEARER), document.clone()),
+    )
+    .await;
+    assert_eq!(json_body(&first)["state"], "succeeded");
+    let (_, _, second) = send(
+        &test.router,
+        post_json("/v1/backtests/jobs", Some(BEARER), document),
+    )
+    .await;
+    assert_eq!(json_body(&second)["state"], "succeeded");
+    assert_eq!(
+        runs.load(Ordering::SeqCst),
+        1,
+        "a duplicate submission must not dispatch again"
+    );
+
+    let mut conflicting = backtest_document("job-duplicate");
+    conflicting["seed"] = json!(99);
+    let (status, _, body) = send(
+        &test.router,
+        post_json("/v1/backtests/jobs", Some(BEARER), conflicting),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(json_body(&body)["error"]["code"], "job_conflict");
+    assert_eq!(runs.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn admission_and_result_publication_rules_are_atomic() {
+    let store = InMemoryJobStore::new();
+    let now = Utc::now();
+    let created = store
+        .admit(JobRecord::new("job-rules", JobKind::Study, "digest", now))
+        .expect("create");
+    assert!(created.created());
+    let joined = store
+        .admit(JobRecord::new("job-rules", JobKind::Study, "digest", now))
+        .expect("join");
+    assert!(!joined.created());
+    assert!(matches!(
+        store.admit(JobRecord::new("job-rules", JobKind::Study, "other", now)),
+        Err(StoreError::Conflict(_))
+    ));
+
+    let mut record = store.get("job-rules").expect("record");
+    record.state = JobState::Succeeded;
+    assert!(matches!(
+        store.put_result(record.clone(), BTreeMap::new()),
+        Err(StoreError::EmptyArtifacts)
+    ));
+    let artifacts = BTreeMap::from([("study.json".to_string(), b"{}".to_vec())]);
+    store
+        .put_result(record.clone(), artifacts.clone())
+        .expect("publish");
+    let mut again = store.get("job-rules").expect("record");
+    again.state = JobState::Succeeded;
+    assert!(matches!(
+        store.put_result(again, artifacts),
+        Err(StoreError::Terminal(_))
+    ));
+}
+
+struct FailingAdmitStore;
+
+impl JobStore for FailingAdmitStore {
+    fn get(&self, _job_id: &str) -> Option<JobRecord> {
+        None
+    }
+
+    fn admit(&self, _record: JobRecord) -> Result<Admission, StoreError> {
+        Err(StoreError::Io("disk offline".to_string()))
+    }
+
+    fn put_result(
+        &self,
+        _record: JobRecord,
+        _artifacts: BTreeMap<String, Vec<u8>>,
+    ) -> Result<JobRecord, StoreError> {
+        Err(StoreError::Io("disk offline".to_string()))
+    }
+
+    fn list(
+        &self,
+        _kind: Option<JobKind>,
+        _state: Option<JobState>,
+        _strategy_id: Option<&str>,
+    ) -> Vec<JobRecord> {
+        Vec::new()
+    }
+
+    fn fetch(&self, _job_id: &str) -> Option<StoredJob> {
+        None
+    }
+
+    fn delete(&self, _job_id: &str) -> bool {
+        false
+    }
+}
+
+#[tokio::test]
+async fn admission_store_failure_is_not_reported_as_accepted() {
+    let mut config = AppConfig::in_memory();
+    config.bearer_token = Some(BEARER.to_string());
+    config.job_store = Arc::new(FailingAdmitStore);
+    let router = create_app(config).expect("app");
+    let (status, _, body) = send(
+        &router,
+        post_json(
+            "/v1/backtests/jobs",
+            Some(BEARER),
+            backtest_document("job-store-failure"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(json_body(&body)["error"]["code"], "store_error");
 }

@@ -25,7 +25,7 @@ const HEXA_DIGEST: usize = 64;
 /// without waiting for completion.
 pub trait SweepJobLauncher {
     /// Enqueue one derived run.
-    fn launch(&self, run_id: &str);
+    fn launch(&self, job_id: &str);
 }
 
 /// Whole-object storage boundary for sweep records.
@@ -42,7 +42,7 @@ pub trait RunBlobStore {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CatalogRecord {
     /// Run identifier.
-    pub run_id: String,
+    pub job_id: String,
     /// Terminal or in-flight status.
     pub status: RunStatus,
     /// String-exact headline metrics.
@@ -65,7 +65,7 @@ pub enum RunStatus {
 /// Run catalog lookup.
 pub trait RunCatalog {
     /// Return one catalog row, or `None` when the run is not cataloged.
-    fn get(&self, run_id: &str) -> Option<CatalogRecord>;
+    fn get(&self, job_id: &str) -> Option<CatalogRecord>;
 }
 
 /// In-memory blob store for deterministic tests and fakes.
@@ -119,13 +119,13 @@ impl InMemoryRunCatalog {
 
     /// Insert or replace one catalog row.
     pub fn insert(&mut self, record: CatalogRecord) {
-        self.records.insert(record.run_id.clone(), record);
+        self.records.insert(record.job_id.clone(), record);
     }
 }
 
 impl RunCatalog for InMemoryRunCatalog {
-    fn get(&self, run_id: &str) -> Option<CatalogRecord> {
-        self.records.get(run_id).cloned()
+    fn get(&self, job_id: &str) -> Option<CatalogRecord> {
+        self.records.get(job_id).cloned()
     }
 }
 
@@ -144,8 +144,8 @@ impl RecordingLauncher {
 }
 
 impl SweepJobLauncher for RecordingLauncher {
-    fn launch(&self, run_id: &str) {
-        self.launched.borrow_mut().push(run_id.to_string());
+    fn launch(&self, job_id: &str) {
+        self.launched.borrow_mut().push(job_id.to_string());
     }
 }
 
@@ -177,7 +177,7 @@ pub struct SweepSubmission {
     /// Duplicates skipped during deduplication.
     pub duplicates_skipped: usize,
     /// Launched run identifiers.
-    pub run_ids: Vec<String>,
+    pub job_ids: Vec<String>,
     /// Expanded points.
     pub points: Vec<SweepPoint>,
 }
@@ -186,7 +186,7 @@ pub struct SweepSubmission {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SweepRunView {
     /// Run identifier.
-    pub run_id: String,
+    pub job_id: String,
     /// Catalog status, when present.
     pub status: Option<RunStatus>,
     /// String-exact headline metrics.
@@ -260,7 +260,7 @@ fn record_payload(spec: &SweepSpec, points: &[SweepPoint]) -> JsonValue {
                     .map(|point| {
                         JsonValue::object([
                             ("index", JsonValue::UInt(point.index as u64)),
-                            ("run_id", JsonValue::String(point.run_id.clone())),
+                            ("job_id", JsonValue::String(point.job_id.clone())),
                             (
                                 "configuration_digest",
                                 JsonValue::String(point.configuration_digest.clone()),
@@ -311,14 +311,14 @@ impl SweepRunner {
                 .as_bytes(),
         );
         for point in &points {
-            self.launcher.launch(&point.run_id);
+            self.launcher.launch(&point.job_id);
         }
         Ok(SweepSubmission {
             sweep_id: spec.sweep_id(),
             requested: spec.count,
             expanded: points.len(),
             duplicates_skipped: spec.count - points.len(),
-            run_ids: points.iter().map(|point| point.run_id.clone()).collect(),
+            job_ids: points.iter().map(|point| point.job_id.clone()).collect(),
             points,
         })
     }
@@ -354,17 +354,17 @@ impl SweepRunner {
             let JsonValue::Object(run) = item else {
                 return Err("sweep run entry is malformed".to_string());
             };
-            let Some(JsonValue::String(run_id)) = run.get("run_id") else {
-                return Err("sweep run entry is missing run_id".to_string());
+            let Some(JsonValue::String(job_id)) = run.get("job_id") else {
+                return Err("sweep run entry is missing job_id".to_string());
             };
-            let view = match self.catalog.get(run_id) {
+            let view = match self.catalog.get(job_id) {
                 Some(record) => SweepRunView {
-                    run_id: record.run_id,
+                    job_id: record.job_id,
                     status: Some(record.status),
                     metrics: record.metrics,
                 },
                 None => SweepRunView {
-                    run_id: run_id.clone(),
+                    job_id: job_id.clone(),
                     status: None,
                     metrics: BTreeMap::new(),
                 },

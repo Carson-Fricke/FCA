@@ -24,7 +24,7 @@
 		"investigation_id": null,
 		"strategy_ids": [],
 		"experiment_ids": [],
-		"tool_job_ids": [],
+		"job_ids": [],
 		"content_hash": "7321abdeda1ec91f2bd39fec897446dedbae5c6678248c8d90ab830d6cf06799"
 	},
 	"chat-b1": {
@@ -50,7 +50,7 @@
 		"investigation_id": null,
 		"strategy_ids": [],
 		"experiment_ids": [],
-		"tool_job_ids": [],
+		"job_ids": [],
 		"content_hash": "68c51d6c95f895300919d45b01270124f79f5a98bcb24a833fe903dc69597540"
 	}
 }

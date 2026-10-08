@@ -58,8 +58,11 @@ def _design() -> dict[str, object]:
     }
 
 
-@pytest.fixture
-def workspace(tmp_path: Path) -> tuple[TestClient, str]:
+@pytest.fixture(scope="module")
+def workspace(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[TestClient, str]:
+    tmp_path = tmp_path_factory.mktemp("artifacts")
     provider = LocalWorkspaceProvider(tmp_path / "workspaces")
     manifest = load_workspace_manifest("config/thesis/workspace.yaml")
     provider.create(manifest)

@@ -7,7 +7,7 @@
 	import type { BacktestDetail } from '$lib/types';
 
 	const workspaceId = $derived(page.params.workspace ?? '');
-	const backtestId = $derived(page.params.id ?? '');
+	const jobId = $derived(page.params.id ?? '');
 
 	let backtest = $state<BacktestDetail | null>(null);
 	let loadError = $state('');
@@ -15,7 +15,7 @@
 	$effect(() => {
 		let cancelled = false;
 		loadError = '';
-		getBacktest(workspaceId, backtestId)
+		getBacktest(workspaceId, jobId)
 			.then((item) => {
 				if (!cancelled) backtest = item;
 			})

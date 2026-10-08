@@ -27,7 +27,7 @@ code{font-family:ui-monospace,Consolas,monospace}svg{width:100%;height:auto}\
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReportHeader {
     /// Run identifier.
-    pub run_id: String,
+    pub job_id: String,
     /// Engine identifier.
     pub engine: String,
     /// Recorded seed.
@@ -39,9 +39,9 @@ pub struct ReportHeader {
 impl ReportHeader {
     /// Build a header for one run.
     #[must_use]
-    pub fn new(run_id: impl Into<String>) -> Self {
+    pub fn new(job_id: impl Into<String>) -> Self {
         Self {
-            run_id: run_id.into(),
+            job_id: job_id.into(),
             engine: "harness.backtest".to_string(),
             seed: String::new(),
             metadata: std::collections::BTreeMap::new(),
@@ -132,18 +132,18 @@ pub fn render_report(header: &ReportHeader, equity: &[EquityPoint], trades: &Tra
         document,
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
 <title>FCA Backtest Report - {}</title><style>{CSS}</style></head><body><main>",
-        escape(&header.run_id)
+        escape(&header.job_id)
     );
     let _ = write!(
         document,
         "<h1>FCA Backtest Report <code>{}</code></h1>",
-        escape(&header.run_id)
+        escape(&header.job_id)
     );
     document.push_str("<section><h2>Manifest</h2><table>");
     let _ = write!(
         document,
         "<tr><th>Run ID</th><td>{}</td></tr>",
-        escape(&header.run_id)
+        escape(&header.job_id)
     );
     let _ = write!(
         document,

@@ -1,9 +1,9 @@
 //! Tool catalog and execution boundaries for the harness MCP server.
 //!
-//! The registry publishes `run_backtest`, `get_job_status`, `get_run`,
+//! The registry publishes `run_backtest`, `get_job_status`, `get_job_result`,
 //! `list_artifacts`, `read_artifact`, `run_study`, `validate_study`,
-//! `run_screener`, `get_screener_status`, the configuration templates, and the
-//! capability-gated `launch_trader`. Every boundary is
+//! `run_screener`, the configuration templates, and the capability-gated
+//! `launch_trader`. Every boundary is
 //! injected; the server composes no subprocess or HTTP client itself, and
 //! serialized settings never contain a token value.
 
@@ -16,7 +16,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::auth::{BearerTokenSource, BEARER_TOKEN_VARIABLE};
-use crate::store::{artifact_digest, run_prefix, JobRepository, RunStore};
+use crate::store::{artifact_digest, artifact_prefix, JobStore};
 
 /// Tool name for the backtest runner.
 pub const TOOL_RUN_BACKTEST: &str = "run_backtest";
@@ -24,8 +24,8 @@ pub const TOOL_RUN_BACKTEST: &str = "run_backtest";
 pub const TOOL_BACKTEST_CONFIG_TEMPLATE: &str = "backtest_config_template";
 /// Tool name for job status queries.
 pub const TOOL_JOB_STATUS: &str = "get_job_status";
-/// Tool name for run queries.
-pub const TOOL_GET_RUN: &str = "get_run";
+/// Tool name for stored job result queries.
+pub const TOOL_GET_JOB_RESULT: &str = "get_job_result";
 /// Tool name for artifact listing.
 pub const TOOL_LIST_ARTIFACTS: &str = "list_artifacts";
 /// Tool name for artifact content reads.
@@ -42,18 +42,14 @@ pub const TOOL_VALIDATE_STRATEGY: &str = "validate_strategy";
 pub const TOOL_READ_SDK_REFERENCE: &str = "read_sdk_reference";
 /// Tool name for the screening runner.
 pub const TOOL_RUN_SCREENER: &str = "run_screener";
-/// Tool name for screening job status queries.
-pub const TOOL_SCREENER_STATUS: &str = "get_screener_status";
 /// Tool name for the embedded screening configuration template.
 pub const TOOL_SCREENER_CONFIG_TEMPLATE: &str = "screener_config_template";
 
 const LAUNCH_ROUTE: &str = "/v1/backtests/jobs";
-const JOB_STATUS_ROUTE: &str = "/v1/backtests/jobs";
-const RUN_ROUTE: &str = "/v1/backtests/runs";
+const JOB_ROUTE: &str = "/v1/jobs";
 const STUDY_LAUNCH_ROUTE: &str = "/v1/studies/jobs";
 /// The screening launch route Thesis and remote MCP clients call.
 pub const SCREENER_LAUNCH_ROUTE: &str = "/v1/screeners/jobs";
-const SCREENER_STATUS_ROUTE: &str = "/v1/screeners/jobs";
 const IDENTIFIER_MAX: usize = 128;
 
 /// Canonical starter configuration embedded at build time so an agent can
@@ -178,11 +174,11 @@ pub struct ToolCapabilities {
     pub backtest: bool,
     /// Publish `get_job_status`.
     pub job_status: bool,
-    /// Publish `get_run` and `list_artifacts`.
+    /// Publish `get_job_result` and `list_artifacts`.
     pub artifacts: bool,
     /// Publish `run_study`.
     pub study: bool,
-    /// Publish `run_screener`, `get_screener_status`, and the template.
+    /// Publish `run_screener` and the template.
     pub screener: bool,
     /// Publish `launch_trader` (opt-in).
     pub trader: bool,
@@ -276,7 +272,12 @@ pub trait BacktestSubmitter: Send + Sync {
     /// # Errors
     ///
     /// Returns a reason string when the backtest cannot be completed.
-    fn submit(&self, config_path: &str, workspace: Option<&str>) -> Result<Value, String>;
+    fn submit(
+        &self,
+        config_path: &str,
+        workspace: Option<&str>,
+        job_id: Option<&str>,
+    ) -> Result<Value, String>;
 }
 
 /// Injected local study surface for one study configuration document path.
@@ -286,7 +287,12 @@ pub trait StudySubmitter: Send + Sync {
     /// # Errors
     ///
     /// Returns a reason string when the study cannot be completed.
-    fn submit(&self, config_path: &str, workspace: Option<&str>) -> Result<Value, String>;
+    fn submit(
+        &self,
+        config_path: &str,
+        workspace: Option<&str>,
+        job_id: Option<&str>,
+    ) -> Result<Value, String>;
 }
 
 /// Injected local screening surface for one screen configuration document path.
@@ -296,7 +302,12 @@ pub trait ScreeningSubmitter: Send + Sync {
     /// # Errors
     ///
     /// Returns a reason string when the screening run cannot be launched.
-    fn submit(&self, config_path: &str, workspace: Option<&str>) -> Result<Value, String>;
+    fn submit(
+        &self,
+        config_path: &str,
+        workspace: Option<&str>,
+        job_id: Option<&str>,
+    ) -> Result<Value, String>;
 }
 
 /// Injected local study validation surface for one authored model document.
@@ -395,10 +406,8 @@ pub struct HarnessToolsContext {
     pub screening_submitter: Option<Arc<dyn ScreeningSubmitter>>,
     /// Local study validator (compiles authored programs without replaying).
     pub study_validator: Option<Arc<dyn StudyValidator>>,
-    /// Durable local results store, queried in `local` mode.
-    pub run_store: Option<Arc<dyn RunStore>>,
-    /// Durable local job repository, queried in `local` mode.
-    pub job_repository: Option<Arc<dyn JobRepository>>,
+    /// Durable local job store, queried in `local` mode.
+    pub job_store: Option<Arc<dyn JobStore>>,
     /// Configuration loader for remote launches.
     pub configuration_loader: Arc<dyn ConfigurationLoader>,
 }
@@ -419,8 +428,7 @@ impl HarnessToolsContext {
             study_submitter: None,
             screening_submitter: None,
             study_validator: None,
-            run_store: None,
-            job_repository: None,
+            job_store: None,
             configuration_loader: Arc::new(JsonFileConfigurationLoader),
         }
     }
@@ -462,11 +470,12 @@ impl HarnessToolsContext {
             Boundary::Local => {
                 if self.runner.is_none()
                     && self.backtest_submitter.is_none()
-                    && self.run_store.is_none()
-                    && self.job_repository.is_none()
+                    && self.study_submitter.is_none()
+                    && self.screening_submitter.is_none()
+                    && self.job_store.is_none()
                 {
                     return Err(ContextError(
-                        "local execution requires a results store or a process runner".to_string(),
+                        "local execution requires a job store or a process runner".to_string(),
                     ));
                 }
             }
@@ -607,9 +616,10 @@ impl HarnessTools {
         &self,
         arguments: &Map<String, Value>,
     ) -> Result<Value, ToolExecutionError> {
-        let config_path = resolve_config(arguments)?;
+        let job_id = optional_identifier_argument(arguments, "job_id")?;
+        let config_path = resolve_config(arguments, job_id.as_deref())?;
         if self.context.mode == Boundary::Remote {
-            return self.launch_remote_backtest(&config_path);
+            return self.launch_remote_backtest(&config_path, job_id.as_deref());
         }
         if let Some(submitter) = &self.context.backtest_submitter {
             let workspace = match arguments.get("workspace") {
@@ -624,13 +634,14 @@ impl HarnessTools {
                 }
             };
             return submitter
-                .submit(&config_path, workspace.as_deref())
+                .submit(&config_path, workspace.as_deref(), job_id.as_deref())
                 .map_err(|error| {
                     ToolExecutionError::new(format!(
                         "the local backtest runner could not complete the backtest: {error}"
                     ))
                 });
         }
+        ensure_process_job_id(&config_path, job_id.as_deref())?;
         let mut tail = vec![
             "backtest-job".to_string(),
             "--config".to_string(),
@@ -651,20 +662,22 @@ impl HarnessTools {
     ///
     /// Returns [`ToolExecutionError`] when the boundary fails.
     pub fn run_study(&self, arguments: &Map<String, Value>) -> Result<Value, ToolExecutionError> {
-        let config_path = resolve_config(arguments)?;
+        let job_id = optional_identifier_argument(arguments, "job_id")?;
+        let config_path = resolve_config(arguments, job_id.as_deref())?;
         if self.context.mode == Boundary::Remote {
-            return self.launch_remote_study(&config_path);
+            return self.launch_remote_study(&config_path, job_id.as_deref());
         }
         if let Some(submitter) = &self.context.study_submitter {
             let workspace = workspace_option(arguments)?;
             return submitter
-                .submit(&config_path, workspace.as_deref())
+                .submit(&config_path, workspace.as_deref(), job_id.as_deref())
                 .map_err(|error| {
                     ToolExecutionError::new(format!(
                         "the local study runner could not complete the study: {error}"
                     ))
                 });
         }
+        ensure_process_job_id(&config_path, job_id.as_deref())?;
         let mut tail = vec!["study-job".to_string(), "--config".to_string(), config_path];
         tail.extend(workspace_arguments(arguments)?);
         self.invoke_process(&tail, "study-job")
@@ -674,7 +687,7 @@ impl HarnessTools {
     ///
     /// A screening run evaluates one JIT-authored cross-sectional program and
     /// produces a ranked `screen.json` artifact. The local boundary returns the
-    /// derived run id immediately and completes the run in the background; the
+    /// job id immediately and completes the run in the background; the
     /// remote boundary posts the configuration to the screener launch route.
     ///
     /// # Errors
@@ -684,20 +697,22 @@ impl HarnessTools {
         &self,
         arguments: &Map<String, Value>,
     ) -> Result<Value, ToolExecutionError> {
-        let config_path = resolve_config(arguments)?;
+        let job_id = optional_identifier_argument(arguments, "job_id")?;
+        let config_path = resolve_config(arguments, job_id.as_deref())?;
         if self.context.mode == Boundary::Remote {
-            return self.launch_remote_screener(&config_path);
+            return self.launch_remote_screener(&config_path, job_id.as_deref());
         }
         if let Some(submitter) = &self.context.screening_submitter {
             let workspace = workspace_option(arguments)?;
             return submitter
-                .submit(&config_path, workspace.as_deref())
+                .submit(&config_path, workspace.as_deref(), job_id.as_deref())
                 .map_err(|error| {
                     ToolExecutionError::new(format!(
                         "the local screening runner could not complete the screening run: {error}"
                     ))
                 });
         }
+        ensure_process_job_id(&config_path, job_id.as_deref())?;
         let mut tail = vec![
             "screen-job".to_string(),
             "--config".to_string(),
@@ -926,53 +941,36 @@ impl HarnessTools {
     ) -> Result<Value, ToolExecutionError> {
         let job_id = identifier_argument(arguments, "job_id")?;
         if self.context.mode == Boundary::Local {
-            return self.local_job_status(&job_id);
+            return self.local_job(&job_id);
         }
         let url = self.remote_url(&format!(
-            "{JOB_STATUS_ROUTE}/{}",
+            "{JOB_ROUTE}/{}",
             utf8_percent_encode(&job_id, PATH_SEGMENT)
         ))?;
         self.remote_get(&url, &format!("job '{job_id}' does not exist"))
     }
 
-    /// Read one screening job's persisted state.
+    /// Read one stored job result from the remote harness API.
     ///
     /// # Errors
     ///
-    /// Returns [`ToolExecutionError`] when the local or remote lookup fails.
-    pub fn get_screener_status(
+    /// Returns [`ToolExecutionError`] when the remote call fails.
+    pub fn get_job_result(
         &self,
         arguments: &Map<String, Value>,
     ) -> Result<Value, ToolExecutionError> {
         let job_id = identifier_argument(arguments, "job_id")?;
         if self.context.mode == Boundary::Local {
-            return self.local_screener_status(&job_id);
+            return self.local_job(&job_id);
         }
         let url = self.remote_url(&format!(
-            "{SCREENER_STATUS_ROUTE}/{}",
+            "{JOB_ROUTE}/{}",
             utf8_percent_encode(&job_id, PATH_SEGMENT)
         ))?;
-        self.remote_get(&url, &format!("screener job '{job_id}' does not exist"))
+        self.remote_get(&url, &format!("job '{job_id}' does not exist"))
     }
 
-    /// Read one stored run's catalog row from the remote harness API.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ToolExecutionError`] when the remote call fails.
-    pub fn get_run(&self, arguments: &Map<String, Value>) -> Result<Value, ToolExecutionError> {
-        let run_id = identifier_argument(arguments, "run_id")?;
-        if self.context.mode == Boundary::Local {
-            return self.local_run(&run_id);
-        }
-        let url = self.remote_url(&format!(
-            "{RUN_ROUTE}/{}",
-            utf8_percent_encode(&run_id, PATH_SEGMENT)
-        ))?;
-        self.remote_get(&url, &format!("run '{run_id}' does not exist"))
-    }
-
-    /// List one stored run's artifacts from the remote harness API.
+    /// List one stored job's artifacts from the remote harness API.
     ///
     /// # Errors
     ///
@@ -981,32 +979,32 @@ impl HarnessTools {
         &self,
         arguments: &Map<String, Value>,
     ) -> Result<Value, ToolExecutionError> {
-        let run_id = identifier_argument(arguments, "run_id")?;
+        let job_id = identifier_argument(arguments, "job_id")?;
         if self.context.mode == Boundary::Local {
-            return self.local_artifacts(&run_id);
+            return self.local_artifacts(&job_id);
         }
         let url = self.remote_url(&format!(
-            "{RUN_ROUTE}/{}/artifacts",
-            utf8_percent_encode(&run_id, PATH_SEGMENT)
+            "{JOB_ROUTE}/{}/artifacts",
+            utf8_percent_encode(&job_id, PATH_SEGMENT)
         ))?;
-        self.remote_get(&url, &format!("run '{run_id}' does not exist"))
+        self.remote_get(&url, &format!("job '{job_id}' does not exist"))
     }
 
-    /// Read one stored run artifact's contents as text or hex-encoded bytes.
+    /// Read one stored job artifact's contents as text or hex-encoded bytes.
     ///
     /// # Errors
     ///
-    /// Returns [`ToolExecutionError`] when the run or artifact does not exist,
+    /// Returns [`ToolExecutionError`] when the job or artifact does not exist,
     /// or when a remote read is requested on a transport that cannot return raw
     /// artifact bytes.
     pub fn read_artifact(
         &self,
         arguments: &Map<String, Value>,
     ) -> Result<Value, ToolExecutionError> {
-        let run_id = identifier_argument(arguments, "run_id")?;
+        let job_id = identifier_argument(arguments, "job_id")?;
         let name = text_argument(arguments, "name")?;
         if self.context.mode == Boundary::Local {
-            return self.local_artifact(&run_id, &name);
+            return self.local_artifact(&job_id, &name);
         }
         Err(ToolExecutionError::new(
             "remote artifact reads require the artifact HTTP route; the configured remote \
@@ -1014,13 +1012,11 @@ impl HarnessTools {
         ))
     }
 
-    fn local_job_status(&self, job_id: &str) -> Result<Value, ToolExecutionError> {
-        let repository = self.context.job_repository.as_ref().ok_or_else(|| {
-            ToolExecutionError::new(
-                "local jobs require a durable job repository in this MCP server",
-            )
+    fn local_job(&self, job_id: &str) -> Result<Value, ToolExecutionError> {
+        let store = self.context.job_store.as_ref().ok_or_else(|| {
+            ToolExecutionError::new("local jobs require a durable job store in this MCP server")
         })?;
-        match repository.get(job_id) {
+        match store.get(job_id) {
             Some(record) => serde_json::to_value(&record)
                 .map_err(|error| ToolExecutionError::new(error.to_string())),
             None => Err(ToolExecutionError::new(format!(
@@ -1029,42 +1025,14 @@ impl HarnessTools {
         }
     }
 
-    fn local_screener_status(&self, job_id: &str) -> Result<Value, ToolExecutionError> {
-        let repository = self.context.job_repository.as_ref().ok_or_else(|| {
-            ToolExecutionError::new(
-                "local screener jobs require a durable job repository in this MCP server",
-            )
-        })?;
-        match repository.get(job_id) {
-            Some(record) => serde_json::to_value(&record)
-                .map_err(|error| ToolExecutionError::new(error.to_string())),
-            None => Err(ToolExecutionError::new(format!(
-                "screener job '{job_id}' does not exist"
-            ))),
-        }
-    }
-
-    fn local_run(&self, run_id: &str) -> Result<Value, ToolExecutionError> {
-        let store = self.context.run_store.as_ref().ok_or_else(|| {
-            ToolExecutionError::new("local runs require a durable results store in this MCP server")
-        })?;
-        match store.get(run_id) {
-            Some(record) => serde_json::to_value(&record)
-                .map_err(|error| ToolExecutionError::new(error.to_string())),
-            None => Err(ToolExecutionError::new(format!(
-                "backtest run '{run_id}' does not exist"
-            ))),
-        }
-    }
-
-    fn local_artifacts(&self, run_id: &str) -> Result<Value, ToolExecutionError> {
-        let store = self.context.run_store.as_ref().ok_or_else(|| {
-            ToolExecutionError::new("local runs require a durable results store in this MCP server")
+    fn local_artifacts(&self, job_id: &str) -> Result<Value, ToolExecutionError> {
+        let store = self.context.job_store.as_ref().ok_or_else(|| {
+            ToolExecutionError::new("local jobs require a durable job store in this MCP server")
         })?;
         let stored = store
-            .fetch(run_id)
-            .ok_or_else(|| ToolExecutionError::new(format!("run '{run_id}' does not exist")))?;
-        let prefix = run_prefix(&stored.record.run_id)
+            .fetch(job_id)
+            .ok_or_else(|| ToolExecutionError::new(format!("job '{job_id}' does not exist")))?;
+        let prefix = artifact_prefix(&stored.record.job_id)
             .map_err(|error| ToolExecutionError::new(error.to_string()))?;
         let artifacts: Vec<Value> = stored
             .artifacts
@@ -1080,30 +1048,30 @@ impl HarnessTools {
                 })
             })
             .collect();
-        Ok(json!({"run_id": stored.record.run_id, "artifacts": artifacts}))
+        Ok(json!({"job_id": stored.record.job_id, "artifacts": artifacts}))
     }
 
-    fn local_artifact(&self, run_id: &str, name: &str) -> Result<Value, ToolExecutionError> {
-        let store = self.context.run_store.as_ref().ok_or_else(|| {
-            ToolExecutionError::new("local runs require a durable results store in this MCP server")
+    fn local_artifact(&self, job_id: &str, name: &str) -> Result<Value, ToolExecutionError> {
+        let store = self.context.job_store.as_ref().ok_or_else(|| {
+            ToolExecutionError::new("local jobs require a durable job store in this MCP server")
         })?;
         let stored = store
-            .fetch(run_id)
-            .ok_or_else(|| ToolExecutionError::new(format!("run '{run_id}' does not exist")))?;
+            .fetch(job_id)
+            .ok_or_else(|| ToolExecutionError::new(format!("job '{job_id}' does not exist")))?;
         let payload = stored.artifacts.get(name).ok_or_else(|| {
             ToolExecutionError::new(format!(
-                "artifact '{name}' does not exist for run '{run_id}'"
+                "artifact '{name}' does not exist for job '{job_id}'"
             ))
         })?;
         let document = match std::str::from_utf8(payload) {
             Ok(content) => json!({
-                "run_id": run_id,
+                "job_id": job_id,
                 "name": name,
                 "encoding": "utf-8",
                 "content": content,
             }),
             Err(_) => json!({
-                "run_id": run_id,
+                "job_id": job_id,
                 "name": name,
                 "encoding": "hex",
                 "content": hex::encode(payload),
@@ -1144,8 +1112,12 @@ impl HarnessTools {
         Ok(payload)
     }
 
-    fn launch_remote_backtest(&self, config_path: &str) -> Result<Value, ToolExecutionError> {
-        let payload = self
+    fn launch_remote_backtest(
+        &self,
+        config_path: &str,
+        job_id: Option<&str>,
+    ) -> Result<Value, ToolExecutionError> {
+        let mut payload = self
             .context
             .configuration_loader
             .load_json(config_path)
@@ -1154,6 +1126,8 @@ impl HarnessTools {
                     "could not load the backtest configuration '{config_path}': {error}"
                 ))
             })?;
+        backtest::backtest::job::overlay_job_id_json(&mut payload, job_id)
+            .map_err(|error| ToolExecutionError::new(error.to_string()))?;
         let url = self.remote_url(LAUNCH_ROUTE)?;
         validate_configuration(&payload, std::path::Path::new(config_path).parent())?;
         let response = self.dispatch_remote_post(&url, &payload)?;
@@ -1202,21 +1176,20 @@ impl HarnessTools {
                 )
                 .with_certainty("unknown_outcome")
             })?;
-        let location = response
-            .headers
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case("location"))
-            .map(|(_, value)| value.clone());
         Ok(json!({
             "boundary": "remote",
             "job_id": job_id,
             "state": state,
-            "location": location,
+            "kind": "backtest",
         }))
     }
 
-    fn launch_remote_study(&self, config_path: &str) -> Result<Value, ToolExecutionError> {
-        let payload = self
+    fn launch_remote_study(
+        &self,
+        config_path: &str,
+        job_id: Option<&str>,
+    ) -> Result<Value, ToolExecutionError> {
+        let mut payload = self
             .context
             .configuration_loader
             .load_json(config_path)
@@ -1225,6 +1198,8 @@ impl HarnessTools {
                     "could not load the study configuration '{config_path}': {error}"
                 ))
             })?;
+        backtest::backtest::job::overlay_job_id_json(&mut payload, job_id)
+            .map_err(|error| ToolExecutionError::new(error.to_string()))?;
         let url = self.remote_url(STUDY_LAUNCH_ROUTE)?;
         validate_configuration(&payload, std::path::Path::new(config_path).parent())?;
         let response = self.dispatch_remote_post(&url, &payload)?;
@@ -1273,22 +1248,20 @@ impl HarnessTools {
                 )
                 .with_certainty("unknown_outcome")
             })?;
-        let location = response
-            .headers
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case("location"))
-            .map(|(_, value)| value.clone());
         Ok(json!({
             "boundary": "remote",
             "job_id": job_id,
-            "run_id": job_id,
             "state": state,
-            "location": location,
+            "kind": "study",
         }))
     }
 
-    fn launch_remote_screener(&self, config_path: &str) -> Result<Value, ToolExecutionError> {
-        let payload = self
+    fn launch_remote_screener(
+        &self,
+        config_path: &str,
+        job_id: Option<&str>,
+    ) -> Result<Value, ToolExecutionError> {
+        let mut payload = self
             .context
             .configuration_loader
             .load_json(config_path)
@@ -1297,6 +1270,8 @@ impl HarnessTools {
                     "could not load the screening configuration '{config_path}': {error}"
                 ))
             })?;
+        backtest::backtest::job::overlay_job_id_json(&mut payload, job_id)
+            .map_err(|error| ToolExecutionError::new(error.to_string()))?;
         let url = self.remote_url(SCREENER_LAUNCH_ROUTE)?;
         validate_configuration(&payload, std::path::Path::new(config_path).parent())?;
         let response = self.dispatch_remote_post(&url, &payload)?;
@@ -1345,17 +1320,11 @@ impl HarnessTools {
                 )
                 .with_certainty("unknown_outcome")
             })?;
-        let location = response
-            .headers
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case("location"))
-            .map(|(_, value)| value.clone());
         Ok(json!({
             "boundary": "remote",
             "job_id": job_id,
-            "run_id": job_id,
             "state": state,
-            "location": location,
+            "kind": "screen",
         }))
     }
 
@@ -1492,20 +1461,69 @@ fn identifier_argument(
     Ok(value)
 }
 
+fn optional_identifier_argument(
+    arguments: &Map<String, Value>,
+    key: &str,
+) -> Result<Option<String>, ToolExecutionError> {
+    match arguments.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(_) => identifier_argument(arguments, key).map(Some),
+    }
+}
+
+fn ensure_process_job_id(
+    config_path: &str,
+    job_id: Option<&str>,
+) -> Result<(), ToolExecutionError> {
+    let Some(job_id) = job_id else {
+        return Ok(());
+    };
+    let text = std::fs::read_to_string(config_path).map_err(|error| {
+        ToolExecutionError::new(format!(
+            "could not read the configuration '{config_path}': {error}"
+        ))
+    })?;
+    let value = backtest::backtest::yaml::load_yaml(&text).map_err(|error| {
+        ToolExecutionError::new(format!(
+            "could not parse the configuration '{config_path}': {}",
+            error.0
+        ))
+    })?;
+    let declared = match &value {
+        backtest::backtest::yaml::YamlValue::Mapping(mapping) => mapping
+            .get("job_id")
+            .and_then(backtest::backtest::yaml::YamlValue::as_str),
+        _ => None,
+    };
+    if declared.map(str::trim) != Some(job_id.trim()) {
+        return Err(ToolExecutionError::new(
+            "the local process boundary cannot set job_id on an existing configuration \
+             document; add the id to the document or compose a local submitter",
+        ));
+    }
+    Ok(())
+}
+
 /// Resolve the backtest configuration path from an existing path or an inline
 /// ``config`` document.
 ///
 /// An inline document is serialized and written to a content-addressed file
 /// under the temp directory so the asynchronous runner can read it after the
 /// tool call returns; identical documents reuse the same file.
-fn resolve_config(arguments: &Map<String, Value>) -> Result<String, ToolExecutionError> {
+fn resolve_config(
+    arguments: &Map<String, Value>,
+    job_id: Option<&str>,
+) -> Result<String, ToolExecutionError> {
     if let Some(value) = arguments.get("config") {
         if !value.is_null() {
             let Some(document) = value.as_object() else {
                 return Err(ToolExecutionError::new("config must be a JSON object"));
             };
-            validate_configuration(value, None)?;
-            let text = serde_json::to_string(document)
+            let mut document = Value::Object(document.clone());
+            backtest::backtest::job::overlay_job_id_json(&mut document, job_id)
+                .map_err(|error| ToolExecutionError::new(error.to_string()))?;
+            validate_configuration(&document, None)?;
+            let text = serde_json::to_string(&document)
                 .map_err(|error| ToolExecutionError::new(error.to_string()))?;
             return materialize_config(&text);
         }
@@ -1668,7 +1686,7 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
         candidates.push(Tool::new(
             TOOL_RUN_BACKTEST,
             "Run one deterministic backtest: a local 'harness backtest-job' process, \
-             or a bearer-authenticated POST to the remote harness API returning {job_id, state}. \
+             or a bearer-authenticated POST to the remote harness API returning {job_id, state, kind}. \
              config_path must reference an existing, readable configuration document; \
              do not guess paths.",
             json!({
@@ -1688,6 +1706,7 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
                         "type": "object",
                         "description": "An inline backtest configuration document, used when no config file exists. Same schema as the configuration file; call backtest_config_template for a starter document."
                     },
+                    "job_id": text_property(),
                     "workspace": {
                         "type": "string",
                         "minLength": 1,
@@ -1704,7 +1723,7 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
         candidates.push(Tool::new(
             TOOL_RUN_STUDY,
             "Run one deterministic study: a local 'harness study-job' process, or a \
-             bearer-authenticated POST to the remote harness API returning {job_id, state}. \
+             bearer-authenticated POST to the remote harness API returning {job_id, state, kind}. \
              A study replays history to fit and observe a research model and resolve \
              indicators with no order execution; it is never recorded as a backtest. \
              config_path must reference an existing, readable study configuration document; \
@@ -1726,6 +1745,7 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
                         "type": "object",
                         "description": "An inline study configuration document, used when no config file exists."
                     },
+                    "job_id": text_property(),
                     "workspace": {
                         "type": "string",
                         "minLength": 1,
@@ -1785,7 +1805,7 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
             TOOL_RUN_SCREENER,
             "Run one deterministic screening run: a local 'harness screen-job' process, \
              or a bearer-authenticated POST to the remote harness API returning \
-             {job_id, run_id, state}. A screening run evaluates one JIT-authored \
+             {job_id, state, kind}. A screening run evaluates one JIT-authored \
              cross-sectional Rust program and produces a ranked 'screen.json' artifact; \
              market data arrives only through the harness data-source port, so an \
              unavailable lake fails the run loudly. config_path must reference an existing, \
@@ -1808,6 +1828,7 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
                         "type": "object",
                         "description": "An inline screen configuration document, used when no config file exists. Same schema as the configuration file; call screener_config_template for a starter document."
                     },
+                    "job_id": text_property(),
                     "workspace": {
                         "type": "string",
                         "minLength": 1,
@@ -1824,7 +1845,7 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
         candidates.push(Tool::new(
             TOOL_BACKTEST_CONFIG_TEMPLATE,
             "Return a canonical starter backtest configuration document (YAML). \
-             Adapt run_id, the time window, symbols, initial_cash, and the \
+             Adapt job_id, the time window, symbols, initial_cash, and the \
              strategy parameters, then pass the result as the inline `config` \
              argument of run_backtest when no configuration file exists.",
             json!({
@@ -1887,7 +1908,7 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
         candidates.push(Tool::new(
             TOOL_JOB_STATUS,
             "Read one job's persisted state \
-             {job_id, state, created_at, updated_at, error_message} from the remote harness API.",
+             {job_id, kind, state, created_at, updated_at, error_message} from the remote harness API.",
             json!({
                 "type": "object",
                 "additionalProperties": false,
@@ -1898,47 +1919,32 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
             move |arguments| handler.get_job_status(arguments),
         ));
     }
-    if capabilities.screener {
-        let handler = tools.clone();
+    if capabilities.artifacts {
+        let result_handler = tools.clone();
         candidates.push(Tool::new(
-            TOOL_SCREENER_STATUS,
-            "Read one screening job's persisted state \
-             {job_id, state, created_at, updated_at, error_message} from the remote harness API.",
+            TOOL_GET_JOB_RESULT,
+            "Read one stored job's result record \
+             {job_id, kind, state, strategy_id, metrics, artifact_count, ...} \
+             from the remote harness API.",
             json!({
                 "type": "object",
                 "additionalProperties": false,
                 "required": ["job_id"],
                 "properties": {"job_id": text_property()}
             }),
-            "screener",
-            move |arguments| handler.get_screener_status(arguments),
-        ));
-    }
-    if capabilities.artifacts {
-        let get_run_handler = tools.clone();
-        candidates.push(Tool::new(
-            TOOL_GET_RUN,
-            "Read one stored run's catalog row {run_id, status, strategy_id, metrics, ...} \
-             from the remote harness API.",
-            json!({
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["run_id"],
-                "properties": {"run_id": text_property()}
-            }),
             "artifacts",
-            move |arguments| get_run_handler.get_run(arguments),
+            move |arguments| result_handler.get_job_result(arguments),
         ));
         let list_handler = tools.clone();
         candidates.push(Tool::new(
             TOOL_LIST_ARTIFACTS,
-            "List one stored run's artifact manifest entries \
+            "List one stored job's artifact manifest entries \
              {name, uri, sha256, sizeBytes} from the remote harness API.",
             json!({
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["run_id"],
-                "properties": {"run_id": text_property()}
+                "required": ["job_id"],
+                "properties": {"job_id": text_property()}
             }),
             "artifacts",
             move |arguments| list_handler.list_artifacts(arguments),
@@ -1946,18 +1952,18 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
         let read_handler = tools.clone();
         candidates.push(Tool::new(
             TOOL_READ_ARTIFACT,
-            "Read one stored run artifact's contents as utf-8 text or hex-encoded bytes \
-             {run_id, name, encoding, content}.",
+            "Read one stored job artifact's contents as utf-8 text or hex-encoded bytes \
+             {job_id, name, encoding, content}.",
             json!({
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["run_id", "name"],
+                "required": ["job_id", "name"],
                 "properties": {
-                    "run_id": {"type": "string", "minLength": 1},
+                    "job_id": {"type": "string", "minLength": 1},
                     "name": {
                         "type": "string",
                         "minLength": 1,
-                        "description": "Artifact name relative to the run, e.g. metrics.json or artifacts/equity.parquet."
+                        "description": "Artifact name relative to the job, e.g. metrics.json or artifacts/equity.parquet."
                     }
                 }
             }),

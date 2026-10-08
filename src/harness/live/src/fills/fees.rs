@@ -109,8 +109,8 @@ impl FeeRounding {
 /// Engine-owned attribution supplied independently of strategy logic.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FeeContext {
-    /// Run identifier.
-    pub run_id: String,
+    /// Execution job identifier.
+    pub job_id: String,
     /// Strategy-instance identifier.
     pub strategy_id: String,
     /// The asset class selecting the fee model.
@@ -119,9 +119,9 @@ pub struct FeeContext {
 
 impl FeeContext {
     /// Construct a validated context.
-    pub fn new(run_id: &str, strategy_id: &str, asset_class: AssetClass) -> LiveResult<Self> {
+    pub fn new(job_id: &str, strategy_id: &str, asset_class: AssetClass) -> LiveResult<Self> {
         Ok(Self {
-            run_id: require_text(run_id, "run_id")?,
+            job_id: require_text(job_id, "job_id")?,
             strategy_id: require_text(strategy_id, "strategy_id")?,
             asset_class,
         })
@@ -195,9 +195,9 @@ impl FeeAssessment {
             .fold(ZERO, |sum, component| sum + component.amount)
     }
 
-    /// The run attribution used by aggregation.
-    pub fn run_id(&self) -> &str {
-        &self.context.run_id
+    /// The job attribution used by aggregation.
+    pub fn job_id(&self) -> &str {
+        &self.context.job_id
     }
 
     /// The strategy-instance attribution used by aggregation.
@@ -467,29 +467,29 @@ pub struct FeeAggregate {
 /// Deterministic fee totals across all required attribution dimensions.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FeeAggregation {
-    /// Totals by run.
-    pub by_run: Vec<FeeAggregate>,
+    /// Totals by execution job.
+    pub by_job: Vec<FeeAggregate>,
     /// Totals by strategy.
     pub by_strategy: Vec<FeeAggregate>,
     /// Totals by asset class.
     pub by_asset_class: Vec<FeeAggregate>,
 }
 
-/// Aggregate assessments by run, strategy, and asset class and currency.
+/// Aggregate assessments by job, strategy, and asset class and currency.
 pub fn aggregate_fees(assessments: &[FeeAssessment]) -> LiveResult<FeeAggregation> {
-    let mut by_run: BTreeMap<(String, String), Decimal18> = BTreeMap::new();
+    let mut by_job: BTreeMap<(String, String), Decimal18> = BTreeMap::new();
     let mut by_strategy: BTreeMap<(String, String), Decimal18> = BTreeMap::new();
     let mut by_asset_class: BTreeMap<(String, String), Decimal18> = BTreeMap::new();
     let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
     for assessment in assessments {
-        let fill_key = (assessment.run_id().to_string(), assessment.fill_id.clone());
+        let fill_key = (assessment.job_id().to_string(), assessment.fill_id.clone());
         if !seen.insert(fill_key.clone()) {
             return Err(LiveError::Fee(format!(
-                "duplicate fee assessment for run/fill {}/{}",
+                "duplicate fee assessment for job/fill {}/{}",
                 fill_key.0, fill_key.1
             )));
         }
-        add_total(&mut by_run, assessment.run_id(), assessment);
+        add_total(&mut by_job, assessment.job_id(), assessment);
         add_total(&mut by_strategy, assessment.strategy_id(), assessment);
         add_total(
             &mut by_asset_class,
@@ -498,7 +498,7 @@ pub fn aggregate_fees(assessments: &[FeeAssessment]) -> LiveResult<FeeAggregatio
         );
     }
     Ok(FeeAggregation {
-        by_run: aggregates(by_run),
+        by_job: aggregates(by_job),
         by_strategy: aggregates(by_strategy),
         by_asset_class: aggregates(by_asset_class),
     })

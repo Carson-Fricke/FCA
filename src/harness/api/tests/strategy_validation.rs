@@ -120,13 +120,8 @@ fn native_strategy_validation_really_compiles_loads_constructs_and_checks_depend
 async fn authenticated_http_mcp_exposes_and_executes_native_strategy_validation() {
     let mut config = api::http::state::AppConfig::in_memory();
     config.bearer_token = Some("test-token".into());
-    config.mcp_server = Some(
-        api::http::mcp::compose_local_server(
-            config.run_store.clone(),
-            config.job_repository.clone(),
-        )
-        .unwrap(),
-    );
+    config.mcp_server =
+        Some(api::http::mcp::compose_local_server(config.job_store.clone()).unwrap());
     let app = api::http::create_app(config).unwrap();
     for (method, params) in [
         ("tools/list", json!({})),
