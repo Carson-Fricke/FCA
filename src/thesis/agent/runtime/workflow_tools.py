@@ -48,7 +48,22 @@ def _start_workflow_schema(workflow_ids: tuple[str, ...]) -> dict[str, object]:
             },
             "launch_options": {
                 "type": "object",
-                "description": "Workflow-specific launch declarations. Hypothesis development requires partition with historyDays, forwardDays, informationHorizonDays, positionHorizonDays and liquidationDays; all are integer calendar-day spans. Freeze these before research; ask conversationally when the partition choice is unclear.",
+                "description": (
+                    "Workflow-specific launch declarations. Hypothesis development "
+                    "requires partition with historyDays (total historical span, "
+                    "including holdout), forwardDays (recent held-out tail, excluded "
+                    "from all development), informationHorizonDays (maximum signal "
+                    "lookback across planned parameters), positionHorizonDays "
+                    "(maximum holding span), and liquidationDays (close-out embargo). "
+                    "All are integer calendar-day spans. Choose defensible explicit "
+                    "values from the research request, respecting any operator "
+                    "constraints, and freeze them before launch. These are agent-owned "
+                    "research design choices; missing technical day counts alone do "
+                    "not require operator confirmation. forwardDays exceeds "
+                    "liquidationDays; historyDays exceeds forwardDays plus the larger "
+                    "information/position horizon. Forward data stays sealed until "
+                    "forward evaluation."
+                ),
             },
             "investigation_id": {
                 "type": "string",

@@ -38,6 +38,12 @@ to their respective packages, not to the conversation implementation.
 - `turns.py` serializes and coalesces conversation turns.
 - `workflow_tools.py` adapts workflow launch tools.
 
+For hypothesis-development launch, the root agent chooses and explicitly
+declares defensible partition spans from the operator's research request.
+Routine day-count choices do not require operator confirmation. The forward
+span is a sealed holdout within the total historical span, not a signal scoring
+horizon; the declaration freezes before research and does not grant forward access.
+
 Serving composes workspace program tools for non-workflow conversations.
 Workflow bindings grant program access only to selected owning phase executors;
 inherited tool names alone give workflow helpers no program authority. Program
