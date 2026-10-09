@@ -190,7 +190,7 @@ pub enum MarketEvent {
     /// One OHLCV bar.
     ///
     /// Bars may coexist with ticks. Their interval comes from the validated
-    /// requirement plan; incompatible multi-interval plans are rejected.
+    /// source cadence; requested intervals are aggregated before dispatch.
     Bar {
         /// Event identifier.
         event_id: String,

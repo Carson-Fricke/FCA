@@ -31,7 +31,7 @@ VERDICT_INCONCLUSIVE = "inconclusive"
 _WORKFLOW_ID = "hypothesis-development"
 
 
-_WORKFLOW_VERSION = "2.3.0"
+_WORKFLOW_VERSION = "3.0.0"
 
 
 _WORKFLOW_TITLE = "Hypothesis development"

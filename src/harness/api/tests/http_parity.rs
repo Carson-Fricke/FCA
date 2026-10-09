@@ -566,6 +566,20 @@ async fn download_artifact_returns_exact_payload_bytes() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, b"fills-bytes");
+    let (json_status, _, json_body) = send(
+        &test.router,
+        get_auth(
+            "/v1/jobs/run-1/artifacts/fills.parquet?representation=json",
+            BEARER,
+        ),
+    )
+    .await;
+    assert_eq!(json_status, StatusCode::OK);
+    let document: Value = serde_json::from_slice(&json_body).unwrap();
+    assert_eq!(document["job_id"], "run-1");
+    assert_eq!(document["name"], "fills.parquet");
+    assert_eq!(document["encoding"], "utf-8");
+    assert_eq!(document["content"], "fills-bytes");
     assert_eq!(
         headers
             .get(header::CONTENT_TYPE)
@@ -869,6 +883,14 @@ struct FaultingPutResultStore {
 }
 
 impl JobStore for FaultingPutResultStore {
+    fn mark_running(
+        &self,
+        job_id: &str,
+        started: chrono::DateTime<Utc>,
+    ) -> Result<JobRecord, StoreError> {
+        self.inner.mark_running(job_id, started)
+    }
+
     fn get(&self, job_id: &str) -> Option<JobRecord> {
         self.inner.get(job_id)
     }
@@ -1609,7 +1631,7 @@ fn strict_http_subscription_contract_rejects_invalid_shapes() {
     for subscriptions in [
         json!({"data_type": "quote", "symbols": ["SPY"]}),
         json!([{"data_type": "bars", "symbols": ["SPY"]}]),
-        json!([{"data_type": "bars", "symbols": ["SPY"], "interval": "5min"}]),
+        json!([{"data_type": "bars", "symbols": ["SPY"], "interval": "1s"}]),
         json!([{"data_type": "quote", "symbols": ["SPY"], "interval": null}]),
         json!([{"data_type": "trade", "symbols": []}]),
         json!([{"data_type": "quote", "symbols": ["SPY"], "extra": true}]),
@@ -1948,6 +1970,14 @@ fn admission_and_result_publication_rules_are_atomic() {
 struct FailingAdmitStore;
 
 impl JobStore for FailingAdmitStore {
+    fn mark_running(
+        &self,
+        _job_id: &str,
+        _started: chrono::DateTime<Utc>,
+    ) -> Result<JobRecord, StoreError> {
+        Err(StoreError::Io("disk offline".to_string()))
+    }
+
     fn get(&self, _job_id: &str) -> Option<JobRecord> {
         None
     }

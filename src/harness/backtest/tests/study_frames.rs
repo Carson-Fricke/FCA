@@ -50,6 +50,7 @@ fn config(interval: &str) -> BacktestConfig {
     .unwrap();
     config.shell = "study".to_string();
     config.data_bar_interval = interval.to_string();
+    config.data_source_bar_interval = interval.to_string();
     config.symbols = vec!["SPY".to_string(), "AAPL".to_string(), "ABSENT".to_string()];
     sync_study_subscriptions(&mut config);
     config
@@ -87,6 +88,7 @@ fn fixture(config: &BacktestConfig, events: Vec<MarketEvent>) -> ReplayFixture {
 #[derive(Default)]
 struct Observer {
     frames: Arc<Mutex<Vec<EngineBarFrame>>>,
+    outputs: BTreeMap<String, serde_json::Value>,
     ticks: Arc<Mutex<u64>>,
     subscriptions: Vec<MarketSubscription>,
 }
@@ -108,6 +110,9 @@ impl StrategyRuntime for Observer {
     }
     fn published_metrics(&self) -> BTreeMap<String, String> {
         BTreeMap::new()
+    }
+    fn published_outputs(&self) -> BTreeMap<String, serde_json::Value> {
+        self.outputs.clone()
     }
 }
 
@@ -264,6 +269,7 @@ fn daily_uses_real_session_close_dst_and_early_close_not_window_clipping() {
         );
         config.end_ns = stamp(close);
         config.data_bar_interval = "1min".to_string();
+        config.data_source_bar_interval = "1min".to_string();
         sync_study_subscriptions(&mut config);
         let last = fixture_with_last_minute(&config);
         assert_eq!(
@@ -637,7 +643,7 @@ fn requested_type_cannot_be_satisfied_by_other_stream_and_echo_is_exact() {
         subscription("bars", &["SPY"], Some("1min")),
         subscription("bars", &["SPY"], Some("1d"))
     ])
-    .is_err());
+    .is_ok());
 }
 
 #[test]
@@ -1088,4 +1094,81 @@ fn runtime_requirements_must_match_declared_subscriptions() {
             backtest::backtest::engine_core::runtime_subscriptions(&config, &strategies).is_err()
         );
     }
+}
+
+#[test]
+fn multi_timeframe_replay_aggregates_completed_windows_from_one_source() {
+    let mut config = config("1min");
+    config.symbols = vec!["SPY".into()];
+    config.end_ns = config.start_ns + 16 * MINUTE;
+    config.data_subscriptions = vec![
+        bars_subscription(&config.symbols, "1min"),
+        bars_subscription(&config.symbols, "15min"),
+    ];
+    let events = (0..16)
+        .map(|minute| bar("SPY", config.start_ns + minute * MINUTE))
+        .collect();
+    let observer = Observer::default();
+    let seen = observer.frames.clone();
+    let outcome = run(&config, &fixture(&config, events), observer);
+    let frames = seen.lock().unwrap();
+    assert_eq!(outcome.bar_frame_count, 17);
+    let slow: Vec<_> = frames
+        .iter()
+        .filter(|frame| frame.interval == "15min")
+        .collect();
+    assert_eq!(slow.len(), 1);
+    assert_eq!(slow[0].available_at_ns, config.start_ns + 15 * MINUTE);
+    assert_eq!(
+        slow[0].bars_by_symbol["SPY"].volume,
+        num::Decimal::from(1500)
+    );
+    assert_eq!(
+        outcome
+            .manifest
+            .acquired_subscriptions
+            .as_ref()
+            .unwrap()
+            .iter()
+            .filter(|s| s.data_type == "bars")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn incomplete_slow_window_reports_missing_instead_of_partial_ohlcv() {
+    let mut config = config("15min");
+    config.data_source_bar_interval = "1min".into();
+    config.symbols = vec!["SPY".into()];
+    let events = (0..15)
+        .filter(|minute| *minute != 7)
+        .map(|minute| bar("SPY", config.start_ns + minute * MINUTE))
+        .collect();
+    let frames = assemble_study_frames(
+        &config,
+        &fixture(&config, events),
+        &SyntheticDataOptions::default(),
+    )
+    .unwrap();
+    assert!(frames[0].bars_by_symbol.is_empty());
+    assert_eq!(frames[0].missing_symbols, ["SPY"]);
+}
+
+#[test]
+fn fitted_outputs_are_stamped_with_actual_training_execution() {
+    let mut config = config("1min");
+    config.symbols = vec!["SPY".into()];
+    sync_study_subscriptions(&mut config);
+    let mut observer = Observer::default();
+    observer.outputs.insert("fit".into(), serde_json::json!({"kind":"fitted_state","training_job_id":"untrusted-author-claim","method":"normalization","training_start_ns":config.start_ns,"training_end_ns":config.end_ns,"available_at_ns":config.end_ns,"seed":0,"parameters":{},"weights":{"mean":10.0}}));
+    let outcome = run(
+        &config,
+        &fixture(&config, vec![bar("SPY", config.start_ns)]),
+        observer,
+    );
+    assert_eq!(
+        outcome.exploratory_outputs["observer"]["fit"]["training_job_id"],
+        config.job_id
+    );
 }

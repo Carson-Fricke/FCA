@@ -149,6 +149,13 @@ def test_compiler_only_change_requires_revalidation(
 ) -> None:
     kit = _kit(tmp_path, payloads=[], results=[])
     request = _request(kit)
+    state = kit.workflow._reconstruct_state(request)
+    kit.workflow._apply_contract(
+        request,
+        state,
+        "discovery",
+        {"target": "model_creation", "discovery": _discovery_envelope()},
+    )
     node = kit.workflow.prepare_phase(request)
     assert node is not None
     record = replace(
@@ -174,6 +181,7 @@ def test_compiler_only_change_requires_revalidation(
         store=store,
         harness_tools=None,
         programs=programs,
+        workflow=(lambda: kit.workflow) if kind == "study" else None,
         activity=lambda context, tool, arguments, execute: execute(),
     )
     completion = (

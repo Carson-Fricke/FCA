@@ -44,7 +44,7 @@
 	let name = $state('');
 	let asOf = $state(new Date().toISOString().slice(0, 10));
 	let lookbackDays = $state(20);
-	let barInterval = $state<ScreenerBarInterval>('1d');
+	let barIntervals = $state<ScreenerBarInterval[]>(['1d']);
 	let rankMetric = $state('close');
 	let saved = $state<ScreenerDefinition[]>([]);
 	let selectedId = $state<string | null>(null);
@@ -75,7 +75,7 @@
 	);
 	const asOfValid = $derived(/^\d{4}-\d{2}-\d{2}$/.test(asOf));
 	const rankValid = $derived(rankMetric.trim().length > 0);
-	const draftValid = $derived(sourceValid && rowsValid && nameValid && lookbackValid && rankValid);
+	const draftValid = $derived(sourceValid && rowsValid && nameValid && lookbackValid && rankValid && barIntervals.length > 0);
 	const canSave = $derived(draftValid && !saving && !running);
 	const canRun = $derived(draftValid && asOfValid && !saving && !running);
 
@@ -89,11 +89,11 @@
 		rows = next;
 		// Filter edits regenerate the source while it is still generated;
 		// manual source edits are never clobbered by the builder.
-		if (!sourceDirty) source = generateScreenerSource(next);
+		if (!sourceDirty) source = generateScreenerSource(next, barIntervals[0]);
 	}
 
 	function regenerate(): void {
-		source = generateScreenerSource(rows);
+		source = generateScreenerSource(rows, barIntervals[0]);
 		sourceDirty = false;
 	}
 
@@ -104,7 +104,7 @@
 	function loadDefinition(definition: ScreenerDefinition): void {
 		name = definition.name;
 		lookbackDays = definition.lookbackDays;
-		barInterval = definition.barInterval;
+		barIntervals = definition.barIntervals;
 		rankMetric = definition.rankMetric;
 		source = definition.source;
 		selectedId = definition.definitionId;
@@ -123,7 +123,7 @@
 		return (
 			definition.name !== name.trim() ||
 			definition.lookbackDays !== lookbackDays ||
-			definition.barInterval !== barInterval ||
+			JSON.stringify(definition.barIntervals) !== JSON.stringify(barIntervals) ||
 			definition.rankMetric !== rankMetric.trim() ||
 			definition.source !== source
 		);
@@ -137,7 +137,7 @@
 			const created = await saveScreener(workspaceId, {
 				name: name.trim(),
 				lookback_days: lookbackDays,
-				bar_interval: barInterval,
+				bar_intervals: barIntervals,
 				rank_metric: rankMetric.trim(),
 				source
 			});
@@ -233,10 +233,12 @@
 				/>
 			</label>
 			<label class="flex flex-col gap-1 text-[10px] text-slate-500">
-				Bar interval
+				Bar intervals (select several)
 				<select
 					class="rounded-lg border border-surface-600 bg-surface-950 px-2 py-1.5 font-mono text-xs text-slate-700 outline-none"
-					bind:value={barInterval}
+					multiple
+					bind:value={barIntervals}
+					onchange={() => { if (!sourceDirty) source = generateScreenerSource(rows, barIntervals[0]); }}
 					data-testid="screener-interval"
 				>
 					{#each BAR_INTERVALS as interval (interval)}

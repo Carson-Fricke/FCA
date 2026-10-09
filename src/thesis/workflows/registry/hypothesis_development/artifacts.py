@@ -71,16 +71,16 @@ def discovery_report_artifact(
     draft = state.discovery
     if draft is None:
         return None
-    candidate = draft.candidate
+    candidate = draft.sketch_reference
     content = (
         f"Discovery found no candidate: {draft.no_candidate_reason}"
         if candidate is None
-        else f"Discovery candidate: {candidate.opportunity}"
+        else f"Discovery sketch: {candidate.sketch_id} ({candidate.version[:12]})"
     )
     return {
         "type": "discovery",
         "content": content,
-        "candidate": None if candidate is None else candidate.as_dict(),
+        "sketchReference": None if candidate is None else candidate.document(),
         "noCandidateReason": draft.no_candidate_reason,
         "attempts": [attempt.as_dict() for attempt in draft.attempts],
         "untouchedData": draft.untouched_data,

@@ -6,6 +6,7 @@
 	import { listWorkspaceArtifacts } from '$lib/api';
 	import type { ArtifactKind, WorkspaceArtifact, WorkspaceArtifactCatalog } from '$lib/types';
 	import type { PageData } from './$types';
+	import { page } from '$app/state';
 
 	let { data }: { data: PageData } = $props();
 
@@ -21,7 +22,12 @@
 	$effect(() => {
 		let cancelled = false;
 		listWorkspaceArtifacts(workspaceId).then((document) => {
-			if (!cancelled) catalog = document;
+			if (!cancelled) {
+				catalog = document;
+				const requested = page.url.searchParams.get('artifact');
+				const artifact = document.items.find((item) => item.id === requested);
+				if (artifact) open(artifact);
+			}
 		});
 		return () => {
 			cancelled = true;
@@ -31,7 +37,7 @@
 	const items = $derived(catalog?.items ?? []);
 
 	const counts = $derived.by((): Record<'all' | ArtifactKind, number> => {
-		const byKind = { strategy: 0, study: 0, indicator: 0 };
+		const byKind = { strategy: 0, study: 0, indicator: 0, sketch: 0 };
 		for (const item of items) byKind[item.kind] += 1;
 		return { all: items.length, ...byKind };
 	});
@@ -51,12 +57,14 @@
 
 	const FILTERS: { id: 'all' | ArtifactKind; label: string }[] = [
 		{ id: 'all', label: 'All' },
+		{ id: 'sketch', label: 'Strategy sketches' },
 		{ id: 'strategy', label: 'Strategies' },
 		{ id: 'study', label: 'Studies' },
 		{ id: 'indicator', label: 'Indicators' }
 	];
 
 	const STATS: { id: ArtifactKind; label: string; dot: string }[] = [
+		{ id: 'sketch', label: 'Strategy sketches', dot: 'bg-accent' },
 		{ id: 'strategy', label: 'Strategies', dot: 'bg-accent' },
 		{ id: 'study', label: 'Studies', dot: 'bg-warn' },
 		{ id: 'indicator', label: 'Indicators', dot: 'bg-profit' }
@@ -86,7 +94,7 @@
 		<div>
 			<h1 class="text-xl font-semibold text-slate-800">Workspace artifacts</h1>
 			<p class="text-sm text-slate-500">
-				Durable strategies, studies, and indicators committed to this workspace.
+				Strategy sketches, strategies, studies, and indicators committed to this workspace.
 			</p>
 		</div>
 		<div class="ml-auto flex overflow-hidden rounded-lg border border-surface-600">

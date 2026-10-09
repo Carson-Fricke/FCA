@@ -49,6 +49,14 @@ fn replay_acceptance_is_shared_at_real_boundaries() {
         "data":{"symbols":["SPY"],
             "subscriptions":[{"data_type":"quote","symbols":["SPY"]}]}});
     acceptance(&valid, true);
+    let mut multi = valid.clone();
+    multi["data"]["subscriptions"] = json!([
+        {"data_type":"bars","symbols":["SPY"],"interval":"1min"},
+        {"data_type":"bars","symbols":["SPY"],"interval":"5min"},
+        {"data_type":"bars","symbols":["SPY"],"interval":"1h"},
+        {"data_type":"bars","symbols":["SPY"],"interval":"1d"}
+    ]);
+    acceptance(&multi, true);
     for (field, value) in [
         ("seed", json!("wrong")),
         ("schema_version", json!(2)),
@@ -63,7 +71,7 @@ fn replay_acceptance_is_shared_at_real_boundaries() {
     for input in [
         json!({"data_type":"ticks","symbols":["SPY"]}),
         json!({"data_type":"quote","symbols":["SPY"],"interval":null}),
-        json!({"data_type":"bars","symbols":["SPY"],"interval":"5min"}),
+        json!({"data_type":"bars","symbols":["SPY"],"interval":"1s"}),
     ] {
         let mut bad = valid.clone();
         bad["data"]["subscriptions"] = json!([input]);
@@ -170,7 +178,7 @@ fn screening_schema_is_shared_by_api_mcp_and_cli() {
     let digest = backtest::sha256::digest_hex(source.as_bytes());
     let document = json!({"schema_version":1,"shell":"screen","job_id":"parity-screen",
         "name":"parity",
-        "as_of":"2024-01-19","bar_interval":"1d","lookback_days":20,"rank_metric":"close",
+        "as_of":"2024-01-19","bar_intervals":["1d"],"lookback_days":20,"rank_metric":"close",
         "source":source,"bundle_hash":digest,
         "definition_id":format!("sha256:{}", "0".repeat(64)),"definition_hash":"0".repeat(64)});
     for invalid in [false, true] {

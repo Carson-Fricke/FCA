@@ -162,7 +162,7 @@ def test_snapshot_only_reports_screeners_with_real_count_source() -> None:
         ScreenerDefinition(
             name="Counted",
             lookback_days=10,
-            bar_interval="1d",
+            bar_intervals=("1d",),
             rank_metric="score",
             source="source",
         ),

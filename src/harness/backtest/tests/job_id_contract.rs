@@ -33,7 +33,7 @@ fn screen_document(job_id: Option<&str>) -> Value {
         "shell": "screen",
         "name": "job-id-contract",
         "as_of": "2024-01-19",
-        "bar_interval": "1d",
+        "bar_intervals": ["1d"],
         "lookback_days": 20,
         "rank_metric": "close",
         "source": source,
@@ -156,4 +156,22 @@ fn shipped_screener_configuration_carries_an_explicit_job_id() {
     let configuration =
         backtest::backtest::job::load_screen_config(&path).expect("shipped screener config");
     assert_eq!(configuration.job_id, "job-screen-example");
+}
+
+#[test]
+fn screen_configuration_freezes_multiple_canonical_intervals() {
+    let mut document = screen_document(Some("job-multi-screen"));
+    document["bar_intervals"] = json!(["15min", "1d", "1min", "15min"]);
+    let config = ScreenConfig::from_json_value(&document).unwrap();
+    assert_eq!(config.bar_intervals, ["15min", "1d", "1min"]);
+    let before = config.configuration_digest();
+    document["bar_intervals"] = json!(["1min", "1d"]);
+    assert_ne!(
+        before,
+        ScreenConfig::from_json_value(&document)
+            .unwrap()
+            .configuration_digest()
+    );
+    document["bar_intervals"] = json!(["1s"]);
+    assert!(ScreenConfig::from_json_value(&document).is_err());
 }

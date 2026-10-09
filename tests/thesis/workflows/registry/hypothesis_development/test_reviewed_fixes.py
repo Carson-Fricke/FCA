@@ -26,6 +26,7 @@ from ._support import (
     _phase_node_id,
     _request,
     _research_envelope,
+    _sketch_reference,
 )
 
 
@@ -202,7 +203,19 @@ def test_live_accepted_contract_sequence_matches_replay(
         },
         {
             "target": target,
-            "verdict": {"outcome": "supported", "reason": "review accepted"},
+            "verdict": {
+                "outcome": "supported",
+                "reason": "review accepted",
+                "sketchReference": _sketch_reference(),
+                "assumptionAssessments": [
+                    {
+                        "assumptionId": "continuation",
+                        "status": "supported",
+                        "reason": "Trial",
+                        "testIds": ["t1"],
+                    }
+                ],
+            },
         },
     ]
     for completion in completions:

@@ -22,6 +22,8 @@ from thesis.workflows.registry.hypothesis_development.spec import (
     build_hypothesis_development_workflow,
 )
 
+from ._support import _sketch_reference
+
 
 def _trial_payload() -> dict[str, object]:
     return {
@@ -38,6 +40,15 @@ def _trial_payload() -> dict[str, object]:
 
 def _verdict_payload() -> dict[str, object]:
     return {
+        "sketchReference": _sketch_reference(),
+        "assumptionAssessments": [
+            {
+                "assumptionId": "continuation",
+                "status": "supported",
+                "reason": "Trial survived",
+                "testIds": ["T01"],
+            }
+        ],
         "outcome": "supported",
         "reason": "the planned falsifiers survived the trials",
         "evidence": "sharpe stayed above zero.",

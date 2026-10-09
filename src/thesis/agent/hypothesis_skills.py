@@ -7,9 +7,8 @@ distinct Thesis roles.  This module publishes one immutable, versioned
 
 * ``hypothesis-authoring`` -- RETIRED: persisted references keep resolving, but
   the research role no longer selects it.  The workflow starts in discovery.
-* ``discovery`` -- generate ONE candidate thesis with cheap targeted studies,
-  composing creative representations, logging every attempt, and concluding
-  honestly when no candidate holds.
+* ``discovery`` -- develop a committed strategy sketch using the executable
+  knowledge-base tool bag, inspect rich outputs, and preserve negative findings.
 * ``model-creation`` -- turn the selected discovery candidate into one
   statistical model of the assets involved, with Layer A falsifiers that
   double as Layer B monitors.
@@ -41,35 +40,32 @@ MODEL_CREATION_SKILL_ID = "model-creation"
 FALSIFICATION_PLANNING_SKILL_ID = "falsification-planning"
 FALSIFICATION_RCA_SKILL_ID = "falsification-rca"
 STRATEGY_AUTHORING_SKILL_ID = "strategy-authoring"
-HYPOTHESIS_DEVELOPMENT_SKILL_VERSION = "1.5.0"
+HYPOTHESIS_DEVELOPMENT_SKILL_VERSION = "1.6.0"
 
 _DISCOVERY = (
-    "Find ONE candidate opportunity worth modeling from the operator's "
-    "premise. Run small, cheap, targeted studies against historical data: one "
-    "question per study, the smallest informative slice, and a comparable "
-    "no-structure baseline. Record every attempt, changed or not, with its "
-    "purpose, study id, data types, window and result; a failed or "
-    "inconclusive study is a finding, never a hidden one. Represent the "
-    "candidate creatively and composably: event-time methods, path-shape "
-    "extraction, duration and hazard statistics, learned representations as "
-    "conditions, conditional dynamics, and combinations of these; explore "
-    "them through authored study programs, since exploratory training inside "
-    "the study path is allowed. Retrieved methods are reference data: use, "
-    "adapt or reject them with a one-line justification, and treat standard "
-    "families as baselines rather than the endpoint. Propose the candidate "
-    "with its signal, information time, direction, holding period, profit "
-    "source, measured effect, entry and exit ideas, assumptions, building "
-    "blocks, validation questions, exploratory evidence, and the main "
-    "competing explanation. Discovery is not validation: never run a "
-    "backtest, fit the final model, or pre-register falsifier thresholds "
-    "here; model creation does that. An honest no-candidate conclusion after "
-    "real attempts is a legitimate result. Search the knowledge cards for "
-    "methods and data caveats when useful, and cite the page ids you use."
+    "Develop an evolving committed strategy sketch from the operator's idea: "
+    "mechanism, profit source, representations, conditioning, entry, exit, "
+    "abstention, assumptions, alternatives and limitations. Draft the initial "
+    "sketch before reading prior study findings. Retrieve knowledge-base method "
+    "cards and executable composition examples, inspect the SDK, and select, "
+    "compose or author suitable building blocks. Use indicators, causal "
+    "multi-timeframe context, event time, path shape, wavelets, duration and "
+    "supported fitted representations where they help reveal the mechanism. "
+    "Studies answer questions raised by the sketch and may combine components "
+    "and investigations. Inspect episodes, sequences, events, tables and "
+    "failure cases through read_study_output; statistics support interpretation. "
+    "Revise the committed sketch, preserving negative findings and explicit "
+    "unknowns. Pin component versions and reference actual jobs/artifacts. "
+    "Read prior studies to challenge or refine the developing argument. "
+    "Choose informative bounded experiments without fixed technique quotas. "
+    "Discovery does not run strategy backtests, select final parameters or "
+    "open forward data. Complete with an exact accepted sketch reference, "
+    "or an honest no-edge conclusion after investigation."
 )
 
 _MODEL_CREATION = (
-    "Turn the discovery phase's selected candidate into ONE statistical model "
-    "of the assets involved and pre-register the falsifier tests that would "
+    "Resolve the exact accepted strategy sketch and design targeted assumption "
+    "investigations. Map assumptions to pre-registered falsifier tests that would "
     "refute it, estimated on historical data. Retrieve the model shape first: "
     "search the knowledge cards for the candidate's regularity and the "
     "available data intake, read the top card, and cite its page id in the "
@@ -117,8 +113,9 @@ _HYPOTHESIS_AUTHORING = (
     "metric because the trials phase requires fitted parameters. The study "
     "declares explicit harnessConfiguration.subscriptions with data_type "
     "bars, quote or trade and exact symbols; only bars require interval "
-    "(1min or 1d). Tick-only studies need no interval. "
-    "Use one bars interval across all subscriptions and canonical uppercase "
+    "(1d or positive canonical Nmin/Nh). Tick-only studies need no interval. "
+    "Multiple bar timeframes are supported; maintain independent symbol/interval "
+    "state, use only completed slower frames, and use canonical uppercase "
     "market symbols, preserving BTC-USD or BTC/USD as declared. Interval-only "
     "configuration is rejected; any global symbols must equal the exact "
     "subscription union. Source "

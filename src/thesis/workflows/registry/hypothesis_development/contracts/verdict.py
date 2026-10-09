@@ -6,6 +6,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import cast
 
+from thesis.workspaces.sketch_contract import StrategySketchReference
+
 from ..errors import (
     WorkflowError,
 )
@@ -25,6 +27,8 @@ class FalsificationVerdict:
     reason: str
     trials: tuple[FalsificationTrial, ...] = ()
     evidence: str | None = None
+    sketch_reference: StrategySketchReference | None = None
+    assumption_assessments: tuple[Mapping[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         if self.outcome not in _VERDICTS:
@@ -41,6 +45,12 @@ class FalsificationVerdict:
     def as_dict(self) -> dict[str, object]:
         """Return the portable verdict representation."""
         return {
+            "sketchReference": None
+            if self.sketch_reference is None
+            else self.sketch_reference.document(),
+            "assumptionAssessments": [
+                dict(item) for item in self.assumption_assessments
+            ],
             "evidence": self.evidence,
             "outcome": self.outcome,
             "reason": self.reason,
@@ -76,6 +86,19 @@ class FalsificationVerdict:
             reason=reason,
             trials=trials,
             evidence=evidence,
+            sketch_reference=(
+                StrategySketchReference.parse(
+                    cast(Mapping[str, object], payload["sketchReference"])
+                )
+                if isinstance(payload.get("sketchReference"), Mapping)
+                else None
+            ),
+            assumption_assessments=tuple(
+                cast(
+                    Sequence[Mapping[str, object]],
+                    payload.get("assumptionAssessments", ()),
+                )
+            ),
         )
 
 

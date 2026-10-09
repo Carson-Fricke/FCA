@@ -4,9 +4,23 @@
 
 ## Status
 
+Workspace strategy sketches live in `workspaces/sketch_contract.py` (pure
+contracts) and `workspaces/sketches.py` (Git revisions). Runtime sketch and
+exploration tools use normal session dispatch. `workspaces/exploration.py`
+projects immutable job output pages for tools and HTTP. The SDK owns reusable
+building blocks and output contracts without depending on backtest. Canonical
+multi-timeframe aggregation belongs to harness execution and serves screening.
+
+Local harness MCP study, backtest, and screening workers durably transition
+their admitted job from `queued` to `running` before acquisition, compilation,
+or execution. The shared `JobStore.mark_running` operation retains accepted
+input and identity, preserves the first start timestamp on repeated updates,
+and rejects terminal jobs. Acceptance receipts remain `queued`; subsequent
+status queries distinguish an active worker from work awaiting dispatch.
+
 Studies, strategies and SDK-authored indicators share `MarketConsumer` market
 callbacks (`on_quote`, `on_trade`, `on_bar`) and exact `Subscription` declarations.
-SDK ABI v4 exposes compiled subscription unions before acquisition. Nested
+SDK ABI v5 exposes compiled subscription unions before acquisition. Nested
 program-owned indicators contribute requirements and update dependency-first;
 each consumer receives only its subscribed symbols/types. Studies/indicators
 use observation-only contexts; strategies receive an order sink. Bars retain
@@ -77,7 +91,7 @@ guard and behavior verification. Missing modules MUST fail without optional
 bypasses; instructions do not guarantee LLM compliance/honesty, and module
 presence does not prove complete recovery coverage.
 
-The current hypothesis-development topology is version `2.3.0`: discovery,
+The current hypothesis-development topology is version `3.0.0`: discovery,
 model creation, deterministic falsification trials, verdict, and the
 strategy/backtest/RCA/optimization/null-testing/variation/forward-validation
 chain, with one-shot agent strategy backtesting, a deterministic

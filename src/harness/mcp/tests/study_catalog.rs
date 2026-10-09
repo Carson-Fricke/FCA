@@ -33,8 +33,8 @@ fn study_catalog_advertises_supported_configuration_and_current_sdk() {
         json!(["data_type", "symbols", "interval"])
     );
     assert_eq!(
-        branches[0]["properties"]["interval"]["enum"],
-        json!(["1min", "1d"])
+        branches[0]["properties"]["interval"]["pattern"],
+        json!("^(?:[1-9][0-9]*(?:min|h)|1d)$")
     );
     assert_eq!(
         branches[1]["properties"]["data_type"]["enum"],

@@ -203,13 +203,13 @@ impl ScreeningDataSource for LakeScreeningSource {
         let start_date = window_start(as_of, lookback_days)?;
         let mut bars = BTreeMap::new();
         for symbol in symbols {
-            let ensure = EnsureSpec::new("equity", "bars", symbol, &start_date, as_of)
-                .with_interval(interval);
+            let ensure =
+                EnsureSpec::new("equity", "bars", symbol, &start_date, as_of).with_interval("1min");
             self.client
                 .ensure(&ensure)
                 .map_err(ScreeningDataSourceError::from)?;
             let read =
-                ReadSpec::new("equity", "bars", symbol, &start_date, as_of).with_interval(interval);
+                ReadSpec::new("equity", "bars", symbol, &start_date, as_of).with_interval("1min");
             let batches = self
                 .client
                 .read_arrow(&read)
@@ -218,6 +218,7 @@ impl ScreeningDataSource for LakeScreeningSource {
             for batch in &batches {
                 records.extend(bars_from_batch(batch)?);
             }
+            let records = aggregate_screen_bars(symbol, interval, as_of, records)?;
             bars.insert(symbol.clone(), records);
         }
         Ok(bars)
@@ -232,6 +233,71 @@ impl ScreeningDataSource for LakeScreeningSource {
             .reference_facts(symbols, as_of)
             .map_err(ScreeningDataSourceError::from)
     }
+}
+
+/// Derive every screener cadence from its single acquired minute series.
+pub(crate) fn aggregate_screen_bars(
+    symbol: &str,
+    interval: &str,
+    as_of: &str,
+    records: Vec<Bar>,
+) -> Result<Vec<Bar>, ScreeningDataSourceError> {
+    let parse = |value: &str| {
+        value
+            .parse::<num::Decimal>()
+            .map_err(|e| ScreeningDataSourceError::data(e.to_string()))
+    };
+    let inputs = records
+        .into_iter()
+        .enumerate()
+        .map(|(index, bar)| {
+            Ok(backtest::backtest::engine_core::EngineBar {
+                event_id: format!("screen:{symbol}:{index}"),
+                timestamp_ns: bar.interval_start_ns,
+                sequence: index as u64,
+                symbol: symbol.to_string(),
+                open: parse(&bar.open)?,
+                high: parse(&bar.high)?,
+                low: parse(&bar.low)?,
+                close: parse(&bar.close)?,
+                volume: parse(&bar.volume)?,
+            })
+        })
+        .collect::<Result<Vec<_>, ScreeningDataSourceError>>()?;
+    let mut config =
+        backtest::backtest::config::BacktestConfig::new("screen-context", 0, i64::MAX, 0)
+            .map_err(|e| ScreeningDataSourceError::data(e.to_string()))?;
+    config.symbols = vec![symbol.to_string()];
+    config.data_bar_interval = interval.into();
+    config.data_source_bar_interval = "1min".into();
+    config.start_ns = i64::MIN;
+    config.end_ns = NaiveDate::parse_from_str(as_of, "%Y-%m-%d")
+        .ok()
+        .and_then(|date| date.succ_opt())
+        .and_then(|date| date.and_hms_opt(0, 0, 0))
+        .and_then(|stamp| stamp.and_utc().timestamp_nanos_opt())
+        .ok_or_else(|| ScreeningDataSourceError::data("as-of date exceeds timestamp bounds"))?;
+    let frames = backtest::backtest::engine_core::assemble_bar_observations(&config, inputs)
+        .map_err(|e| ScreeningDataSourceError::data(e.to_string()))?;
+    let records = frames
+        .into_iter()
+        .filter_map(|frame| {
+            frame.bars_by_symbol.get(symbol).map(|bar| Bar {
+                date: DateTime::<Utc>::from_timestamp_nanos(frame.interval_start_ns)
+                    .date_naive()
+                    .to_string(),
+                interval_start_ns: frame.interval_start_ns,
+                interval_end_ns: frame.interval_end_ns,
+                available_at_ns: frame.available_at_ns,
+                open: bar.open.to_string(),
+                high: bar.high.to_string(),
+                low: bar.low.to_string(),
+                close: bar.close.to_string(),
+                volume: bar.volume.to_string(),
+            })
+        })
+        .collect();
+    Ok(records)
 }
 
 impl From<LakeClientError> for ScreeningDataSourceError {
@@ -277,6 +343,9 @@ fn bars_from_batch(batch: &RecordBatch) -> Result<Vec<Bar>, ScreeningDataSourceE
             .to_string();
         bars.push(Bar {
             date,
+            interval_start_ns: timestamps.value(row),
+            interval_end_ns: timestamps.value(row) + 60_000_000_000,
+            available_at_ns: timestamps.value(row) + 60_000_000_000,
             open: decimal_text(open, row),
             high: decimal_text(high, row),
             low: decimal_text(low, row),

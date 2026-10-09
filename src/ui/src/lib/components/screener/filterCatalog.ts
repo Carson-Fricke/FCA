@@ -581,7 +581,7 @@ export function metricsForRows(rows: FilterRow[]): string[] {
 }
 
 /** Bar intervals the harness accepts; mirrors `BAR_INTERVALS` in Thesis. */
-export const BAR_INTERVALS: readonly ScreenerBarInterval[] = ['1d', '1min'];
+export const BAR_INTERVALS: readonly ScreenerBarInterval[] = ['1d', '1min', '5min', '15min', '30min', '1h'];
 
 /**
  * Map a thrown API error to a readable message. The screener router

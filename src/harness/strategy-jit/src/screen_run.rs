@@ -217,12 +217,23 @@ fn screen_context(
     let mut universe = source.universe(&as_of)?;
     universe.sort();
     universe.dedup();
-    let bars = source.bars(
-        &universe,
-        &configuration.bar_interval,
-        &as_of,
-        configuration.lookback_days,
-    )?;
+    let source_bars = source.bars(&universe, "1min", &as_of, configuration.lookback_days)?;
+    let mut bars = BTreeMap::new();
+    for interval in &configuration.bar_intervals {
+        let mut series = BTreeMap::new();
+        for symbol in &universe {
+            series.insert(
+                symbol.clone(),
+                crate::source::aggregate_screen_bars(
+                    symbol,
+                    interval,
+                    &as_of,
+                    source_bars.get(symbol).cloned().unwrap_or_default(),
+                )?,
+            );
+        }
+        bars.insert(interval.clone(), series);
+    }
     let facts = source.facts(&universe, &as_of)?;
     Ok(ScreenContext {
         as_of,
@@ -313,8 +324,8 @@ fn artifact_document(
         serde_json::json!(configuration.rank_metric),
     );
     object.insert(
-        "bar_interval".to_string(),
-        serde_json::json!(configuration.bar_interval),
+        "bar_intervals".to_string(),
+        serde_json::json!(configuration.bar_intervals),
     );
     object.insert(
         "data_window".to_string(),

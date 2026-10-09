@@ -5,6 +5,7 @@
 	import IndicatorArtifactPreview from './IndicatorArtifactPreview.svelte';
 	import StrategyArtifactPreview from './StrategyArtifactPreview.svelte';
 	import StudyArtifactPreview from './StudyArtifactPreview.svelte';
+	import SketchArtifactPreview from './SketchArtifactPreview.svelte';
 	import { shortDate, shortHash } from '$lib/format';
 	import type { WorkspaceArtifact } from '$lib/types';
 
@@ -53,7 +54,9 @@
 		</div>
 	</header>
 
-	{#if artifact.preview.type === 'strategy'}
+	{#if artifact.preview.type === 'sketch'}
+		<SketchArtifactPreview preview={artifact.preview} {workspaceId} />
+	{:else if artifact.preview.type === 'strategy'}
 		<StrategyArtifactPreview preview={artifact.preview} inputs={artifact.inputs} />
 	{:else if artifact.preview.type === 'study'}
 		<StudyArtifactPreview

@@ -78,11 +78,19 @@ impl StudyProgram for MixedStudy {
         }
     }
     fn on_stop(&mut self, metrics: &mut MetricPublisher) {
-        assert!(self.indicator.sequence().completed().is_empty());
-        let partial = &self.indicator.sequence().in_progress()["DEP"];
-        assert_eq!(partial.close, Some(Decimal::from_i128(1)));
-        assert_eq!(partial.available_at_ns, None);
-        assert_eq!(partial.observations, 1);
+        if let Some(partial) = self.indicator.sequence().in_progress().get("DEP") {
+            assert_eq!(partial.close, Some(Decimal::from_i128(1)));
+            assert_eq!(partial.available_at_ns, None);
+            assert_eq!(partial.observations, 1);
+        } else {
+            let completed = self.indicator.sequence().completed();
+            let bars = &completed[&("DEP".into(), "ticks:60000000000".into())];
+            assert_eq!(bars[0].close, Some(Decimal::from_i128(1)));
+            assert!(bars[0].available_at_ns.is_some());
+        }
+        metrics.publish_output("signal", &harness_strategy_sdk::StudyOutput::Series {
+            points: vec![harness_strategy_sdk::OutputPoint { symbol: "AAA".into(), interval: "1min".into(), event_time_ns: 20, available_at_ns: 25, value: Some(1.0), undefined_reason: None }],
+        }).unwrap();
         metrics.publish("quotes", self.quotes as f64).unwrap();
         metrics.publish("trades", self.trades as f64).unwrap();
         metrics.publish("frames", self.frames as f64).unwrap();
@@ -105,6 +113,8 @@ impl MarketConsumer for MixedStudy {
                 symbols: vec!["AAA".into()],
                 interval: "1min".into(),
             },
+            Subscription::Bars { symbols: vec!["AAA".into()], interval: "5min".into() },
+            Subscription::Bars { symbols: vec!["AAA".into()], interval: "1d".into() },
         ]
     }
     fn indicators(&mut self) -> Vec<&mut dyn Indicator> {

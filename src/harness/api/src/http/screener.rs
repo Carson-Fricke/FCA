@@ -212,8 +212,8 @@ fn screen_metrics(configuration: &ScreenConfig, rows: u64) -> BTreeMap<String, S
     BTreeMap::from([
         ("as_of".to_string(), configuration.as_of.clone()),
         (
-            "bar_interval".to_string(),
-            configuration.bar_interval.clone(),
+            "bar_intervals".to_string(),
+            configuration.bar_intervals.join(","),
         ),
         (
             "definition_id".to_string(),

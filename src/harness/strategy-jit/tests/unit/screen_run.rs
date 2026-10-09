@@ -14,7 +14,7 @@ fn configuration(job_id: &str) -> ScreenConfig {
         job_id: job_id.to_string(),
         name: "momentum-screen".to_string(),
         as_of: "2024-01-05".to_string(),
-        bar_interval: "1d".to_string(),
+        bar_intervals: vec!["1d".to_string()],
         lookback_days: 20,
         rank_metric: "momentum".to_string(),
         universe_revision: None,

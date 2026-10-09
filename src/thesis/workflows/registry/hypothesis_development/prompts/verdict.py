@@ -65,7 +65,7 @@ _VERDICT_COMPLETION_PROTOCOL = (
 #: How the recorded trials decide the proposed target.
 _VERDICT_TARGET_RULES = (
     "Choose the completion target from what the trials actually recorded:",
-    "- If the planned falsifiers survived (no falsifier fired), propose "
+    "- If the recorded evidence supports attempting construction of the proposed edge, with assumption coverage and limitations explained, propose "
     'progressing to strategy design: target "strategy_design".',
     "- If a falsifier fired (the regularity was refuted on history), or every "
     "trial shows the model could not be evaluated (the data or the sample was "
@@ -74,7 +74,7 @@ _VERDICT_TARGET_RULES = (
     "the selected discovery candidate still stands and only the model needs "
     'revision, or target "discovery" when the candidate itself no longer '
     "holds and discovery must start over.",
-    "Base the proposal only on the recorded trials below; never fabricate "
+    "Assess every sketch assumption explicitly as supported, refuted, inconclusive or untested; cite only actual testIds assigned to that assumption. A favorable verdict supports strategy construction, not profitable alpha. Base measured conclusions only on recorded trials; never fabricate "
     "observations the trials do not carry.",
     "A data-availability check surviving is not evidence that the statistical "
     "regularity survived. If the handed-off suite only checks data or fit "
@@ -125,7 +125,7 @@ _VERDICT_CONTRACT = (
     "The verdict completion contract is one JSON object with these fields:",
     '- verdict: an object with outcome ("supported", "refuted" or '
     '"inconclusive") and reason (one concise sentence grounded in the '
-    "recorded trials), plus optional evidence citing the test ids, observables "
+    "recorded trials), sketchReference (the unchanged accepted sketch revision), assumptionAssessments (one entry per sketch assumption: assumptionId, status, reason, testIds), plus optional evidence citing the test ids, observables "
     "and observed values the verdict rests on.",
     '- target: "strategy_design" to progress, "model_creation" to loop back '
     'and re-model the same selected candidate, or "discovery" to start '

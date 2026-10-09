@@ -6,7 +6,35 @@ be interpreted as described in RFC 2119.
 
 ## Status
 
-Current study authoring uses SDK ABI v4 and shared `MarketConsumer` callbacks.
+Discovery in workflow `3.0.0` develops a Git-committed strategy sketch through
+ordinary session tools. Workspace `sketch_contract.py` owns pure contracts;
+`sketches.py` owns immutable content-addressed revisions and CAS updates.
+Completion carries only `sketchReference`. Model creation, falsification,
+verdict and strategy construction resolve that exact revision and its pinned
+components. Assumption-to-falsifier assignments and verdict assessments connect
+investigations to the sketch. Discovery retrieves executable method cards,
+authors components, inspects outputs and revises its argument. This is agent
+guidance, not an engine gate or proof of alpha.
+
+SDK ABI v5 publishes sequences, events, tables and fitted state. The host
+records these and composed indicator histories in immutable job artifact
+`exploratory_outputs.json`, retaining undefined reasons and availability times.
+Host-owned fitted-state provenance binds the training window and owning job.
+`read_study_output` exposes bounded artifact pages without a second evidence
+ledger. The SDK tool bag includes causal directional change, rolling moments,
+EMA, simple RSI, ATR, VWAP, crossover age, PIP, trailing Haar decomposition and
+frozen normalization. Knowledge cards describe timing, weaknesses and runnable
+compositions; MODWT/CWT and autoencoders are not advertised as SDK implementations.
+
+Strategies, studies, indicators and screeners accept multiple bar intervals:
+`1d` and positive canonical `Nmin`/`Nh`. Replay derives them from one-minute
+data with explicit session boundaries. Completed slow frames route before fast
+frames sharing availability time; incomplete windows remain missing. Ticks
+have no interval. Screeners declare `bar_intervals`, accessing series by
+symbol and interval, and retain completed-session as-of-date evaluation.
+Later selection, null, variation and forward phase purposes remain unchanged.
+
+Current study authoring uses SDK ABI v5 and shared `MarketConsumer` callbacks.
 The model declares exact `harnessConfiguration.subscriptions` for bars, quotes
 and/or trades, including requirements of its owned indicators. Source declares
 the same union through `subscriptions()` and `indicators()`. Compilation
@@ -19,7 +47,7 @@ registry has not migrated; this shared interface applies to SDK-authored
 consumers and their program-owned indicator dependencies.
 
 This document records the current implemented runtime and the accepted design
-baseline. The registered hypothesis-development topology is version `2.3.0`;
+baseline. The registered hypothesis-development topology is version `3.0.0`;
 remaining normative recovery and repair-budget requirements below are not a
 claim that all of them are implemented.
 
@@ -210,7 +238,7 @@ before authoring or repairing, apply targeted patches, and ask through
 `request_workflow_input` after three unsuccessful repairs. That compiler-repair
 limit is prompt guidance, not a runtime-enforced repair cap or workflow gate.
 
-The changed hypothesis-development topology is version `2.3.0`. Definition
+The changed hypothesis-development topology is version `3.0.0`. Definition
 requests can name a version; unsupported historical versions return an explicit
 diagnostic rather than substituting today's legal edges. Persisted retired phase
 values remain readable independently of topology availability.
@@ -1206,7 +1234,7 @@ daily bounds use real XNYS sessions including DST and early closes; crypto
 daily bounds use UTC days. Mixed equity/crypto daily intervals are rejected.
 Duplicate symbol/interval rows, unexpected symbols, and off-grid starts fail
 validation. Raw replay counts/fingerprints remain distinct from frame dispatch
-counts. SDK ABI v4 invalidates older compiled artifacts; authored studies and
+counts. SDK ABI v5 invalidates older compiled artifacts; authored studies and
 strategies MUST move market methods into `MarketConsumer` and declare exact
 subscriptions. `new` and `on_stop` remain in the specialized program impl;
 strategies also retain `on_start` and `on_fill` there.
@@ -1347,7 +1375,7 @@ contract.
 
 ### Falsification Trials Completion
 
-In the current `2.3.0` topology this contract is returned by the deterministic
+In the current `3.0.0` topology this contract is returned by the deterministic
 `run_falsification_trials` executor, not a phase-agent tool call. It runs the
 accepted model through the study runner and resolves evidence in deterministic
 code. The returned contract carries `trials` plus the accepted research

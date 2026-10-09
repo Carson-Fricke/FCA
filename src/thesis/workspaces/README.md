@@ -25,8 +25,13 @@ it does not own agent turns, provider projection, or workflow transitions.
   and bounded candidate/null/variation batches validate assignments against the
   declaration, and the workflow-scoped data-window policy gates, or for the
   forward holdout rewrites, the committed window before submission.
+- `sketch_contract.py` defines closed strategy-sketch contracts and validates
+  representation and assumption dependencies without depending on the runtime.
+- `sketches.py` stores immutable sketch revisions in Git and CAS-fences edits.
+- `exploration.py` projects bounded pages from authoritative job output artifacts.
 - `repository.py` defines the structural create/open/resolve/publish/locator port
-  shared by local and Gitea providers.
+  shared by local and Gitea providers, and the fenced Git port shared by programs
+  and sketches.
 
 Programs live under `studies/<program_id>/`, `strategies/<program_id>/`, or
 `indicators/<program_id>/` with `program.rs`, `manifest.json`, and, after validation,

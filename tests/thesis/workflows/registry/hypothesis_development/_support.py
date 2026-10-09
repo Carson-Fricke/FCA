@@ -151,6 +151,11 @@ class FakePrograms:
             job_id, {"job_id": job_id, "state": "succeeded", "metrics": {}}
         )
 
+    def verify_strategy_sketch(self, workspace_id, reference):
+        if dict(reference) != _sketch_reference():
+            raise ValueError("sketch reference mismatch")
+        return _sketch_document()
+
     def load(self, workspace_id, kind, program_id, commit=None):
         inline = _inline_model()
         return {
@@ -186,6 +191,12 @@ def _hypothesis_envelope(
     falsifiers: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     return {
+        "sketchReference": _sketch_reference(),
+        "assumptionTests": {
+            "continuation": [str(item.get("falsifierId", "f1")) for item in falsifiers]
+        }
+        if falsifiers
+        else {"continuation": ["f1"]},
         "hypothesisId": "momentum-breakout",
         "claim": "Five-day momentum in SPY continues over the next five days.",
         "disagreement": (
@@ -212,33 +223,46 @@ def _hypothesis_envelope(
     }
 
 
+def _sketch_reference() -> dict[str, str]:
+    return {"sketchId": "momentum-edge", "version": "e" * 64, "gitCommit": "a" * 40}
+
+
+def _sketch_document() -> dict[str, object]:
+    return {
+        "title": "Momentum edge",
+        "premise": IDEAS,
+        "mechanism": "Slow information diffusion",
+        "profitSource": "Early hedgers",
+        "representations": [
+            {
+                "nodeId": "momentum",
+                "description": "Five-day return",
+                "inputs": [],
+                "timeframes": ["1d"],
+                "informationTime": "After the daily close",
+            }
+        ],
+        "conditioning": "Unknown; investigate liquidity",
+        "entry": "Positive return",
+        "exit": "Five days or sign flip",
+        "abstention": "Missing bars",
+        "assumptions": [
+            {
+                "assumptionId": "continuation",
+                "claim": "Momentum persists",
+                "status": "untested",
+                "investigation": "Challenge continuation with controls",
+                "evidence": [],
+            }
+        ],
+        "alternatives": ["Macro drift"],
+        "limitations": "One market",
+    }
+
+
 def _discovery_envelope() -> dict[str, object]:
     return {
-        "candidate": {
-            "opportunity": (
-                "Five-day momentum in SPY continues over the next five days."
-            ),
-            "signal": "Five-day return sign, measured at each daily close.",
-            "informationTime": "At the daily close that ends the five-day window.",
-            "direction": "long continuation",
-            "holdingPeriod": "five trading days",
-            "profitSource": (
-                "Slow information diffusion: the other side hedges too early."
-            ),
-            "effect": "positive conditional mean forward return",
-            "competingExplanation": (
-                "Time-series momentum proxies a slow macro drift."
-            ),
-            "evidence": "Small studies showed continuation after five-day gains.",
-            "entryIdea": "Enter when the five-day return is positive at the close.",
-            "exitIdea": "Exit after five trading days or when the sign flips.",
-            "assumptions": ["Daily bars are clean enough to measure five-day returns."],
-            "buildingBlocks": ["daily bars", "five-day return"],
-            "validationQuestions": ["Does the effect survive on untouched quote data?"],
-            "exploratoryEvidence": (
-                "Small studies showed continuation after five-day gains."
-            ),
-        },
+        "sketchReference": _sketch_reference(),
         "attempts": [
             {
                 "purpose": "Check momentum continuation on SPY daily bars.",

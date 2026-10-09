@@ -608,7 +608,7 @@ fn build_data_snapshot(value: YamlValue) -> Result<Value, ConfigError> {
     let output = harness_contracts::canonical_subscriptions(inputs).map_err(ConfigError)?;
     let subscriptions = serde_json::to_value(&output).map_err(|e| ConfigError(e.to_string()))?;
     let interval = output.iter().find_map(|subscription| match subscription {
-        harness_contracts::Subscription::Bars { interval, .. } => Some(interval.clone()),
+        harness_contracts::Subscription::Bars { .. } => Some("1min"),
         harness_contracts::Subscription::Quote { .. }
         | harness_contracts::Subscription::Trade { .. } => None,
     });

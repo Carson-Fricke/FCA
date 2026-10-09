@@ -247,6 +247,8 @@ pub struct BacktestConfig {
     pub data_fingerprint: String,
     /// Data bar interval.
     pub data_bar_interval: String,
+    /// Source fixture cadence, distinct from requested output intervals.
+    pub data_source_bar_interval: String,
     /// Optional expected echo of the runtime requirement union.
     pub data_subscriptions: Vec<MarketSubscription>,
     /// Distinguishes an absent echo from an explicitly empty echo.
@@ -303,6 +305,7 @@ impl BacktestConfig {
             data_snapshot_id: "synthetic".to_string(),
             data_fingerprint: String::new(),
             data_bar_interval: "1min".to_string(),
+            data_source_bar_interval: "1min".to_string(),
             data_subscriptions: Vec::new(),
             data_subscriptions_declared: false,
             symbols: vec!["SPY".to_string()],
@@ -621,6 +624,7 @@ impl BacktestConfig {
             }
             if let Some(interval) = data.get("bar_interval").and_then(YamlValue::as_str) {
                 config.data_bar_interval = interval.to_string();
+                config.data_source_bar_interval = interval.to_string();
             }
             if let Some(symbols) = data.get("symbols").and_then(YamlValue::as_sequence) {
                 config.symbols = canonical_symbols(symbols)?;

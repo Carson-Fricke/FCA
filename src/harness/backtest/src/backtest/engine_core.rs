@@ -40,8 +40,7 @@ pub struct MarketSubscription {
 /// Validate and deduplicate an exact requirement union.
 ///
 /// # Errors
-/// Rejects invalid declarations and multiple bar intervals, whose identity the
-/// current replay fixture cannot preserve.
+/// Rejects invalid declarations and intervals unsupported by minute-source aggregation.
 pub fn normalize_subscriptions(
     inputs: &[MarketSubscription],
 ) -> Result<Vec<MarketSubscription>, BacktestError> {
@@ -74,17 +73,11 @@ pub fn normalize_subscriptions(
     }
     let declarations = harness_contracts::canonical_subscriptions(declarations)
         .map_err(BacktestError::Configuration)?;
-    let mut intervals = BTreeSet::new();
     let mut output = Vec::new();
     for input in declarations {
         let (data_type, symbols, interval) = match input {
             harness_contracts::Subscription::Bars { symbols, interval } => {
-                if !matches!(interval.as_str(), "1min" | "1d") {
-                    return Err(BacktestError::Configuration(
-                        "replay bar interval must be 1min or 1d".into(),
-                    ));
-                }
-                intervals.insert(interval.clone());
+                replay_interval_ns(&interval)?;
                 ("bars", symbols, Some(interval))
             }
             harness_contracts::Subscription::Quote { symbols } => ("quote", symbols, None),
@@ -96,12 +89,70 @@ pub fn normalize_subscriptions(
             interval,
         });
     }
-    if intervals.len() > 1 {
-        return Err(BacktestError::Configuration(
-            "multiple bar intervals are incompatible with replay fixture interval identity".into(),
-        ));
-    }
     Ok(output)
+}
+
+/// Supported completed bars: positive minute/hour widths, or one session day.
+pub fn replay_interval_ns(interval: &str) -> Result<Option<i64>, BacktestError> {
+    harness_contracts::completed_bar_interval_ns(interval).map_err(BacktestError::Configuration)
+}
+
+/// Canonical acquisition uses minute bars for every requested timeframe.
+pub fn source_subscriptions(
+    inputs: &[MarketSubscription],
+    source_interval: &str,
+) -> Result<Vec<MarketSubscription>, BacktestError> {
+    let mut sources = inputs.to_vec();
+    for input in &mut sources {
+        if input.data_type == "bars" {
+            input.interval = Some(source_interval.into());
+        }
+    }
+    normalize_subscriptions(&sources)
+}
+
+/// Assemble every declared interval from the same causal source series.
+pub fn assemble_subscription_frames(
+    configuration: &BacktestConfig,
+    fixture: &ReplayFixture,
+    options: &SyntheticDataOptions,
+    requirements: &[MarketSubscription],
+) -> Result<Vec<EngineBarFrame>, BacktestError> {
+    let bars = fixture
+        .events
+        .iter()
+        .filter(|event| matches!(event, MarketEvent::Bar { .. }))
+        .map(|event| market_event(event, options))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter_map(|event| match event {
+            EngineMarket::Bar(bar) => Some(bar),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut frames = Vec::new();
+    for input in requirements.iter().filter(|s| s.data_type == "bars") {
+        let mut config = configuration.clone();
+        config.symbols = input.symbols.clone();
+        config.data_bar_interval = input.interval.clone().unwrap();
+        let selected = bars
+            .iter()
+            .filter(|bar| input.symbols.contains(&bar.symbol))
+            .cloned()
+            .collect();
+        frames.extend(assemble_bar_observations(&config, selected)?);
+    }
+    frames.sort_by(|a, b| {
+        a.available_at_ns
+            .cmp(&b.available_at_ns)
+            .then_with(|| {
+                (b.interval_end_ns - b.interval_start_ns)
+                    .cmp(&(a.interval_end_ns - a.interval_start_ns))
+            })
+            .then_with(|| a.interval.cmp(&b.interval))
+            .then_with(|| a.interval_start_ns.cmp(&b.interval_start_ns))
+    });
+    Ok(frames)
 }
 
 /// Backtest execution feeds: quote and trade for every declared input symbol.
@@ -173,7 +224,7 @@ pub struct EngineBar {
 /// Atomic bar observation. Availability assumes interval completion, not provider latency.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EngineBarFrame {
-    /// Canonical interval identity (`1min` or `1d`).
+    /// Canonical declared minute/hour/session interval identity.
     pub interval: String,
     /// Inclusive interval start in epoch nanoseconds.
     pub interval_start_ns: i64,
@@ -198,12 +249,33 @@ pub fn assemble_study_frames(
     fixture: &ReplayFixture,
     options: &SyntheticDataOptions,
 ) -> Result<Vec<EngineBarFrame>, BacktestError> {
+    let bars = fixture
+        .events
+        .iter()
+        .map(|event| market_event(event, options))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter_map(|event| match event {
+            EngineMarket::Bar(bar) => Some(bar),
+            _ => None,
+        })
+        .collect();
+    assemble_bar_observations(configuration, bars)
+}
+
+/// Canonical session-anchored aggregation shared by replay and screening.
+pub fn assemble_bar_observations(
+    configuration: &BacktestConfig,
+    mut bars: Vec<EngineBar>,
+) -> Result<Vec<EngineBarFrame>, BacktestError> {
+    bars.sort_by_key(|bar| (bar.timestamp_ns, bar.sequence));
     let invalid = |message: String| BacktestError::DataPreflight(message);
-    let daily = match configuration.data_bar_interval.as_str() {
-        "1d" => true,
-        "1min" => false,
-        _ => return Err(invalid("study interval must be 1min or 1d".to_string())),
-    };
+    let duration = replay_interval_ns(&configuration.data_bar_interval)?;
+    let daily = duration.is_none();
+    let source_daily = configuration.data_source_bar_interval == "1d";
+    if source_daily && !daily {
+        return Err(invalid("intraday frames require minute source bars".into()));
+    }
     let symbols: BTreeSet<String> = configuration.symbols.iter().cloned().collect();
     let has_crypto = symbols
         .iter()
@@ -218,14 +290,13 @@ pub fn assemble_study_frames(
     }
     let mut frames: BTreeMap<i64, EngineBarFrame> = BTreeMap::new();
     let mut seen = BTreeSet::new();
-    for event in &fixture.events {
-        let EngineMarket::Bar(bar) = market_event(event, options)? else {
-            continue;
-        };
+    let mut counts: BTreeMap<(i64, String), usize> = BTreeMap::new();
+    for bar in bars {
         if !symbols.contains(&bar.symbol) {
             return Err(invalid(format!("unexpected study symbol {:?}", bar.symbol)));
         }
-        let start = bar.timestamp_ns;
+        let source_start = bar.timestamp_ns;
+        let start = source_start;
         if !seen.insert((start, bar.symbol.clone())) {
             return Err(invalid(format!(
                 "duplicate study timestamp/symbol: {start}/{}",
@@ -248,7 +319,7 @@ pub fn assemble_study_frames(
         let minute = 60_000_000_000;
         if start < open
             || start >= close
-            || (daily && start != open)
+            || (source_daily && start != open)
             || (!daily && (start - open) % minute != 0)
         {
             return Err(invalid(format!(
@@ -256,11 +327,8 @@ pub fn assemble_study_frames(
                 bar.symbol
             )));
         }
-        let end = if daily {
-            close
-        } else {
-            (start + minute).min(close)
-        };
+        let start = duration.map_or(open, |width| open + (source_start - open) / width * width);
+        let end = duration.map_or(close, |width| start.saturating_add(width).min(close));
         let frame = frames.entry(start).or_insert_with(|| EngineBarFrame {
             interval: configuration.data_bar_interval.clone(),
             interval_start_ns: start,
@@ -274,7 +342,21 @@ pub fn assemble_study_frames(
                 "incompatible study interval bounds at {start}"
             )));
         }
-        frame.bars_by_symbol.insert(bar.symbol.clone(), bar);
+        *counts.entry((start, bar.symbol.clone())).or_default() += 1;
+        frame
+            .bars_by_symbol
+            .entry(bar.symbol.clone())
+            .and_modify(|aggregate| {
+                aggregate.high = aggregate.high.max(bar.high);
+                aggregate.low = aggregate.low.min(bar.low);
+                aggregate.close = bar.close;
+                aggregate.volume += bar.volume;
+            })
+            .or_insert_with(|| {
+                let mut bar = bar;
+                bar.timestamp_ns = start;
+                bar
+            });
     }
     Ok(frames
         .into_values()
@@ -285,6 +367,17 @@ pub fn assemble_study_frames(
             {
                 return None;
             }
+            let expected = if source_daily {
+                1
+            } else {
+                ((frame.interval_end_ns - frame.interval_start_ns) / 60_000_000_000) as usize
+            };
+            frame.bars_by_symbol.retain(|symbol, _| {
+                counts
+                    .get(&(frame.interval_start_ns, symbol.clone()))
+                    .copied()
+                    == Some(expected)
+            });
             frame.missing_symbols = symbols
                 .iter()
                 .filter(|symbol| !frame.bars_by_symbol.contains_key(*symbol))
@@ -1251,6 +1344,10 @@ pub trait StrategyRuntime {
     fn published_metrics(&self) -> BTreeMap<String, String> {
         BTreeMap::new()
     }
+    /// Validated structured exploratory outputs, keyed by authored output name.
+    fn published_outputs(&self) -> BTreeMap<String, serde_json::Value> {
+        BTreeMap::new()
+    }
 }
 
 /// Explicit knobs for one native engine run.
@@ -1327,6 +1424,8 @@ pub struct BacktestOutcome {
     pub lookahead_violations: Vec<String>,
     /// Custom finite numeric observations published by research or strategy code.
     pub custom_metrics: BTreeMap<String, String>,
+    /// Host-validated structured exploratory results.
+    pub exploratory_outputs: BTreeMap<String, serde_json::Value>,
 }
 
 impl BacktestOutcome {
@@ -1794,17 +1893,13 @@ pub fn run_native_engine(
     };
     let mut acquired = requirements.clone();
     acquired.extend(execution.iter().cloned());
-    manifest.acquired_subscriptions = Some(normalize_subscriptions(&acquired)?);
+    manifest.acquired_subscriptions = Some(source_subscriptions(
+        &acquired,
+        &configuration.data_source_bar_interval,
+    )?);
     manifest.execution_subscriptions = Some(execution);
-    let mut frame_config = configuration.clone();
-    let bars = requirements.iter().find(|s| s.data_type == "bars");
-    let frames = if let Some(bars) = bars {
-        frame_config.symbols = bars.symbols.clone();
-        frame_config.data_bar_interval = bars.interval.clone().unwrap();
-        assemble_study_frames(&frame_config, fixture, synthetic_options)?
-    } else {
-        Vec::new()
-    };
+    let frames =
+        assemble_subscription_frames(configuration, fixture, synthetic_options, &requirements)?;
     super::preflight::validate_completed_bar_coverage(&requirements, &frames)?;
     let bar_frame_count = frames.len() as u64;
     let schedule = fee_schedule_from_config(
@@ -1866,7 +1961,7 @@ pub fn run_native_engine(
     }
 
     let mut bus = EventBus::new();
-    bus.frame_replay = bars.is_some();
+    bus.frame_replay = !frames.is_empty();
     let mut venue = SimulatedVenue::new();
     let mut prices: BTreeMap<String, Decimal> = BTreeMap::new();
     let mut order_owners: BTreeMap<String, String> = BTreeMap::new();
@@ -1951,11 +2046,24 @@ pub fn run_native_engine(
     let mut stopped = Vec::new();
     let mut teardown_errors = Vec::new();
     let mut custom_metrics = BTreeMap::new();
+    let mut exploratory_outputs = BTreeMap::new();
     let mut metric_owners = BTreeMap::new();
     for instance in &mut strategies {
         if let Err(error) = instance.runtime.on_stop() {
             teardown_errors.push(error.to_string());
         }
+        let mut outputs = instance.runtime.published_outputs();
+        for output in outputs.values_mut() {
+            if output.get("kind").and_then(serde_json::Value::as_str) == Some("fitted_state") {
+                if let Some(record) = output.as_object_mut() {
+                    record.insert(
+                        "training_job_id".into(),
+                        serde_json::Value::String(configuration.job_id.clone()),
+                    );
+                }
+            }
+        }
+        exploratory_outputs.insert(instance.instance_id.clone(), serde_json::json!(outputs));
         for (name, value) in instance.runtime.published_metrics() {
             if let Some(owner) = metric_owners.get(&name) {
                 teardown_errors.push(format!(
@@ -1998,6 +2106,7 @@ pub fn run_native_engine(
         teardown_errors,
         lookahead_violations: Vec::new(),
         custom_metrics,
+        exploratory_outputs,
     })
 }
 

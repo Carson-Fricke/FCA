@@ -54,7 +54,7 @@
 					</span>
 				</div>
 				<p class="mt-0.5 font-mono text-[10px] text-slate-500">
-					{definition.barInterval} · {definition.lookbackDays}d · rank {definition.rankMetric}
+					{definition.barIntervals} · {definition.lookbackDays}d · rank {definition.rankMetric}
 				</p>
 				<p class="mt-0.5 truncate font-mono text-[10px] text-slate-500">
 					{sourcePreview(definition.source)}

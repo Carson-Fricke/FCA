@@ -21,6 +21,9 @@ from thesis.agent.runtime.store import PersistenceSubAgentStore
 from thesis.chat import ChatService
 from thesis.chat.contracts import SubAgentRecord, WorkflowDefinition
 from thesis.experiments import MandateError, derive_mandate, rfc3339_ns
+from thesis.workflows.registry.hypothesis_development.contracts.discovery import (
+    DiscoveryDraft,
+)
 from thesis.workflows.registry.hypothesis_development.session_services import (
     HypothesisSessionServices,
 )
@@ -29,6 +32,7 @@ from thesis.workflows.research_models import ProgramSnapshots
 from ._support import (
     WORKSPACE,
     FakePrograms,
+    _discovery_envelope,
     _hypothesis_envelope,
     _kit,
     _request,
@@ -118,7 +122,8 @@ def _simple_workflow(execution_store: object, phase: str) -> SimpleNamespace:
         ),
         execution_store=execution_store,
         _reconstruct_state=lambda request: SimpleNamespace(
-            phase=SimpleNamespace(value=phase)
+            phase=SimpleNamespace(value=phase),
+            discovery=DiscoveryDraft.from_dict(_discovery_envelope()),
         ),
         _workflow_node_id=lambda request: "phase-node",
         _phase_attempt_id=lambda request, value: "attempt",

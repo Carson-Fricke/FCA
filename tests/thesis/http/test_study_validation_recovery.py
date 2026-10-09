@@ -10,6 +10,7 @@ from tests.thesis.workflows.registry.hypothesis_development._support import (
     _discovery_envelope,
     _hypothesis_envelope,
     _inline_model,
+    _sketch_document,
 )
 from tests.thesis.workspaces._support import MemoryGitFactory, Repositories
 
@@ -230,8 +231,35 @@ def setup_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     node = workflow.prepare_phase(request)
     assert node is not None
+    discovery_record = PersistenceSubAgentStore(chat.persistence).get_sub_agent(
+        wid, node
+    )
+    assert discovery_record is not None
+    discovery_registry = callbacks["registry"](
+        ToolContext(
+            workspace_id=wid,
+            chat_id=thread.chat_id,
+            conversation_id=node,
+            sub_agent_id=node,
+            actor_id="operator",
+            workflow_execution_id=request.execution_id,
+            phase_executor=True,
+            allowed_tools=discovery_record.allowed_tools,
+        )
+    )
+    sketch = discovery_registry.dispatch(
+        "author_strategy_sketch",
+        {
+            "sketch_id": "momentum-edge",
+            "sketch": _sketch_document(),
+        },
+    )
+    assert sketch.ok, sketch.text
+    callbacks["sketchReference"] = sketch.structured["reference"]
+    discovery = _discovery_envelope()
+    discovery["sketchReference"] = callbacks["sketchReference"]
     workflow.apply_phase_completion(
-        request, node, {"target": "model_creation", "discovery": _discovery_envelope()}
+        request, node, {"target": "model_creation", "discovery": discovery}
     )
     work.pop(0)()
     node = workflow.active_orchestrators[request.execution_id].sub_agent_id
@@ -277,7 +305,9 @@ def setup_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
 
 
-def completion_from(receipt: Mapping[str, object]) -> dict[str, object]:
+def completion_from(
+    receipt: Mapping[str, object], sketch_reference: Mapping[str, object]
+) -> dict[str, object]:
     reference = {
         key: receipt[key]
         for key in ("workspaceId", "kind", "programId", "gitCommit", "version")
@@ -288,6 +318,7 @@ def completion_from(receipt: Mapping[str, object]) -> dict[str, object]:
         "target": "falsification_trials",
         "hypothesis": {
             **_hypothesis_envelope(),
+            "sketchReference": dict(sketch_reference),
             "model": {
                 **reference,
                 "description": model["description"],
@@ -312,7 +343,7 @@ def test_author_validate_complete_then_trials_use_pinned_commit(tmp_path, monkey
     ) = setup_workflow(tmp_path, monkeypatch)
     checked = registry.dispatch("validate_study", {"program_id": "momentum"})
     assert checked.ok
-    completion = completion_from(checked.structured)
+    completion = completion_from(checked.structured, callbacks["sketchReference"])
     validate_count = len(harness.calls)
     assert callbacks["validate"](request.workspace_id, record, completion) is None
     assert len(harness.calls) == validate_count  # Completion never recompiles.
@@ -388,7 +419,7 @@ def test_failed_validation_requires_patch_and_revalidate_id(tmp_path, monkeypatc
     harness.reject = True
     checked = registry.dispatch("validate_study", {"program_id": "momentum"})
     assert not checked.ok
-    completion = completion_from(checked.structured)
+    completion = completion_from(checked.structured, callbacks["sketchReference"])
     assert "accepted validation" in callbacks["validate"](
         request.workspace_id, record, completion
     )
@@ -407,7 +438,9 @@ def test_failed_validation_requires_patch_and_revalidate_id(tmp_path, monkeypatc
     assert checked.ok
     assert (
         callbacks["validate"](
-            request.workspace_id, record, completion_from(checked.structured)
+            request.workspace_id,
+            record,
+            completion_from(checked.structured, callbacks["sketchReference"]),
         )
         is None
     )
@@ -434,7 +467,7 @@ def test_compiler_change_invalidates_stored_completion_until_id_revalidated(
     )
     checked = registry.dispatch("validate_study", {"program_id": "momentum"})
     assert checked.ok
-    completion = completion_from(checked.structured)
+    completion = completion_from(checked.structured, callbacks["sketchReference"])
     assert callbacks["validate"](request.workspace_id, record, completion) is None
     harness.compiler_identity = "test-harness-v2"
     assert "compiler identity" in callbacks["validate"](
@@ -446,7 +479,9 @@ def test_compiler_change_invalidates_stored_completion_until_id_revalidated(
     assert revalidated.structured["validationIdentity"] == "test-harness-v2"
     assert (
         callbacks["validate"](
-            request.workspace_id, record, completion_from(revalidated.structured)
+            request.workspace_id,
+            record,
+            completion_from(revalidated.structured, callbacks["sketchReference"]),
         )
         is None
     )
@@ -460,7 +495,7 @@ def test_inline_validation_and_foreign_or_stale_completion_are_rejected(
     )
     assert not registry.dispatch("validate_study", {"model": _inline_model()}).ok
     checked = registry.dispatch("validate_study", {"program_id": "momentum"})
-    completion = completion_from(checked.structured)
+    completion = completion_from(checked.structured, callbacks["sketchReference"])
     helper = replace(record, phase_executor=False)
     assert "owning phase executor" in callbacks["validate"](
         request.workspace_id, helper, completion
@@ -469,7 +504,7 @@ def test_inline_validation_and_foreign_or_stale_completion_are_rejected(
     assert "workspace" in callbacks["validate"](
         request.workspace_id, record, completion
     )
-    completion = completion_from(checked.structured)
+    completion = completion_from(checked.structured, callbacks["sketchReference"])
     # A unique patch changes committed content; stale references never complete.
     update = registry.dispatch(
         "update_study",
@@ -499,7 +534,11 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         work,
     ) = setup_workflow(tmp_path, monkeypatch)
     study = registry.dispatch("validate_study", {"program_id": "momentum"})
-    callbacks["apply"](request.workspace_id, record, completion_from(study.structured))
+    callbacks["apply"](
+        request.workspace_id,
+        record,
+        completion_from(study.structured, callbacks["sketchReference"]),
+    )
     work.pop(0)()
     verdict_node = workflow.active_orchestrators[request.execution_id].sub_agent_id
     workflow.apply_phase_completion(
@@ -507,7 +546,19 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         verdict_node,
         {
             "target": "strategy_design",
-            "verdict": {"outcome": "supported", "reason": "accepted"},
+            "verdict": {
+                "outcome": "supported",
+                "reason": "accepted",
+                "sketchReference": callbacks["sketchReference"],
+                "assumptionAssessments": [
+                    {
+                        "assumptionId": "continuation",
+                        "status": "supported",
+                        "reason": "Trial survived",
+                        "testIds": ["T01"],
+                    }
+                ],
+            },
         },
     )
     work.pop(0)()
@@ -1139,7 +1190,9 @@ def test_completion_receipt_writer_failure_propagates(
     monkeypatch.setattr(stack.chat_service, "create_message", fail_write)
     with pytest.raises(SessionPersistenceError):
         callbacks["validate"](
-            request.workspace_id, record, completion_from(checked.structured)
+            request.workspace_id,
+            record,
+            completion_from(checked.structured, callbacks["sketchReference"]),
         )
 
 
@@ -1176,7 +1229,7 @@ def test_trials_pin_indicator_dependencies_and_configuration(tmp_path, monkeypat
     accepted = programs.load(
         request.workspace_id, "study", "momentum", str(checked.structured["gitCommit"])
     )
-    completion = completion_from(checked.structured)
+    completion = completion_from(checked.structured, callbacks["sketchReference"])
     assert callbacks["validate"](request.workspace_id, record, completion) is None
     callbacks["apply"](request.workspace_id, record, completion)
     indicator = registry.dispatch("read_indicator", {"program_id": "signal"})

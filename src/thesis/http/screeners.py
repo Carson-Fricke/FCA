@@ -27,7 +27,7 @@ class SaveScreenerRequest(BaseModel):
 
     name: str = Field(min_length=1, max_length=256)
     lookback_days: int = Field(ge=1, le=3_650)
-    bar_interval: str = Field(default="1d", pattern="^(1min|1d)$")
+    bar_intervals: list[str] = Field(min_length=1)
     rank_metric: str = Field(min_length=1, max_length=256)
     universe_revision: str | None = Field(default=None, min_length=1, max_length=256)
     source: str = Field(min_length=1)
@@ -87,7 +87,7 @@ def create_screener_router() -> APIRouter:
             definition = ScreenerDefinition(
                 name=request.name,
                 lookback_days=request.lookback_days,
-                bar_interval=request.bar_interval,
+                bar_intervals=tuple(request.bar_intervals),
                 rank_metric=request.rank_metric,
                 universe_revision=request.universe_revision,
                 source=request.source,

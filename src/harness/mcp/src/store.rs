@@ -283,6 +283,12 @@ pub trait JobStore: Send + Sync {
     /// Returns [`StoreError`] for an unsafe name, a digest conflict, or a
     /// persistence failure.
     fn admit(&self, record: JobRecord) -> Result<Admission, StoreError>;
+    /// Persist worker start without changing the accepted input or artifacts.
+    /// Repeated starts preserve the first timestamp; terminal jobs cannot start.
+    ///
+    /// # Errors
+    /// Returns an error for an absent, terminal, unsafe, or unwritable job.
+    fn mark_running(&self, job_id: &str, started: DateTime<Utc>) -> Result<JobRecord, StoreError>;
     /// Publish a terminal result with its complete artifact set. A failed or
     /// cancelled job may publish terminal metadata with an empty artifact set;
     /// successful states still require at least one artifact.
@@ -440,6 +446,23 @@ impl InMemoryJobStore {
 }
 
 impl JobStore for InMemoryJobStore {
+    fn mark_running(&self, job_id: &str, started: DateTime<Utc>) -> Result<JobRecord, StoreError> {
+        path_segment(job_id)?;
+        let mut inner = self.lock();
+        let record = inner
+            .jobs
+            .get_mut(job_id)
+            .ok_or_else(|| StoreError::JobNotFound(job_id.to_string()))?;
+        if record.state.is_terminal() {
+            return Err(StoreError::Terminal(job_id.to_string()));
+        }
+        if record.state == JobState::Queued {
+            record.state = JobState::Running;
+            record.updated_at = started.max(record.updated_at);
+        }
+        Ok(record.clone())
+    }
+
     fn get(&self, job_id: &str) -> Option<JobRecord> {
         path_segment(job_id).ok()?;
         let inner = self.lock();
@@ -639,6 +662,25 @@ impl FileSystemJobStore {
 }
 
 impl JobStore for FileSystemJobStore {
+    fn mark_running(&self, job_id: &str, started: DateTime<Utc>) -> Result<JobRecord, StoreError> {
+        path_segment(job_id)?;
+        let _guard = self.lock.lock().unwrap_or_else(|error| error.into_inner());
+        let mut record = self
+            .read_job(job_id)?
+            .ok_or_else(|| StoreError::JobNotFound(job_id.to_string()))?;
+        if record.state.is_terminal() {
+            return Err(StoreError::Terminal(job_id.to_string()));
+        }
+        if record.state == JobState::Queued {
+            record.state = JobState::Running;
+            record.updated_at = started.max(record.updated_at);
+            let text = serde_json::to_string_pretty(&record)
+                .map_err(|error| StoreError::Io(error.to_string()))?;
+            fs::write(self.job_path(job_id), text).map_err(io_error)?;
+        }
+        Ok(record)
+    }
+
     fn get(&self, job_id: &str) -> Option<JobRecord> {
         path_segment(job_id).ok()?;
         self.read_job(job_id).ok().flatten()

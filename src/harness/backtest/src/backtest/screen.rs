@@ -22,9 +22,6 @@ use crate::sha256::digest_hex;
 /// The configuration shell every screening document declares.
 pub const SCREEN_SHELL: &str = "screen";
 
-/// The bar intervals a screening run accepts.
-pub const SCREEN_BAR_INTERVALS: [&str; 2] = ["1min", "1d"];
-
 /// The domain separator for the screening configuration content address.
 const SCREEN_CONFIG_DOMAIN: &[u8] = b"fca:harness-screen-config:v1\0";
 
@@ -35,7 +32,7 @@ const SCREEN_KEYS: [&str; 16] = [
     "job_id",
     "name",
     "as_of",
-    "bar_interval",
+    "bar_intervals",
     "lookback_days",
     "rank_metric",
     "universe_revision",
@@ -66,8 +63,8 @@ pub struct ScreenConfig {
     pub name: String,
     /// Evaluation date (`YYYY-MM-DD`).
     pub as_of: String,
-    /// Bar interval (`1min` or `1d`).
-    pub bar_interval: String,
+    /// Canonical requested minute/hour/session cadences.
+    pub bar_intervals: Vec<String>,
     /// Calendar days of history ending at `as_of`.
     pub lookback_days: u32,
     /// Metric the host ranks rows by.
@@ -133,7 +130,17 @@ impl ScreenConfig {
             job_id: required_string(root, "job_id")?,
             name: required_string(root, "name")?,
             as_of: required_string(root, "as_of")?,
-            bar_interval: required_string(root, "bar_interval")?,
+            bar_intervals: root
+                .get("bar_intervals")
+                .and_then(YamlValue::as_sequence)
+                .ok_or_else(|| configuration_error("bar_intervals must be a list"))?
+                .iter()
+                .map(|v| {
+                    v.as_str()
+                        .map(str::to_string)
+                        .ok_or_else(|| configuration_error("bar_intervals must contain strings"))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
             lookback_days: required_int(root, "lookback_days")?,
             rank_metric: required_string(root, "rank_metric")?,
             universe_revision: optional_string(root, "universe_revision")?,
@@ -184,7 +191,17 @@ impl ScreenConfig {
             job_id: json_string(object, "job_id")?,
             name: json_string(object, "name")?,
             as_of: json_string(object, "as_of")?,
-            bar_interval: json_string(object, "bar_interval")?,
+            bar_intervals: object
+                .get("bar_intervals")
+                .and_then(serde_json::Value::as_array)
+                .ok_or_else(|| configuration_error("bar_intervals must be a list"))?
+                .iter()
+                .map(|v| {
+                    v.as_str()
+                        .map(str::to_string)
+                        .ok_or_else(|| configuration_error("bar_intervals must contain strings"))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
             lookback_days: json_int(object, "lookback_days")?,
             rank_metric: json_string(object, "rank_metric")?,
             universe_revision: json_optional_string(object, "universe_revision")?,
@@ -244,7 +261,7 @@ impl ScreenConfig {
     fn content_document(&self) -> serde_json::Value {
         serde_json::json!({
             "as_of": self.as_of,
-            "bar_interval": self.bar_interval,
+            "bar_intervals": self.bar_intervals,
             "bundle_hash": self.bundle_hash,
             "definition_hash": self.definition_hash,
             "definition_id": self.definition_id,
@@ -266,7 +283,7 @@ struct RawFields {
     job_id: String,
     name: String,
     as_of: String,
-    bar_interval: String,
+    bar_intervals: Vec<String>,
     lookback_days: i64,
     rank_metric: String,
     universe_revision: Option<String>,
@@ -296,9 +313,15 @@ fn assemble(fields: RawFields, base_dir: Option<&Path>) -> Result<ScreenConfig, 
     }
     parse_date_days(&fields.as_of)
         .ok_or_else(|| configuration_error("as_of must be a YYYY-MM-DD session date"))?;
-    if !SCREEN_BAR_INTERVALS.contains(&fields.bar_interval.as_str()) {
-        return Err(configuration_error("bar_interval must be '1min' or '1d'"));
+    if fields.bar_intervals.is_empty() {
+        return Err(configuration_error("bar_intervals must be nonempty"));
     }
+    for interval in &fields.bar_intervals {
+        super::engine_core::replay_interval_ns(interval)?;
+    }
+    let mut intervals = fields.bar_intervals.clone();
+    intervals.sort();
+    intervals.dedup();
     if fields.lookback_days <= 0 {
         return Err(configuration_error(
             "lookback_days must be a positive integer",
@@ -357,7 +380,7 @@ fn assemble(fields: RawFields, base_dir: Option<&Path>) -> Result<ScreenConfig, 
         job_id,
         name: name.to_string(),
         as_of: fields.as_of,
-        bar_interval: fields.bar_interval,
+        bar_intervals: intervals,
         lookback_days: u32::try_from(fields.lookback_days)
             .map_err(|_| configuration_error("lookback_days is out of range"))?,
         rank_metric: fields.rank_metric,

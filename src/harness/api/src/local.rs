@@ -543,6 +543,9 @@ fn run_background_screen(
     started: DateTime<Utc>,
 ) {
     let guard = BackgroundJobGuard::new(job_store.clone(), &job_id, started);
+    if !start_background_job(&job_store, &job_id) {
+        return;
+    }
     let outcome = catch_unwind(AssertUnwindSafe({
         let job_store = job_store.clone();
         let runner = runner.clone();
@@ -606,8 +609,8 @@ fn screen_metrics(configuration: &ScreenConfig, rows: u64) -> BTreeMap<String, S
     BTreeMap::from([
         ("as_of".to_string(), configuration.as_of.clone()),
         (
-            "bar_interval".to_string(),
-            configuration.bar_interval.clone(),
+            "bar_intervals".to_string(),
+            configuration.bar_intervals.join(","),
         ),
         (
             "definition_id".to_string(),
@@ -632,6 +635,9 @@ fn run_background_study(
     started: DateTime<Utc>,
 ) {
     let guard = BackgroundJobGuard::new(job_store.clone(), &job_id, started);
+    if !start_background_job(&job_store, &job_id) {
+        return;
+    }
     let outcome = catch_unwind(AssertUnwindSafe({
         let job_store = job_store.clone();
         let job_id = job_id.clone();
@@ -729,6 +735,9 @@ fn run_background_backtest(
     started: DateTime<Utc>,
 ) {
     let guard = BackgroundJobGuard::new(job_store.clone(), &job_id, started);
+    if !start_background_job(&job_store, &job_id) {
+        return;
+    }
     let outcome = catch_unwind(AssertUnwindSafe({
         let job_store = job_store.clone();
         let job_id = job_id.clone();
@@ -854,6 +863,22 @@ pub(crate) fn clamp_study_window(
     let end_date = date_of(configuration.end_ns.saturating_sub(1))
         .ok_or_else(|| "the data window end is outside the representable range".to_string())?;
     Ok((start_date, end_date))
+}
+
+/// Persist worker start before acquisition, compilation, or execution.
+fn start_background_job(job_store: &Arc<dyn JobStore>, job_id: &str) -> bool {
+    match job_store.mark_running(job_id, Utc::now()) {
+        Ok(_) => true,
+        Err(error) => {
+            fail_job(
+                job_store,
+                job_id,
+                Utc::now(),
+                format!("could not persist worker start: {error}"),
+            );
+            false
+        }
+    }
 }
 
 /// Mark one background job failed when its worker exits without a terminal

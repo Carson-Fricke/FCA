@@ -21,7 +21,7 @@ from collections.abc import Callable, Mapping
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from thesis.integrations.mcp import (
@@ -35,6 +35,7 @@ from thesis.integrations.mcp import (
     harness_mcp_topology_from_env,
     open_harness_mcp_client,
 )
+from thesis.workspaces.exploration import output_page
 
 ClientFactory = Callable[[], HarnessMcpClient]
 
@@ -165,6 +166,51 @@ class HarnessDataService:
         """Return one job result row from the ``get_job_result`` tool."""
         result = self._tool_result(lambda client: client.get_job_result(job_id=job_id))
         return _object(result.structured)
+
+    def exploratory_output(
+        self,
+        job_id: str,
+        instance_id: str | None = None,
+        output_name: str | None = None,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> dict[str, object]:
+        """Project bounded pages from the job's authoritative exploratory artifact."""
+        result = self._tool_result(
+            lambda client: client.read_artifact(
+                job_id=job_id, name="exploratory_outputs.json"
+            )
+        )
+        content = result.structured.get("content")
+        if not isinstance(content, str):
+            raise ValueError("exploratory output artifact is not UTF-8 JSON")
+        return output_page(
+            job_id,
+            content,
+            instance_id=instance_id,
+            output_name=output_name,
+            offset=offset,
+            limit=limit,
+        )
+
+    def artifact(self, job_id: str, name: str) -> bytes:
+        """Read complete artifact bytes through the same harness artifact authority."""
+        result = self._tool_result(
+            lambda client: client.read_artifact(job_id=job_id, name=name)
+        )
+        document = result.structured
+        if document.get("job_id") != job_id or document.get("name") != name:
+            raise ValueError(
+                "artifact receipt identity does not match the requested job/name"
+            )
+        content = document.get("content")
+        if not isinstance(content, str):
+            raise ValueError("artifact content is missing")
+        if document.get("encoding") == "utf-8":
+            return content.encode()
+        if document.get("encoding") == "hex":
+            return bytes.fromhex(content)
+        raise ValueError("artifact encoding is unsupported")
 
     def list_artifacts(self, job_id: str) -> dict[str, object]:
         """Return the job's artifact manifest, normalized for the UI contract."""
@@ -312,6 +358,35 @@ def create_harness_router() -> APIRouter:
     ) -> dict[str, object]:
         try:
             return service.list_artifacts(job_id)
+        except Exception as error:
+            raise _service_error(error) from error
+
+    @router.get("/v1/jobs/{job_id}/exploratory-outputs")
+    async def exploratory_outputs(
+        job_id: Annotated[str, Path(min_length=1, max_length=128)],
+        service: Annotated[HarnessDataService, Depends(get_harness_service)],
+        instance_id: str | None = None,
+        output_name: str | None = None,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> dict[str, object]:
+        try:
+            return service.exploratory_output(
+                job_id, instance_id, output_name, offset, limit
+            )
+        except Exception as error:
+            raise _service_error(error) from error
+
+    @router.get("/v1/jobs/{job_id}/artifacts/{name}")
+    async def download_artifact(
+        job_id: str,
+        name: str,
+        service: Annotated[HarnessDataService, Depends(get_harness_service)],
+    ) -> Response:
+        try:
+            return Response(
+                service.artifact(job_id, name), media_type="application/octet-stream"
+            )
         except Exception as error:
             raise _service_error(error) from error
 

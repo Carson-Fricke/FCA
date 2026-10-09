@@ -28,6 +28,8 @@ to their respective packages, not to the conversation implementation.
   accept IDs, not inline source or paths; the existing dispatcher delivers results.
 - `registry.py` composes injected tools under the effective session policy.
 - `schema.py` validates advertised tool arguments.
+- `sketch_tools.py` binds workspace-scoped sketch revision tools.
+- `exploration_tools.py` inspects paged canonical study/strategy outputs.
 - `session.py` owns the durable model/tool loop and tool-result envelope.
 - `spawn.py` implements child creation collaborators.
 - `specs.py` defines immutable child specifications and budgets.

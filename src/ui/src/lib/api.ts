@@ -1271,7 +1271,7 @@ export function saveScreener(
 			if (!Number.isInteger(input.lookback_days) || input.lookback_days < 1 || input.lookback_days > 3650) {
 				throw new ThesisApiError(422, path);
 			}
-			if (input.bar_interval !== '1min' && input.bar_interval !== '1d') {
+			if (!input.bar_intervals.length || input.bar_intervals.some((interval) => !/^(?:[1-9][0-9]*(?:min|h)|1d)$/.test(interval))) {
 				throw new ThesisApiError(422, path);
 			}
 			if (!input.rank_metric.trim() || !input.source.trim()) throw new ThesisApiError(422, path);
@@ -1281,7 +1281,7 @@ export function saveScreener(
 				JSON.stringify([
 					name,
 					input.lookback_days,
-					input.bar_interval,
+					input.bar_intervals,
 					input.rank_metric.trim(),
 					universeRevision,
 					input.source,
@@ -1292,7 +1292,7 @@ export function saveScreener(
 				schema: 'fca-thesis-screener-definition-v1',
 				name,
 				lookbackDays: input.lookback_days,
-				barInterval: input.bar_interval,
+				barIntervals: input.bar_intervals,
 				rankMetric: input.rank_metric.trim(),
 				universeRevision,
 				source: input.source,
@@ -1314,7 +1314,7 @@ export function saveScreener(
 		body: JSON.stringify({
 			name: input.name,
 			lookback_days: input.lookback_days,
-			bar_interval: input.bar_interval,
+			bar_intervals: input.bar_intervals,
 			rank_metric: input.rank_metric,
 			universe_revision: input.universe_revision ?? null,
 			source: input.source,
@@ -1364,7 +1364,7 @@ export function runScreener(
 					screen: {
 						...(plain((template?.provenance?.screen as Record<string, unknown>) ?? {})),
 						as_of: input.as_of,
-						bar_interval: definition.barInterval,
+						bar_intervals: definition.barIntervals,
 						bundle_hash: definition.sourceSha256,
 						definition_hash: definition.definitionSha256,
 						definition_id: definition.definitionId,
@@ -1423,6 +1423,20 @@ export function listWorkspaceArtifacts(workspaceId: string): Promise<WorkspaceAr
 		});
 	}
 	return apiFetch<WorkspaceArtifactCatalog>(path);
+}
+
+export interface ExploratoryOutputPage {
+	job_id: string; artifactName: string; artifactSha256: string;
+	outputs?: { instanceId: string; name: string; kind: string; count: number | null }[];
+	output?: Record<string, unknown>; total: number; nextOffset: number | null;
+}
+
+/** Bounded view of canonical job output; no independently reconstructed series. */
+export function getExploratoryOutput(jobId: string, instanceId?: string, outputName?: string, offset = 0): Promise<ExploratoryOutputPage> {
+	const query = new URLSearchParams({ offset: String(offset), limit: '100' });
+	if (instanceId) query.set('instance_id', instanceId);
+	if (outputName) query.set('output_name', outputName);
+	return apiFetch<ExploratoryOutputPage>(`/v1/jobs/${encodeURIComponent(jobId)}/exploratory-outputs?${query}`);
 }
 
 /** Fetch one bounded UTF-8 artifact file for the in-page viewer. */

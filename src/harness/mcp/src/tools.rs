@@ -995,8 +995,7 @@ impl HarnessTools {
     /// # Errors
     ///
     /// Returns [`ToolExecutionError`] when the job or artifact does not exist,
-    /// or when a remote read is requested on a transport that cannot return raw
-    /// artifact bytes.
+    /// or the authenticated remote artifact response has mismatched attribution.
     pub fn read_artifact(
         &self,
         arguments: &Map<String, Value>,
@@ -1006,10 +1005,27 @@ impl HarnessTools {
         if self.context.mode == Boundary::Local {
             return self.local_artifact(&job_id, &name);
         }
-        Err(ToolExecutionError::new(
-            "remote artifact reads require the artifact HTTP route; the configured remote \
-             transport returns decoded JSON only",
-        ))
+        let path = name
+            .split('/')
+            .map(|part| utf8_percent_encode(part, PATH_SEGMENT).to_string())
+            .collect::<Vec<_>>()
+            .join("/");
+        let url = self.remote_url(&format!(
+            "{JOB_ROUTE}/{}/artifacts/{path}?representation=json",
+            utf8_percent_encode(&job_id, PATH_SEGMENT)
+        ))?;
+        let document = self.remote_get(
+            &url,
+            &format!("artifact '{name}' does not exist for job '{job_id}'"),
+        )?;
+        if document.get("job_id").and_then(Value::as_str) != Some(job_id.as_str())
+            || document.get("name").and_then(Value::as_str) != Some(name.as_str())
+        {
+            return Err(ToolExecutionError::new(
+                "remote artifact response attribution does not match request",
+            ));
+        }
+        Ok(document)
     }
 
     fn local_job(&self, job_id: &str) -> Result<Value, ToolExecutionError> {
@@ -1595,12 +1611,12 @@ fn study_subscription_schema() -> Value {
     let symbols = json!({"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1, "pattern": "^\\S(?:.*\\S)?$"}});
     json!({
         "type": "array", "minItems": 1,
-        "description": "Exact requested inputs, matching the program and its indicators. Bars support one shared interval, 1min or 1d (not both); quote/trade must omit interval. Symbol aliases must equal the subscription symbol union; duplicate aliases must agree. Symbols must be nonempty and unpadded.",
+        "description": "Exact requested inputs, matching the program and its indicators. Bars support multiple session-anchored minute/hour intervals and 1d; quote/trade must omit interval. Symbol aliases must equal the subscription symbol union; duplicate aliases must agree. Symbols must be nonempty and unpadded.",
         "items": {"oneOf": [
             {"type": "object", "additionalProperties": false,
              "required": ["data_type", "symbols", "interval"],
              "properties": {"data_type": {"const": "bars"}, "symbols": symbols,
-                            "interval": {"type": "string", "enum": ["1min", "1d"]}}},
+                            "interval": {"type": "string", "pattern": "^(?:[1-9][0-9]*(?:min|h)|1d)$"}}},
             {"type": "object", "additionalProperties": false,
              "required": ["data_type", "symbols"],
              "properties": {"data_type": {"type": "string", "enum": ["quote", "trade"]}, "symbols": symbols}}
@@ -1628,7 +1644,7 @@ fn study_configuration_schema() -> Value {
             {"required": ["subscriptions"]},
             {"required": ["data"]}
         ],
-        "description": "Supported replay configuration. Declare exact subscriptions; bars support one shared interval (1min or 1d), tick-only inputs omit interval, and symbol aliases must equal the subscription union.",
+        "description": "Supported replay configuration. Declare exact subscriptions; bars support multiple completed minute/hour intervals and 1d, tick-only inputs omit interval, and symbol aliases must equal the subscription union.",
         "properties": {
             "start": {"type": "string", "format": "date-time", "pattern": "(Z|[+-][0-9]{2}:[0-9]{2})$", "description": "RFC 3339 timestamp with Z or explicit UTC offset; must precede end."},
             "end": {"type": "string", "format": "date-time", "pattern": "(Z|[+-][0-9]{2}:[0-9]{2})$", "description": "RFC 3339 timestamp with Z or explicit UTC offset; must follow start."},
@@ -1674,7 +1690,7 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
              package or stale template. Compare sdkIdentity before using local SDK guidance. \
              Refresh initialize/serverInfo to compare current validationIdentity before running.",
             json!({"type": "object", "additionalProperties": false, "properties": {
-                "topic": {"type": "string", "enum": ["consumer", "program", "indicator_api", "events", "exports", "decimal"]},
+                "topic": {"type": "string", "enum": ["consumer", "program", "indicator_api", "events", "exports", "decimal", "building_blocks", "outputs"]},
                 "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1},
                 "max_chars": {"type": "integer", "minimum": 1, "maximum": 16000}
             }}), "sdk", move |arguments| handler.read_sdk_reference(arguments),

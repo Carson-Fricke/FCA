@@ -34,7 +34,7 @@
 				{input.data_type} {input.symbols.join('/')}{input.interval ? ` · ${input.interval}` : ''}
 			</span>
 		{:else}
-			<span class="text-[10px] text-slate-500">No declared inputs</span>
+			<span class="text-[10px] text-slate-500">{artifact.kind === 'sketch' ? 'Representation inputs in sketch' : 'No declared inputs'}</span>
 		{/each}
 	</div>
 	<div class="mt-3 flex w-full items-center gap-3 border-t border-surface-700 pt-2 font-mono text-[10px] text-slate-500">

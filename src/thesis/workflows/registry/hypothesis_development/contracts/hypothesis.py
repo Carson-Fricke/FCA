@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 
 from thesis.research.hypothesis import HypothesisFalsifier
 from thesis.research.models import ResearchModel
 from thesis.workflows.research_models import StudyProgramReference
+from thesis.workspaces.sketch_contract import StrategySketchReference
 
 from ..errors import (
     FalsificationComposeError,
@@ -32,6 +33,8 @@ class HypothesisDraft:
     sizing: str | None = None
     body: str = ""
     hypothesis_id: str | None = None
+    sketch_reference: StrategySketchReference | None = None
+    assumption_tests: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         _text(self.claim, "claim", max_length=8_192)

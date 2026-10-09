@@ -1,13 +1,13 @@
 ---
 id: directional-change-events
 title: Directional change events
-version: 1
+version: 2
 created: 2026-10-06
 retrieved: 2026-10-06
 source:
   url: https://github.com/Carson-Fricke/FCA
   publisher: FCA Thesis
-  content_hash: f4a8e3bd45f051053b3f43c173754fe8c8747bfa1b4c5e00c5b36c8e8bc7009c
+  content_hash: 45147302ef28756cff8462d962bfc6aba0fc3c76390438df09ba4dd44d0c3168
 tags:
   - directional-change
   - event-time
@@ -19,6 +19,7 @@ collections:
   - discovery
   - model-cards
 links:
+  - executable-discovery-tool-bag
   - return-continuation-and-reversal
   - time-series-momentum-and-trend
   - stability-across-periods
@@ -117,8 +118,11 @@ result to [Return continuation and
 reversal](return-continuation-and-reversal). This baseline can be expressed
 as a condition on bars once event times are known, but detecting events,
 tracking confirmation timestamps, and building duration or overshoot
-summaries requires authoring custom study code today; the knowledge cards
-describe the method, not a platform primitive.
+summaries is supported by the SDK's `building_blocks::DirectionalChange`.
+Its absolute-threshold events carry extreme and confirmation timestamps.
+Compose and publish it as shown in the
+[Executable discovery tool bag](executable-discovery-tool-bag). Volatility-scaled
+and asymmetric variants require explicit authored detectors.
 
 ## Statistical test
 

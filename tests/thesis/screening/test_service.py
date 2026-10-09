@@ -148,7 +148,7 @@ class FakeScreeningTools:
             "definition_hash": self._definition.definition_sha256,
             "bundle_hash": self._definition.source_sha256,
             "rank_metric": "momentum",
-            "bar_interval": "1d",
+            "bar_intervals": ["1d"],
             "universe_revision": None,
             "rows": [{"symbol": "AAPL", "metrics": {"momentum": "1.5"}}],
         }
@@ -164,7 +164,7 @@ def _definition() -> ScreenerDefinition:
     return ScreenerDefinition(
         name="momentum",
         lookback_days=20,
-        bar_interval="1d",
+        bar_intervals=("1d",),
         rank_metric="momentum",
         source="fn screen() {}",
     )

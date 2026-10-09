@@ -47,6 +47,7 @@ from thesis.workflows.research_models import (
     ProgramSnapshots,
     ResearchModelRunner,
 )
+from thesis.workspaces.sketch_contract import StrategySketchReference
 
 from .contracts.candidates import (
     CANDIDATE_EVALUATION_PAYLOAD_SCHEMA,
@@ -121,6 +122,7 @@ from .rebuild import (
 from .services import (
     DevelopmentEngine,
     HypothesisDevelopmentServices,
+    services_of,
 )
 from .state import HypothesisDevelopmentOutcome, HypothesisDevelopmentState
 
@@ -196,20 +198,31 @@ def _discovery_seed(
     )
 
 
-def _discovery_handoff(
-    draft: DiscoveryDraft | None,
-) -> dict[str, object] | None:
-    """Render the accepted candidate compactly for the model-creation seed."""
-    if draft is None or draft.candidate is None:
-        return None
-    return {
-        "candidate": draft.candidate.as_dict(),
-        "attempts": [
-            f"{attempt.purpose}: {attempt.result}" for attempt in draft.attempts
-        ],
-        "untouchedData": draft.untouched_data,
-        "limitations": draft.limitations,
-    }
+def _sketch_section(
+    workflow: Workflow[Any, Any, Any],
+    request: HypothesisDevelopmentRequest,
+    reference: StrategySketchReference | None,
+) -> list[str]:
+    """Resolve the immutable sketch, never today's edited workspace artifact."""
+    if reference is None:
+        return []
+    programs = services_of(workflow).programs
+    if programs is None:
+        raise WorkflowError(
+            "workspace programs are required to resolve the accepted sketch"
+        )
+    document = programs.verify_strategy_sketch(
+        request.workspace_id, reference.document()
+    )
+    return [
+        "",
+        "Accepted strategy sketch (exact committed revision):",
+        json.dumps(
+            {"reference": reference.document(), "sketch": document},
+            ensure_ascii=True,
+            indent=2,
+        ),
+    ]
 
 
 def _accepted_discovery(
@@ -278,13 +291,10 @@ def _model_creation_seed(
     mandate = _mandate(workflow, request)
     if mandate is not None:
         parts += ["", mandate_section(mandate)]
-    handoff = _discovery_handoff(_accepted_discovery(state, context))
-    if handoff is not None:
-        parts += [
-            "",
-            "Selected discovery candidate:",
-            json.dumps(handoff, ensure_ascii=True, indent=2, default=str),
-        ]
+    discovery = _accepted_discovery(state, context)
+    parts += _sketch_section(
+        workflow, request, None if discovery is None else discovery.sketch_reference
+    )
     return "\n".join(parts)
 
 
@@ -326,10 +336,19 @@ def _strategy_design_seed(
     The agent must explain the strategy it designs in prose and ask the
     operator to confirm it before the workflow advances to backtesting.
     """
-    del workflow, request
     from .prompts.strategy_design import _strategy_design_instructions
 
     parts = [_strategy_design_instructions()]
+    reference = None if state.verdict is None else state.verdict.sketch_reference
+    if reference is None and context.source == "verdict":
+        verdict = context.completion.get("verdict")
+        if isinstance(verdict, Mapping) and isinstance(
+            verdict.get("sketchReference"), Mapping
+        ):
+            reference = StrategySketchReference.parse(verdict["sketchReference"])
+    if reference is None and state.discovery is not None:
+        reference = state.discovery.sketch_reference
+    parts += _sketch_section(workflow, request, reference)
     hypothesis = _surviving_hypothesis(state)
     if hypothesis is not None:
         parts += [
@@ -556,10 +575,14 @@ def _verdict_seed(
     them and must ask the operator through ``request_workflow_input`` before
     completing — it never auto-completes over the trials.
     """
-    del workflow, request, state
     from .prompts.verdict import _verdict_instructions
 
     parts = [_verdict_instructions()]
+    parts += _sketch_section(
+        workflow,
+        request,
+        None if state.discovery is None else state.discovery.sketch_reference,
+    )
     if context.source is not None and context.completion:
         parts += [
             "",
@@ -617,7 +640,7 @@ def _discovery_validator(completion: Mapping[str, object]) -> str | None:
         except WorkflowError as error:
             errors = [str(error)]
     target = completion.get("target")
-    has_candidate = payload.get("candidate") is not None
+    has_candidate = payload.get("sketchReference") is not None
     expected = "model_creation" if has_candidate else "completed"
     if isinstance(target, str) and target not in {expected, _FAILED.value}:
         errors.append(
@@ -992,6 +1015,12 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
     """Declare every live phase; all secondary lookup maps derive from here."""
     phase = HypothesisDevelopmentPhase
     knowledge_tools = ("search_knowledge", "read_knowledge")
+    sketch_tools = (
+        "author_strategy_sketch",
+        "read_strategy_sketch",
+        "update_strategy_sketch",
+        "list_strategy_sketches",
+    )
     program_tools = (
         tuple(
             f"{operation}_{kind}"
@@ -1083,8 +1112,8 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
             },
             "research",
             "Thesis discovery orchestrator",
-            "Run small targeted studies on the premise, record every attempt, and identify a candidate opportunity with its signal, information timing, holding period and profit source, plus the main competing explanation; stop when nothing is worth pursuing.",
-            "Running targeted studies to find a candidate opportunity.",
+            "Develop an evolving strategy sketch from the premise using the knowledge tool bag, authored components and exploratory outputs; investigate and revise its mechanism, representations, conditioning and trading ideas.",
+            "Developing and investigating an evolving strategy sketch.",
             "discovery",
             _discovery_validator,
             _discovery_seed,
@@ -1095,7 +1124,13 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
                 "list_artifacts",
                 "read_artifact",
             ),
-            tools=(*knowledge_tools, *program_tools, "run_study"),
+            tools=(
+                *knowledge_tools,
+                *sketch_tools,
+                *program_tools,
+                "run_study",
+                "read_study_output",
+            ),
             knowledge=("discovery", "data-quality", "trading-costs", "model-cards"),
         ),
         agent(
@@ -1107,13 +1142,13 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
             },
             "research",
             "Thesis model-creation orchestrator",
-            "Turn the selected discovery candidate into ONE statistical model and pre-register the falsifier tests from the knowledge cards.",
+            "Prepare executable falsification trials tied to the accepted sketch assumptions and pinned components.",
             "Finalizing the structured hypothesis model.",
             "hypothesis",
             _creation_validator,
             _model_creation_seed,
             _fold_draft,
-            tools=(*knowledge_tools, *program_tools),
+            tools=(*knowledge_tools, "read_strategy_sketch", *program_tools),
             knowledge=("model-cards", "inference", "validation", "trading-costs"),
         ),
         PhaseDeclaration(
@@ -1169,7 +1204,7 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
             _strategy_receipt_validator,
             _strategy_design_seed,
             _fold_strategy_design,
-            tools=(*knowledge_tools, *program_tools),
+            tools=(*knowledge_tools, "read_strategy_sketch", *program_tools),
         ),
         agent(
             phase.STRATEGY_BACKTESTING,

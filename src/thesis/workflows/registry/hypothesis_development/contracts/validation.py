@@ -15,10 +15,22 @@ from thesis.paths import InvalidRelativePath, confined_relative_path
 from thesis.research.grammar import IDENTIFIER_PATTERN
 from thesis.research.models import MARKET_SYMBOL_PATTERN
 from thesis.workflows.research_models import PROGRAM_REFERENCE_SCHEMA
+from thesis.workspaces.sketch_contract import SKETCH_REFERENCE_SCHEMA
 
 HYPOTHESIS_PAYLOAD_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
+        "sketchReference": SKETCH_REFERENCE_SCHEMA,
+        "assumptionTests": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": True,
+                "items": {"type": "string", "pattern": IDENTIFIER_PATTERN},
+            },
+        },
         "claim": {
             "type": "string",
             "minLength": 1,
@@ -105,7 +117,14 @@ HYPOTHESIS_PAYLOAD_SCHEMA: dict[str, Any] = {
         "body": {"type": "string"},
         "hypothesisId": {"type": "string", "pattern": IDENTIFIER_PATTERN},
     },
-    "required": ["claim", "disagreement", "falsifiers", "model"],
+    "required": [
+        "claim",
+        "disagreement",
+        "falsifiers",
+        "model",
+        "sketchReference",
+        "assumptionTests",
+    ],
 }
 
 HYPOTHESIS_COMPLETION_SCHEMA: dict[str, Any] = {
@@ -117,102 +136,11 @@ HYPOTHESIS_COMPLETION_SCHEMA: dict[str, Any] = {
     "required": ["hypothesis"],
 }
 
-DISCOVERY_CANDIDATE_FIELDS: tuple[str, ...] = (
-    "opportunity",
-    "signal",
-    "informationTime",
-    "direction",
-    "holdingPeriod",
-    "profitSource",
-    "effect",
-    "competingExplanation",
-    "evidence",
-    "entryIdea",
-    "exitIdea",
-    "assumptions",
-    "buildingBlocks",
-    "validationQuestions",
-    "exploratoryEvidence",
-)
-
-_DISCOVERY_TEXT_FIELDS: tuple[str, ...] = (
-    "opportunity",
-    "signal",
-    "informationTime",
-    "direction",
-    "holdingPeriod",
-    "profitSource",
-    "effect",
-    "competingExplanation",
-    "entryIdea",
-    "exitIdea",
-)
-
-DISCOVERY_CANDIDATE_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        **{
-            name: {
-                "type": "string",
-                "minLength": 1,
-                "pattern": r"\S",
-                "maxLength": 4_096,
-            }
-            for name in _DISCOVERY_TEXT_FIELDS
-        },
-        "evidence": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 8_192,
-            "pattern": r"\S",
-        },
-        "exploratoryEvidence": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 8_192,
-            "pattern": r"\S",
-        },
-        "assumptions": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 8,
-            "items": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2_048,
-                "pattern": r"\S",
-            },
-        },
-        "buildingBlocks": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 8,
-            "items": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 128,
-                "pattern": r"\S",
-            },
-        },
-        "validationQuestions": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 8,
-            "items": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2_048,
-                "pattern": r"\S",
-            },
-        },
-    },
-    "required": list(DISCOVERY_CANDIDATE_FIELDS),
-}
-
 DISCOVERY_PAYLOAD_SCHEMA: dict[str, Any] = {
     "type": "object",
+    "additionalProperties": False,
     "properties": {
-        "candidate": DISCOVERY_CANDIDATE_SCHEMA,
+        "sketchReference": {"anyOf": [SKETCH_REFERENCE_SCHEMA, {"type": "null"}]},
         "noCandidateReason": {
             "type": "string",
             "minLength": 1,
@@ -224,6 +152,7 @@ DISCOVERY_PAYLOAD_SCHEMA: dict[str, Any] = {
             "minItems": 1,
             "items": {
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "purpose": {
                         "type": "string",
@@ -271,7 +200,7 @@ DISCOVERY_PAYLOAD_SCHEMA: dict[str, Any] = {
         },
     },
     "anyOf": [
-        {"required": ["candidate", "attempts", "untouchedData", "limitations"]},
+        {"required": ["sketchReference", "attempts", "untouchedData", "limitations"]},
         {
             "required": [
                 "noCandidateReason",
@@ -312,6 +241,29 @@ _VERDICT_TRIAL_SCHEMA: dict[str, Any] = {
 VERDICT_PAYLOAD_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
+        "sketchReference": SKETCH_REFERENCE_SCHEMA,
+        "assumptionAssessments": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["assumptionId", "status", "reason", "testIds"],
+                "properties": {
+                    "assumptionId": {"type": "string", "pattern": IDENTIFIER_PATTERN},
+                    "status": {
+                        "type": "string",
+                        "enum": ["supported", "refuted", "inconclusive", "untested"],
+                    },
+                    "reason": {"type": "string", "minLength": 1},
+                    "testIds": {
+                        "type": "array",
+                        "uniqueItems": True,
+                        "items": {"type": "string", "pattern": IDENTIFIER_PATTERN},
+                    },
+                },
+            },
+        },
         "target": {"type": "string"},
         "outcome": {"type": "string", "enum": list(_VERDICT_OUTCOMES)},
         "reason": {
@@ -323,7 +275,7 @@ VERDICT_PAYLOAD_SCHEMA: dict[str, Any] = {
         "evidence": {"type": "string"},
         "trials": {"type": "array", "items": _VERDICT_TRIAL_SCHEMA},
     },
-    "required": ["outcome", "reason"],
+    "required": ["outcome", "reason", "sketchReference", "assumptionAssessments"],
 }
 
 
@@ -333,11 +285,11 @@ def discovery_payload_errors(payload: Mapping[str, object]) -> list[str]:
         miss.render()
         for miss in violations(DISCOVERY_PAYLOAD_SCHEMA, payload, "discovery")
     ]
-    candidate = payload.get("candidate")
+    candidate = payload.get("sketchReference")
     no_candidate_reason = payload.get("noCandidateReason")
     if (candidate is None) == (no_candidate_reason is None):
         errors.append(
-            "discovery: exactly one of candidate or noCandidateReason is required"
+            "discovery: exactly one of sketchReference or noCandidateReason is required"
         )
     return errors
 
@@ -357,6 +309,20 @@ def hypothesis_payload_errors(payload: Mapping[str, object]) -> list[str]:
     ]
     model = payload.get("model")
     falsifiers = payload.get("falsifiers")
+    assignments = payload.get("assumptionTests")
+    if isinstance(assignments, Mapping) and isinstance(falsifiers, Sequence):
+        identities = {
+            item.get("falsifierId") or item.get("falsifier_id")
+            for item in falsifiers
+            if isinstance(item, Mapping)
+        }
+        for assumption, tests in assignments.items():
+            if isinstance(tests, Sequence) and not isinstance(tests, str):
+                unknown = set(tests) - identities
+                if unknown:
+                    errors.append(
+                        f"hypothesis.assumptionTests.{assumption}: unknown falsifier IDs {sorted(unknown)}"
+                    )
     if isinstance(model, Mapping):
         tests = model.get("tests")
         if isinstance(tests, Mapping):
@@ -396,8 +362,6 @@ def format_contract_errors(errors: Sequence[str]) -> str:
 
 
 __all__ = [
-    "DISCOVERY_CANDIDATE_FIELDS",
-    "DISCOVERY_CANDIDATE_SCHEMA",
     "DISCOVERY_COMPLETION_SCHEMA",
     "DISCOVERY_PAYLOAD_SCHEMA",
     "HYPOTHESIS_COMPLETION_SCHEMA",

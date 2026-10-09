@@ -11,6 +11,16 @@ have observation-only contexts, while strategies receive an order sink.
   dependency-first routing. Cycles and zero-sized dependencies are rejected.
 - `program.rs` defines program construction, lifecycle, metrics, orders, and
   the separate screening surface.
+- `outputs.rs` defines causal series, confirmed events, scalar-cell tables,
+  and frozen fitted state with training-job/window provenance. The host validates
+  and persists these through `MetricPublisher.publish_output`. Composed indicator
+  OHLC histories are automatically published by dependency path at stop, with
+  completed and in-progress tables kept separate and decimals preserved as strings.
+- `building_blocks.rs` provides trailing moments, EMA, simple-average RSI/ATR,
+  rolling VWAP, crossover age, directional-change confirmation, trailing-window
+  vertical-distance PIP, Haar detail coefficients, and frozen normalization.
+  These pure kernels hold no market subscriptions or execution capabilities;
+  authored consumers own symbol/cadence state and their output timing.
 - `indicator.rs` defines symbol-aware values, mandatory `IndicatorSequence`
   history, and decimal arithmetic. Every owned indicator exposes `value(symbol)`,
   `sequence()`, and `sequence_mut()`; the shared router records its outputs after

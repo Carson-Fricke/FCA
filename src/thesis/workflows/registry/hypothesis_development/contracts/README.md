@@ -9,12 +9,12 @@ operator interaction or schedule phase agents.
 | --- | --- |
 | `__init__.py` | Public handoff records and schemas. |
 | `creation.py` | Trusted launch identity, explicit frozen partition and dependency recovery. |
-| `discovery.py` | Candidate-thesis discovery and honest no-candidate outcomes. |
-| `hypothesis.py` | Selected hypothesis and falsification model references. |
+| `discovery.py` | Reference-only strategy-sketch discovery and honest no-edge outcomes. |
+| `hypothesis.py` | Sketch-bound hypothesis, assumption/test assignments and falsification study references. |
 | `plan.py` | Declared trial plan. |
 | `trials.py` | Trial completion records and result references. |
 | `evidence.py` | Research evidence envelopes. |
-| `verdict.py` | Scientific verdict interpretation. |
+| `verdict.py` | Per-sketch-assumption scientific verdict interpretation with executed test references. |
 | `strategy.py` | Strategy references and terminal strategy backtest handoffs. |
 | `candidates.py` | Parameter search assignments, states and shortlisted candidates. |
 | `nulls.py` | Supported permutation methods, signal-dependency assertions and conditional tail evidence. |

@@ -211,6 +211,11 @@ impl ValidationService {
             let (file, hash_key) = match topic {
                 "consumer" => ("src/consumer.rs", "strategy-sdk/src/consumer.rs"),
                 "program" => ("src/program.rs", "strategy-sdk/src/program.rs"),
+                "outputs" => ("src/outputs.rs", "strategy-sdk/src/outputs.rs"),
+                "building_blocks" => (
+                    "src/building_blocks.rs",
+                    "strategy-sdk/src/building_blocks.rs",
+                ),
                 "indicator_api" => ("src/indicator.rs", "strategy-sdk/src/indicator.rs"),
                 "events" => ("src/events.rs", "strategy-sdk/src/events.rs"),
                 "exports" => ("src/export.rs", "strategy-sdk/src/export.rs"),

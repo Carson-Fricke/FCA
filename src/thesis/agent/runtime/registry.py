@@ -20,6 +20,10 @@ from thesis.agent.runtime.control_tools import (
     SpawnObserver,
     control_registered_tools,
 )
+from thesis.agent.runtime.exploration_tools import (
+    EXPLORATION_TOOL_NAMES,
+    exploration_registered_tools,
+)
 from thesis.agent.runtime.knowledge_tools import (
     KNOWLEDGE_TOOL_NAMES,
     knowledge_registered_tools,
@@ -35,6 +39,7 @@ from thesis.agent.runtime.session import (
     SessionToolRegistry,
     ToolExecution,
 )
+from thesis.agent.runtime.sketch_tools import SKETCH_TOOL_NAMES, sketch_registered_tools
 from thesis.agent.runtime.strategy_tools import (
     StrategyAuthor,
     StrategyAuthoringService,
@@ -60,6 +65,8 @@ THESIS_TOOL_NAMES: tuple[str, ...] = tuple(
             *WORKFLOW_TOOL_NAMES,
             *KNOWLEDGE_TOOL_NAMES,
             *PROGRAM_TOOL_NAMES,
+            *SKETCH_TOOL_NAMES,
+            *EXPLORATION_TOOL_NAMES,
         }
     )
 )
@@ -154,6 +161,8 @@ def build_session_registry(
             )
         )
     if programs is not None:
+        tools.extend(sketch_registered_tools(programs.sketches, context))
+        tools.extend(exploration_registered_tools(programs))
         tools.extend(
             program_registered_tools(
                 programs,

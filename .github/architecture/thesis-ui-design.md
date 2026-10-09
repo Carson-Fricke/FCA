@@ -3,6 +3,18 @@
 Status: accepted design with the implemented chat timeline and scope boundaries
 described below; the broader page requirements remain the design baseline.
 
+The artifact gallery includes committed strategy sketches with representation
+graphs, assumption investigations, pinned components and revision history.
+Workspace exploratory-output pages read canonical job artifacts through bounded
+backend projections, displaying sequence values and records with timing and
+undefined states. Screener authoring accepts multiple declared bar intervals;
+generated filters use the primary interval and custom SDK source can compose
+all declared intervals. UI projections do not reconstruct indicator histories.
+
+Both local and production API entrypoints explicitly compose the harness data
+service, independently of whether a model provider is enabled. Job inspection,
+exploratory output pages and exports use that service's resolved MCP topology.
+
 This document is the design specification for the Thesis web UI. It captures
 the product requirements, the adopted information architecture, the visual
 design language, the backend contracts the UI must preserve, and the
@@ -175,7 +187,7 @@ Both `/v1` and `/api/v1` register on the same backend app and resolve the same
 app-state services and authentication. Missing production services return 503,
 not request-local defaults. Process-local scheduling/brokers require one serving
 worker (`WEB_CONCURRENCY=1`). The current hypothesis-development graph is version
-`2.3.0`, with deterministic falsification trials, a typed variation report path
+`3.0.0`, with deterministic falsification trials, a typed variation report path
 that renders per-parameter value versus total-return/profit-factor charts, and
 executor-free terminal nodes.
 

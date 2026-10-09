@@ -105,7 +105,7 @@ pub struct BarEvent<'a> {
 /// The map is constructed locally by the SDK and never crosses the C ABI.
 #[derive(Clone, Debug)]
 pub struct BarFrame<'a> {
-    /// Canonical interval identity: `1min` or `1d`.
+    /// Canonical interval identity: positive minute/hour cadence or one session day.
     pub interval: &'a str,
     /// Inclusive interval start in epoch nanoseconds.
     pub interval_start_ns: i64,

@@ -219,9 +219,9 @@ def _phase_summary(state: HypothesisDevelopmentState, phase: object) -> str:
     resolved = phase_from_value(_phase_value(phase))
     if resolved is _DISCOVERY:
         if state.discovery is not None:
-            candidate = state.discovery.candidate
+            candidate = state.discovery.sketch_reference
             if candidate is not None:
-                return f"Discovery candidate: {candidate.opportunity}"
+                return f"Discovery sketch: {candidate.sketch_id} ({candidate.version[:12]})"
             return (
                 "Discovery concluded no candidate: "
                 f"{state.discovery.no_candidate_reason}"

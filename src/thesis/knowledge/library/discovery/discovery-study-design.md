@@ -1,13 +1,13 @@
 ---
 id: discovery-study-design
 title: Discovery study design
-version: 1
+version: 2
 created: 2026-10-02
 retrieved: 2026-10-02
 source:
   url: https://github.com/Carson-Fricke/FCA
   publisher: FCA Thesis
-  content_hash: eb38af3fd304fa62b6c6a4b1378fbeac87e33cdbb6a9a4934330255ca515e85d
+  content_hash: 67217c5ace00ff0993da6a4d5292d0c6142cb4ed2086fd1171dc46efd947962e
 tags:
   - discovery
   - study-design
@@ -16,6 +16,7 @@ collections:
   - discovery
   - validation
 links:
+  - executable-discovery-tool-bag
   - return-continuation-and-reversal
   - signal-size-buckets
   - time-of-day-breakdown
@@ -71,12 +72,17 @@ trust:
 ---
 # Discovery study design
 
-Discovery turns a market story into a candidate worth building. It runs
-cheap, targeted studies: bars first, trades next, quotes only when needed.
+Discovery turns a market story into an evolving strategy sketch. Describe the
+mechanism, representation, conditioning, entry/exit/abstention, and assumptions.
+Reach for the [Executable discovery tool bag](executable-discovery-tool-bag)
+before letting existing studies define the search. Compose or author indicators,
+event detectors, shape features, and scale-specific representations. Inspect
+their sequences and events; targeted studies support revision of the sketch.
+Choose bars, trades, or quotes according to the mechanism and information needed.
 
 ## In brief
 
-- One question per study, written down before touching data.
+- Give each investigation a purpose tied to a sketch assumption or design choice.
 - Predeclare the window, the measure, the variants, and the stop rule.
 - Log every attempt, including failures, and note what changed after seeing it.
 - Keep a slice of data untouched for validation.
@@ -88,8 +94,10 @@ cheap, targeted studies: bars first, trades next, quotes only when needed.
 Before looking, write down: the question; the data and window; the signal;
 the measure; the number of variants; and the stop rule. Every attempt gets a
 log line with purpose, data, window, result, and whether anything changed
-after seeing it. Redesigning after a peek is how accidental discoveries are
-born. See [Exploratory search and multiple attempts](exploratory-search-and-multiple-attempts).
+after seeing it. Discovery may revise the sketch after observing development
+evidence. Record those revisions and all alternatives tried; they are exploratory
+search, not independent confirmatory evidence. See
+[Exploratory search and multiple attempts](exploratory-search-and-multiple-attempts).
 
 ## Keep validation data untouched
 

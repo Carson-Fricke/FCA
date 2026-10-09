@@ -166,10 +166,7 @@ def test_stored_model_and_runner_preserve_exact_subscriptions(
         [{"data_type": "bars", "symbols": ["SPY"], "interval": " 1min"}],
         [{"data_type": "bars", "symbols": ["SPY"], "interval": True}],
         [{"data_type": "bars", "symbols": ["SPY"], "interval": []}],
-        [
-            {"data_type": "bars", "symbols": ["SPY"], "interval": "1min"},
-            {"data_type": "bars", "symbols": ["QQQ"], "interval": "1d"},
-        ],
+        [{"data_type": "bars", "symbols": ["SPY"], "interval": "01min"}],
     ],
 )
 def test_subscription_shape_is_strict(subscriptions: object) -> None:
@@ -181,11 +178,18 @@ def test_subscription_shape_is_strict(subscriptions: object) -> None:
 
 def _payload(model: ResearchModel) -> dict[str, object]:
     return {
+        "sketchReference": {
+            "sketchId": "quotes",
+            "version": "c" * 64,
+            "gitCommit": "a" * 40,
+        },
+        "assumptionTests": {"a1": ["f1"]},
         "claim": "Quotes show a regularity.",
         "disagreement": "The null has no regularity.",
         "universe": ["SPY"],
         "falsifiers": [
             {
+                "falsifierId": "f1",
                 "observable": "data_ok",
                 "condition": "lt",
                 "threshold": 1.0,
@@ -212,6 +216,11 @@ def _resolve(
     configuration: Mapping[str, object] | None = None,
 ) -> ResearchModel:
     class Snapshots:
+        def verify_strategy_sketch(
+            self, workspace_id: str, reference: Mapping[str, object]
+        ) -> dict[str, object]:
+            raise NotImplementedError("Study resolution does not consume sketches")
+
         def job_result(self, job_id: str) -> Mapping[str, object]:
             return {"job_id": job_id, "state": "succeeded", "metrics": {}}
 
@@ -355,7 +364,7 @@ def test_global_symbols_preserve_exact_echo_and_broader_universe() -> None:
     assert configuration["end"] == _WINDOW["end"]
 
 
-def test_contract_rejects_multiple_bar_intervals() -> None:
+def test_contract_preserves_multiple_bar_intervals() -> None:
     model = _model([{"data_type": "bars", "symbols": ["SPY"], "interval": "1min"}])
     document = model.canonical_document
     configuration = cast(dict[str, object], document["harnessConfiguration"])
@@ -363,8 +372,11 @@ def test_contract_rejects_multiple_bar_intervals() -> None:
         {"data_type": "bars", "symbols": ["SPY"], "interval": "1min"},
         {"data_type": "bars", "symbols": ["SPY"], "interval": "1d"},
     ]
-    with pytest.raises(ResearchModelError, match="single bars interval"):
-        _resolve(model, configuration=configuration)
+    resolved = _resolve(model, configuration=configuration)
+    assert (
+        resolved.harness_configuration["subscriptions"]
+        == configuration["subscriptions"]
+    )
 
 
 def test_compiler_revalidates_mutated_nested_fetch_fields() -> None:

@@ -38,7 +38,26 @@ class WorkspacePathProvider(Protocol):
 MODEL_DIRECTORY = "models"
 
 #: Bar intervals accepted by each explicit bars subscription.
-BAR_INTERVALS: tuple[str, ...] = ("1min", "1d")
+BAR_INTERVAL_PATTERN = r"^(?:[1-9][0-9]*(?:min|h)|1d)$"
+BAR_INTERVALS: tuple[str, ...] = ("1min", "5min", "15min", "30min", "1h", "1d")
+
+
+def validate_bar_interval(value: object) -> str:
+    """Accept canonical session-bounded bar widths supported by harness replay."""
+    if not isinstance(value, str) or re.fullmatch(BAR_INTERVAL_PATTERN, value) is None:
+        raise ResearchModelError(
+            "bar interval must be 1d or a positive canonical Nmin/Nh"
+        )
+    if value != "1d":
+        width = int(value[:-3] if value.endswith("min") else value[:-1])
+        scale = 60_000_000_000 if value.endswith("min") else 3_600_000_000_000
+        if width > (2**63 - 1) // scale:
+            raise ResearchModelError(
+                "bar interval exceeds supported timestamp arithmetic"
+            )
+    return value
+
+
 MARKET_SYMBOL_PATTERN = r"^[A-Z0-9][A-Z0-9._/:-]*$"
 
 MARKET_SUBSCRIPTIONS_SCHEMA: dict[str, object] = {
@@ -62,7 +81,12 @@ MARKET_SUBSCRIPTIONS_SCHEMA: dict[str, object] = {
                         "items": {"type": "string", "pattern": MARKET_SYMBOL_PATTERN},
                     },
                     **(
-                        {"interval": {"type": "string", "enum": list(BAR_INTERVALS)}}
+                        {
+                            "interval": {
+                                "type": "string",
+                                "pattern": BAR_INTERVAL_PATTERN,
+                            }
+                        }
                         if kind == "bars"
                         else {}
                     ),
@@ -86,7 +110,6 @@ def validate_market_subscriptions(value: object) -> None:
     """Validate an exact subscription echo without normalizing or widening it."""
     if not isinstance(value, list) or not value:
         raise ResearchModelError("subscriptions must be a non-empty list")
-    intervals: set[str] = set()
     for index, item in enumerate(value):
         label = f"subscriptions[{index}]"
         if not isinstance(item, Mapping):
@@ -117,14 +140,8 @@ def validate_market_subscriptions(value: object) -> None:
                 f"{label}.symbols must be a non-empty list of canonical uppercase "
                 "market symbols (letters, digits and ._/:-); no padding or normalization"
             )
-        if kind == "bars" and item["interval"] not in BAR_INTERVALS:
-            raise ResearchModelError(
-                f"{label}.interval must be one of {', '.join(BAR_INTERVALS)}"
-            )
         if kind == "bars":
-            intervals.add(item["interval"])
-    if len(intervals) > 1:
-        raise ResearchModelError("subscriptions must use a single bars interval")
+            validate_bar_interval(item["interval"])
 
 
 def validate_market_configuration(configuration: Mapping[str, object]) -> None:

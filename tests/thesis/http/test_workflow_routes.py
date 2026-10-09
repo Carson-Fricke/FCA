@@ -22,13 +22,13 @@ HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 
 
 @pytest.mark.parametrize("prefix", ["", "/api"])
-@pytest.mark.parametrize("version", [None, "2.3.0"])
+@pytest.mark.parametrize("version", [None, "3.0.0"])
 def test_definition_preserves_arbitrary_topology_without_executing(
     prefix: str, version: str | None
 ) -> None:
     spec: WorkflowSpec[Any, Any, Any] = WorkflowSpec(
         workflow_id="custom-research",
-        version="2.3.0",
+        version="3.0.0",
         title="Custom research",
         phases=(
             ConversationPhase(phase="draft"),
@@ -58,7 +58,7 @@ def test_definition_preserves_arbitrary_topology_without_executing(
     assert response.status_code == 200
     assert response.json() == {
         "workflow_id": "custom-research",
-        "version": "2.3.0",
+        "version": "3.0.0",
         "title": "Custom research",
         "phases": ["draft", "review", "repair", "publish"],
         "terminal_phases": ["publish"],
@@ -122,7 +122,7 @@ def test_builtin_definition_is_available_without_execution_services(
 
 
 def test_breaking_builtin_topology_has_a_new_major_version() -> None:
-    assert _WORKFLOW_VERSION == "2.3.0"
+    assert _WORKFLOW_VERSION == "3.0.0"
 
 
 @pytest.mark.parametrize("prefix", ["", "/api"])

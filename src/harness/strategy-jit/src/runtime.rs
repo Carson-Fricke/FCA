@@ -113,6 +113,7 @@ fn frame_view(frame: &EngineBarFrame, bars: &[CBarEvent], missing: &[CStr]) -> C
 
 struct MetricCollector {
     values: BTreeMap<String, String>,
+    outputs: BTreeMap<String, serde_json::Value>,
     rejection: Option<String>,
 }
 
@@ -139,6 +140,40 @@ extern "C" fn metric_publish(ctx: *mut c_void, name: CStr, value: f64) -> i32 {
     }
     collector.values.insert(name.to_string(), value.to_string());
     METRIC_OK
+}
+
+unsafe extern "C" fn output_publish(ctx: *mut c_void, name: CStr, json: CStr) -> i32 {
+    let Some(collector) = (unsafe { (ctx as *mut MetricCollector).as_mut() }) else {
+        return METRIC_REJECTED;
+    };
+    let parsed = (|| -> Result<(String, serde_json::Value), String> {
+        let name = unsafe { name.as_str() }.ok_or("output name must be UTF-8")?;
+        if !valid_metric_name(name) {
+            return Err("invalid output name".into());
+        }
+        let json = unsafe { json.as_str() }.ok_or("output JSON must be UTF-8")?;
+        let document: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        let output: harness_strategy_sdk::StudyOutput =
+            serde_json::from_value(document).map_err(|e| e.to_string())?;
+        output.validate()?;
+        if collector.outputs.contains_key(name) {
+            return Err("duplicate output name".into());
+        }
+        Ok((
+            name.into(),
+            serde_json::to_value(output).map_err(|e| e.to_string())?,
+        ))
+    })();
+    match parsed {
+        Ok((name, value)) => {
+            collector.outputs.insert(name, value);
+            METRIC_OK
+        }
+        Err(error) => {
+            collector.rejection = Some(error);
+            METRIC_REJECTED
+        }
+    }
 }
 
 fn valid_metric_name(name: &str) -> bool {
@@ -217,6 +252,7 @@ pub struct JitStudyRuntime {
     loaded: LoadedStudy,
     subscriptions: Vec<MarketSubscription>,
     metrics: BTreeMap<String, String>,
+    outputs: BTreeMap<String, serde_json::Value>,
 }
 
 impl JitStudyRuntime {
@@ -239,6 +275,7 @@ impl JitStudyRuntime {
             loaded,
             subscriptions,
             metrics: BTreeMap::new(),
+            outputs: BTreeMap::new(),
         })
     }
 
@@ -321,11 +358,13 @@ impl StrategyRuntime for JitStudyRuntime {
         let vtable = self.loaded.vtable();
         let mut collector = MetricCollector {
             values: BTreeMap::new(),
+            outputs: BTreeMap::new(),
             rejection: None,
         };
         let sink = CMetricSink {
             ctx: &mut collector as *mut MetricCollector as *mut c_void,
             publish: metric_publish as MetricPublishFn,
+            publish_output: output_publish,
         };
         let code = unsafe { (vtable.on_stop)(self.loaded.state(), &sink) };
         if code != SDK_OK || collector.rejection.is_some() {
@@ -336,11 +375,15 @@ impl StrategyRuntime for JitStudyRuntime {
             return Err(BacktestError::StrategyExecution(detail));
         }
         self.metrics = collector.values;
+        self.outputs = collector.outputs;
         Ok(())
     }
 
     fn published_metrics(&self) -> BTreeMap<String, String> {
         self.metrics.clone()
+    }
+    fn published_outputs(&self) -> BTreeMap<String, serde_json::Value> {
+        self.outputs.clone()
     }
 }
 
@@ -349,6 +392,7 @@ pub struct JitStrategyRuntime {
     loaded: LoadedStrategy,
     subscriptions: Vec<MarketSubscription>,
     metrics: BTreeMap<String, String>,
+    outputs: BTreeMap<String, serde_json::Value>,
 }
 
 impl JitStrategyRuntime {
@@ -371,6 +415,7 @@ impl JitStrategyRuntime {
             loaded,
             subscriptions,
             metrics: BTreeMap::new(),
+            outputs: BTreeMap::new(),
         })
     }
 
@@ -518,11 +563,13 @@ impl StrategyRuntime for JitStrategyRuntime {
         let vtable = self.loaded.vtable();
         let mut collector = MetricCollector {
             values: BTreeMap::new(),
+            outputs: BTreeMap::new(),
             rejection: None,
         };
         let sink = CMetricSink {
             ctx: &mut collector as *mut MetricCollector as *mut c_void,
             publish: metric_publish as MetricPublishFn,
+            publish_output: output_publish,
         };
         let code = unsafe { (vtable.on_stop)(self.loaded.state(), &sink) };
         if code != SDK_OK || collector.rejection.is_some() {
@@ -533,11 +580,15 @@ impl StrategyRuntime for JitStrategyRuntime {
             return Err(BacktestError::StrategyExecution(detail));
         }
         self.metrics = collector.values;
+        self.outputs = collector.outputs;
         Ok(())
     }
 
     fn published_metrics(&self) -> BTreeMap<String, String> {
         self.metrics.clone()
+    }
+    fn published_outputs(&self) -> BTreeMap<String, serde_json::Value> {
+        self.outputs.clone()
     }
 }
 

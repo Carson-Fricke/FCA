@@ -46,6 +46,7 @@ from thesis.http.application import (  # noqa: E402
     require_single_worker,
     serving_workspace_store,
 )
+from thesis.http.harness import HarnessDataService  # noqa: E402
 from thesis.http.serving import (  # noqa: E402
     build_serving_stack,
     open_serving_model_provider,
@@ -216,6 +217,7 @@ app = create_app(
     workflow_runtime=stack.workflow_runtime,
     workflow_registry=stack.workflow_registry,
     harness_tool_provider=stack.harness_tool_provider,
+    harness_data_service=HarnessDataService(),
     operator_policies=stack.operator_policies,
     timeline=timeline,
     in_memory=False,

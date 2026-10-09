@@ -101,12 +101,12 @@ def test_discovery_completion_schema_and_validator_reject_missing_pieces() -> No
     assert phase.validate(completion) is None
 
     missing_candidate = _discovery_envelope()
-    del missing_candidate["candidate"]
+    del missing_candidate["sketchReference"]
     failure = phase.validate(
         {"target": "model_creation", "discovery": missing_candidate}
     )
     assert failure is not None
-    assert "discovery.candidate" in failure
+    assert "discovery.sketchReference" in failure
     assert validate_arguments(
         phase.completion_schema,
         {"target": "model_creation", "discovery": missing_candidate},
@@ -144,11 +144,8 @@ def test_accepted_discovery_contract_folds_into_state() -> None:
 
     assert folded.phase is HypothesisDevelopmentPhase.MODEL_CREATION
     assert folded.discovery is not None
-    assert folded.discovery.candidate is not None
-    assert (
-        folded.discovery.candidate.opportunity
-        == "Five-day momentum in SPY continues over the next five days."
-    )
+    assert folded.discovery.sketch_reference is not None
+    assert folded.discovery.sketch_reference.sketch_id == "momentum-edge"
     assert [attempt.job_id for attempt in folded.discovery.attempts] == ["job-momentum"]
     assert folded.hypothesis is None
     assert folded.draft is None
@@ -256,9 +253,9 @@ def test_discovery_attempt_uses_an_optional_job_identity_without_study_id() -> N
 def test_discovery_draft_round_trips_and_rejects_malformed_payloads() -> None:
     draft = DiscoveryDraft.from_dict(_discovery_envelope())
     assert DiscoveryDraft.from_dict(draft.as_dict()) == draft
-    candidate = draft.as_dict()["candidate"]
+    candidate = draft.as_dict()["sketchReference"]
     assert isinstance(candidate, dict)
-    assert candidate["informationTime"]
+    assert candidate["gitCommit"]
 
     outcome = HypothesisDevelopmentOutcome(
         workspace_id=WORKSPACE,
@@ -307,7 +304,7 @@ def test_discovery_no_candidate_branch_and_target_consistency() -> None:
     # Neither branch is reported by both the structural anyOf and the
     # semantic check.
     neither = _discovery_envelope()
-    del neither["candidate"]
+    del neither["sketchReference"]
     errors = discovery_payload_errors(neither)
     assert any("exactly one" in error for error in errors)
     assert any("noCandidateReason" in error for error in errors)
@@ -337,19 +334,19 @@ def test_discovery_no_candidate_folds_to_completed() -> None:
 
     assert folded.phase is HypothesisDevelopmentPhase.COMPLETED
     assert folded.discovery is not None
-    assert folded.discovery.candidate is None
+    assert folded.discovery.sketch_reference is None
     assert folded.discovery.no_candidate_reason is not None
     assert workflow_piping()[("discovery", "completed")] is identity_pipe
 
 
 def test_discovery_draft_no_candidate_round_trips_and_enforces_exactly_one() -> None:
     draft = DiscoveryDraft.from_dict(_no_candidate_discovery_envelope())
-    assert draft.candidate is None
+    assert draft.sketch_reference is None
     assert DiscoveryDraft.from_dict(draft.as_dict()) == draft
 
     with pytest.raises(WorkflowError, match="exactly one"):
         DiscoveryDraft(
-            candidate=None,
+            sketch_reference=None,
             no_candidate_reason=None,
             attempts=draft.attempts,
             untouched_data=draft.untouched_data,
@@ -357,7 +354,9 @@ def test_discovery_draft_no_candidate_round_trips_and_enforces_exactly_one() -> 
         )
     with pytest.raises(WorkflowError, match="exactly one"):
         DiscoveryDraft(
-            candidate=DiscoveryDraft.from_dict(_discovery_envelope()).candidate,
+            sketch_reference=DiscoveryDraft.from_dict(
+                _discovery_envelope()
+            ).sketch_reference,
             no_candidate_reason="Also nothing.",
             attempts=draft.attempts,
             untouched_data=draft.untouched_data,

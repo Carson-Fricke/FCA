@@ -2,7 +2,7 @@
 
 ## Status
 
-Market-input authoring now uses SDK ABI v4: studies, strategies and authored
+Market-input authoring now uses SDK ABI v5: studies, strategies and authored
 indicators implement `MarketConsumer` with `on_quote`, `on_trade`, `on_bar`
 and explicit subscriptions. Studies can combine bars, quotes and trades;
 tick-only studies need no global interval. Owned indicator dependencies compose
@@ -22,7 +22,7 @@ This document is the architecture and phased roadmap for **FCA Thesis**.
 Roadmap provisions record planned work; they do not claim that the described
 services are implemented.
 
-The current concrete workflow (version `2.3.0`) lives behind the
+The current concrete workflow (version `3.0.0`) lives behind the
 `thesis.workflows.registry.hypothesis_development` public facade: discovery,
 model creation, trials, verdict, and the
 strategy/backtest/RCA/optimization/null-testing/variation/forward-validation
@@ -924,7 +924,7 @@ Every request for operator input or direction is model-authored from a structure
    start. Thesis writes a workspace evidence
    record under `models/runs/` containing the model ref, `jobId`, state,
     metrics, and result artifacts. This is a deterministic phase in topology
-    `2.3.0`: `run_falsification_trials` resolves the recorded result and returns
+    `3.0.0`: `run_falsification_trials` resolves the recorded result and returns
     the trials contract without creating a phase agent or model turn. The report
     projection uses observed metrics and declared thresholds;
     distribution and time-series charts render only when the evidence artifact

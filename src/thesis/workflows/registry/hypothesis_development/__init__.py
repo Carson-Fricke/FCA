@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from .contracts import (
     DiscoveryAttempt,
-    DiscoveryCandidate,
     DiscoveryDraft,
     FalsificationPlan,
     FalsificationTrial,
@@ -67,7 +66,6 @@ HYPOTHESIS_DEVELOPMENT_PHASES = HYPOTHESIS_DEVELOPMENT_WORKFLOW.phases
 __all__ = [
     "DevelopmentEngine",
     "DiscoveryAttempt",
-    "DiscoveryCandidate",
     "DiscoveryDraft",
     "StrategyBacktest",
     "FalsificationComposeError",

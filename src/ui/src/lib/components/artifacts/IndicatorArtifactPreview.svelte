@@ -24,7 +24,7 @@
 				no recorded series
 			</span>
 			<p class="mt-2 text-xs text-slate-500">
-				Indicators expose an in-memory value during a replay; no per-event series is persisted yet.
+				Indicator sequences are recorded in consuming study and strategy jobs. Open their exploratory outputs to inspect completed and developing windows.
 			</p>
 		</div>
 		<div class="rounded-xl border border-surface-700 bg-surface-900 p-4">

@@ -557,7 +557,7 @@ export interface WidgetDefinition {
  * The bar intervals the harness accepts for a screening run, mirroring
  * `BAR_INTERVALS` in `src/thesis/screening/definitions.py`.
  */
-export type ScreenerBarInterval = '1min' | '1d';
+export type ScreenerBarInterval = '1d' | `${number}min` | `${number}h`;
 
 /**
  * A content-addressed screener definition document as served by the screener
@@ -570,7 +570,7 @@ export interface ScreenerDefinition {
 	schema: 'fca-thesis-screener-definition-v1';
 	name: string;
 	lookbackDays: number;
-	barInterval: ScreenerBarInterval;
+	barIntervals: ScreenerBarInterval[];
 	rankMetric: string;
 	universeRevision: string | null;
 	source: string;
@@ -613,7 +613,7 @@ export interface ScreeningResult {
 export interface ScreenerSaveInput {
 	name: string;
 	lookback_days: number;
-	bar_interval: ScreenerBarInterval;
+	bar_intervals: ScreenerBarInterval[];
 	rank_metric: string;
 	universe_revision?: string | null;
 	source: string;
@@ -669,7 +669,7 @@ export interface KnowledgeHit {
 
 // ---------- Workspace artifacts ----------
 
-export type ArtifactKind = 'strategy' | 'study' | 'indicator';
+export type ArtifactKind = 'strategy' | 'study' | 'indicator' | 'sketch';
 export type ArtifactViewer = 'code' | 'json' | 'markdown' | 'text';
 
 export interface ArtifactInput {
@@ -736,7 +736,20 @@ export interface IndicatorArtifactPreview {
 export type ArtifactPreview =
 	| StrategyArtifactPreview
 	| StudyArtifactPreview
-	| IndicatorArtifactPreview;
+	| IndicatorArtifactPreview
+	| SketchArtifactPreview;
+
+export interface SketchArtifactPreview {
+	type: 'sketch';
+	reference: { sketchId: string; version: string; gitCommit: string };
+	sketch: {
+		title: string; premise: string; mechanism: string; profitSource: string;
+		conditioning: string; entry: string; exit: string; abstention: string; limitations: string;
+		representations: { nodeId: string; description: string; inputs: string[]; timeframes: string[]; informationTime: string; componentReference?: { kind: string; programId: string; version: string; gitCommit: string } }[];
+		assumptions: { assumptionId: string; claim: string; status: string; investigation: string; evidence: { jobId: string; artifactName?: string }[] }[];
+		alternatives: string[];
+	};
+}
 
 export interface WorkspaceArtifact {
 	id: string;

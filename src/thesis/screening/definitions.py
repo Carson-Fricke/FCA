@@ -18,10 +18,9 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
-_HASH_DOMAIN = b"fca:thesis-screener-definition:v1\0"
+from thesis.research.models import BAR_INTERVALS, validate_bar_interval
 
-#: The bar intervals the harness accepts for a screening run.
-BAR_INTERVALS: tuple[str, ...] = ("1min", "1d")
+_HASH_DOMAIN = b"fca:thesis-screener-definition:v1\0"
 
 
 class ScreenerDefinitionError(ValueError):
@@ -78,7 +77,7 @@ class ScreenerDefinition:
 
     name: str
     lookback_days: int
-    bar_interval: str
+    bar_intervals: tuple[str, ...]
     rank_metric: str
     universe_revision: str | None = None
     source: str = ""
@@ -91,9 +90,19 @@ class ScreenerDefinition:
             raise ScreenerDefinitionError("lookback_days must be a positive integer")
         if lookback <= 0:
             raise ScreenerDefinitionError("lookback_days must be a positive integer")
-        if self.bar_interval not in BAR_INTERVALS:
-            allowed = ", ".join(repr(item) for item in BAR_INTERVALS)
-            raise ScreenerDefinitionError(f"bar_interval must be one of {allowed}")
+        if not isinstance(self.bar_intervals, (list, tuple)) or not self.bar_intervals:
+            raise ScreenerDefinitionError(
+                "bar_intervals must contain at least one interval"
+            )
+        try:
+            intervals = tuple(
+                validate_bar_interval(item) for item in self.bar_intervals
+            )
+        except ValueError as error:
+            raise ScreenerDefinitionError(str(error)) from error
+        if len(set(intervals)) != len(intervals):
+            raise ScreenerDefinitionError("bar_intervals must be unique")
+        object.__setattr__(self, "bar_intervals", tuple(sorted(intervals)))
         object.__setattr__(self, "rank_metric", _text(self.rank_metric, "rank_metric"))
         if self.universe_revision is not None:
             object.__setattr__(
@@ -129,7 +138,7 @@ class ScreenerDefinition:
     def canonical_document(self) -> dict[str, object]:
         """Return the complete content document without derived location fields."""
         return {
-            "barInterval": self.bar_interval,
+            "barIntervals": list(self.bar_intervals),
             "lookbackDays": self.lookback_days,
             "name": self.name,
             "parameters": _canonical_value(self.parameters),
@@ -170,7 +179,7 @@ class ScreenerDefinition:
         moment = _text(as_of, "as_of")
         return {
             "as_of": moment,
-            "bar_interval": self.bar_interval,
+            "bar_intervals": list(self.bar_intervals),
             "bundle_hash": self.source_sha256,
             "definition_hash": self.definition_sha256,
             "definition_id": self.definition_id,

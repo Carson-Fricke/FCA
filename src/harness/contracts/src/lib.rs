@@ -120,6 +120,29 @@ pub fn validate_bar_interval(value: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Completed replay cadences supported by canonical minute-source aggregation.
+/// `None` denotes one exchange session day; finite widths never cross sessions.
+pub fn completed_bar_interval_ns(interval: &str) -> Result<Option<i64>, String> {
+    validate_bar_interval(interval)?;
+    if interval == "1d" {
+        return Ok(None);
+    }
+    let (number, scale) = if let Some(n) = interval.strip_suffix("min") {
+        (n, 60_000_000_000_i64)
+    } else if let Some(n) = interval.strip_suffix('h') {
+        (n, 3_600_000_000_000_i64)
+    } else {
+        return Err("replay bars require minute/hour intervals or 1d".into());
+    };
+    number
+        .parse::<i64>()
+        .ok()
+        .and_then(|n| n.checked_mul(scale))
+        .filter(|n| *n > 0)
+        .map(Some)
+        .ok_or_else(|| "bar interval overflow".into())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "data_type", deny_unknown_fields)]
 pub enum Subscription {

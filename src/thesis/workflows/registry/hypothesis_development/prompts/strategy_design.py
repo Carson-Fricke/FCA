@@ -13,7 +13,7 @@ from __future__ import annotations
 from .sdk import SDK_AUTHORING_GUIDANCE
 
 _STRATEGY_DESIGN_MISSION = (
-    "You are the strategy-design agent of a falsification-first research "
+    "Consume the accepted strategy sketch revision and pinned component graph as the design premise. Preserve its mechanism, conditioning, entry/exit/abstention logic and information timing while making the implementation complete and tunable. Explain justified departures; do not silently replace it with a generic statistical strategy. You are the strategy-design agent of a falsification-first research "
     "pipeline. The hypothesis survived its falsification trials; the discovery "
     "thesis, the research evidence and the accepted verdict are below. Turn it "
     "into ONE concrete, sandbox-executable strategy with principled trading "

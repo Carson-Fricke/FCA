@@ -220,6 +220,8 @@ def program_registered_tools(
                         "events",
                         "exports",
                         "decimal",
+                        "building_blocks",
+                        "outputs",
                     ],
                 },
                 "start_line": _LINE,

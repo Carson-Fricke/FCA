@@ -8,7 +8,6 @@ import math
 import re
 import tomllib
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import AbstractContextManager
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Protocol, cast
@@ -28,8 +27,10 @@ from thesis.research.models import (
     validate_market_configuration,
     validate_market_subscriptions,
 )
+from thesis.workspaces.exploration import output_page
 from thesis.workspaces.local import WorkspaceRepositoryError
-from thesis.workspaces.repository import WorkspaceRepositoryProvider
+from thesis.workspaces.repository import WorkspaceGit, WorkspaceRepositoryProvider
+from thesis.workspaces.sketches import WorkspaceSketches
 
 ProgramKind = Literal["study", "strategy", "indicator"]
 
@@ -40,46 +41,7 @@ JobSettlement = Callable[[str, str | None], None]
 JobRetention = Callable[[str, str, Mapping[str, object]], JobSettlement]
 
 
-class ProgramGit(Protocol):
-    """The Git surface program operations require, as an injected storage port."""
-
-    @property
-    def repository(self) -> Path: ...
-
-    def head(self) -> str | None: ...
-
-    def publication_lock(self) -> AbstractContextManager[None]: ...
-
-    def tracked_paths(self, prefix: str) -> tuple[str, ...]: ...
-
-    def file_matches(self, commit_hash: str, path: str, payload: bytes) -> bool: ...
-
-    def is_ancestor(self, commit_hash: str) -> bool: ...
-
-    def read_blobs(
-        self, commit_hash: str, paths: Sequence[str]
-    ) -> dict[str, bytes]: ...
-
-    def read_file(self, commit_hash: str, path: str) -> bytes: ...
-
-    def path_revisions(self, prefix: str) -> tuple[tuple[str, str], ...]: ...
-
-    def path_revisions_many(
-        self, prefixes: Sequence[str]
-    ) -> dict[str, tuple[tuple[str, str], ...]]: ...
-
-    def has_staged_changes(self, paths: Sequence[str]) -> bool: ...
-
-    def commit_exact_files(
-        self,
-        head: str | None,
-        files: Mapping[str, bytes],
-        destinations: Mapping[str, Path],
-        message: str,
-    ) -> str: ...
-
-
-def _default_git_factory(root: Path) -> ProgramGit:
+def _default_git_factory(root: Path) -> WorkspaceGit:
     return GitCoordinator(root)
 
 
@@ -187,6 +149,8 @@ _SDK_TOPICS = {
     "events": "strategy-sdk/src/events.rs",
     "exports": "strategy-sdk/src/export.rs",
     "decimal": "num/src/decimal.rs",
+    "building_blocks": "strategy-sdk/src/building_blocks.rs",
+    "outputs": "strategy-sdk/src/outputs.rs",
 }
 
 
@@ -350,9 +314,10 @@ class WorkspacePrograms:
         harness: ProgramHarness | None = None,
         *,
         sdk_root: Path | None = None,
-        git_factory: Callable[[Path], ProgramGit] = _default_git_factory,
+        git_factory: Callable[[Path], WorkspaceGit] = _default_git_factory,
     ) -> None:
         self.repositories = repositories
+        self.sketches = WorkspaceSketches(repositories, git_factory=git_factory)
         self.harness = harness
         self.sdk_root = (
             sdk_root or Path(__file__).resolve().parents[2] / "harness" / "strategy-sdk"
@@ -362,8 +327,28 @@ class WorkspacePrograms:
             tuple[str, str], tuple[str, tuple[dict[str, object], ...]]
         ] = {}
 
-    def _git(self, root: Path) -> ProgramGit:
+    def _git(self, root: Path) -> WorkspaceGit:
         return self._git_factory(root)
+
+    def verify_strategy_sketch(
+        self, workspace_id: str, reference: Mapping[str, object]
+    ) -> dict[str, object]:
+        """Resolve an immutable accepted sketch from this workspace's Git history."""
+        sketch = self.sketches.verify(workspace_id, reference)
+        for node in cast(list[dict[str, object]], sketch["representations"]):
+            component = node.get("componentReference")
+            if isinstance(component, Mapping):
+                snapshot = self.load(
+                    workspace_id,
+                    cast(ProgramKind, component["kind"]),
+                    cast(str, component["programId"]),
+                    cast(str, component["gitCommit"]),
+                )
+                if snapshot["version"] != component["version"]:
+                    raise ProgramArtifactError(
+                        "sketch component does not match its committed version"
+                    )
+        return sketch
 
     def _path(
         self,
@@ -901,7 +886,7 @@ class WorkspacePrograms:
         program_id: str,
         commit: str,
         snapshot: Mapping[str, object],
-        git: ProgramGit,
+        git: WorkspaceGit,
         history: _HistoryEntries | None = None,
     ) -> dict[str, object]:
         manifest = cast(dict[str, object], snapshot["manifest"])
@@ -949,7 +934,7 @@ class WorkspacePrograms:
             "preview": _program_preview(kind, manifest, configuration),
         }
 
-    def _revision_history(self, git: ProgramGit, relative: str) -> _HistoryEntries:
+    def _revision_history(self, git: WorkspaceGit, relative: str) -> _HistoryEntries:
         return self._history_entries(git.path_revisions(relative))
 
     @staticmethod
@@ -1618,6 +1603,31 @@ class WorkspacePrograms:
             raise ProgramArtifactError("harness job result is unavailable")
         return dict(result.structured)
 
+    def read_study_output(
+        self,
+        job_id: str,
+        *,
+        instance_id: str | None = None,
+        output_name: str | None = None,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> dict[str, object]:
+        """Inspect canonical rich outputs by job identity with bounded record pages."""
+        result = self._call(
+            "read_artifact", {"job_id": job_id, "name": "exploratory_outputs.json"}
+        )
+        content = result.structured.get("content")
+        if result.is_error or not isinstance(content, str):
+            raise ProgramArtifactError("exploratory output artifact is unavailable")
+        return output_page(
+            job_id,
+            content,
+            instance_id=instance_id,
+            output_name=output_name,
+            offset=offset,
+            limit=limit,
+        )
+
     def _serving_sdk(self) -> dict[str, object]:
         """Read fresh SDK/compiler metadata through the public harness ports."""
         if self.harness is None:
@@ -1844,7 +1854,7 @@ impl Default for AuthoredIndicator {
         kind: ProgramKind,
         program_id: str,
         commit: str,
-        git: ProgramGit | None = None,
+        git: WorkspaceGit | None = None,
         fetched: Mapping[str, bytes] | None = None,
     ) -> dict[str, object]:
         if git is None:
@@ -2432,7 +2442,7 @@ impl Default for AuthoredIndicator {
         return source.encode()
 
     @staticmethod
-    def _head(git: ProgramGit) -> str:
+    def _head(git: WorkspaceGit) -> str:
         head = git.head()
         if head is None:
             raise ProgramArtifactError("workspace has no committed artifacts")
@@ -2604,7 +2614,7 @@ export_study_program!(IndicatorValidation);
     def _commit(
         self,
         workspace_id: str,
-        git: ProgramGit,
+        git: WorkspaceGit,
         head: str | None,
         files: Mapping[str, bytes],
         message: str,

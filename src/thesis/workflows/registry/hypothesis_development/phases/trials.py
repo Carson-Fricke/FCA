@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
+from typing import cast
 
 from thesis.chat.contracts import HARNESS_RESEARCH_MODEL_TOOL
 from thesis.experiments.mandate import derive_launch_mandate, rfc3339_ns
@@ -16,6 +17,7 @@ from thesis.workflows.research_models import (
     resolve_study_reference,
     study_window,
 )
+from thesis.workspaces.sketch_contract import StrategySketchReference
 
 from ..artifacts import (
     build_hypothesis,
@@ -112,6 +114,34 @@ def _run_falsification_trials(
     # The pure fold owns historical decoding. A newly supplied handoff never
     # enables the retired inline schema just because it reaches an executor.
     draft = state.draft or _draft_from_contract(payload)
+    if draft.sketch_reference is None:
+        raise WorkflowError("falsification requires an accepted sketch reference")
+    sketch_reference = draft.sketch_reference
+    if (
+        state.discovery is None
+        or state.discovery.sketch_reference != draft.sketch_reference
+    ):
+        raise WorkflowError("falsification sketch does not match accepted discovery")
+    programs = services_of(workflow).programs
+    if programs is None:
+        raise WorkflowError("workspace programs are not configured")
+    sketch = programs.verify_strategy_sketch(
+        request.workspace_id, draft.sketch_reference.document()
+    )
+    assumptions = sketch.get("assumptions")
+    assert isinstance(assumptions, list)
+    known_assumptions = {item["assumptionId"] for item in assumptions}
+    unknown = set(draft.assumption_tests) - known_assumptions
+    if unknown:
+        raise WorkflowError(
+            f"falsification names unknown sketch assumptions: {sorted(unknown)}"
+        )
+    known_falsifiers = {item.falsifier_id for item in draft.falsifiers}
+    for assumption, tests in draft.assumption_tests.items():
+        if set(tests) - known_falsifiers:
+            raise WorkflowError(
+                f"assumption {assumption!r} references unknown falsifier IDs"
+            )
     accepted_study: StudyProgramReference | None = None
     resolved_study: ResearchModel | None = None
     if isinstance(draft.model, StudyProgramReference):
@@ -145,6 +175,10 @@ def _run_falsification_trials(
     report = falsification_report_artifact(workflow, final)
     evidence = _research_evidence(accepted_study, final, report)
     contract: Mapping[str, object] = {
+        "sketchReference": sketch_reference.document(),
+        "assumptionTests": {
+            key: list(value) for key, value in draft.assumption_tests.items()
+        },
         "trials": [dict(trial.as_dict()) for trial in final.trials],
         "research": evidence.as_dict(),
         "target": _VERDICT.value,
@@ -234,6 +268,19 @@ def _draft_from_contract(payload: Mapping[str, object]) -> HypothesisDraft:
             sizing=None,
             body=_optional_text(payload.get("body")),
             hypothesis_id=None,
+            sketch_reference=(
+                StrategySketchReference.parse(
+                    cast(Mapping[str, object], payload["sketchReference"])
+                )
+                if isinstance(payload.get("sketchReference"), Mapping)
+                else None
+            ),
+            assumption_tests={
+                str(key): tuple(value)
+                for key, value in cast(
+                    Mapping[str, list[str]], payload.get("assumptionTests", {})
+                ).items()
+            },
         )
     except WorkflowError as error:
         raise FalsificationComposeError(str(error)) from error

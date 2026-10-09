@@ -13,7 +13,7 @@ from .candidates import (
     CandidateShortlistEntry,
 )
 from .creation import HypothesisDevelopmentRequest
-from .discovery import DiscoveryAttempt, DiscoveryCandidate, DiscoveryDraft
+from .discovery import DiscoveryAttempt, DiscoveryDraft
 from .evidence import AssumptionEvidence, ControlEvidence, ResearchEvidence
 from .forward import (
     ForwardEvaluation,
@@ -50,7 +50,6 @@ __all__ = [
     "CandidateShortlistEntry",
     "ControlEvidence",
     "DiscoveryAttempt",
-    "DiscoveryCandidate",
     "DiscoveryDraft",
     "STRATEGY_BACKTEST_STATES",
     "StrategyBacktest",

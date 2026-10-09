@@ -32,22 +32,26 @@
 //! version ([`SDK_VERSION`]) is recorded with every compiled artifact.
 
 mod abi;
+/// Causal numeric building blocks for authored market consumers.
+pub mod building_blocks;
 mod consumer;
 mod events;
 /// Macro-support trampolines; reachable only through the exported macros.
 #[doc(hidden)]
 pub mod export;
 mod indicator;
+mod outputs;
 mod program;
 
 pub use abi::{
     CBarEvent, CBarFrame, CDecimal, CFill, CMarketOrder, CMetricSink, COrderSink, CQuoteEvent,
-    CSlice, CStart, CStr, CTradeEvent, MetricPublishFn, OrderSubmitFn, ScreeningCreateFn,
-    ScreeningDestroyFn, ScreeningProgramVTable, ScreeningResultFn, ScreeningScreenFn,
-    StrategyBarFrameFn, StrategyProgramVTable, StudyBarFrameFn, StudyProgramVTable, StudyQuoteFn,
-    StudyTradeFn, SubscriptionsFn, ABI_EXPORT, LAST_ERROR_EXPORT, METRIC_INVALID_NAME,
-    METRIC_NOT_FINITE, METRIC_OK, METRIC_REJECTED, METRIC_RESERVED_NAME, SCREENING_VTABLE_EXPORT,
-    SDK_ABI_VERSION, SDK_ERROR, SDK_OK, STRATEGY_VTABLE_EXPORT, STUDY_VTABLE_EXPORT,
+    CSlice, CStart, CStr, CTradeEvent, MetricPublishFn, OrderSubmitFn, OutputPublishFn,
+    ScreeningCreateFn, ScreeningDestroyFn, ScreeningProgramVTable, ScreeningResultFn,
+    ScreeningScreenFn, StrategyBarFrameFn, StrategyProgramVTable, StudyBarFrameFn,
+    StudyProgramVTable, StudyQuoteFn, StudyTradeFn, SubscriptionsFn, ABI_EXPORT, LAST_ERROR_EXPORT,
+    METRIC_INVALID_NAME, METRIC_NOT_FINITE, METRIC_OK, METRIC_REJECTED, METRIC_RESERVED_NAME,
+    SCREENING_VTABLE_EXPORT, SDK_ABI_VERSION, SDK_ERROR, SDK_OK, STRATEGY_VTABLE_EXPORT,
+    STUDY_VTABLE_EXPORT,
 };
 pub use consumer::{
     canonical_subscriptions, effective_subscriptions, route_bar, route_quote, route_trade,
@@ -58,6 +62,7 @@ pub use indicator::{
     indicator_add, indicator_context, indicator_div, indicator_mul, indicator_sub, Indicator,
     IndicatorBar, IndicatorMissing, IndicatorSequence, INDICATOR_CONTEXT_PRECISION,
 };
+pub use outputs::{OutputEvent, OutputPoint, StudyOutput};
 pub use program::{
     Bar, MetricPublisher, OrderSink, OrderType, PublishError, ScreenContext, ScreenRow,
     ScreeningProgram, Side, StrategyProgram, StudyProgram, SubmitError, SubmittedOrder,

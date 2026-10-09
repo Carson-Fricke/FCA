@@ -16,9 +16,9 @@ use num::Decimal;
 
 /// The ABI version the host and every artifact must agree on.
 ///
-/// Version 4 unifies market consumers, adds interval identity and state-based
-/// subscriptions, and adds study ticks and strategy frames. Rebuild artifacts.
-pub const SDK_ABI_VERSION: u32 = 4;
+/// Version 5 adds structured exploratory output publication and multi-timeframe
+/// screening contexts. Artifacts must be rebuilt against the matching SDK.
+pub const SDK_ABI_VERSION: u32 = 5;
 
 /// Callback result: the author code completed.
 pub const SDK_OK: i32 = 0;
@@ -207,7 +207,7 @@ pub struct CBarFrame {
     pub missing_symbols: *const CStr,
     /// Number of missing symbols.
     pub missing_symbols_len: usize,
-    /// Canonical interval identity: `1min` or `1d`.
+    /// Canonical interval identity: positive minute/hour cadence or one session day.
     pub interval: CStr,
 }
 
@@ -312,10 +312,15 @@ pub struct CMetricSink {
     pub ctx: *mut c_void,
     /// Publish callback.
     pub publish: MetricPublishFn,
+    /// Publish a typed exploratory output as validated JSON.
+    pub publish_output: OutputPublishFn,
 }
 
 /// Publish one finite metric value under one validated name.
 pub type MetricPublishFn = unsafe extern "C" fn(ctx: *mut c_void, name: CStr, value: f64) -> i32;
+
+/// Publish one structured output; the host copies JSON during the callback.
+pub type OutputPublishFn = unsafe extern "C" fn(ctx: *mut c_void, name: CStr, json: CStr) -> i32;
 
 /// The host-owned order sink handed to strategy callbacks.
 #[repr(C)]

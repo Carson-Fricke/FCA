@@ -9,7 +9,9 @@ artifacts whose bytes are durable in Git.
 from __future__ import annotations
 
 import hashlib
-from typing import Annotated
+import json
+import re
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, Path, Request
 from fastapi.concurrency import run_in_threadpool
@@ -64,6 +66,67 @@ class ArtifactCatalogService:
         )
         indicator_items = program_items["indicator"]
         items = [*strategy_items, *program_items["study"], *indicator_items]
+        if self.programs is not None:
+            sketches = self.programs.sketches
+            offset = 0
+            while True:
+                page = sketches.list(workspace_id, offset=offset, limit=200)
+                for record in cast(list[dict[str, dict[str, object]]], page["items"]):
+                    reference = record["reference"]
+                    sketch = record["sketch"]
+                    payload = (
+                        json.dumps(
+                            sketch,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            allow_nan=False,
+                        )
+                        + "\n"
+                    ).encode()
+                    version = cast(str, reference["version"])
+                    items.append(
+                        {
+                            "id": reference["sketchId"],
+                            "kind": "sketch",
+                            "title": sketch["title"],
+                            "subtitle": "Evolving strategy sketch",
+                            "description": sketch["premise"],
+                            "status": "committed",
+                            "version": version,
+                            "artifact_path": f"sketches/{reference['sketchId']}",
+                            "created_at": None,
+                            "updated_at": None,
+                            "git_commit": reference["gitCommit"],
+                            "digests": {
+                                "source_sha256": None,
+                                "bundle_sha256": version,
+                                "manifest_sha256": version,
+                            },
+                            "inputs": [],
+                            "files": [
+                                {
+                                    "path": f"revisions/{version}.json",
+                                    "sha256": version,
+                                    "size_bytes": len(payload),
+                                    "viewer": "json",
+                                }
+                            ],
+                            "file_count": 1,
+                            "size_bytes": len(payload),
+                            "history": sketches.history(
+                                workspace_id, cast(str, reference["sketchId"])
+                            ),
+                            "preview": {
+                                "type": "sketch",
+                                "reference": reference,
+                                "sketch": sketch,
+                            },
+                        }
+                    )
+                next_offset = page["nextOffset"]
+                if next_offset is None:
+                    break
+                offset = cast(int, next_offset)
         _link_indicator_usage(indicator_items, items)
         for item in items:
             item["id"] = f"{item['kind']}:{item['id']}"
@@ -93,6 +156,28 @@ class ArtifactCatalogService:
     ) -> dict[str, object]:
         """Read one bounded UTF-8 file from a committed artifact."""
         kind, separator, name = artifact_id.partition(":")
+        if separator and kind == "sketch" and self.programs is not None:
+            match = re.fullmatch(r"revisions/([0-9a-f]{64})\.json", file_path)
+            if match is None:
+                raise KeyError(file_path)
+            result = self.programs.sketches.read(workspace_id, name, version=match[1])
+            text = (
+                json.dumps(
+                    result["sketch"],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                )
+                + "\n"
+            )
+            payload = text.encode()
+            return {
+                "path": file_path,
+                "text": text[:MAX_ARTIFACT_FILE_BYTES],
+                "truncated": len(payload) > MAX_ARTIFACT_FILE_BYTES,
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "size_bytes": len(payload),
+            }
         if not separator or kind not in _ARTIFACT_KINDS or not name:
             raise KeyError(artifact_id)
         try:
@@ -179,6 +264,29 @@ def create_artifact_router() -> APIRouter:
             raise service_error(error, resource="workspace") from error
         except ValueError as error:
             raise service_error(error) from error
+
+    @router.get("/sketches/{sketch_id}")
+    async def read_strategy_sketch(
+        workspace_id: str,
+        sketch_id: str,
+        service: Annotated[
+            ArtifactCatalogService, Depends(get_artifact_catalog_service)
+        ],
+        git_commit: str | None = None,
+        version: str | None = None,
+    ) -> dict[str, object]:
+        if service.programs is None:
+            raise service_error(KeyError(sketch_id), resource="sketch")
+        try:
+            return await run_in_threadpool(
+                service.programs.sketches.read,
+                workspace_id,
+                sketch_id,
+                git_commit=git_commit,
+                version=version,
+            )
+        except (KeyError, ValueError) as error:
+            raise service_error(error, resource="sketch") from error
 
     @router.get("/artifacts/{artifact_id}/files/{file_path:path}")
     async def read_workspace_artifact_file(

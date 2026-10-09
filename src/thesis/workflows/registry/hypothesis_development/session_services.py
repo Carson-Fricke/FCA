@@ -42,6 +42,7 @@ from thesis.workflows.research_models import (
     study_configuration,
 )
 from thesis.workspaces.programs import JobSettlement, ProgramArtifactError, ProgramKind
+from thesis.workspaces.sketch_contract import StrategySketchReference
 
 from .composers.hypothesis import _compose_universe
 from .contracts.creation import HypothesisDevelopmentRequest
@@ -414,7 +415,7 @@ class HypothesisSessionServices:
         if provenance is not None:
             return provenance
         if record.phase not in ("model_creation", "strategy_design"):
-            return None
+            return self._sketch_error(workspace_id, record, completion)
         receipt = completion.get("strategy")
         kind: ProgramKind = "strategy"
         if record.phase == "model_creation":
@@ -552,7 +553,131 @@ class HypothesisSessionServices:
             lambda: self._guarded_validation(workspace_id, record, completion, verify),
         )
         failure = None if result.ok else result.text
-        return self._acceptance_error(workspace_id, record, completion) or failure
+        return (
+            self._acceptance_error(workspace_id, record, completion)
+            or failure
+            or self._sketch_error(workspace_id, record, completion)
+        )
+
+    def _sketch_error(
+        self,
+        workspace_id: str,
+        record: SubAgentRecord,
+        completion: Mapping[str, object],
+    ) -> str | None:
+        """Bind scientific interpretation to the exact accepted sketch revision."""
+        field = {
+            "discovery": "discovery",
+            "model_creation": "hypothesis",
+            "verdict": "verdict",
+        }.get(record.phase or "")
+        if field is None:
+            return None
+        payload = completion.get(field)
+        if not isinstance(payload, Mapping):
+            return f"completion requires {field}"
+        if record.phase == "discovery" and payload.get("noCandidateReason") is not None:
+            return None
+        reference = payload.get("sketchReference")
+        if not isinstance(reference, Mapping):
+            return "completion requires sketchReference"
+        if self._programs is None:
+            return "workspace programs are not configured"
+        try:
+            parsed = StrategySketchReference.parse(reference)
+            sketch = self._programs.verify_strategy_sketch(
+                workspace_id, parsed.document()
+            )
+            if record.phase == "discovery":
+                # The provenance check above already binds attempts to durable
+                # submissions and authoritative harness receipts. Sketch evidence
+                # must be a subset of those same executed investigations.
+                attempts = cast(list[Mapping[str, object]], payload.get("attempts", []))
+                investigated = {
+                    item.get("jobId") for item in attempts if item.get("jobId")
+                }
+                for assumption in cast(
+                    list[Mapping[str, object]], sketch["assumptions"]
+                ):
+                    evidence = cast(list[Mapping[str, object]], assumption["evidence"])
+                    measured = assumption["status"] in ("supported", "refuted")
+                    if measured and not evidence:
+                        return (
+                            "measured sketch assumption requires executed job evidence"
+                        )
+                    for item in evidence:
+                        job_id = item["jobId"]
+                        if job_id not in investigated:
+                            return "sketch evidence cites a job outside the accepted discovery attempts"
+                        if measured:
+                            result = self._programs.job_result(cast(str, job_id))
+                            if result.get("state") != "succeeded":
+                                return "failed or incomplete discovery jobs cannot support a measured sketch assumption"
+                return None
+            if self._workflow is None or record.workflow_execution_id is None:
+                return "sketch handoff requires a workflow execution"
+            workflow = self._workflow()
+            execution = self._chat.get_execution(
+                workspace_id, record.workflow_execution_id
+            )
+            state = workflow._reconstruct_state(self._request_from_execution(execution))
+            if state.discovery is None or parsed != state.discovery.sketch_reference:
+                return "sketchReference does not match accepted discovery"
+            assumptions = cast(list[Mapping[str, object]], sketch["assumptions"])
+            identities = {item["assumptionId"] for item in assumptions}
+            if record.phase == "model_creation":
+                assignments = payload.get("assumptionTests")
+                if not isinstance(assignments, Mapping) or not assignments:
+                    return "model creation requires assumptionTests"
+                if set(assignments) - identities:
+                    return "assumptionTests names an unknown sketch assumption"
+                falsifiers = cast(
+                    list[Mapping[str, object]], payload.get("falsifiers", [])
+                )
+                known = {
+                    item.get("falsifierId") or item.get("falsifier_id")
+                    for item in falsifiers
+                }
+                for tests in assignments.values():
+                    if not isinstance(tests, list) or not tests or set(tests) - known:
+                        return "assumptionTests requires declared falsifier IDs"
+            else:
+                assessments = payload.get("assumptionAssessments")
+                if not isinstance(assessments, list):
+                    return "verdict requires assumptionAssessments"
+                assessed = [
+                    item.get("assumptionId")
+                    for item in assessments
+                    if isinstance(item, Mapping)
+                ]
+                if len(assessed) != len(set(assessed)) or set(assessed) != identities:
+                    return "verdict must assess each sketch assumption exactly once, including untested assumptions"
+                trials = {item.test_id: item for item in state.trials}
+                assignments = (
+                    {} if state.draft is None else state.draft.assumption_tests
+                )
+                for item in assessments:
+                    test_ids = item.get("testIds", [])
+                    if set(test_ids) - trials.keys():
+                        return "assumption assessment cites a test that did not execute"
+                    allowed = set(assignments.get(item["assumptionId"], ()))
+                    if any(
+                        trials[test].falsifier_id not in allowed for test in test_ids
+                    ):
+                        return "assumption assessment cites another assumption's test"
+                    if item.get("status") in ("supported", "refuted") and not test_ids:
+                        return (
+                            "measured assumption assessment requires executed testIds"
+                        )
+                    if item.get("status") in ("supported", "refuted") and any(
+                        trials[test].observed is None
+                        or trials[test].run_state != "succeeded"
+                        for test in test_ids
+                    ):
+                        return "failed or undefined trials cannot support a measured assumption assessment"
+            return None
+        except (ValueError, OSError, KeyError, TypeError) as error:
+            return str(error)
 
     def _guarded_validation(
         self,

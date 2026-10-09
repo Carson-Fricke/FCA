@@ -75,6 +75,11 @@ class ProgramSnapshots(Protocol):
         are the harness's own, not values typed into a completion.
         """
 
+    def verify_strategy_sketch(
+        self, workspace_id: str, reference: Mapping[str, object]
+    ) -> dict[str, object]:
+        """Resolve a frozen sketch revision from authoritative workspace Git."""
+
 
 @dataclass(frozen=True, slots=True)
 class StudyProgramReference:

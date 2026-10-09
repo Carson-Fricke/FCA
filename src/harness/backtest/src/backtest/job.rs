@@ -496,8 +496,10 @@ pub fn run_native_job_with_lake_client(
 ) -> Result<(BacktestOutcome, PathBuf), BacktestJobError> {
     let subscriptions = runtime_subscriptions(configuration, &strategies)?;
     let fixture = lake_fixture_with_subscriptions(configuration, client, &subscriptions)?;
+    let mut source_configuration = configuration.clone();
+    source_configuration.data_source_bar_interval = "1min".into();
     let outcome = run_native_engine_outcome(
-        configuration,
+        &source_configuration,
         engine_options,
         strategies,
         fixture,
@@ -530,8 +532,10 @@ pub fn run_native_study_job_with_lake_client(
 ) -> Result<(BacktestOutcome, PathBuf), BacktestJobError> {
     let subscriptions = runtime_subscriptions(configuration, &programs)?;
     let fixture = lake_fixture_with_subscriptions(configuration, client, &subscriptions)?;
+    let mut source_configuration = configuration.clone();
+    source_configuration.data_source_bar_interval = "1min".into();
     let outcome = run_native_engine_outcome(
-        configuration,
+        &source_configuration,
         engine_options,
         programs,
         fixture,
@@ -582,6 +586,35 @@ fn write_run_artifacts(
     default_subdir: &str,
     artifact_name: &str,
 ) -> Result<PathBuf, BacktestJobError> {
+    for program in outcome.exploratory_outputs.values() {
+        for output in program.as_object().into_iter().flat_map(|map| map.values()) {
+            if output.get("kind").and_then(serde_json::Value::as_str) == Some("fitted_state") {
+                let matches_job = output
+                    .get("training_job_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(outcome.manifest.job_id.as_str());
+                let start = output
+                    .get("training_start_ns")
+                    .and_then(serde_json::Value::as_i64);
+                let end = output
+                    .get("training_end_ns")
+                    .and_then(serde_json::Value::as_i64);
+                let available = output
+                    .get("available_at_ns")
+                    .and_then(serde_json::Value::as_i64);
+                if !matches_job
+                    || start.is_none_or(|v| v < configuration.start_ns)
+                    || end.is_none_or(|v| v > configuration.end_ns)
+                    || available.is_none_or(|v| v > configuration.end_ns)
+                {
+                    return Err(BacktestJobError::Artifact(
+                        "fitted state must reference its actual training job and executed window"
+                            .into(),
+                    ));
+                }
+            }
+        }
+    }
     let fills = ledger_fills_from_outcome(outcome);
     let orders = ledger_orders_from_outcome(outcome);
     let ledger = build_ledger(configuration, &fills, &orders, &outcome.valuations)?;
@@ -600,6 +633,12 @@ fn write_run_artifacts(
     std::fs::write(&artifact_path, payload)
         .map_err(|error| BacktestJobError::Artifact(error.to_string()))?;
     write_native_results(&directory, configuration, outcome, &fills, &orders, &ledger)?;
+    let outputs = serde_json::json!({"schema_version":1,"job_id":outcome.manifest.job_id,"programs":outcome.exploratory_outputs});
+    std::fs::write(
+        directory.join("exploratory_outputs.json"),
+        serde_json::to_vec_pretty(&outputs).map_err(|e| BacktestJobError::Io(e.to_string()))?,
+    )
+    .map_err(|e| BacktestJobError::Io(e.to_string()))?;
     Ok(artifact_path)
 }
 
@@ -692,7 +731,7 @@ pub fn lake_fixture(
 /// Acquire exact consumer inputs plus separate backtest execution feeds.
 ///
 /// # Errors
-/// Rejects incompatible intervals and empty requested symbol/type coverage.
+/// Rejects unsupported cadences and empty requested symbol/type coverage.
 pub fn lake_fixture_with_subscriptions(
     configuration: &BacktestConfig,
     client: &BlockingLakeClient,
@@ -710,7 +749,7 @@ pub fn lake_fixture_with_subscriptions(
     if configuration.shell != "study" {
         acquisition.extend(super::engine_core::execution_subscriptions(&requirements));
     }
-    let acquisition = normalize_subscriptions(&acquisition)?;
+    let acquisition = super::engine_core::source_subscriptions(&acquisition, "1min")?;
     let start_date = Date::from_days(configuration.start_ns.div_euclid(ONE_DAY_NS) as i32);
     let end_date = Date::from_days(
         configuration
@@ -751,17 +790,15 @@ pub fn lake_fixture_with_subscriptions(
         expected_data_fingerprint: None,
     };
     super::preflight::validate_subscription_coverage(&fixture, &requirements)?;
-    if let Some(bars) = requirements.iter().find(|input| input.data_type == "bars") {
-        let mut frame_config = configuration.clone();
-        frame_config.symbols = bars.symbols.clone();
-        frame_config.data_bar_interval = bars.interval.clone().unwrap();
-        let frames = super::engine_core::assemble_study_frames(
-            &frame_config,
-            &fixture,
-            &lake_scale_options(),
-        )?;
-        super::preflight::validate_completed_bar_coverage(&requirements, &frames)?;
-    }
+    let mut frame_config = configuration.clone();
+    frame_config.data_source_bar_interval = "1min".into();
+    let frames = super::engine_core::assemble_subscription_frames(
+        &frame_config,
+        &fixture,
+        &lake_scale_options(),
+        &requirements,
+    )?;
+    super::preflight::validate_completed_bar_coverage(&requirements, &frames)?;
     Ok(fixture)
 }
 

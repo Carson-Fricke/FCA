@@ -2,7 +2,7 @@
 //!
 //! The capability split mirrors the Python contract exactly: a
 //! [`StudyProgram`] never sees the order surface and observes market inputs;
-//! its only context interaction is publishing metrics through
+//! its only context interaction is publishing evidence through
 //! [`MetricPublisher`] — while a [`StrategyProgram`] submits orders through
 //! [`OrderSink`], whose host stamps the event time on every intent exactly as
 //! the Python adapter does. A [`ScreeningProgram`] is the third kind: one-shot
@@ -82,23 +82,29 @@ pub trait ScreeningProgram {
     fn screen(&mut self, ctx: &ScreenContext) -> Vec<ScreenRow>;
 }
 
-/// One daily OHLCV bar as the host provides it.
+/// One completed OHLCV bar as the host provides it.
 ///
 /// Every decimal field crosses as the exact decimal string the host built
 /// (no float roundtrip); [`volume`](Bar::volume) is exact as well.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Bar {
+    /// Source window start in Unix nanoseconds.
+    pub interval_start_ns: i64,
+    /// Source window end in Unix nanoseconds.
+    pub interval_end_ns: i64,
+    /// Earliest causal availability in Unix nanoseconds.
+    pub available_at_ns: i64,
     /// Session date (`YYYY-MM-DD`).
     pub date: String,
-    /// Session open.
+    /// Window open.
     pub open: String,
-    /// Session high.
+    /// Window high.
     pub high: String,
-    /// Session low.
+    /// Window low.
     pub low: String,
-    /// Session close.
+    /// Window close.
     pub close: String,
-    /// Session volume.
+    /// Window volume.
     pub volume: String,
 }
 
@@ -115,8 +121,8 @@ pub struct ScreenContext {
     pub as_of: String,
     /// The as-of universe symbols.
     pub universe: Vec<String>,
-    /// Daily bars per symbol; symbols without bars are absent.
-    pub bars: BTreeMap<String, Vec<Bar>>,
+    /// Completed bars by interval then symbol; absent inputs stay absent.
+    pub bars: BTreeMap<String, BTreeMap<String, Vec<Bar>>>,
     /// Engine fact-sheet entries per symbol.
     pub facts: BTreeMap<String, BTreeMap<String, String>>,
     /// Precomputed indicator values per symbol, keyed by metric key.
@@ -130,10 +136,13 @@ impl ScreenContext {
         &self.universe
     }
 
-    /// The symbol's bars, or an empty slice when it has none.
+    /// The symbol's bars at the requested interval, or an empty slice.
     #[must_use]
-    pub fn bars(&self, symbol: &str) -> &[Bar] {
-        self.bars.get(symbol).map_or(&[], Vec::as_slice)
+    pub fn bars(&self, symbol: &str, interval: &str) -> &[Bar] {
+        self.bars
+            .get(interval)
+            .and_then(|series| series.get(symbol))
+            .map_or(&[], Vec::as_slice)
     }
 
     /// The symbol's fact-sheet entries, or an empty map when it has none.
@@ -224,6 +233,26 @@ impl MetricPublisher {
     /// value is not finite, or the host rejects the publish.
     pub fn publish(&mut self, name: &str, value: f64) -> Result<(), PublishError> {
         let code = unsafe { (self.sink.publish)(self.sink.ctx, CStr::from_slice(name), value) };
+        PublishError::from_code(code).map_or(Ok(()), Err)
+    }
+
+    /// Publish a sequence, event collection, or typed table for job inspection.
+    ///
+    /// # Errors
+    /// Returns an error if serialization or host validation rejects the output.
+    pub fn publish_output(
+        &mut self,
+        name: &str,
+        output: &crate::StudyOutput,
+    ) -> Result<(), PublishError> {
+        let json = serde_json::to_string(output).map_err(|_| PublishError::Rejected)?;
+        let code = unsafe {
+            (self.sink.publish_output)(
+                self.sink.ctx,
+                CStr::from_slice(name),
+                CStr::from_slice(&json),
+            )
+        };
         PublishError::from_code(code).map_or(Ok(()), Err)
     }
 }

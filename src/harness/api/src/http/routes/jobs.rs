@@ -135,6 +135,7 @@ async fn list_artifacts(
 async fn download_artifact(
     State(state): State<AppState>,
     Path((job_id, artifact_name)): Path<(String, String)>,
+    Query(query): Query<HashMap<String, String>>,
 ) -> Result<Response, ApiError> {
     identifier(&job_id)?;
     if artifact_name.is_empty() || artifact_name.len() > ARTIFACT_NAME_MAX {
@@ -148,6 +149,19 @@ async fn download_artifact(
         .artifacts
         .get(&artifact_name)
         .ok_or_else(ApiError::artifact_not_found)?;
+    if query
+        .get("representation")
+        .is_some_and(|value| value == "json")
+    {
+        let (encoding, content) = match std::str::from_utf8(payload) {
+            Ok(text) => ("utf-8", text.to_string()),
+            Err(_) => ("hex", hex::encode(payload)),
+        };
+        return Ok(Json(
+            json!({"job_id":job_id,"name":artifact_name,"encoding":encoding,"content":content}),
+        )
+        .into_response());
+    }
     Ok((
         [(header::CONTENT_TYPE, "application/octet-stream")],
         payload.clone(),

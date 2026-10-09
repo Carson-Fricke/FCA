@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { generateWire } from '../../generate-wire.mjs';

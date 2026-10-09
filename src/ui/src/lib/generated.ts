@@ -572,7 +572,10 @@ export interface RunScreenerRequest {
  * Request boundary for one authored screener definition.
  */
 export interface SaveScreenerRequest {
-	bar_interval?: string;
+	/**
+	 * @minItems 1
+	 */
+	bar_intervals: [string, ...string[]];
 	lookback_days: number;
 	name: string;
 	parameters?: {

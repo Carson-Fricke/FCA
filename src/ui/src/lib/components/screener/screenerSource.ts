@@ -58,7 +58,7 @@ function rowMarker(rows: FilterRow[]): string {
  * The emitted program always records the last close when a symbol has bars,
  * so `close` is available as a rank metric for any filter set.
  */
-export function generateScreenerSource(rows: FilterRow[]): string {
+export function generateScreenerSource(rows: FilterRow[], interval: string = '1d'): string {
 	const validRows = rows.filter((row) => validateRow(row) === null);
 	const usesFacts = validRows.some((row) => kindSpec(row.kind)?.surface === 'facts');
 	const fragments = validRows
@@ -90,7 +90,7 @@ impl ScreeningProgram for ${SCREENER_STRUCT_NAME} {
     fn screen(&mut self, ctx: &ScreenContext) -> Vec<ScreenRow> {
         let mut rows = Vec::new();
         for symbol in ctx.universe().iter() {
-            let bars = ctx.bars(symbol);${factsLine}
+            let bars = ctx.bars(symbol, ${JSON.stringify(interval)});${factsLine}
             let mut metrics = BTreeMap::new();
             if let Some(bar) = bars.last() {
                 metrics.insert("close".to_string(), bar.close.clone());

@@ -73,7 +73,7 @@ fn exact_mixed_and_trade_only_study_plans_never_acquire_unrequested_streams() {
 }
 
 #[test]
-fn missing_requested_stream_is_not_covered_by_bars_and_incompatible_intervals_fail_before_io() {
+fn missing_requested_stream_is_not_covered_by_bars_and_unsupported_intervals_fail_before_io() {
     let server = FakeLakeServer::start(FakeLakeConfig {
         read_bodies_by_type: BTreeMap::from([
             ("bars".into(), bars_stream("SPY", &[bar_row(0)])),
@@ -101,7 +101,7 @@ fn missing_requested_stream_is_not_covered_by_bars_and_incompatible_intervals_fa
     conflicting.push(MarketSubscription {
         data_type: "bars".into(),
         symbols: vec!["SPY".into()],
-        interval: Some("1d".into()),
+        interval: Some("1s".into()),
     });
     assert!(lake_fixture_with_subscriptions(&config(), &client, &conflicting).is_err());
     assert_eq!(server.requests().len(), before);
@@ -263,5 +263,41 @@ fn multi_symbol_study_acquires_every_symbol_and_keeps_canonical_order() {
             .filter(|request| request.path == "/v1/read")
             .count(),
         2
+    );
+}
+
+#[test]
+fn multiple_timeframes_acquire_one_canonical_minute_source_window() {
+    let rows: Vec<_> = (0..390).map(bar_row).collect();
+    let server = FakeLakeServer::start(FakeLakeConfig {
+        read_bodies_by_type: BTreeMap::from([("bars".into(), bars_stream("SPY", &rows))]),
+        ..FakeLakeConfig::new(TOKEN)
+    });
+    let subscriptions: Vec<_> = ["1min", "5min", "1d"]
+        .into_iter()
+        .map(|interval| MarketSubscription {
+            data_type: "bars".into(),
+            symbols: vec!["SPY".into()],
+            interval: Some(interval.into()),
+        })
+        .collect();
+    let fixture =
+        lake_fixture_with_subscriptions(&config(), &client(&server), &subscriptions).unwrap();
+    assert_eq!(fixture.events.len(), 390);
+    let requests = server.requests();
+    let ensures: Vec<_> = requests
+        .iter()
+        .filter(|request| request.path == "/v1/catalog/ensure")
+        .collect();
+    assert_eq!(ensures.len(), 1);
+    let body: serde_json::Value =
+        serde_json::from_slice(ensures[0].body.as_ref().unwrap()).unwrap();
+    assert_eq!(body["interval"], "1min");
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.path == "/v1/read")
+            .count(),
+        1
     );
 }

@@ -363,7 +363,7 @@ pub unsafe fn bar_frame_view<'a>(frame: *const CBarFrame) -> Option<BarFrame<'a>
     }
     Some(BarFrame {
         interval: match unsafe { raw.interval.as_str() }? {
-            interval @ ("1min" | "1d") => interval,
+            interval if harness_contracts::completed_bar_interval_ns(interval).is_ok() => interval,
             _ => return None,
         },
         interval_start_ns: raw.interval_start_ns,
@@ -479,6 +479,9 @@ pub unsafe extern "C" fn __study_on_stop<T: StudyProgram>(
     };
     let mut publisher = MetricPublisher::from_sink(*sink);
     run_guarded(|| {
+        if let Err(error) = crate::outputs::publish_indicator_outputs(program, &mut publisher) {
+            return unsafe { finish_callback::<T>(state, Err(error)) };
+        }
         program.on_stop(&mut publisher);
         unsafe { finish_callback::<T>(state, Ok(())) }
     })
@@ -673,6 +676,9 @@ pub unsafe extern "C" fn __strategy_on_stop<T: StrategyProgram>(
     };
     let mut publisher = MetricPublisher::from_sink(*sink);
     run_guarded(|| {
+        if let Err(error) = crate::outputs::publish_indicator_outputs(program, &mut publisher) {
+            return unsafe { finish_callback::<T>(state, Err(error)) };
+        }
         program.on_stop(&mut publisher);
         unsafe { finish_callback::<T>(state, Ok(())) }
     })

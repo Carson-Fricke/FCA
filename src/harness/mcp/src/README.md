@@ -18,6 +18,8 @@ opaque provenance, structured diagnostics, and complete-result reuse metadata.
   object prefix, and adapters. Failed and cancelled jobs publish terminal
   records with an empty artifact set and their truthful `error_message`; a
   successful result still requires at least one artifact.
+  `mark_running` persists worker start while preserving accepted input and
+  rejecting terminal jobs; local MCP workers call it before doing any work.
 - `transport.rs` serves the composed protocol through stdio and HTTP transports.
 
 Focused protocol tests live in the sibling `tests/` folder. The API crate

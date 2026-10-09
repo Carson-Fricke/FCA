@@ -5,6 +5,7 @@
 	let { kind }: { kind: ArtifactKind } = $props();
 
 	const META: Record<ArtifactKind, { label: string; icon: string; cls: string }> = {
+		sketch: { label: 'Strategy sketch', icon: '◇', cls: 'border-accent/40 text-accent' },
 		strategy: { label: 'Strategy', icon: '❮', cls: 'border-accent/40 text-accent' },
 		study: { label: 'Study', icon: '❡', cls: 'border-warn/40 text-warn' },
 		indicator: { label: 'Indicator', icon: '∿', cls: 'border-profit/40 text-profit' }

@@ -15,6 +15,7 @@
 	} = $props();
 
 	const GROUPS: { kind: ArtifactKind; label: string }[] = [
+		{ kind: 'sketch', label: 'Strategy sketches' },
 		{ kind: 'strategy', label: 'Strategies' },
 		{ kind: 'study', label: 'Studies' },
 		{ kind: 'indicator', label: 'Indicators' }

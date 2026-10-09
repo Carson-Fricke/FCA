@@ -51,6 +51,7 @@ from ._support import (
     _Kit,
     _kit,
     _request,
+    _sketch_reference,
 )
 
 
@@ -281,9 +282,14 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
             for operation in ("author", "update", "read", "validate", "publish")
         ),
         *(f"list_{plural}" for plural in ("studies", "strategies", "indicators")),
+        "author_strategy_sketch",
+        "read_strategy_sketch",
+        "update_strategy_sketch",
+        "list_strategy_sketches",
         "read_sdk_reference",
         "validate_study",
         "run_study",
+        "read_study_output",
         "get_job_status",
         "get_job_result",
         "list_artifacts",
@@ -387,9 +393,9 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     artifact = discovery_outputs[-1].payload.get("artifact")
     assert isinstance(artifact, Mapping)
     assert artifact["type"] == "discovery"
-    candidate = artifact["candidate"]
+    candidate = artifact["sketchReference"]
     assert isinstance(candidate, Mapping)
-    assert str(candidate["opportunity"]).startswith("Five-day momentum")
+    assert candidate["sketchId"] == "momentum-edge"
 
     runner = _runner(
         kit,
@@ -417,6 +423,7 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
             for operation in ("author", "update", "read", "validate", "publish")
         ),
         *(f"list_{plural}" for plural in ("studies", "strategies", "indicators")),
+        "read_strategy_sketch",
         "read_sdk_reference",
         "validate_study",
         "search_knowledge",
@@ -509,11 +516,8 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     )
     assert rebuilt.phase is HypothesisDevelopmentPhase.VERDICT
     assert rebuilt.discovery is not None
-    assert rebuilt.discovery.candidate is not None
-    assert (
-        rebuilt.discovery.candidate.opportunity
-        == "Five-day momentum in SPY continues over the next five days."
-    )
+    assert rebuilt.discovery.sketch_reference is not None
+    assert rebuilt.discovery.sketch_reference.sketch_id == "momentum-edge"
     assert rebuilt.draft is not None
     assert rebuilt.draft.claim == _hypothesis_envelope()["claim"]
     assert [trial.run_state for trial in rebuilt.trials] == ["succeeded"]
@@ -570,6 +574,15 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
                 {
                     "completion": {
                         "verdict": {
+                            "sketchReference": _sketch_reference(),
+                            "assumptionAssessments": [
+                                {
+                                    "assumptionId": "continuation",
+                                    "status": "supported",
+                                    "reason": "Recorded trial",
+                                    "testIds": ["T01"],
+                                }
+                            ],
                             "outcome": "supported",
                             "reason": "the planned falsifier survived the trials",
                         },
@@ -676,6 +689,15 @@ def test_loop_back_reseeds_the_revisited_phase(tmp_path: Path) -> None:
                     "completion": {
                         "target": "model_creation",
                         "verdict": {
+                            "sketchReference": _sketch_reference(),
+                            "assumptionAssessments": [
+                                {
+                                    "assumptionId": "continuation",
+                                    "status": "supported",
+                                    "reason": "Recorded trial",
+                                    "testIds": ["T01"],
+                                }
+                            ],
                             "outcome": "refuted",
                             "reason": "the planned falsifier fired",
                         },
@@ -790,6 +812,15 @@ def test_strategy_design_is_a_conversation(tmp_path: Path) -> None:
                     "completion": {
                         "target": "strategy_design",
                         "verdict": {
+                            "sketchReference": _sketch_reference(),
+                            "assumptionAssessments": [
+                                {
+                                    "assumptionId": "continuation",
+                                    "status": "supported",
+                                    "reason": "Recorded trial",
+                                    "testIds": ["T01"],
+                                }
+                            ],
                             "outcome": "supported",
                             "reason": "the planned falsifiers survived",
                         },
@@ -814,6 +845,7 @@ def test_strategy_design_is_a_conversation(tmp_path: Path) -> None:
             for operation in ("author", "update", "read", "validate", "publish")
         ),
         *(f"list_{plural}" for plural in ("studies", "strategies", "indicators")),
+        "read_strategy_sketch",
         "read_sdk_reference",
         "author_strategy",
         "search_knowledge",

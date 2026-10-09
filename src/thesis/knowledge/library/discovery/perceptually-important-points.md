@@ -1,13 +1,13 @@
 ---
 id: perceptually-important-points
 title: Perceptually important points
-version: 1
+version: 2
 created: 2026-10-06
 retrieved: 2026-10-06
 source:
   url: https://github.com/Carson-Fricke/FCA
   publisher: FCA Thesis
-  content_hash: c1df9fd6e7f4f5155ac7670cdcda92a81420d1a35d579dd47998355782364a71
+  content_hash: f15a9020a7d41cef319351274069b73ef7bdb7790d6dd18a7367de96cb1fc530
 tags:
   - perceptually-important-points
   - pattern-extraction
@@ -19,6 +19,7 @@ collections:
   - discovery
   - model-cards
 links:
+  - executable-discovery-tool-bag
   - directional-change-events
   - return-continuation-and-reversal
   - signal-size-buckets
@@ -113,9 +114,11 @@ E\left[ r_{t:t+h} \mid \text{shape bucket at } t \right]
 Bucket the feature once, before looking, using the discipline in [Signal
 size buckets](signal-size-buckets), and connect the direction to whichever of
 continuation or reversal is claimed in [Return continuation and
-reversal](return-continuation-and-reversal). PIP extraction, rolling
-recomputation, and confirmation bookkeeping require authoring custom study
-code today; the cards describe the method, not a platform primitive.
+reversal](return-continuation-and-reversal). The SDK now exposes the
+vertical-distance `building_blocks::perceptually_important_points` kernel.
+Compose it in a trailing window and publish shape/event outputs using the
+[Executable discovery tool bag](executable-discovery-tool-bag). The selected
+earlier points remain retrospective; the shape is available only at window end.
 
 ## Statistical test
 

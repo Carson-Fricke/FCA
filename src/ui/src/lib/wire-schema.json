@@ -1871,10 +1871,12 @@
       "additionalProperties": false,
       "description": "Request boundary for one authored screener definition.",
       "properties": {
-        "bar_interval": {
-          "default": "1d",
-          "pattern": "^(1min|1d)$",
-          "type": "string"
+        "bar_intervals": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
         },
         "lookback_days": {
           "maximum": 3650,
@@ -1922,6 +1924,7 @@
       "required": [
         "name",
         "lookback_days",
+        "bar_intervals",
         "rank_metric",
         "source"
       ],
