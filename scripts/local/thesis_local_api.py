@@ -202,7 +202,6 @@ stack = build_serving_stack(
     execution_store=execution_store,
     workspace_root=WORKSPACE_ROOT,
     workspace_repositories=repositories,
-    strategy_artifacts=workspace_data.strategy_artifacts,
     detach=daemon_thread,
     control_factory=_LoggingControlToolService,
     on_turn_error=lambda error: print(
