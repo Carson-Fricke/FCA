@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, ExecutionEvent, SubAgentNode, TimelineItem, WorkflowExecutionRecord } from '$lib/types';
-import { timelineFixture } from './timeline-fixture';
+import { eventFixture, timelineFixture } from './timeline-fixture';
 
 const fixture = vi.hoisted(() => ({ terminal: false, cancelled: false, backfill: [] as TimelineItem[] }));
 vi.mock('$lib/api', async (importOriginal) => {
@@ -65,9 +65,9 @@ describe('node input and canonical history', () => {
 			.mockResolvedValueOnce([running]);
 		const { timeline } = surface();
 		await screen.findByTestId('scope-readonly');
-		const prior = { eventId: 'prior-completed', eventType: 'sub_agent.completed', cursor: 3, seq: 3,
-			occurredAt: completed.updatedAt, executionId: 'exec-1',
-			payload: { subAgentId: completed.subAgentId, phaseAttemptId: 'a' } } as ExecutionEvent;
+		const prior = eventFixture({ eventId: 'prior-completed', eventType: 'sub_agent.completed', cursor: 3, seq: 3,
+			occurredAt: completed.updatedAt ?? '2026-01-01T00:00:03Z', executionId: 'exec-1',
+			payload: { subAgentId: completed.subAgentId, phaseAttemptId: 'a' } });
 		timeline.merge(timelineFixture([], [prior]).items);
 		await waitFor(() => expect(listChatSubAgents).toHaveBeenCalledTimes(2));
 		const loopback = { ...prior, eventId: 'loopback', eventType: 'workflow.phase' as const, cursor: 5, seq: 5,
@@ -97,8 +97,8 @@ describe('node input and canonical history', () => {
 				createdAt: '2026-01-01T00:00:05Z', updatedAt: '2026-01-01T00:00:06Z' }]);
 		const { timeline } = surface();
 		await waitFor(() => expect(listChatSubAgents).toHaveBeenCalledTimes(1));
-		const loopback = { eventId: 'loopback', eventType: 'workflow.phase', cursor: 5, seq: 5,
-			occurredAt: '2026-01-01T00:00:05Z', executionId: 'exec-1', payload: { phase: 'model_creation' } } as ExecutionEvent;
+		const loopback = eventFixture({ eventId: 'loopback', eventType: 'workflow.phase', cursor: 5, seq: 5,
+			occurredAt: '2026-01-01T00:00:05Z', executionId: 'exec-1', payload: { phase: 'model_creation' } });
 		timeline.merge(timelineFixture([], [loopback]).items);
 		await waitFor(() => expect(screen.getByTestId('scope-readonly')).toBeInTheDocument());
 		expect(listChatSubAgents).toHaveBeenCalledTimes(1);
@@ -132,8 +132,8 @@ describe('node input and canonical history', () => {
 			createdAt: '2026-01-01T00:00:05Z', updatedAt: '2026-01-01T00:00:06Z',
 			context: { isolated: true, knowledge_cutoff: null, mcp: { enabled: false, tools: [] } } };
 		vi.mocked(listChatSubAgents).mockResolvedValueOnce([snapshot]);
-		const completed = { eventId: 'old-completed', eventType: 'sub_agent.completed', cursor: 3, seq: 3,
-			occurredAt: '2026-01-01T00:00:03Z', executionId: 'exec-1', payload: { subAgentId: 'subagent-a' } } as ExecutionEvent;
+		const completed = eventFixture({ eventId: 'old-completed', eventType: 'sub_agent.completed', cursor: 3, seq: 3,
+			occurredAt: '2026-01-01T00:00:03Z', executionId: 'exec-1', payload: { subAgentId: 'subagent-a' } });
 		fixture.backfill = timelineFixture([], [completed]).items;
 		surface([message('new prompt')]);
 		const input = await screen.findByTestId('sub-agent-composer-input');
@@ -150,9 +150,9 @@ describe('node input and canonical history', () => {
 		vi.mocked(listChatSubAgents).mockResolvedValueOnce([snapshot]).mockResolvedValueOnce([snapshot]);
 		const { timeline } = surface();
 		await screen.findByTestId('scope-readonly');
-		const spawn = { eventId: 'new-spawn', eventType: 'sub_agent.spawned', cursor: 5, seq: 5,
+		const spawn = eventFixture({ eventId: 'new-spawn', eventType: 'sub_agent.spawned', cursor: 5, seq: 5,
 			occurredAt: '2026-01-01T00:00:05Z', executionId: 'exec-1',
-			payload: { subAgentId: 'subagent-a', acceptsInput: true, phase: 'model_creation' } } as ExecutionEvent;
+			payload: { subAgentId: 'subagent-a', acceptsInput: true, phase: 'model_creation' } });
 		timeline.merge(timelineFixture([], [spawn]).items);
 		const input = await screen.findByTestId('sub-agent-composer-input');
 		await waitFor(() => expect(listChatSubAgents).toHaveBeenCalledTimes(2));
@@ -168,9 +168,9 @@ describe('node input and canonical history', () => {
 		vi.mocked(listChatSubAgents).mockResolvedValueOnce([snapshot]).mockResolvedValueOnce([snapshot]);
 		const { timeline } = surface();
 		await screen.findByTestId('sub-agent-composer-input');
-		const cancel = { eventId: 'cancel', eventType: 'sub_agent.cancelled', cursor: 3, seq: 3,
+		const cancel = eventFixture({ eventId: 'cancel', eventType: 'sub_agent.cancelled', cursor: 3, seq: 3,
 			occurredAt: '2026-01-01T00:00:03Z', executionId: 'exec-1',
-			payload: { subAgentId: 'subagent-a', phaseAttemptId: 'a', acceptsInput: false } } as ExecutionEvent;
+			payload: { subAgentId: 'subagent-a', phaseAttemptId: 'a', acceptsInput: false } });
 		const late = { ...cancel, eventId: 'late-input', eventType: 'sub_agent.needs_input' as const, cursor: 4, seq: 4,
 			occurredAt: '2026-01-01T00:00:04Z', payload: { ...cancel.payload, acceptsInput: true } };
 		timeline.merge(timelineFixture([], [cancel, late]).items);

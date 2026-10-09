@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use backtest::backtest::config::BacktestConfig;
+use backtest::backtest::config::{BacktestConfig, StrategyInstanceConfig};
 use backtest::backtest::engine_core::{
     assemble_study_frames, build_default_manifest, run_native_engine, BacktestOutcome,
     EngineBarFrame, EngineMarket, EngineOptions, EngineOrder, MarketSubscription, StrategyInstance,
@@ -507,6 +507,17 @@ fn mixed_replay_routes_each_consumer_and_never_dispatches_future_frames_ahead_of
             subscription("quote", &["SPY", "AAPL"], None),
             subscription("bars", &["SPY", "AAPL"], Some("1min")),
         ];
+        config.strategy_instances = ["mixed", "other"]
+            .into_iter()
+            .map(|instance_id| StrategyInstanceConfig {
+                instance_id: instance_id.into(),
+                implementation: "observer".into(),
+                bundle_hash: "observer".into(),
+                parameters: BTreeMap::new(),
+                symbols: vec!["SPY".into(), "AAPL".into()],
+                capital_fraction: "0.5".into(),
+            })
+            .collect();
         let start = config.start_ns;
         let fixture = fixture(
             &config,

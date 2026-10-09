@@ -469,14 +469,12 @@ def test_helper_inherits_current_phase_knowledge_without_completion_authority(
     # Helpers may retain parent phase attribution while the workflow advances.
     record = replace(record, phase="strategy_design")
     store.save_sub_agent(record)
-    artifacts = cast(Any, object())
     service = HypothesisSessionServices(
         chat=chat,
         store=store,
         workflow=lambda: Workflow(cast(Any, spec)),
         harness_tools=None,
         activity=lambda context, tool, arguments, execute: execute(),
-        strategy_artifacts=artifacts,
     )
     context = ToolContext(
         "alpha",

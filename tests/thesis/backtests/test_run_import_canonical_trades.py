@@ -10,6 +10,7 @@ fills, and a value the harness did not publish is ``None`` with a reason.
 
 from __future__ import annotations
 
+import json
 import pathlib
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -48,6 +49,8 @@ _EXPECTED_TRADES: list[dict[str, object]] = [
         "exitPrice": 12.0,
         "grossPnl": 8.0,
         "fees": 0.8,
+        "entryFee": 0.4,
+        "exitFee": 0.4,
         "pnl": 7.2,
     },
     {
@@ -61,6 +64,8 @@ _EXPECTED_TRADES: list[dict[str, object]] = [
         "exitPrice": 9.6,
         "grossPnl": -2.4,
         "fees": 1.2,
+        "entryFee": 0.6,
+        "exitFee": 0.6,
         "pnl": -3.6,
     },
     {
@@ -74,6 +79,8 @@ _EXPECTED_TRADES: list[dict[str, object]] = [
         "exitPrice": 21.0,
         "grossPnl": -5.0,
         "fees": 1.0,
+        "entryFee": 0.5,
+        "exitFee": 0.5,
         "pnl": -6.0,
     },
 ]
@@ -143,31 +150,29 @@ def _stats(record: BacktestRecord) -> Mapping[str, object]:
     return cast(Mapping[str, object], record.manifest["stats"])
 
 
-def test_reads_every_published_statistic_in_both_key_styles() -> None:
+def test_reads_every_published_statistic_with_only_canonical_names() -> None:
     record = _case("closed_trades")
     stats = _stats(record)
-    for snake, camel, expected in [
-        ("trade_count", "tradeCount", 3.0),
-        ("win_count", "winCount", 1.0),
-        ("loss_count", "lossCount", 2.0),
-        ("hit_rate", "hitRate", pytest.approx(1 / 3)),
-        ("win_rate", None, pytest.approx(1 / 3)),
-        ("gross_profit", "grossProfit", 8.0),
-        ("gross_loss", "grossLoss", 7.4),
-        ("net_profit", "netProfit", 7.2),
-        ("net_loss", "netLoss", 9.6),
-        ("profit_factor", "profitFactor", 0.75),
-        ("average_net_win", "averageWin", 7.2),
-        ("average_net_loss", "averageLoss", -4.8),
-        ("largest_net_win", "largestWin", 7.2),
-        ("largest_net_loss", "largestLoss", -6.0),
-        ("total_return", "totalReturn", -0.0024),
-        ("max_drawdown", "maxDrawdown", 0.02),
-        ("sharpe_per_sample", "sharpePerSample", -0.41),
+    for snake, expected in [
+        ("trade_count", 3.0),
+        ("win_count", 1.0),
+        ("loss_count", 2.0),
+        ("hit_rate", pytest.approx(1 / 3)),
+        ("gross_profit", 8.0),
+        ("gross_loss", 7.4),
+        ("net_profit", 7.2),
+        ("net_loss", 9.6),
+        ("profit_factor", 0.75),
+        ("average_net_win", 7.2),
+        ("average_net_loss", -4.8),
+        ("largest_net_win", 7.2),
+        ("largest_net_loss", -6.0),
+        ("total_return", -0.0024),
+        ("max_drawdown", 0.02),
+        ("sharpe_per_sample", -0.41),
     ]:
         assert stats[snake] == expected, snake
-        if camel is not None:
-            assert stats[camel] == expected, camel
+    assert not any(any(character.isupper() for character in key) for key in stats)
     for reason in (
         "total_return_reason",
         "max_drawdown_reason",
@@ -188,12 +193,12 @@ def test_reads_every_published_statistic_in_both_key_styles() -> None:
 def test_net_pnl_is_the_headline_with_explicit_gross_and_fees() -> None:
     stats = _stats(_case("closed_trades"))
     assert stats["net_pnl"] == -2.4
-    assert stats["totalPnl"] == stats["net_pnl"]
     assert stats["gross_pnl"] == 0.6
-    assert stats["grossPnl"] == stats["gross_pnl"]
     assert stats["fees"] == 3.0
     # Gross less fees reconciles to the net headline; the headline is not the gross.
-    assert stats["gross_pnl"] - stats["fees"] == pytest.approx(stats["net_pnl"])
+    assert cast(float, stats["gross_pnl"]) - cast(
+        float, stats["fees"]
+    ) == pytest.approx(stats["net_pnl"])
 
 
 def test_trade_log_projects_published_rows_with_ids_and_exact_times() -> None:
@@ -225,37 +230,21 @@ def test_legacy_artifact_without_trades_is_not_rebuilt_from_fills() -> None:
     assert stats["trades_unavailable_reason"] == "legacy_artifact"
     for key in (
         "trade_count",
-        "tradeCount",
         "win_count",
-        "winCount",
         "loss_count",
-        "lossCount",
         "hit_rate",
-        "hitRate",
-        "win_rate",
         "net_pnl",
-        "totalPnl",
         "gross_pnl",
-        "grossPnl",
         "fees",
         "gross_profit",
-        "grossProfit",
         "gross_loss",
-        "grossLoss",
         "net_profit",
-        "netProfit",
         "net_loss",
-        "netLoss",
         "profit_factor",
-        "profitFactor",
         "average_net_win",
-        "averageWin",
         "average_net_loss",
-        "averageLoss",
         "largest_net_win",
-        "largestWin",
         "largest_net_loss",
-        "largestLoss",
     ):
         assert stats[key] is None, key
     # The equity block is published independently of the trades block.
@@ -268,7 +257,7 @@ def test_undefined_profit_factor_is_null_with_its_reason() -> None:
     assert stats["gross_profit"] == 4.0
     assert stats["net_profit"] == 3.6
     assert stats["profit_factor"] is None
-    assert stats["profitFactor"] is None
+    assert stats["profit_factor"] is None
     assert stats["profit_factor_reason"] == "no_net_losses"
     assert stats["hit_rate"] == 1.0
     assert stats["average_net_loss"] is None
@@ -279,7 +268,7 @@ def test_null_drawdown_is_null_with_its_reason() -> None:
     stats = _stats(record)
     assert record.max_drawdown is None
     assert stats["max_drawdown"] is None
-    assert stats["maxDrawdown"] is None
+    assert stats["max_drawdown"] is None
     assert stats["max_drawdown_reason"] == "negative_equity"
     assert record.summary_row()["max_drawdown"] is None
     assert record.total_return is None
@@ -323,3 +312,37 @@ def test_capital_change_stays_undefined_without_a_published_end_capital() -> Non
     assert record.initial_capital == 1000.0
     assert record.final_capital is None
     assert record.detail()["capital_change"] is None
+
+
+def test_marked_net_pnl_remains_distinct_from_closed_trade_pnl() -> None:
+    source = _fixture("closed_trades.metrics.json")
+    assert source is not None
+    document = json.loads(source)
+    document["equity"]["net_pnl"] = "7.25"
+    document["equity"]["gross_pnl"] = "10.25"
+    record = _run(json.dumps(document).encode())
+    stats = _stats(record)
+    assert stats["net_pnl"] == 7.25
+    assert stats["net_pnl"] == 7.25
+    assert stats["gross_pnl"] == 10.25
+    assert stats["closed_trade_net_pnl"] == -2.4
+    assert stats["fees_total"] == 3.0
+    assert stats["profit_factor"] == _stats(_case("closed_trades"))["profit_factor"]
+
+
+def report_fixture() -> dict[str, object]:
+    """Produce the UI report fixture through the canonical importer boundary."""
+    return {
+        case: {
+            "title": case,
+            "stats": dict(_stats(_case(case))),
+            "equity": [],
+            "trades": [],
+        }
+        for case in ("closed_trades", "negative_equity", "no_net_losses")
+    }
+
+
+def test_ui_report_fixture_matches_imported_harness_evidence() -> None:
+    target = pathlib.Path("src/ui/src/tests/fixtures/backtest-reports.json")
+    assert json.loads(target.read_text(encoding="utf-8")) == report_fixture()

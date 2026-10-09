@@ -7,10 +7,9 @@ workflow state or folds: ``createdAt`` is the cut-off and the request's
 the same mandate. A launch request without a usable ``createdAt`` or ``partition``
 raises :class:`MandateError`; nothing falls back to an unrestricted window.
 
-The launch request persists its partition at launch (see
-:func:`default_launch_partition`). The ``DEFAULT_*`` constants are read only to
-build that launch partition. Derivation after launch reads the persisted values
-alone.
+The launch request persists an explicit partition at launch. Dependency
+horizons derive its purge and embargo allowances; derivation after launch reads
+the persisted values alone.
 
 For cut-off C (UTC), with the partition's day counts:
 
@@ -54,10 +53,6 @@ from thesis.experiments.intervals import (
     derive_purge_and_embargo,
 )
 
-DEFAULT_HISTORY_DAYS = 1825
-DEFAULT_FORWARD_DAYS = 90
-DEFAULT_PURGE_DAYS = 1
-DEFAULT_EMBARGO_DAYS = 0
 LAUNCH_PARTITION_PROVENANCE = "launch-v2"
 MAX_HISTORY_DAYS = 36_500
 
@@ -253,17 +248,33 @@ class LaunchPartition:
         )
 
 
-def default_launch_partition() -> LaunchPartition:
-    """Return the partition a new launch persists.
+def declared_launch_partition(payload: object) -> LaunchPartition:
+    """Derive partition gaps from explicit information and position dependencies.
 
-    Only the launch path calls this, when it writes the launch request. Every
-    later derivation reads the persisted partition instead.
+    Horizons are conservative maximum calendar-day spans across all planned
+    parameter choices. A later design needing longer spans requires a new launch.
+    No launch path selects a default holdout length or dependence allowance.
     """
+    keys = {
+        "historyDays",
+        "forwardDays",
+        "informationHorizonDays",
+        "positionHorizonDays",
+        "liquidationDays",
+    }
+    if not isinstance(payload, Mapping) or set(payload) != keys:
+        raise MandateError(
+            "partition must explicitly declare historyDays, forwardDays, informationHorizonDays, positionHorizonDays, and liquidationDays"
+        )
+    values = {name: _integer(payload[name], f"partition {name}") for name in keys}
+    for name in ("informationHorizonDays", "positionHorizonDays", "liquidationDays"):
+        if values[name] < 0:
+            raise MandateError(f"partition {name} must not be negative")
     return LaunchPartition(
-        history_days=DEFAULT_HISTORY_DAYS,
-        forward_days=DEFAULT_FORWARD_DAYS,
-        purge_days=DEFAULT_PURGE_DAYS,
-        embargo_days=DEFAULT_EMBARGO_DAYS,
+        history_days=values["historyDays"],
+        forward_days=values["forwardDays"],
+        purge_days=max(values["informationHorizonDays"], values["positionHorizonDays"]),
+        embargo_days=values["liquidationDays"],
     )
 
 
@@ -680,17 +691,13 @@ def mandate_section(mandate: ResearchMandate) -> str:
 
 
 __all__ = [
-    "DEFAULT_EMBARGO_DAYS",
-    "DEFAULT_FORWARD_DAYS",
-    "DEFAULT_HISTORY_DAYS",
-    "DEFAULT_PURGE_DAYS",
     "LAUNCH_PARTITION_PROVENANCE",
     "DataWindowPolicy",
     "LaunchPartition",
     "MandateError",
     "ResearchMandate",
     "datetime_ns",
-    "default_launch_partition",
+    "declared_launch_partition",
     "derive_launch_mandate",
     "derive_mandate",
     "mandate_section",

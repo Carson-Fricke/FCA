@@ -1,4 +1,4 @@
-"""The discovery phase: capabilities, contract, pipes, folds, and legacy runs."""
+"""The discovery phase: capabilities, contracts, pipes, and folds."""
 
 from __future__ import annotations
 
@@ -46,6 +46,7 @@ from ._support import (
     _discovery_envelope,
     _hypothesis_envelope,
     _no_candidate_discovery_envelope,
+    _research_envelope,
 )
 
 
@@ -205,7 +206,7 @@ def test_verdict_loopback_folds_keep_or_clear_discovery() -> None:
             occurred_at=_moment(),
             intent_epoch=1,
             reason="accepted trials",
-            completion={"trials": []},
+            completion={"trials": [], "research": _research_envelope()},
         ),
     ]
     kept = rebuild_state(
@@ -229,32 +230,9 @@ def test_verdict_loopback_folds_keep_or_clear_discovery() -> None:
     assert cleared.verdict is not None and cleared.verdict.outcome == "refuted"
 
 
-def test_retired_hypothesis_creation_decodes_to_model_creation() -> None:
-    assert (
+def test_retired_phase_is_rejected() -> None:
+    with pytest.raises(WorkflowError, match="unknown phase"):
         phase_from_value("hypothesis_creation")
-        is HypothesisDevelopmentPhase.MODEL_CREATION
-    )
-
-    legacy = StoreTransition(
-        sequence=1,
-        from_phase="hypothesis_creation",
-        to_phase="falsification_trials",
-        occurred_at=_moment(),
-        intent_epoch=1,
-        reason="legacy creation contract accepted",
-        completion={
-            "target": "falsification_trials",
-            "hypothesis": _hypothesis_envelope(),
-        },
-    )
-    rebuilt = rebuild_state(WORKSPACE, "execution-legacy", [legacy])
-
-    assert rebuilt.phase is HypothesisDevelopmentPhase.FALSIFICATION_TRIALS
-    assert (
-        rebuilt.transitions[0].from_phase is HypothesisDevelopmentPhase.MODEL_CREATION
-    )
-    assert rebuilt.draft is not None
-    assert rebuilt.draft.claim == _hypothesis_envelope()["claim"]
 
 
 def test_discovery_attempt_uses_an_optional_job_identity_without_study_id() -> None:

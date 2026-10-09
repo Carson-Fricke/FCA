@@ -106,41 +106,9 @@ def _wrong_strategy_kind(payload: dict[str, object]) -> None:
     strategy["kind"] = "study"
 
 
-def test_null_test_round_trips_and_decodes_snake_case() -> None:
+def test_null_test_round_trips() -> None:
     evaluation = NullTestEvaluation.from_dict(_null_test_envelope())
     assert NullTestEvaluation.from_dict(evaluation.as_dict()) == evaluation
-
-    portable = evaluation.as_dict()
-    observed = cast(dict[str, object], portable["observed"])
-    replicates = cast(list[dict[str, object]], portable["replicates"])
-    legacy = {
-        "strategy": portable["strategy"],
-        "batch_id": portable["batchId"],
-        "mode": portable["mode"],
-        "block_size": portable["blockSize"],
-        "statistic": portable["statistic"],
-        "direction": portable["direction"],
-        "observed": {
-            "job_id": observed["jobId"],
-            "metrics": observed["metrics"],
-            "value": observed["value"],
-        },
-        "replicates": [
-            {
-                "seed": item["seed"],
-                "job_id": item["jobId"],
-                "state": item["state"],
-                "metrics": item["metrics"],
-                "error": item["error"],
-            }
-            for item in replicates
-        ],
-        "exceedance_count": portable["exceedanceCount"],
-        "p_value": portable["pValue"],
-        "limitations": portable["limitations"],
-    }
-
-    assert NullTestEvaluation.from_dict(legacy) == evaluation
 
 
 def test_null_test_completion_schema_and_validator_accept_the_evaluation() -> None:
@@ -166,13 +134,13 @@ def test_null_test_completion_schema_and_validator_accept_the_evaluation() -> No
         (_missing_statistic, "must contain a finite number at 'sharpe'"),
         (_observed_value_mismatch, "must equal"),
         (_exceedance_mismatch, "extremeness count"),
-        (_pvalue_mismatch, "pValue must equal"),
+        (_pvalue_mismatch, "p_value must equal"),
         (_duplicate_seed, "seeds must be unique"),
         (_no_succeeded, "at least one succeeded replicate"),
         (_non_finite_metric, "must be finite numbers"),
         (_empty_replicates, "at least 1 item"),
         (_wrong_mode, "is not one of"),
-        (_wrong_strategy_kind, "must be 'strategy'"),
+        (_wrong_strategy_kind, "is not one of"),
     ],
 )
 def test_null_test_evaluation_rejections(mutate, marker: str) -> None:
@@ -203,7 +171,7 @@ def test_null_test_evaluation_rejects_foreign_target_and_bad_bounds() -> None:
     payload = _null_test_envelope()
     payload["blockSize"] = 0
     assert any(
-        "blockSize" in error for error in null_test_evaluation_payload_errors(payload)
+        "block_size" in error for error in null_test_evaluation_payload_errors(payload)
     )
     with pytest.raises(WorkflowError):
         NullTestEvaluation.from_dict(payload)

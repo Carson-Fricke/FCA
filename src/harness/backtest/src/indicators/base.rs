@@ -9,7 +9,7 @@
 //! [`IndicatorMachine`] is the shared state machine from the Python base class:
 //! it closes and emits the previous half-open bucket when an event rotates into
 //! a later one, resets cumulative state on session rollover, skips buckets with
-//! no driver event, and supports an end-of-replay [`IndicatorMachine::flush`].
+//! no driver event, and keeps the final partial bucket separate from completed evidence.
 //! The per-indicator arithmetic lives behind the [`IndicatorKernel`] hook trait,
 //! so every built-in shares exactly one emission and session contract.
 
@@ -182,7 +182,17 @@ pub struct IndicatorSample {
     /// Exclusive bucket end in epoch nanoseconds.
     pub end_ns: i64,
     /// Indicator value as of the boundary.
-    pub value: Decimal18,
+    pub value: Option<Decimal18>,
+    /// First defined value inside the bucket.
+    pub open: Option<Decimal18>,
+    /// Highest defined value inside the bucket.
+    pub high: Option<Decimal18>,
+    /// Lowest defined value inside the bucket.
+    pub low: Option<Decimal18>,
+    /// Number of driving observations, including warm-up.
+    pub observations: u64,
+    /// Actual observed time when the bucket became complete; absent while open.
+    pub available_at_ns: Option<i64>,
 }
 
 /// Floor a timestamp onto the half-open bucket grid anchored at the epoch.
@@ -275,11 +285,11 @@ pub trait TickIndicator {
     /// The current value, or `None` during warm-up.
     fn value(&self) -> Option<Decimal18>;
     /// Every sample emitted so far, in emission order.
-    fn samples(&self) -> &[IndicatorSample] {
-        &[]
-    }
-    /// Close the open bucket, emitting its sample when one is defined.
-    fn flush(&mut self) {}
+    fn samples(&self) -> &[IndicatorSample];
+    /// Current partial window, excluded from completed evidence.
+    fn in_progress(&self) -> Option<IndicatorSample>;
+    /// Seal populated windows only up to an observed causal time.
+    fn advance(&mut self, timestamp_ns: i64) -> Result<(), IndicatorError>;
 }
 
 /// One symbol-bound indicator: an [`IndicatorKernel`] plus the shared bucket and
@@ -293,6 +303,9 @@ pub struct IndicatorMachine<K: IndicatorKernel> {
     samples: Vec<IndicatorSample>,
     open_bucket_ns: Option<i64>,
     bucket_driver_count: u64,
+    bucket_open: Option<Decimal18>,
+    bucket_high: Option<Decimal18>,
+    bucket_low: Option<Decimal18>,
     last_key: Option<(i64, u64)>,
     session_start_ns: Option<i64>,
 }
@@ -323,6 +336,9 @@ impl<K: IndicatorKernel> IndicatorMachine<K> {
             samples: Vec::new(),
             open_bucket_ns: None,
             bucket_driver_count: 0,
+            bucket_open: None,
+            bucket_high: None,
+            bucket_low: None,
             last_key: None,
             session_start_ns: None,
         })
@@ -351,24 +367,35 @@ impl<K: IndicatorKernel> IndicatorMachine<K> {
         &mut self.kernel
     }
 
-    fn close_open_bucket(&mut self) {
+    fn close_open_bucket(&mut self, available_at_ns: i64) {
         let Some(bucket) = self.open_bucket_ns.take() else {
             return;
         };
         let end = bucket + self.interval_ns;
         self.kernel.on_bucket_close(end);
+        if let Some(value) = self.kernel.value() {
+            self.bucket_open.get_or_insert(value);
+            self.bucket_high = Some(self.bucket_high.map_or(value, |high| high.max(value)));
+            self.bucket_low = Some(self.bucket_low.map_or(value, |low| low.min(value)));
+        }
         if self.bucket_driver_count > 0 {
-            if let Some(value) = self.kernel.value() {
-                self.samples.push(IndicatorSample {
-                    name: self.kernel.name().to_string(),
-                    symbol: self.symbol.clone(),
-                    start_ns: bucket,
-                    end_ns: end,
-                    value,
-                });
-            }
+            self.samples.push(IndicatorSample {
+                name: self.kernel.name().to_string(),
+                symbol: self.symbol.clone(),
+                start_ns: bucket,
+                end_ns: end,
+                value: self.kernel.value(),
+                open: self.bucket_open,
+                high: self.bucket_high,
+                low: self.bucket_low,
+                observations: self.bucket_driver_count,
+                available_at_ns: Some(available_at_ns),
+            });
         }
         self.bucket_driver_count = 0;
+        self.bucket_open = None;
+        self.bucket_high = None;
+        self.bucket_low = None;
     }
 }
 
@@ -394,9 +421,14 @@ impl<K: IndicatorKernel> TickIndicator for IndicatorMachine<K> {
         if !self.kernel.consumes().contains(&driver) {
             return Ok(());
         }
-        let bucket = bucket_start_ns(tick.timestamp_ns, self.interval_ns);
+        let bucket = tick
+            .timestamp_ns
+            .div_euclid(self.interval_ns)
+            .checked_mul(self.interval_ns)
+            .filter(|start| start.checked_add(self.interval_ns).is_some())
+            .ok_or_else(|| IndicatorError::Configuration("indicator window overflow".into()))?;
         if self.open_bucket_ns.is_some_and(|open| bucket > open) {
-            self.close_open_bucket();
+            self.close_open_bucket(tick.timestamp_ns);
         }
         if let Some(anchor) = self.session_anchor_ns {
             let session = session_start_ns(tick.timestamp_ns, anchor);
@@ -404,7 +436,7 @@ impl<K: IndicatorKernel> TickIndicator for IndicatorMachine<K> {
                 None => self.session_start_ns = Some(session),
                 Some(current) if session > current => {
                     if self.open_bucket_ns.is_some() {
-                        self.close_open_bucket();
+                        self.close_open_bucket(tick.timestamp_ns);
                     }
                     self.kernel.reset_session();
                     self.session_start_ns = Some(session);
@@ -415,6 +447,9 @@ impl<K: IndicatorKernel> TickIndicator for IndicatorMachine<K> {
         if self.open_bucket_ns.is_none() {
             self.open_bucket_ns = Some(bucket);
             self.bucket_driver_count = 0;
+            self.bucket_open = None;
+            self.bucket_high = None;
+            self.bucket_low = None;
             self.kernel.on_bucket_open(bucket);
         }
         match &tick.kind {
@@ -427,6 +462,11 @@ impl<K: IndicatorKernel> TickIndicator for IndicatorMachine<K> {
         }
         if self.kernel.drivers().contains(&driver) {
             self.bucket_driver_count += 1;
+            if let Some(value) = self.kernel.value() {
+                self.bucket_open.get_or_insert(value);
+                self.bucket_high = Some(self.bucket_high.map_or(value, |high| high.max(value)));
+                self.bucket_low = Some(self.bucket_low.map_or(value, |low| low.min(value)));
+            }
         }
         self.last_key = Some(key);
         Ok(())
@@ -440,8 +480,36 @@ impl<K: IndicatorKernel> TickIndicator for IndicatorMachine<K> {
         &self.samples
     }
 
-    fn flush(&mut self) {
-        self.close_open_bucket();
+    fn in_progress(&self) -> Option<IndicatorSample> {
+        self.open_bucket_ns
+            .filter(|_| self.bucket_driver_count > 0)
+            .map(|start_ns| IndicatorSample {
+                name: self.kernel.name().into(),
+                symbol: self.symbol.clone(),
+                start_ns,
+                end_ns: start_ns + self.interval_ns,
+                value: self.kernel.value(),
+                open: self.bucket_open,
+                high: self.bucket_high,
+                low: self.bucket_low,
+                observations: self.bucket_driver_count,
+                available_at_ns: None,
+            })
+    }
+    fn advance(&mut self, timestamp_ns: i64) -> Result<(), IndicatorError> {
+        if self.last_key.is_some_and(|(time, _)| timestamp_ns < time) {
+            return Err(IndicatorError::Ordering("indicator clock regressed".into()));
+        }
+        if self
+            .open_bucket_ns
+            .is_some_and(|start| timestamp_ns >= start + self.interval_ns)
+        {
+            self.close_open_bucket(timestamp_ns);
+        }
+        if self.last_key.is_none_or(|(time, _)| timestamp_ns > time) {
+            self.last_key = Some((timestamp_ns, 0));
+        }
+        Ok(())
     }
 }
 

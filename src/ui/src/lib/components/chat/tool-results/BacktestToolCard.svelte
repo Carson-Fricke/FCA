@@ -107,32 +107,6 @@
 		};
 	});
 
-	/**
-	 * BacktestReport reads camelCase keys. The backend may publish snake_case,
-	 * so carry every original key through and add the camelCase aliases the
-	 * report understands.
-	 */
-	function normalizeStats(
-		stats: Record<string, number | string | null>
-	): Record<string, number | string | null> {
-		const out: Record<string, number | string | null> = { ...stats };
-		const aliases: Record<string, string> = {
-			sharpe_per_sample: 'sharpePerSample',
-			max_drawdown: 'maxDrawdown',
-			win_rate: 'hitRate',
-			total_return: 'totalReturn',
-			total_pnl: 'totalPnl',
-			profit_factor: 'profitFactor',
-			trade_count: 'tradeCount',
-			win_count: 'winCount',
-			loss_count: 'lossCount'
-		};
-		for (const [snake, camel] of Object.entries(aliases)) {
-			if (stats[snake] !== undefined && out[camel] === undefined) out[camel] = stats[snake];
-		}
-		return out;
-	}
-
 	const report = $derived.by(() => {
 		const current = detail;
 		if (!current) return null;
@@ -140,7 +114,7 @@
 			title: current.name,
 			equity: current.equity ?? [],
 			trades: current.trades ?? [],
-			stats: normalizeStats(current.stats ?? {}),
+			stats: current.stats ?? {},
 			instruments: []
 		};
 	});

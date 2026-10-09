@@ -114,3 +114,16 @@ fn declared_capital_fraction_runs_the_job_to_completion() {
     let (result, _) = run("declared", &configuration("0.5"));
     assert!(result.expect("a well-formed capital fraction runs"));
 }
+
+#[test]
+fn negative_or_overallocated_capital_fails_before_publication() {
+    for fraction in ["-0.5", "1.1"] {
+        let (result, directory) = run(
+            &format!("invalid-allocation-{fraction}"),
+            &configuration(fraction),
+        );
+        assert!(matches!(result, Err(BacktestJobError::Engine(_))));
+        assert!(!directory.join("backtest.json").exists());
+        assert!(!directory.join("metrics.json").exists());
+    }
+}

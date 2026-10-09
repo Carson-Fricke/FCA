@@ -16,13 +16,16 @@ vi.mock('$lib/sse', () => ({ TimelineStream: class {
 } }));
 import { TimelineController } from '$lib/timeline.svelte';
 import { listTimelinePage } from '$lib/api';
-import { buildNodeEntries, threadActivity } from '$lib/transcript';
+import { buildNodeEntries, threadActivity, toChatMessage } from '$lib/transcript';
+import { decodeWire } from '$lib/wire';
+import type { TimelineMessageWire } from '$lib/generated';
 import { fixtureTimeline } from '$lib/fixture-timeline';
 import { fixtures } from '$lib/fixtures';
 
-const item = (seq: number, threadId = 'root'): TimelineItem => ({ id: `item-${seq}`, seq, threadId,
-	kind: 'message', chatId: 'chat', workspaceId: 'ws', ts: '2026-01-01', payload: {
-		message_id: `message-${seq}`, role: 'user', body: `${seq}`, created_at: '2026-01-01', data: {} } });
+const item = (seq: number, threadId = 'root'): TimelineMessageWire => ({ id: `item-${seq}`, seq, threadId,
+	kind: 'message', chatId: 'chat', workspaceId: 'ws', ts: '2026-01-01', payload: decodeWire('ChatMessageWire', {
+        ...fixtures.chatMessages['chat-1'].items[0],
+		message_id: `message-${seq}`, role: 'user', body: `${seq}`, created_at: '2026-01-01', data: {} }, 'test/timeline') });
 beforeEach(() => { vi.clearAllMocks(); streams.length = 0; streamOptions.length = 0; });
 
 describe('one timeline authority', () => {
@@ -152,7 +155,7 @@ describe('one timeline authority', () => {
 	it('derives pending requests and delivery from historical/live activity with skewed timestamps', () => {
 		const timeline = new TimelineController();
 		const prompt = item(5, 'node');
-		const answer = { ...item(6, 'node'), payload: { ...item(6).payload, role: 'assistant', body: 'Done', created_at: '2024-01-01' } };
+		const answer: TimelineMessageWire = { ...item(6, 'node'), payload: { ...item(6).payload, role: 'assistant', body: 'Done', created_at: '2024-01-01' } };
 		timeline.merge([prompt]);
 		expect(threadActivity(timeline.messagesFor('node'), [], false, 'message-5')).toEqual({ pending: true, queued: true });
 		timeline.merge([answer]);
@@ -171,7 +174,7 @@ describe('fixture snapshot watermark', () => {
 	it('replays arrivals between the history snapshot and subscription, then delivers new items once', () => {
 		const chatId = 'fixture-snapshot-race';
 		const snapshot = fixtureTimeline.page('alpha-lab', chatId, null, null);
-		const message = { ...fixtures.chatMessages['chat-1'].items[0], chat_id: chatId };
+		const message = toChatMessage({ ...fixtures.chatMessages['chat-1'].items[0], chat_id: chatId });
 		fixtureTimeline.message({ ...message, message_id: 'fixture-race-1' });
 		const received: TimelineItem[] = [];
 		const unsubscribe = fixtureTimeline.subscribe('alpha-lab', chatId, snapshot.after, (item) => received.push(item));

@@ -1271,6 +1271,19 @@ impl Default for EngineOptions {
     }
 }
 
+/// Causal valuation checkpoint after a market, completed frame, or booked fill.
+/// Marks contain only updates from that dispatch; omitted symbols retain their
+/// last observed mark. Fill count identifies exactly which booked fills existed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ValuationSample {
+    /// Actual dispatch/availability time, never a bar's earlier source start.
+    pub timestamp_ns: i64,
+    /// Prefix length of the outcome's fill ledger.
+    pub fill_count: usize,
+    /// Market marks observed by this dispatch, keyed by symbol.
+    pub marks: BTreeMap<String, Decimal>,
+}
+
 /// The complete outcome of one native engine run.
 #[derive(Clone, Debug)]
 pub struct BacktestOutcome {
@@ -1294,6 +1307,8 @@ pub struct BacktestOutcome {
     pub order_count: u64,
     /// Booked fills.
     pub fills: Vec<EngineFill>,
+    /// Causal market and fill valuation history for canonical financial reporting.
+    pub valuations: Vec<ValuationSample>,
     /// Fee assessments.
     pub fee_assessments: Vec<FeeAssessment>,
     /// Fee aggregation.
@@ -1799,9 +1814,41 @@ pub fn run_native_engine(
     )?;
     let rules = resolve_risk_rules(configuration)?;
     let mut hub = PortfolioHub::new(&configuration.job_id);
+    let mut allocated_cash = Decimal::ZERO;
     for instance in &strategies {
-        let initial_cash = instance_initial_cash(configuration, &instance.instance_id)?;
+        if instance.instance_id == "__unallocated_cash" {
+            return Err(BacktestError::Configuration(
+                "reserved unallocated cash book identity".into(),
+            ));
+        }
+        let initial_cash = if configuration.shell == "study" {
+            Decimal::ZERO
+        } else {
+            instance_initial_cash(configuration, &instance.instance_id)?
+        };
+        if initial_cash.is_negative() {
+            return Err(BacktestError::Configuration(
+                "capital_fraction must not be negative".into(),
+            ));
+        }
+        allocated_cash = allocated_cash.checked_add(initial_cash).map_err(|error| {
+            BacktestError::Arithmetic(format!("allocated capital overflow: {error}"))
+        })?;
         hub.create_book(&instance.instance_id, initial_cash);
+    }
+    let residual = configuration
+        .initial_cash_decimal
+        .checked_sub(allocated_cash)
+        .map_err(|error| {
+            BacktestError::Arithmetic(format!("unallocated capital overflow: {error}"))
+        })?;
+    if residual.is_negative() {
+        return Err(BacktestError::Configuration(
+            "strategy capital allocations exceed initial capital".into(),
+        ));
+    }
+    if residual.is_positive() {
+        hub.create_book("__unallocated_cash", residual);
     }
 
     let mut strategies = strategies;
@@ -1825,6 +1872,7 @@ pub fn run_native_engine(
     let mut order_owners: BTreeMap<String, String> = BTreeMap::new();
     let mut order_counts: BTreeMap<String, u64> = BTreeMap::new();
     let mut fills: Vec<EngineFill> = Vec::new();
+    let mut valuations = Vec::new();
     let mut assessments: Vec<FeeAssessment> = Vec::new();
     let mut risk_decisions: Vec<RiskDecision> = Vec::new();
     let market_event_count = fixture.events.len() as u64;
@@ -1876,6 +1924,27 @@ pub fn run_native_engine(
                 &mut risk_decisions,
                 &mut strategies,
             )?;
+            let marks = match &dispatched {
+                EngineEvent::Market(market) => {
+                    Some([(market.symbol().to_string(), market.mark_price())].into())
+                }
+                EngineEvent::BarFrame(frame) => Some(
+                    frame
+                        .bars_by_symbol
+                        .iter()
+                        .map(|(symbol, bar)| (symbol.clone(), bar.close))
+                        .collect(),
+                ),
+                EngineEvent::Fill(_) => Some(BTreeMap::new()),
+                EngineEvent::Report(_) => None,
+            };
+            if let Some(marks) = marks {
+                valuations.push(ValuationSample {
+                    timestamp_ns: dispatched.timestamp_ns(),
+                    fill_count: fills.len(),
+                    marks,
+                });
+            }
         }
     }
 
@@ -1919,6 +1988,7 @@ pub fn run_native_engine(
         bar_frame_count,
         order_count,
         fills,
+        valuations,
         fee_assessments: assessments,
         fee_totals,
         portfolio: hub.snapshot(),

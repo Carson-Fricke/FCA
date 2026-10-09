@@ -13,6 +13,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
+from thesis.agent.runtime.context import ToolContext
+from thesis.agent.runtime.store import PersistenceSubAgentStore
+from thesis.research.evidence import document_digest
 from thesis.workflows.registry.hypothesis_development.contracts.nulls import (
     NullTestEvaluation,
 )
@@ -23,6 +28,7 @@ from thesis.workflows.registry.hypothesis_development.contracts.variation import
     VariationEvaluation,
 )
 from thesis.workflows.registry.hypothesis_development.design import frozen_design
+from thesis.workflows.registry.hypothesis_development.errors import WorkflowError
 from thesis.workflows.registry.hypothesis_development.exposure import (
     record_submission_exposure,
 )
@@ -31,6 +37,9 @@ from thesis.workflows.registry.hypothesis_development.primitives import (
 )
 from thesis.workflows.registry.hypothesis_development.provenance import (
     verify_phase_completion,
+)
+from thesis.workflows.registry.hypothesis_development.session_services import (
+    HypothesisSessionServices,
 )
 from thesis.workspaces.programs import parameter_assignment_sha256
 
@@ -70,6 +79,16 @@ def _forward_payload() -> dict[str, Any]:
         "direction": "upper",
         "observed": {"jobId": "fwd-observed", "metrics": {"sharpe": 1.0}, "value": 1.0},
         "null": {
+            "mode": "block_permutation",
+            "signalAdequacy": {
+                "signal": "lagged price relationship",
+                "destroyedDependency": "inter_block_order",
+                "preservedProperties": ["marginal_returns", "within_block_dependence"],
+                "limitations": "Within-block dependence remains; calendar volatility schedule is not preserved.",
+            },
+            "evidenceScope": "selection_conditional",
+            "failedReplicatePolicy": "conservative_exceedance",
+            "targetResolution": 0.25,
             "batchId": "forward-null-0123456789ab",
             "blockSize": 7,
             "replicates": [
@@ -96,7 +115,7 @@ def _forward_payload() -> dict[str, Any]:
                 },
             ],
             "exceedanceCount": 1,
-            "pValue": 2 / 3,
+            "pValue": 3 / 4,
         },
         "variation": {
             "batchId": "forward-variation-0123456789ab",
@@ -138,6 +157,8 @@ def _forward_payload() -> dict[str, Any]:
                 },
             ],
             "parameters": ["fast", "slow"],
+            "method": "one_at_a_time",
+            "interactions": [],
             "stability": "the neighborhood holds",
         },
         "comparison": "development sharpe 1.0 against forward sharpe 1.0",
@@ -205,7 +226,18 @@ def _submit(
         tool_name="run_backtest",
         actor_id=_WORKFLOW_ACTOR,
         job_id=job_id,
-        attribution=dict(attribution),
+        attribution={
+            **{key: value for key, value in attribution.items() if key != "nullPlan"},
+            **(
+                {
+                    "nullPlanSha256": document_digest(
+                        cast(Mapping[str, object], attribution["nullPlan"])
+                    )
+                }
+                if isinstance(attribution.get("nullPlan"), Mapping)
+                else {}
+            ),
+        },
     )
     record_submission_exposure(
         kit.workflow,
@@ -218,6 +250,7 @@ def _submit(
         parameter_sha256=str(attribution.get("parameterAssignmentSha256")),
         design_sha256=design_sha,
         phase_attempt_id=ATTEMPT,
+        null_plan=cast(Mapping[str, object] | None, attribution.get("nullPlan")),
     )
     kit.chat.start_tool_job(WORKSPACE, job_id, actor_id=_WORKFLOW_ACTOR)
 
@@ -256,11 +289,25 @@ def _fixture(
             attribution.update(
                 {
                     "batchKind": "null",
+                    "nullPlan": {
+                        "mode": "block_permutation",
+                        "blockSize": 7,
+                        "seeds": [1, 2, 3],
+                        "parameters": dict(CENTER),
+                    },
                     "seed": job["seed"],
                     "blockSize": 7,
                     "nullMode": "block_permutation",
                 }
             )
+        accepted_input = {
+            "job_id": job["jobId"],
+            "parameters": job["params"],
+            "start": WINDOW[0],
+            "end": WINDOW[1],
+            "seed": job["seed"],
+        }
+        attribution["submittedInputSha256"] = document_digest(accepted_input)
         if attribution_for is not None:
             attribution = attribution_for(job["jobId"], attribution)
         _submit(
@@ -274,6 +321,7 @@ def _fixture(
         programs.results[job["jobId"]] = {
             "job_id": job["jobId"],
             "state": job["state"],
+            "accepted_input": accepted_input,
             "metrics": dict(job["metrics"] or {}),
         }
     return kit, request, state, programs, payload, design_sha
@@ -404,8 +452,7 @@ def test_a_reported_metric_the_harness_did_not_produce_is_rejected(
 ) -> None:
     kit, request, state, programs, payload, _ = _fixture(tmp_path)
     programs.results["fwd-observed"] = {
-        "job_id": "fwd-observed",
-        "state": "succeeded",
+        **programs.results["fwd-observed"],
         "metrics": {"sharpe": 9.9},
     }
     error = _verify(kit, request, state, programs, payload)
@@ -443,6 +490,7 @@ def _discovery_study(kit: _Kit, request: Any, job_id: str) -> None:
             "gitCommit": "d" * 40,
             "phase": "discovery",
             "parameterAssignmentSha256": _hash({"lookback": 10}),
+            "submittedInputSha256": document_digest({"job_id": job_id}),
         },
         design_sha="",
     )
@@ -454,6 +502,13 @@ def test_discovery_studies_are_bound_before_any_strategy_exists(
     kit = _kit(tmp_path, payloads=[], results=[])
     request = _request(kit)
     _discovery_study(kit, request, "study-1")
+    programs = FakePrograms()
+    programs.results["study-1"] = {
+        "job_id": "study-1",
+        "state": "succeeded",
+        "accepted_input": {"job_id": "study-1"},
+        "metrics": {},
+    }
     state = kit.workflow._reconstruct_state(request)
     assert state.strategy is None
     error = verify_phase_completion(
@@ -465,7 +520,7 @@ def test_discovery_studies_are_bound_before_any_strategy_exists(
         phase_attempt_id=ATTEMPT,
         completion={"discovery": {"attempts": [{"jobId": "study-1"}]}},
         forward_window=None,
-        programs=None,
+        programs=programs,
     )
     assert error is None
 
@@ -487,3 +542,129 @@ def test_discovery_omitting_an_executed_study_is_rejected(tmp_path: Path) -> Non
         programs=None,
     )
     assert error is not None and "omits executed jobs" in error
+
+
+def test_accepted_inputs_cannot_be_changed_after_retention(tmp_path: Path) -> None:
+    kit, request, state, programs, payload, _ = _fixture(tmp_path)
+    programs.results["fwd-observed"] = {
+        **programs.results["fwd-observed"],
+        "accepted_input": {"start": DEVELOPMENT_WINDOW[0]},
+    }
+    error = _verify(kit, request, state, programs, payload)
+    assert error is not None and "executed inputs" in error
+
+
+def test_decimal_harness_statistics_are_accepted_without_float_reconstruction(
+    tmp_path: Path,
+) -> None:
+    kit, request, state, programs, payload, _ = _fixture(tmp_path)
+    programs.results["fwd-observed"] = {
+        **programs.results["fwd-observed"],
+        "metrics": {"sharpe": "1.000000000000000000"},
+    }
+    assert _verify(kit, request, state, programs, payload) is None
+
+
+def test_another_jobs_result_is_rejected(tmp_path: Path) -> None:
+    kit, request, state, programs, payload, _ = _fixture(tmp_path)
+    programs.results["fwd-observed"] = {
+        **programs.results["fwd-observed"],
+        "job_id": "another-job",
+    }
+    error = _verify(kit, request, state, programs, payload)
+    assert error is not None and "job identity" in error
+
+
+def test_null_seed_plan_is_frozen_before_dispatch(tmp_path: Path) -> None:
+    kit = _kit(tmp_path, payloads=[], results=[])
+    request = _request(kit)
+    service = HypothesisSessionServices(
+        chat=kit.chat,
+        store=PersistenceSubAgentStore(kit.chat.persistence),
+        workflow=lambda: kit.workflow,
+        harness_tools=None,
+        programs=FakePrograms(),
+        activity=lambda context, tool, arguments, execute: execute(),
+    )
+    context = ToolContext(
+        workspace_id=WORKSPACE,
+        chat_id=request.chat_id,
+        conversation_id=request.chat_id,
+        actor_id=_WORKFLOW_ACTOR,
+        workflow_execution_id=request.execution_id,
+        phase_attempt_id=ATTEMPT,
+    )
+    retain = service._program_job_retention("null_testing")
+    attribution = {
+        "nullPlan": {
+            "mode": "permutation",
+            "blockSize": 1,
+            "seeds": [1, 2],
+            "parameters": dict(CENTER),
+        }
+    }
+    retain(context, "null-first", "run_backtest", attribution)
+    changed = {
+        "nullPlan": {
+            "mode": "permutation",
+            "blockSize": 1,
+            "seeds": [1, 2, 3],
+            "parameters": dict(CENTER),
+        }
+    }
+    with pytest.raises(WorkflowError, match="changed after first submission"):
+        retain(context, "null-adaptive", "run_backtest", changed)
+    assert kit.chat.find_tool_job(WORKSPACE, "null-adaptive") is None
+
+
+def test_development_statistics_are_checked_against_the_harness(tmp_path: Path) -> None:
+    kit = _kit(tmp_path, payloads=[], results=[])
+    request = _request(kit)
+    strategy = program_reference(_null_test_envelope()["strategy"])
+    state = replace(kit.workflow._reconstruct_state(request), strategy=strategy)
+    accepted_input = {"job_id": "candidate-1", "parameters": dict(CENTER)}
+    _submit(
+        kit,
+        request,
+        "candidate-1",
+        phase="optimization",
+        attribution={
+            **strategy,
+            "phase": "optimization",
+            "parameterAssignmentSha256": _hash(CENTER),
+            "submittedInputSha256": document_digest(accepted_input),
+        },
+        design_sha="",
+    )
+    programs = FakePrograms()
+    programs.results["candidate-1"] = {
+        "job_id": "candidate-1",
+        "state": "succeeded",
+        "metrics": {"net_pnl": "12"},
+        "accepted_input": accepted_input,
+    }
+    completion = {
+        "optimization": {
+            "strategy": strategy,
+            "assignments": [
+                {
+                    "jobId": "candidate-1",
+                    "parameters": dict(CENTER),
+                    "state": "succeeded",
+                    "metrics": {"net_pnl": "120"},
+                }
+            ],
+        }
+    }
+    error = verify_phase_completion(
+        chat=kit.chat,
+        workflow=kit.workflow,
+        request=request,
+        state=state,
+        phase="optimization",
+        phase_attempt_id=ATTEMPT,
+        completion=completion,
+        forward_window=None,
+        programs=programs,
+    )
+    assert error is not None and "metrics the harness did not produce" in error

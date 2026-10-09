@@ -1,14 +1,8 @@
-//! Data-source resolution and runnability preflight for backtest runs.
-//!
-//! Port of `harness.runtime.backtest.preflight`. The local Parquet lake reader
-//! lives in the Rust data layer (another epic), so the staged resolver handles
-//! the deterministic synthetic fixture and an injected [`ReplayFixture`]; the
-//! path and stream-mapping sources slot into the same entry point once the data
-//! layer lands.
+//! Validate replay market coverage before deterministic execution.
 
 use super::config::BacktestConfig;
 use super::errors::BacktestError;
-use super::fixture::{synthetic_fixture, DataPreflight, ReplayFixture, SyntheticDataOptions};
+use super::fixture::{DataPreflight, ReplayFixture};
 
 /// Require at least one dispatchable completed frame for every requested bar symbol.
 ///
@@ -149,29 +143,4 @@ pub fn preflight_data(
         symbols,
         fingerprints: fixture.fingerprints.clone(),
     })
-}
-
-/// Resolve the runner's `data_source` argument to one fixture.
-///
-/// # Errors
-///
-/// Returns [`BacktestError`] when the configuration or synthetic options are
-/// invalid.
-pub fn resolve_data_source(
-    configuration: &BacktestConfig,
-    data_source: Option<&ReplayFixture>,
-    options: Option<&SyntheticDataOptions>,
-) -> Result<ReplayFixture, BacktestError> {
-    if !configuration.is_replay() {
-        return Err(BacktestError::Configuration(
-            "configuration must be a validated BacktestConfig".to_string(),
-        ));
-    }
-    match data_source {
-        Some(fixture) => Ok(fixture.clone()),
-        None => {
-            let chosen = options.cloned().unwrap_or_default();
-            synthetic_fixture(configuration, &chosen)
-        }
-    }
 }

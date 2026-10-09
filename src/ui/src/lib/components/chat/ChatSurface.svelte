@@ -435,7 +435,7 @@
 			<SubAgentComposer
 				acceptsInput={true}
 				bind:draft={() => nodeDrafts[node.subAgentId] ?? '', (value) => { nodeDrafts[node.subAgentId] = value; }}
-				phase={node.phase}
+				phase={node.phase ?? undefined}
 				busy={controller.busy}
 				onSubmit={(body) => sendNode(node, body)}
 			/>

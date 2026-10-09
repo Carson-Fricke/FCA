@@ -985,7 +985,7 @@ Every request for operator input or direction is model-authored from a structure
    Optimization failures use the same back-edge. This strategy loop is bounded
    to five designed-and-tested attempts.
 8. `optimization` -- a `OneShotPhase` agent that evaluates a bounded parameter
-   search for the designed strategy: it composes at most sixteen assignments
+   search for the designed strategy: it composes explicit parameter assignments
    from the committed declaration, submits them in one `run_backtest_batch`
    call, follows each run to a terminal state, records honest states and
    observed metrics, and completes with a typed candidate evaluation carrying
@@ -995,16 +995,16 @@ Every request for operator input or direction is model-authored from a structure
    relaunched automatically.
 9. `null_testing` -- a `OneShotPhase` agent that tests the selected candidate
    against signal-destruction nulls: it fixes the observed run and statistic,
-   submits up to sixteen seeded replicates through `run_null_batch` (the
-   harness block-permutes per-symbol bar returns and rescales the feed), polls
+   freezes sufficient unique seeds for the declared resolution and submits them in bounded chunks through `run_null_batch` (the
+   harness permutes individual or block per-symbol bar returns and rescales the feed), polls
    every run to a terminal state, records honest states and metrics, and
    completes with a typed evaluation carrying the observed value, replicate
    values, exceedance count, and the empirical `(1+k)/(1+n)` p-value. Unknown
    runs are recorded, never relaunched automatically.
 10. `variation` -- a `OneShotPhase` agent that runs a deterministic
     one-at-a-time parameter neighborhood around the selected candidate within
-    its declared bounds (at most sixteen points, exactly one differing
-    parameter per point) through `run_backtest_batch`, records honest points
+    its declared bounds (one differing
+    parameter per point, or declared joint experiments) through `run_backtest_batch`, records honest points
     and metrics, and completes with a typed variation evaluation plus a
     stability assessment. The UI renders per-parameter value-versus-total-
     return/profit-factor charts from the phase report artifact.

@@ -13,7 +13,7 @@ from __future__ import annotations
 _CANDIDATES_MISSION = (
     "You are the candidate-evaluation agent of a falsification-first research "
     "pipeline. The designed strategy was backtested once; the accepted strategy "
-    "receipt and its run evidence are below. Evaluate a bounded set of "
+    "receipt and its run evidence are below. Evaluate a declared set of "
     "parameter candidates for that strategy and select a shortlist that would "
     "survive costs and turnover, then record the whole evaluation as the "
     "accepted handoff so the run can finish or return to strategy revision."
@@ -24,8 +24,8 @@ _CANDIDATES_MISSION = (
 _CANDIDATES_PROTOCOL = (
     "Evaluation protocol — follow it exactly:",
     "1. Read the handed-off strategy with read_strategy {program_id: ...} and "
-    "find its parameter declaration in the returned manifest. Compose at most "
-    "16 distinct parameter assignments from the declared parameters: each "
+    "find its parameter declaration in the returned manifest. Compose a declared finite set of "
+    "distinct parameter assignments from the declared parameters: each "
     "assignment maps declared names to values of the declared type, inside any "
     "declared minimum, maximum or levels. Validate every shape yourself before "
     "submitting: omitted names receive their declared defaults, unknown or "

@@ -8,8 +8,18 @@ import backendMessage from './backend-message.json';
 import backendTree from './backend-tree.json';
 import backendThread from './backend-thread.json';
 import { aggregateDatums, aggregateMessage } from './timeline-fixture';
+import { toChatMessage } from '$lib/transcript';
 
 describe('committed backend wire contract', () => {
+    it('accepts null metadata and preserves a neutral delivery without a tool request identity', () => {
+        const plain = decodeWire('ChatMessageWire', { ...backendMessage, data: null }, 'plain-message');
+        expect(plain.data).toBeNull();
+        const delivered = { datumType: 'agent_prompt', ok: true, summary: 'Seed', text: 'Seed', structured: {}, failure: null };
+        const message = decodeWire('ChatMessageWire', { ...backendMessage, tool_result: delivered }, 'neutral-delivery');
+        const projected = toChatMessage(message);
+        expect(projected.tool_result).toEqual({ ...delivered, tool: null, callId: null });
+        expect(message.tool_result).toEqual(delivered);
+    });
 	it('decodes one aggregate incoming record with canonical correlation and typed datums', () => {
 		expect(decodeWire('ChatMessageWire', aggregateMessage, 'aggregate')).toEqual(aggregateMessage);
 		for (const datum of aggregateDatums) expect(decodeWire('DatumWire', datum, 'aggregate/datum')).toEqual(datum);

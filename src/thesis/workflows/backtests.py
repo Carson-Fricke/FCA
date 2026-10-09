@@ -1,36 +1,16 @@
-"""Backtest execution ports for Thesis workflows.
-
-The workflow core only knows the :class:`BacktestRunner` port.  Two concrete
-seams exist:
-
-- local mode goes through the published Thesis-to-harness client boundary
-  (:class:`thesis.integrations.harness.ThesisHarnessClient`), whose local
-  process adapter drives the harness ``run_backtest`` service;
-- remote mode uses the same published client over the authenticated remote
-  harness API, behind the identical port.
-
-Both return opaque JSON-shaped values; Thesis never imports engine objects.
-"""
+"""Execution request/result records and injected backtest runner port."""
 
 from __future__ import annotations
 
-import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
-from thesis.integrations import (
-    BacktestRequest,
-    HarnessBacktestResult,
-    HarnessError,
-    ThesisHarnessClient,
-)
 from thesis.strategies.bundles import StrategyBundle
 
 BacktestMode = Literal["local", "remote"]
 
 _SUCCESS_STATES = frozenset({"succeeded"})
-_PENDING_STATES = frozenset({"queued", "running"})
 
 
 class BacktestRunError(RuntimeError):
@@ -138,114 +118,10 @@ class BacktestRunner(Protocol):
         """Run one backtest and return its opaque result."""
 
 
-class HarnessBacktestRunner:
-    """Adapter over the published Thesis-to-harness client boundary."""
-
-    def __init__(
-        self,
-        client: ThesisHarnessClient,
-        *,
-        mode: BacktestMode = "local",
-        metadata: Mapping[str, object] | None = None,
-        poll_attempts: int = 200,
-        poll_interval_seconds: float = 0.05,
-        sleep: Callable[[float], None] = time.sleep,
-    ) -> None:
-        if not isinstance(client, ThesisHarnessClient):
-            raise TypeError("client must be a ThesisHarnessClient")
-        if mode not in ("local", "remote"):
-            raise ValueError("mode must be 'local' or 'remote'")
-        self._client = client
-        self._mode: BacktestMode = mode
-        self._metadata = dict(metadata or {})
-        if poll_attempts < 1:
-            raise ValueError("poll_attempts must be positive")
-        if poll_interval_seconds < 0:
-            raise ValueError("poll_interval_seconds must be non-negative")
-        self._poll_attempts = poll_attempts
-        self._poll_interval_seconds = poll_interval_seconds
-        self._sleep = sleep
-
-    def run(self, request: BacktestRunRequest) -> BacktestRunResult:
-        """Launch one backtest and resolve pending jobs with one result query."""
-        payload = BacktestRequest(
-            job_id=request.job_id,
-            configuration=request.bundle.harness_configuration,
-            strategy_bundle=request.bundle.canonical_document,
-            metadata={
-                **self._metadata,
-                "experimentId": request.experiment_id,
-                "strategyId": request.bundle.strategy_id,
-                "workspaceId": request.workspace_id,
-                "workflowExecutionId": request.workflow_execution_id,
-            },
-        )
-        launched = self._client.launch_backtest(payload)
-        _require_acknowledged_job(request.job_id, launched.job_id)
-        root = _result_root(launched)
-        result = launched
-        if launched.state.casefold() in _PENDING_STATES:
-            for _ in range(self._poll_attempts):
-                result = self._client.query_backtest(launched.job_id)
-                _require_acknowledged_job(request.job_id, result.job_id)
-                root = _result_root(result) or root
-                if result.state.casefold() not in _PENDING_STATES:
-                    break
-                self._sleep(self._poll_interval_seconds)
-            else:
-                raise BacktestRunError(
-                    f"backtest {launched.job_id!r} did not reach a terminal state"
-                )
-        elif launched.metrics is None:
-            result = self._client.query_backtest(launched.job_id)
-            _require_acknowledged_job(request.job_id, result.job_id)
-            root = _result_root(result) or root
-        return _result(result, self._mode, root)
-
-
-def _require_acknowledged_job(submitted: str, acknowledged: str) -> None:
-    if acknowledged != submitted:
-        raise BacktestRunError(
-            f"harness acknowledged job_id {acknowledged!r} for submitted "
-            f"job_id {submitted!r}"
-        )
-
-
-def _result(
-    result: HarnessBacktestResult, mode: BacktestMode, root: str | None
-) -> BacktestRunResult:
-    return BacktestRunResult(
-        job_id=result.job_id,
-        state=result.state,
-        mode=mode,
-        manifest=result.manifest,
-        metrics=result.metrics,
-        result_artifacts=result.result_artifacts,
-        result_root=root,
-        error=_error_text(result.raw),
-    )
-
-
-def _error_text(raw: Mapping[str, object]) -> str | None:
-    """Return the harness failure message carried by a raw result mapping."""
-    for key in ("error", "error_message", "errorMessage", "reason"):
-        value = raw.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
-def _result_root(result: HarnessBacktestResult) -> str | None:
-    root = result.raw.get("resultRoot", result.raw.get("result_root"))
-    return root if isinstance(root, str) else None
-
-
 __all__ = [
     "BacktestMode",
     "BacktestRunError",
     "BacktestRunRequest",
     "BacktestRunResult",
     "BacktestRunner",
-    "HarnessBacktestRunner",
-    "HarnessError",
 ]

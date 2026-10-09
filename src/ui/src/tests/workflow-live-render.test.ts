@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { aggregateDatums, aggregateEnvelope, aggregateMessage, timelineFixture } from './timeline-fixture';
+import { aggregateDatums, aggregateEnvelope, aggregateMessage, eventFixture, timelineFixture } from './timeline-fixture';
 
 const fixture = vi.hoisted(() => ({
 	subscribers: [] as Array<(item: Record<string, unknown>) => void>,
@@ -109,8 +109,8 @@ describe('durable tool activity', () => {
 			...aggregateDatums[0], tool: 'validate_study', callId: 'aggregate-call'
 		} } as ChatMessage;
 		expect(projectToolMessages([aggregateEnvelope as ChatMessage, result]).some((message) => message.tool_result?.pending)).toBe(false);
-		const event = { eventId: 'aggregate-copy', eventType: 'tool.result', cursor: 3,
-			occurredAt: aggregateMessage.created_at, payload: { toolResult: result.tool_result } } as ExecutionEvent;
+		const event = eventFixture({ eventId: 'aggregate-copy', eventType: 'tool.result', cursor: 3,
+			occurredAt: aggregateMessage.created_at, payload: { toolResult: result.tool_result } });
 		const entries = buildNodeEntries({ messages: [aggregateEnvelope, aggregateMessage] as ChatMessage[], events: [event] });
 		expect(entries.filter((entry) => entry.kind === 'tool')).toHaveLength(0);
 		expect(entries.map((entry) => entry.id)).toEqual(['aggregate-envelope', 'aggregate-result:datum:0', 'aggregate-result:datum:1']);
@@ -183,7 +183,7 @@ describe('durable tool activity', () => {
 	});
 
 	it.each(['root', 'scoped'])('normalizes persisted message metadata in the %s transcript', (scope) => {
-		const persisted = { ...result,
+		const persisted: ChatMessage = { ...result,
 			data: { sessionMessage: { message_id: 'result', direction: 'incoming', position: 1,
 				content: { text: 'validated', source: 'tool_result', requests: [],
 					correlation: { request_message_id: 'envelope', request_id: 'validate-1', tool_name: 'validate_study' },
@@ -198,24 +198,24 @@ describe('durable tool activity', () => {
 	});
 
 	it('does not duplicate a final result event explicitly referencing its durable message', () => {
-		const event = { eventId: 'tool-event', eventType: 'tool.result', cursor: 1,
-			occurredAt: result.created_at, payload: { toolResult: result.tool_result, messageId: result.message_id } } as ExecutionEvent;
+		const event = eventFixture({ eventId: 'tool-event', eventType: 'tool.result', cursor: 1,
+			occurredAt: result.created_at, payload: { toolResult: result.tool_result, messageId: result.message_id } });
 		const entries = buildNodeEntries({ messages: [envelope, result], events: [event] });
 		expect(entries.filter((entry) => entry.kind === 'tool')).toHaveLength(0);
 		expect(entries.filter((entry) => entry.kind === 'message')).toHaveLength(3);
 	});
 
 	it('does not duplicate assistant output events linked to an existing durable reply', () => {
-		const event = { eventId: 'output-copy', eventType: 'sub_agent.output', cursor: 1,
-			occurredAt: envelope.created_at, payload: { messageId: envelope.message_id, text: envelope.body } } as ExecutionEvent;
+		const event = eventFixture({ eventId: 'output-copy', eventType: 'sub_agent.output', cursor: 1,
+			occurredAt: envelope.created_at, payload: { messageId: envelope.message_id, text: envelope.body } });
 		const entries = buildNodeEntries({ messages: [envelope], events: [event] });
 		expect(entries.some((entry) => entry.kind === 'assistant')).toBe(false);
 		expect(entries.filter((entry) => entry.kind === 'message' && entry.message.role === 'assistant')).toHaveLength(1);
 	});
 
 	it('replaces an envelope pending call with a final event result before its message arrives', () => {
-		const event = { eventId: 'tool-event', eventType: 'tool.result', cursor: 1,
-			occurredAt: result.created_at, payload: { toolResult: result.tool_result } } as ExecutionEvent;
+		const event = eventFixture({ eventId: 'tool-event', eventType: 'tool.result', cursor: 1,
+			occurredAt: result.created_at, payload: { toolResult: result.tool_result } });
 		const entries = buildNodeEntries({ messages: [envelope], events: [event, { ...event }] });
 		expect(entries.filter((entry) => entry.kind === 'tool')).toHaveLength(1);
 		const pending = entries.filter((entry) => entry.kind === 'message' && entry.message.tool_result?.pending);
@@ -264,8 +264,8 @@ describe('durable tool activity', () => {
 	});
 
 	it('preserves distinct event datums sharing a call ID', () => {
-		const event = { eventId: 'first', eventType: 'tool.result', cursor: 1, occurredAt: result.created_at,
-			payload: { toolResult: result.tool_result } } as ExecutionEvent;
+		const event = eventFixture({ eventId: 'first', eventType: 'tool.result', cursor: 1, occurredAt: result.created_at,
+			payload: { toolResult: result.tool_result } });
 		const second = { ...event, eventId: 'second', payload: { toolResult: { ...result.tool_result!, summary: 'Another datum' } } };
 		const entries = buildNodeEntries({ messages: [envelope], events: [event, second, { ...event }] });
 		expect(entries.filter((entry) => entry.kind === 'tool')).toHaveLength(2);
@@ -278,7 +278,7 @@ describe('durable tool activity', () => {
 				payload: { toolResult: persisted.tool_result } },
 			{ eventId: 'additional', seq: 32, eventType: 'tool.result', cursor: 1, occurredAt: '2024-01-01',
 				payload: { toolResult: { ...persisted.tool_result!, datumType: 'study_evidence', summary: 'Distinct evidence datum' } } }
-		] as ExecutionEvent[];
+		].map(eventFixture);
 		const messages = [{ ...envelope, seq: 20 }, persisted];
 		if (scope === 'root') render(ChatTranscript, { props: { workspaceId: 'ws-1', messages, events } });
 		else render(ScopeTranscript, { props: { workspaceId: 'ws-1', entries: buildNodeEntries({ messages, events }) } });

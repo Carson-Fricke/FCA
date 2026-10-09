@@ -32,12 +32,9 @@ _MAX_BUILDING_BLOCK_TEXT = 128
 _MAX_VALIDATION_QUESTION_TEXT = 2_048
 
 
-def _field(payload: Mapping[str, object], *keys: str) -> Any:
-    """Return the first present spelling of one wire field."""
-    for key in keys:
-        if key in payload:
-            return payload[key]
-    return None
+def _field(payload: Mapping[str, object], key: str) -> Any:
+    """Read one canonical wire field for typed contract construction."""
+    return payload.get(key)
 
 
 def _text_list(
@@ -197,32 +194,26 @@ class DiscoveryCandidate:
         return cls(
             opportunity=_field(payload, "opportunity"),
             signal=_field(payload, "signal"),
-            information_time=_field(payload, "informationTime", "information_time"),
+            information_time=_field(payload, "informationTime"),
             direction=_field(payload, "direction"),
-            holding_period=_field(payload, "holdingPeriod", "holding_period"),
-            profit_source=_field(payload, "profitSource", "profit_source"),
+            holding_period=_field(payload, "holdingPeriod"),
+            profit_source=_field(payload, "profitSource"),
             effect=_field(payload, "effect"),
-            competing_explanation=_field(
-                payload, "competingExplanation", "competing_explanation"
-            ),
+            competing_explanation=_field(payload, "competingExplanation"),
             evidence=_field(payload, "evidence"),
-            entry_idea=_field(payload, "entryIdea", "entry_idea"),
-            exit_idea=_field(payload, "exitIdea", "exit_idea"),
+            entry_idea=_field(payload, "entryIdea"),
+            exit_idea=_field(payload, "exitIdea"),
             assumptions=_field(payload, "assumptions"),
-            building_blocks=_field(payload, "buildingBlocks", "building_blocks"),
-            validation_questions=_field(
-                payload, "validationQuestions", "validation_questions"
-            ),
-            exploratory_evidence=_field(
-                payload, "exploratoryEvidence", "exploratory_evidence"
-            ),
+            building_blocks=_field(payload, "buildingBlocks"),
+            validation_questions=_field(payload, "validationQuestions"),
+            exploratory_evidence=_field(payload, "exploratoryEvidence"),
         )
 
 
 def _attempt_from_dict(payload: object) -> DiscoveryAttempt:
     if not isinstance(payload, Mapping):
         raise WorkflowError("discovery attempt must be an object")
-    data_types = _field(payload, "dataTypes", "data_types")
+    data_types = _field(payload, "dataTypes")
     if isinstance(data_types, str) or not isinstance(data_types, Sequence):
         raise WorkflowError("discovery attempt requires dataTypes")
     return DiscoveryAttempt(
@@ -308,11 +299,9 @@ class DiscoveryDraft:
             candidate=(
                 None if candidate is None else DiscoveryCandidate.from_dict(candidate)
             ),
-            no_candidate_reason=_field(
-                payload, "noCandidateReason", "no_candidate_reason"
-            ),
+            no_candidate_reason=_field(payload, "noCandidateReason"),
             attempts=attempts,
-            untouched_data=_field(payload, "untouchedData", "untouched_data"),
+            untouched_data=_field(payload, "untouchedData"),
             limitations=_field(payload, "limitations"),
         )
 

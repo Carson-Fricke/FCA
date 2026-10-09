@@ -18,7 +18,9 @@
     "drawdown_duration_ns": null,
     "drawdown_recovered": null,
     "sharpe_per_sample": null,
-    "sharpe_per_sample_reason": "negative_equity"
+    "sharpe_per_sample_reason": "negative_equity",
+    "net_pnl": "-18.000000000000000000",
+    "gross_pnl": "-18.000000000000000000"
   },
   "execution": {
     "fill_count": 3,

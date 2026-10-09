@@ -1,11 +1,9 @@
 # Quant-harness Rust workspace.
 #
-# Every crate is a direct child of this directory, alongside the Python plugin
-# surface under `src/harness`. The workspace manifest is the Cargo root.
+# Every crate is a direct child of this directory. This manifest is the Cargo root.
 [workspace]
 resolver = "2"
 members = [
-    "native",
     "num",
     "api",
     "marketdata",

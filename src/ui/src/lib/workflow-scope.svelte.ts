@@ -36,7 +36,7 @@ export class WorkflowScopeController {
 		this.scope = new ScopeController(scopeStorageKey(workspaceId, hostId));
 	}
 
-	tree = $derived(deriveSubAgentTree(this.timeline.events, this.knownNodes));
+	tree = $derived.by(() => deriveSubAgentTree(this.timeline.events, this.knownNodes));
 	#nodes = $derived.by(() => {
 		const byId = new Map<string, SubAgentTreeNode>();
 		const byPhase = new Map<string, SubAgentTreeNode[]>();

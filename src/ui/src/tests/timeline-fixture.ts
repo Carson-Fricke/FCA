@@ -2,6 +2,13 @@ import { TimelineController } from '$lib/timeline.svelte';
 import type { ChatMessage, ExecutionEvent, TimelineItem } from '$lib/types';
 import type { DatumWire } from '$lib/generated';
 import backendMessage from './backend-message.json';
+import { fixtures } from '$lib/fixtures';
+import { decodeWire } from '$lib/wire';
+
+export function eventFixture(overrides: Partial<ExecutionEvent>): ExecutionEvent {
+    const {seq, threadId, ...wire} = overrides;
+    return { ...decodeWire('ExecutionEventWire', { ...fixtures.executionEvents['exec-1'].items[0], ...wire }, 'test/event'), seq, threadId };
+}
 
 export const aggregateDatums: DatumWire[] = [
 	{ datumType: 'study_evidence', ok: true, summary: 'Measured study evidence', text: 'Retained measurements',
@@ -25,12 +32,15 @@ export const aggregateEnvelope = { ...backendMessage, message_id: 'aggregate-env
 export function timelineFixture(messages: ChatMessage[] = [], events: ExecutionEvent[] = []): TimelineController {
 	const timeline = new TimelineController();
 	const items: TimelineItem[] = [
-		...messages.map((message, index) => ({ id: message.message_id, kind: 'message', seq: message.seq ?? index + 1,
+		...messages.map((message, index) => {
+            const {seq, threadId, ...wire} = message;
+            return { id: message.message_id, kind: 'message' as const, seq: seq ?? index + 1,
 			chatId: message.chat_id, workspaceId: message.workspace_id, ts: message.created_at,
-			threadId: String(message.data?.subAgentId ?? 'root'), payload: message as unknown as Record<string, unknown> })),
-		...events.map((event, index) => ({ id: event.eventId, kind: 'event', seq: event.seq ?? messages.length + index + 1,
+			threadId: threadId ?? String(message.data?.subAgentId ?? 'root'), payload: decodeWire('ChatMessageWire', { ...backendMessage, tool_result: null, ...wire }, 'test/message') };
+        }),
+		...events.map((event, index) => ({ id: event.eventId, kind: 'event' as const, seq: event.seq ?? messages.length + index + 1,
 			chatId: 'chat-1', workspaceId: event.workspaceId, ts: event.occurredAt,
-			threadId: String(event.payload.subAgentId ?? 'root'), payload: event as unknown as Record<string, unknown> }))
+			threadId: String(event.payload.subAgentId ?? 'root'), payload: event }))
 	];
 	timeline.merge(items);
 	return timeline;

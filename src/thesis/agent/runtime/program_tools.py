@@ -13,11 +13,10 @@ from thesis.integrations.mcp import HarnessMcpError
 from thesis.persistence.git import GitPublicationError
 from thesis.workspaces.local import WorkspaceRepositoryError
 from thesis.workspaces.programs import (
-    MAX_BATCH_POINTS,
     MAX_LIST_RESULTS,
     MAX_NULL_BLOCK_SIZE,
-    MAX_NULL_SEEDS,
     MAX_READ_CHARS,
+    NULL_TRANSFORM_MODES,
     PROGRAM_CONFIGURATION_SCHEMA,
     PROGRAM_ID_PATTERN,
     JobRetention,
@@ -179,7 +178,6 @@ def program_registered_tools(
                     "assignments": {
                         "type": "array",
                         "minItems": 1,
-                        "maxItems": MAX_BATCH_POINTS,
                         "items": {"type": "object"},
                     },
                     "label": {"type": "string", "minLength": 1, "maxLength": 200},
@@ -190,6 +188,9 @@ def program_registered_tools(
             properties.update(
                 {
                     "parameters": {"type": "object"},
+                    "mode": {"type": "string", "enum": list(NULL_TRANSFORM_MODES)},
+                    "offset": {"type": "integer", "minimum": 0},
+                    "chunk_size": {"type": "integer", "minimum": 1, "maximum": 256},
                     "block_size": {
                         "type": "integer",
                         "minimum": 1,
@@ -198,14 +199,13 @@ def program_registered_tools(
                     "seeds": {
                         "type": "array",
                         "minItems": 1,
-                        "maxItems": MAX_NULL_SEEDS,
                         "uniqueItems": True,
                         "items": {"type": "integer", "minimum": 0},
                     },
                     "label": {"type": "string", "minLength": 1, "maxLength": 200},
                 }
             )
-            required.extend(["block_size", "seeds"])
+            required.extend(["mode", "block_size", "seeds"])
         if name == "read_sdk_reference":
             properties = {
                 "topic": {
@@ -394,6 +394,9 @@ def program_registered_tools(
                             ),
                             block_size=cast(int, arguments["block_size"]),
                             seeds=cast(Sequence[int], arguments["seeds"]),
+                            mode=cast(str, arguments["mode"]),
+                            offset=cast(int, arguments.get("offset", 0)),
+                            chunk_size=cast(int, arguments.get("chunk_size", 64)),
                             label=cast(str | None, arguments.get("label")),
                             data_window=data_window,
                             retain=retain,
@@ -477,9 +480,9 @@ def program_registered_tools(
                             if operation == "publish"
                             else f"List committed workspace {kind} IDs at HEAD with content version, hashes, and compact configuration. Read a selected ID before patching; author only a new ID."
                             if operation == "list"
-                            else "Submit one to 16 distinct validated parameter assignments for a strategy through the existing run boundary; every point is validated before any submission and the deterministic batch id carries per-point run receipts. Unknown-outcome points are recorded truthfully and never replayed automatically; inspect each run before an explicit retry."
+                            else "Submit distinct validated parameter assignments for a strategy through the existing run boundary; every point is validated before any submission and the deterministic batch id carries per-point run receipts. Unknown-outcome points are recorded truthfully and never replayed automatically; inspect each run before an explicit retry."
                             if name == "run_backtest_batch"
-                            else "Submit one block-permutation null run per seed (1 to 16 unique seeds) for a committed strategy; the parameter assignment and block_size are validated before any submission, every point carries the frozen null config and a fresh opaque run id, and unknown outcomes are recorded truthfully and never replayed."
+                            else "Submit a bounded chunk of ordinary or block-permutation null jobs from the complete frozen seed list; advance offset to nextOffset until completedSubmission for a committed strategy; the parameter assignment and block_size are validated before any submission, every point carries the frozen null config and a fresh opaque run id, and unknown outcomes are recorded truthfully and never replayed."
                             if name == "run_null_batch"
                             else "Run a committed workspace strategy by program_id with an optional parameters assignment validated against its parameter_declaration before submission; omitted names receive declared defaults."
                             if name == "run_backtest"

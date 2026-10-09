@@ -13,12 +13,13 @@ corrects it.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 
 from thesis.experiments.mandate import rfc3339_ns
+from thesis.research.evidence import document_digest
 from thesis.workflows.research_models import ProgramSnapshots
 from thesis.workspaces.programs import parameter_assignment_sha256
 
@@ -253,11 +254,17 @@ def _metrics_match(
         if isinstance(value, bool) or isinstance(expected, bool):
             if value != expected:
                 return False
-        elif isinstance(value, int | float) and isinstance(expected, int | float):
-            if not math.isclose(
-                float(value), float(expected), rel_tol=1e-9, abs_tol=1e-12
-            ):
-                return False
+        elif isinstance(value, int | float | str) and isinstance(
+            expected, int | float | str
+        ):
+            try:
+                left, right = Decimal(str(value)), Decimal(str(expected))
+            except InvalidOperation:
+                if value != expected:
+                    return False
+            else:
+                if not left.is_finite() or not right.is_finite() or left != right:
+                    return False
         elif value != expected:
             return False
     return True
@@ -278,8 +285,18 @@ def _forward_design_errors(
     if payload.get("direction") != design.direction:
         errors.append("forward direction differs from the frozen null design")
     null = _mapping(payload.get("null"), "null")
+    if null.get("mode") != design.mode:
+        errors.append("forward null mode differs from the frozen design")
     if null.get("blockSize") != design.block_size:
         errors.append("forward block size differs from the frozen null design")
+    for key, expected in (
+        ("signalAdequacy", design.signal_adequacy),
+        ("evidenceScope", design.evidence_scope),
+        ("failedReplicatePolicy", design.failed_replicate_policy),
+        ("targetResolution", design.target_resolution),
+    ):
+        if null.get(key) != expected:
+            errors.append(f"forward {key} differs from the frozen design")
     replicates = _sequence(null.get("replicates"), "null.replicates")
     seeds = sorted(
         seed
@@ -289,28 +306,29 @@ def _forward_design_errors(
     if seeds != list(design.seeds):
         errors.append("forward null seeds differ from the frozen null design")
     variation = _mapping(payload.get("variation"), "variation")
+    if variation.get("method") != design.variation_method:
+        errors.append("forward variation method differs from the frozen design")
+    if variation.get("interactions") != [
+        list(group) for group in design.variation_interactions
+    ]:
+        errors.append("forward interactions differ from the frozen design")
     declared = _sequence(variation.get("parameters", []), "variation.parameters")
     names = sorted(name for name in declared if isinstance(name, str))
     if names != list(design.variation_parameters):
         errors.append("forward variation parameters differ from the frozen design")
     center = _mapping(variation.get("center"), "variation.center")
-    if canonical_parameters(
+    if parameter_assignment_sha256(
         _mapping(center.get("parameters"), "center.parameters")
-    ) != dict(design.center):
+    ) != parameter_assignment_sha256(design.center):
         errors.append("forward center parameters differ from the frozen design")
-    points = sorted(
-        (
-            canonical_parameters(_mapping(item.get("parameters"), "point.parameters"))
-            for item in _sequence(variation.get("points"), "variation.points")
-            if isinstance(item, Mapping)
-        ),
-        key=lambda item: repr(sorted(item.items())),
-    )
-    frozen_points = sorted(
-        (dict(item) for item in design.variation_points),
-        key=lambda item: repr(sorted(item.items())),
-    )
-    if points != frozen_points:
+    points = [
+        _mapping(item.get("parameters"), "point.parameters")
+        for item in _sequence(variation.get("points"), "variation.points")
+        if isinstance(item, Mapping)
+    ]
+    if sorted(parameter_assignment_sha256(point) for point in points) != sorted(
+        parameter_assignment_sha256(point) for point in design.variation_points
+    ):
         errors.append("forward variation points differ from the frozen design")
     return errors
 
@@ -328,6 +346,7 @@ def _check_job_record(
     reference: _Reference,
     *,
     block_size: int | None,
+    null_mode: str | None,
     forward: tuple[tuple[int, int], str] | None,
 ) -> str | None:
     """Verify one reported job against its retained tool record."""
@@ -355,12 +374,14 @@ def _check_job_record(
     ) != parameter_assignment_sha256(reference.parameters):
         return f"job {reference.job_id} ran different parameters than reported"
     if reference.seed is not None:
+        if not isinstance(attribution.get("nullPlanSha256"), str):
+            return f"job {reference.job_id} has no null plan frozen before dispatch"
         if attribution.get("batchKind") != "null":
             return f"job {reference.job_id} is not a null replicate"
         if attribution.get("seed") != reference.seed:
             return f"job {reference.job_id} ran seed {attribution.get('seed')!r}"
         if attribution.get("blockSize") != block_size or (
-            attribution.get("nullMode") != "block_permutation"
+            attribution.get("nullMode") != null_mode
         ):
             return f"job {reference.job_id} ran a different null design"
     if forward is not None:
@@ -383,7 +404,7 @@ def _check_outcome(reference: _Reference, harness: Mapping[str, object]) -> str 
         if harness_state != "succeeded":
             return f"job {reference.job_id} is not succeeded in the harness"
         if reference.metrics is None:
-            return f"job {reference.job_id} reports no metrics"
+            return None
         harness_metrics = harness.get("metrics")
         if not isinstance(harness_metrics, Mapping) or not _metrics_match(
             reference.metrics, harness_metrics
@@ -421,6 +442,7 @@ def _verify(
     design: FrozenDesign | None = None
     forward: tuple[tuple[int, int], str] | None = None
     block_size: int | None = None
+    null_mode: str | None = None
     if phase == "forward_validation":
         if forward_window is None:
             return "forward validation requires the protected forward window"
@@ -428,16 +450,38 @@ def _verify(
         if window_ns is None:
             return "the protected forward window is malformed"
         design = frozen_design(state, *forward_window)
+        references = tuple(
+            _Reference(
+                job_id=item.job_id,
+                owner=item.owner,
+                role=item.role,
+                parameters=design.center
+                if item.role == "observed"
+                else item.parameters,
+                seed=item.seed,
+                state=item.state,
+                metrics=item.metrics,
+            )
+            for item in references
+        )
         forward = (window_ns, design.sha256())
         block_size = design.block_size
+        null_mode = design.mode
         payload = _mapping(completion.get("forwardValidation"), "forwardValidation")
         for error in _forward_design_errors(payload, design, window_ns):
             return error
     elif phase == "null_testing":
         payload = _mapping(completion.get("nullTesting"), "nullTesting")
         declared_block = payload.get("blockSize")
+        null_mode = str(payload.get("mode"))
         if isinstance(declared_block, int) and not isinstance(declared_block, bool):
             block_size = declared_block
+        observed = next(item for item in references if item.role == "observed")
+        candidates = state.candidate_evaluation
+        if candidates is None or observed.job_id not in {
+            item.job_id for item in candidates.shortlist
+        }:
+            return "null testing observation must be an accepted shortlisted candidate"
     elif phase == "variation" and state.null_testing is None:
         return "variation requires the accepted null testing"
 
@@ -479,6 +523,27 @@ def _verify(
                 continue
         exposed.setdefault(owner, set()).add(str(entry.get("jobId")))
 
+    if phase in ("null_testing", "forward_validation"):
+        seeds = sorted(item.seed for item in references if item.seed is not None)
+        for reference in references:
+            if reference.role != "replicate":
+                continue
+            entry = next(
+                (item for item in ledger if item.get("jobId") == reference.job_id), {}
+            )
+            plan = entry.get("nullPlan")
+            if not isinstance(plan, Mapping):
+                return f"job {reference.job_id} has no null plan frozen before dispatch"
+            if seeds != plan.get("seeds"):
+                return (
+                    "completion null seeds differ from the plan frozen before execution"
+                )
+            job = chat.find_tool_job(request.workspace_id, reference.job_id)
+            if job is None or document_digest(plan) != job.attribution.get(
+                "nullPlanSha256"
+            ):
+                return f"job {reference.job_id} does not match its frozen null plan"
+
     for reference in references:
         if reference.job_id not in exposed.get(reference.owner, set()):
             return (
@@ -490,6 +555,7 @@ def _verify(
             state,
             reference,
             block_size=block_size,
+            null_mode=null_mode,
             forward=forward,
         )
         if error is not None:
@@ -525,18 +591,27 @@ def _verify(
     if never_started:
         return f"{phase} reports jobs that never started: {', '.join(never_started)}"
 
-    # Forward results must be the harness's own results, not typed values.
-    if phase == "forward_validation":
-        if programs is None:
-            return "forward validation requires the harness job result port"
-        for reference in references:
-            try:
-                harness = programs.job_result(reference.job_id)
-            except Exception as error:  # noqa: BLE001 - unreadable result rejects
-                return f"job {reference.job_id} has no readable harness result: {error}"
-            error = _check_outcome(reference, harness)
-            if error is not None:
-                return error
+    # The harness receipt is authoritative for both development and forward evidence.
+    if not references:
+        return None
+    if programs is None:
+        return f"{phase} requires the harness job result port"
+    for reference in references:
+        try:
+            harness = programs.job_result(reference.job_id)
+        except Exception as error:  # noqa: BLE001 - unreadable result rejects
+            return f"job {reference.job_id} has no readable harness result: {error}"
+        if harness.get("job_id") != reference.job_id:
+            return f"job {reference.job_id} returned a different job identity"
+        error = _check_outcome(reference, harness)
+        if error is not None:
+            return error
+        accepted = harness.get("accepted_input")
+        job = chat.find_tool_job(request.workspace_id, reference.job_id)
+        if not isinstance(accepted, Mapping) or job is None:
+            return f"job {reference.job_id} has no immutable accepted input"
+        if document_digest(accepted) != job.attribution.get("submittedInputSha256"):
+            return f"job {reference.job_id} executed inputs other than its retained submission"
     return None
 
 

@@ -157,20 +157,6 @@ def _child_system_prompt(child: SubAgentRecord) -> str:
     )
 
 
-def _tool_result_data(chunk: ToolResultChunk) -> dict[str, object]:
-    """Return the canonical UI payload for one streamed tool outcome."""
-    return tool_result_payload(
-        call_id=chunk.call_id,
-        ok=chunk.ok,
-        failure=chunk.failure,
-        structured=chunk.structured,
-        summary=chunk.summary,
-        text=chunk.text,
-        tool=chunk.tool,
-        datum_type=chunk.datum_type,
-    )
-
-
 class Conversation:
     """The only owner of one anchored transcript and its turns."""
 

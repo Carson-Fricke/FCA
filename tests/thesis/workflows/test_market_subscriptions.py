@@ -19,14 +19,8 @@ from thesis.research.models import (
 from thesis.strategies.bundles import StrategyBundleError
 from thesis.strategies.contracts import StrategyDesign
 from thesis.workflows.backtests import BacktestRunRequest, BacktestRunResult
-from thesis.workflows.registry.hypothesis_development.composers.hypothesis import (
-    decode_persisted_model,
-)
 from thesis.workflows.registry.hypothesis_development.contracts.validation import (
     hypothesis_payload_errors,
-)
-from thesis.workflows.registry.hypothesis_development.errors import (
-    FalsificationComposeError,
 )
 from thesis.workflows.research_models import (
     BacktestResearchModelRunner,
@@ -258,9 +252,6 @@ def test_tick_only_contract_and_separate_impl_publications() -> None:
     assert composed.source == model.source
     assert composed.harness_configuration == model.harness_configuration
     assert composed.outputs == model.outputs
-    persisted = decode_persisted_model(model.canonical_document)
-    assert isinstance(persisted, ResearchModel)
-    assert persisted.canonical_document == model.canonical_document
 
 
 def test_subscription_symbols_must_belong_to_universe() -> None:
@@ -322,8 +313,6 @@ def test_model_and_contract_reject_contradictory_fetch_fields(
     document = {**model.canonical_document, "harnessConfiguration": configuration}
     payload = {**_payload(model), "model": document}
     assert hypothesis_payload_errors(payload)
-    with pytest.raises(FalsificationComposeError):
-        decode_persisted_model(document)
     # Live configuration is loaded from the pinned snapshot, not the contract.
     with pytest.raises(ResearchModelError):
         _resolve(model, configuration=configuration)
@@ -376,8 +365,6 @@ def test_contract_rejects_multiple_bar_intervals() -> None:
     ]
     with pytest.raises(ResearchModelError, match="single bars interval"):
         _resolve(model, configuration=configuration)
-    with pytest.raises(FalsificationComposeError, match="single bars interval"):
-        decode_persisted_model(document)
 
 
 def test_compiler_revalidates_mutated_nested_fetch_fields() -> None:
@@ -469,9 +456,6 @@ def test_nested_subscription_echo_is_supported_without_legacy_interval(
     assert model.bar_interval == ("1min" if kind == "bars" else None)
     payload = {**_payload(model), "universe": ["QQQ"]}
     assert hypothesis_payload_errors(payload) == []
-    persisted = decode_persisted_model(model.canonical_document)
-    assert isinstance(persisted, ResearchModel)
-    assert persisted.canonical_document == model.canonical_document
     configuration = study_configuration(model, job_id="nested", universe=("SPY", "QQQ"))
     data = cast(Mapping[str, object], configuration["data"])
     assert data["subscriptions"] == [subscription]

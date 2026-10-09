@@ -65,3 +65,9 @@ operations. `schema.py` and `wire.py` supply the backend contract consumed by
 `src/ui/backend-wire.json` and the frontend generator. Missing composed services
 fail closed rather than creating request-local defaults. Serving requires
 `WEB_CONCURRENCY=1` for process-local scheduling and brokers.
+
+The message schema preserves null metadata. Object metadata independently
+validates canonical session messages and aggregate datums; intersecting those
+object extensions with the null branch would incorrectly exclude a serialized
+null value. Neutral delivered datums retain their own schema and do not become
+model-requested tool outcomes.

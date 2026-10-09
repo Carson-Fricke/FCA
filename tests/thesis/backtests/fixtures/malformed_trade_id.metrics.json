@@ -18,7 +18,9 @@
     "drawdown_duration_ns": 120000000000,
     "drawdown_recovered": false,
     "sharpe_per_sample": "-0.410000000000000000",
-    "sharpe_per_sample_reason": null
+    "sharpe_per_sample_reason": null,
+    "net_pnl": "-2.400000000000000000",
+    "gross_pnl": "0.600000000000000000"
   },
   "execution": {
     "fill_count": 5,

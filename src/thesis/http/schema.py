@@ -87,19 +87,24 @@ def enrich_schema(schema: dict[str, Any]) -> dict[str, Any]:
         ]
     }
     metadata = {
-        "allOf": [
-            metadata,
+        "anyOf": [
             {
-                "properties": {
-                    "sessionMessage": {
-                        "$ref": "#/components/schemas/SessionMessageWire"
+                "allOf": [
+                    {"anyOf": metadata["anyOf"][:-1]},
+                    {
+                        "properties": {
+                            "sessionMessage": {
+                                "$ref": "#/components/schemas/SessionMessageWire"
+                            },
+                            "datums": {
+                                "type": "array",
+                                "items": {"$ref": "#/components/schemas/DatumWire"},
+                            },
+                        }
                     },
-                    "datums": {
-                        "type": "array",
-                        "items": {"$ref": "#/components/schemas/DatumWire"},
-                    },
-                }
+                ]
             },
+            {"type": "null"},
         ]
     }
     for name in (

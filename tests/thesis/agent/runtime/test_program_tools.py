@@ -12,7 +12,7 @@ from thesis.agent.runtime.program_tools import (
 from thesis.agent.runtime.session import RegisteredTool
 from thesis.experiments.mandate import (
     DataWindowPolicy,
-    default_launch_partition,
+    LaunchPartition,
     derive_mandate,
 )
 from thesis.workspaces.programs import ProgramPublicationError, WorkspacePrograms
@@ -92,6 +92,9 @@ def test_catalog_and_no_attribution_or_inline_execution_source() -> None:
                 "program_id",
                 "parameters",
                 "block_size",
+                "mode",
+                "offset",
+                "chunk_size",
                 "seeds",
                 "label",
             }
@@ -196,6 +199,7 @@ def test_all_operations_dispatch_with_trusted_workspace() -> None:
             args.update(
                 {
                     "parameters": {"lookback": 20},
+                    "mode": "block_permutation",
                     "block_size": 5,
                     "seeds": [1, 2],
                     "label": "seeds",
@@ -365,12 +369,11 @@ def test_run_backtest_batch_schema_bounds_and_dispatch() -> None:
     properties = cast(Mapping[str, object], schema["properties"])
     assignments = cast(Mapping[str, object], properties["assignments"])
     assert schema["required"] == ["program_id", "assignments"]
-    assert assignments["minItems"] == 1 and assignments["maxItems"] == 16
+    assert assignments["minItems"] == 1 and "maxItems" not in assignments
     count = len(service.calls)
     for invalid in (
         {"program_id": "alpha"},
         {"program_id": "alpha", "assignments": []},
-        {"program_id": "alpha", "assignments": [{}] * 17},
         {"program_id": "alpha", "assignments": "nope"},
         {"program_id": "alpha", "assignments": [{"lookback": 20}], "label": ""},
         {"program_id": "alpha", "assignments": [{"lookback": 20}], "extra": True},
@@ -404,18 +407,21 @@ def test_run_null_batch_schema_bounds_and_dispatch() -> None:
     schema = cast(Mapping[str, object], function["parameters"])
     properties = cast(Mapping[str, object], schema["properties"])
     assert schema["additionalProperties"] is False
-    assert schema["required"] == ["program_id", "block_size", "seeds"]
+    assert schema["required"] == ["program_id", "mode", "block_size", "seeds"]
     assert set(properties) == {
         "program_id",
         "parameters",
         "block_size",
+        "mode",
+        "offset",
+        "chunk_size",
         "seeds",
         "label",
     }
     block_size = cast(Mapping[str, object], properties["block_size"])
     assert block_size == {"type": "integer", "minimum": 1, "maximum": 10000}
     seeds = cast(Mapping[str, object], properties["seeds"])
-    assert seeds["minItems"] == 1 and seeds["maxItems"] == 16
+    assert seeds["minItems"] == 1 and "maxItems" not in seeds
     assert seeds["uniqueItems"] is True
     assert seeds["items"] == {"type": "integer", "minimum": 0}
     count = len(service.calls)
@@ -423,15 +429,48 @@ def test_run_null_batch_schema_bounds_and_dispatch() -> None:
         {"program_id": "alpha"},
         {"program_id": "alpha", "block_size": 5},
         {"program_id": "alpha", "seeds": [1]},
-        {"program_id": "alpha", "block_size": 5, "seeds": []},
-        {"program_id": "alpha", "block_size": 5, "seeds": [1] * 17},
-        {"program_id": "alpha", "block_size": 5, "seeds": "nope"},
-        {"program_id": "alpha", "block_size": 5, "seeds": [1.5]},
-        {"program_id": "alpha", "block_size": "5", "seeds": [1]},
-        {"program_id": "alpha", "block_size": 5, "seeds": [1], "extra": True},
-        {"program_id": "alpha", "block_size": 5, "seeds": [1], "label": ""},
         {
             "program_id": "alpha",
+            "mode": "block_permutation",
+            "block_size": 5,
+            "seeds": [],
+        },
+        {
+            "program_id": "alpha",
+            "mode": "block_permutation",
+            "block_size": 5,
+            "seeds": [1] * 17,
+        },
+        {
+            "program_id": "alpha",
+            "mode": "block_permutation",
+            "block_size": 5,
+            "seeds": "nope",
+        },
+        {
+            "program_id": "alpha",
+            "mode": "block_permutation",
+            "block_size": 5,
+            "seeds": [1.5],
+        },
+        {"program_id": "alpha", "block_size": "5", "seeds": [1]},
+        {
+            "program_id": "alpha",
+            "mode": "block_permutation",
+            "block_size": 5,
+            "seeds": [1],
+            "extra": True,
+        },
+        {
+            "program_id": "alpha",
+            "mode": "block_permutation",
+            "block_size": 5,
+            "seeds": [1],
+            "label": "",
+        },
+        {
+            "program_id": "alpha",
+            "mode": "block_permutation",
             "block_size": 5,
             "seeds": [1],
             "parameters": ["not", "an", "object"],
@@ -443,6 +482,7 @@ def test_run_null_batch_schema_bounds_and_dispatch() -> None:
         {
             "program_id": "alpha",
             "parameters": {"lookback": 20},
+            "mode": "block_permutation",
             "block_size": 5,
             "seeds": [1, 2],
             "label": "seeds",
@@ -452,17 +492,30 @@ def test_run_null_batch_schema_bounds_and_dispatch() -> None:
     assert positional == ("trusted-workspace", "strategy", "alpha")
     assert kwargs == {
         "parameters": {"lookback": 20},
+        "mode": "block_permutation",
         "block_size": 5,
         "seeds": [1, 2],
+        "offset": 0,
+        "chunk_size": 64,
         "label": "seeds",
         "data_window": None,
         "retain": None,
     }
-    assert null_batch.handler({"program_id": "alpha", "block_size": 5, "seeds": [1]}).ok
+    assert null_batch.handler(
+        {
+            "program_id": "alpha",
+            "mode": "block_permutation",
+            "block_size": 5,
+            "seeds": [1],
+        }
+    ).ok
     assert service.calls[-1][1] == {
         "parameters": None,
+        "mode": "block_permutation",
         "block_size": 5,
         "seeds": [1],
+        "offset": 0,
+        "chunk_size": 64,
         "label": None,
         "data_window": None,
         "retain": None,
@@ -473,7 +526,7 @@ def _launch_request(cutoff: datetime) -> dict[str, object]:
     """The launch request persisted for a cutoff with the default partition."""
     return {
         "createdAt": cutoff.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "partition": default_launch_partition().as_dict(),
+        "partition": LaunchPartition(1825, 90, 1, 0).as_dict(),
     }
 
 
@@ -514,15 +567,25 @@ def test_execution_handlers_forward_the_research_mandate_policy() -> None:
     assert kwargs == {"label": None, "data_window": policy, "retain": None}
     assert (
         tools["run_null_batch"]
-        .handler({"program_id": "alpha", "block_size": 5, "seeds": [1, 2]})
+        .handler(
+            {
+                "program_id": "alpha",
+                "mode": "block_permutation",
+                "block_size": 5,
+                "seeds": [1, 2],
+            }
+        )
         .ok
     )
     positional, kwargs = service.calls[-1]
     assert positional == ("trusted-workspace", "strategy", "alpha")
     assert kwargs == {
         "parameters": None,
+        "mode": "block_permutation",
         "block_size": 5,
         "seeds": [1, 2],
+        "offset": 0,
+        "chunk_size": 64,
         "label": None,
         "data_window": policy,
         "retain": None,

@@ -499,7 +499,7 @@ export function derivePhaseSteps(
 		for (const node of list) {
 			if (
 				!isWorkflowNodeRole(node.node.role) &&
-				node.node.phase.length > 0 &&
+				typeof node.node.phase === 'string' && node.node.phase.length > 0 &&
 				(!executionId || node.node.workflowExecutionId === executionId)
 			) {
 				const spawn = node.events.find((event) => event.eventType === 'sub_agent.spawned');

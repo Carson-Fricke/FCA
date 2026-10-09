@@ -1,21 +1,4 @@
-"""Compose the Thesis workflow runtime from injected ports.
-
-This module is the composition root for the Thesis workflow verticals.  It
-builds the policy-driven :class:`~thesis.agent.router.ModelRouter` from role
-policies, model profiles, and a :class:`~thesis.agent.skills.SkillRegistry`,
-and builds a :class:`~thesis.workflows.backtests.HarnessBacktestRunner` over
-the published :class:`~thesis.integrations.harness.ThesisHarnessClient`
-boundary. The resulting :class:`WorkflowRuntime` holder constructs and executes
-the falsification-first hypothesis-development workflow against those composed
-ports.
-
-Composition stays entirely behind injected boundaries: callers provide the
-provider registry, the policy/profile/skill registries, and either a harness
-adapter or a replacement :class:`~thesis.workflows.backtests.BacktestRunner`.
-Tests inject a fake model provider and a fake backtest runner; production
-injects the configured provider and the harness transport.  No HTTP or CLI
-code is imported here; the runtime depends only on inward Thesis packages.
-"""
+"""Compose the workflow runtime over explicit model and execution ports."""
 
 from __future__ import annotations
 
@@ -45,21 +28,15 @@ from thesis.agent.runtime.program_tools import ContextJobRetention
 from thesis.agent.runtime.session import ToolExecution
 from thesis.agent.runtime.store import SubAgentStore
 from thesis.agent.skills import SkillRegistry
-from thesis.agent.subagents import SubagentContextFactory
 from thesis.chat.contracts import SubAgentRecord
 from thesis.chat.service import ChatService
 from thesis.experiments.mandate import DataWindowPolicy
-from thesis.integrations.harness import HarnessClientPort, ThesisHarnessClient
 from thesis.knowledge.service import KnowledgeScope, validate_scope
-from thesis.persistence.journal import CommandJournal
 from thesis.research.hypothesis import HypothesisStore
 from thesis.research.models import ResearchModelStore
 from thesis.strategies import WorkspaceStrategyArtifacts
-from thesis.strategies.validation import StrategySandboxValidator
 from thesis.workflows.backtests import (
-    BacktestMode,
     BacktestRunner,
-    HarnessBacktestRunner,
 )
 from thesis.workflows.core.execution_store import ExecutionStore
 from thesis.workflows.core.workflow import Detach, Workflow
@@ -133,7 +110,6 @@ def bind_workflow_session_services(
     chat: ChatService,
     store: SubAgentStore,
     activity: RuntimeToolActivity,
-    strategy_artifacts: WorkspaceStrategyArtifacts | None = None,
     programs: ProgramSnapshots | None = None,
     knowledge_scope: KnowledgeScope = "both",
 ) -> WorkflowSessionServices:
@@ -143,7 +119,6 @@ def bind_workflow_session_services(
             chat=chat,
             store=store,
             activity=activity,
-            strategy_artifacts=strategy_artifacts,
             programs=programs,
         )
     from thesis.workflows.registry.hypothesis_development.session_services import (
@@ -155,7 +130,6 @@ def bind_workflow_session_services(
         store=store,
         harness_tools=None,
         activity=activity,
-        strategy_artifacts=strategy_artifacts,
         programs=programs,
         knowledge_scope=knowledge_scope,
     )
@@ -213,42 +187,20 @@ def build_model_router(
     )
 
 
-def _harness_runner(
-    harness: ThesisHarnessClient | HarnessClientPort | None,
-    *,
-    mode: BacktestMode,
-    metadata: Mapping[str, object] | None,
-) -> HarnessBacktestRunner:
-    if harness is None:
-        raise WorkflowRuntimeError(
-            "provide a harness client or an injected backtest runner"
-        )
-    client = (
-        harness
-        if isinstance(harness, ThesisHarnessClient)
-        else ThesisHarnessClient(harness)
-    )
-    return HarnessBacktestRunner(client, mode=mode, metadata=metadata)
-
-
 def build_workflow_runtime(
     *,
     role_policies: Mapping[Role, RolePolicy],
     model_profiles: Mapping[str, ModelProfile],
     providers: Mapping[str, ModelProvider],
     skills: SkillRegistry,
-    harness: ThesisHarnessClient | HarnessClientPort | None = None,
     runner: BacktestRunner | None = None,
     harness_tools: HarnessToolProvider | None = None,
-    strategy_validator: StrategySandboxValidator | None = None,
     hypothesis_store: HypothesisStore | None = None,
     research_model_store: ResearchModelStore | None = None,
     research_runner: ResearchModelRunner | None = None,
     programs: ProgramSnapshots | None = None,
     bundle: PolicyBundle | None = None,
     bundle_hashes: Mapping[str, str] | None = None,
-    backtest_mode: BacktestMode = "local",
-    metadata: Mapping[str, object] | None = None,
     conversations: Conversations | None = None,
     execution_store: ExecutionStore | None = None,
     detach: Detach | None = None,
@@ -259,9 +211,7 @@ def build_workflow_runtime(
 ) -> WorkflowRuntime:
     """Compose the model router and backtest runner into one runtime holder.
 
-    A :class:`HarnessBacktestRunner` is built over the injected harness client
-    unless an explicit ``runner`` is supplied, so tests can replace the harness
-    with a fake while exercising the same runtime surface.  A
+    Callers provide an execution runner. A
     :class:`~thesis.agent.harness_tools.HarnessToolProvider` supplied here is
     held for composition consumers; tool dispatch happens through the unified
     session registry.
@@ -297,11 +247,9 @@ def build_workflow_runtime(
         clock=clock,
         invocation_id_factory=_invocation_id,
     )
-    resolved_runner: BacktestRunner = (
-        runner
-        if runner is not None
-        else _harness_runner(harness, mode=backtest_mode, metadata=metadata)
-    )
+    if runner is None:
+        raise WorkflowRuntimeError("provide a backtest runner")
+    resolved_runner = runner
     resolved_research_runner = (
         research_runner
         if research_runner is not None
@@ -316,7 +264,6 @@ def build_workflow_runtime(
         research_runner=resolved_research_runner,
         programs=programs,
         harness_tools=harness_tools,
-        validator=strategy_validator,
         hypothesis_store=hypothesis_store,
         conversations=conversations,
         execution_store=execution_store,
@@ -346,7 +293,6 @@ class WorkflowRuntime:
         research_runner: ResearchModelRunner | None = None,
         programs: ProgramSnapshots | None = None,
         harness_tools: HarnessToolProvider | None = None,
-        validator: StrategySandboxValidator | None = None,
         hypothesis_store: HypothesisStore | None = None,
         conversations: Conversations | None = None,
         execution_store: ExecutionStore | None = None,
@@ -377,7 +323,6 @@ class WorkflowRuntime:
         self._research_runner = resolved_research_runner
         self._programs = programs
         self._harness_tools = harness_tools
-        self._validator = validator
         self._hypothesis_store = hypothesis_store
         self._conversations = conversations
         self._execution_store = execution_store
@@ -424,11 +369,7 @@ class WorkflowRuntime:
         self,
         *,
         chat: ChatService,
-        validator: StrategySandboxValidator | None = None,
         hypothesis_store: HypothesisStore | None = None,
-        subagent_factory: SubagentContextFactory | None = None,
-        journal: CommandJournal | None = None,
-        research_role: Role = "research",
         experiment_id: str | None = None,
     ) -> Workflow[
         HypothesisDevelopmentRequest,
@@ -436,26 +377,10 @@ class WorkflowRuntime:
         HypothesisDevelopmentOutcome,
     ]:
         """Reuse the default workflow per chat; explicit overrides build separately."""
-        if (
-            any(
-                value is not None
-                for value in (
-                    validator,
-                    hypothesis_store,
-                    subagent_factory,
-                    journal,
-                    experiment_id,
-                )
-            )
-            or research_role != "research"
-        ):
+        if hypothesis_store is not None or experiment_id is not None:
             return self._build_hypothesis_development(
                 chat=chat,
-                validator=validator,
                 hypothesis_store=hypothesis_store,
-                subagent_factory=subagent_factory,
-                journal=journal,
-                research_role=research_role,
                 experiment_id=experiment_id,
             )
         with self._workflow_lock:
@@ -469,7 +394,6 @@ class WorkflowRuntime:
         chat: ChatService,
         store: SubAgentStore,
         activity: RuntimeToolActivity,
-        strategy_artifacts: WorkspaceStrategyArtifacts | None = None,
         programs: ProgramSnapshots | None = None,
     ) -> WorkflowSessionServices:
         """Bind workflow-owned policy and completion services to conversation ports."""
@@ -483,7 +407,6 @@ class WorkflowRuntime:
             workflow=lambda: self.build_hypothesis_development(chat=chat),
             harness_tools=self._harness_tools,
             activity=activity,
-            strategy_artifacts=strategy_artifacts,
             programs=self._programs if programs is None else programs,
         )
 
@@ -491,11 +414,7 @@ class WorkflowRuntime:
         self,
         *,
         chat: ChatService,
-        validator: StrategySandboxValidator | None = None,
         hypothesis_store: HypothesisStore | None = None,
-        subagent_factory: SubagentContextFactory | None = None,
-        journal: CommandJournal | None = None,
-        research_role: Role = "research",
         experiment_id: str | None = None,
     ) -> Workflow[
         HypothesisDevelopmentRequest,
@@ -503,28 +422,17 @@ class WorkflowRuntime:
         HypothesisDevelopmentOutcome,
     ]:
         """Compose the falsification-first hypothesis-development workflow."""
-        resolved_validator = validator if validator is not None else self._validator
-        if resolved_validator is None:
-            raise WorkflowRuntimeError(
-                "provide a strategy sandbox validator to compose the "
-                "hypothesis-development workflow"
-            )
         resolved_store = (
             hypothesis_store if hypothesis_store is not None else self._hypothesis_store
         )
         return build_hypothesis_development_workflow(
             chat=chat,
-            router=self._router,
             runner=self._runner,
             research_runner=self._research_runner,
             programs=self._programs,
-            validator=resolved_validator,
             hypothesis_store=resolved_store,
-            subagent_factory=subagent_factory,
-            journal=journal,
             clock=self._clock,
             id_factory=self._id_factory,
-            research_role=research_role,
             experiment_id=experiment_id,
             conversations=self._conversations,
             execution_store=self._execution_store,

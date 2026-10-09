@@ -131,17 +131,18 @@ export interface ChatMessageWire {
 	conversation_id: string | null;
 	created_at: string;
 	created_by: string;
-	data: (
-		| (ExternalInput | ModelOutput | RuntimeTool | Delivery)
-		| {
+	data:
+		| ((
+				| (ExternalInput | ModelOutput | RuntimeTool | Delivery)
+				| {
+						[k: string]: unknown;
+				  }
+		  ) & {
+				datums?: DatumWire[];
+				sessionMessage?: SessionMessageWire;
 				[k: string]: unknown;
-		  }
-		| null
-	) & {
-		datums?: DatumWire[];
-		sessionMessage?: SessionMessageWire;
-		[k: string]: unknown;
-	};
+		  })
+		| null;
 	execution_id: string | null;
 	input_position: number;
 	intent_epoch: number;
@@ -390,17 +391,18 @@ export interface CreateMessageResponseWire {
 	conversation_id: string | null;
 	created_at: string;
 	created_by: string;
-	data: (
-		| (ExternalInput | ModelOutput | RuntimeTool | Delivery)
-		| {
+	data:
+		| ((
+				| (ExternalInput | ModelOutput | RuntimeTool | Delivery)
+				| {
+						[k: string]: unknown;
+				  }
+		  ) & {
+				datums?: DatumWire[];
+				sessionMessage?: SessionMessageWire;
 				[k: string]: unknown;
-		  }
-		| null
-	) & {
-		datums?: DatumWire[];
-		sessionMessage?: SessionMessageWire;
-		[k: string]: unknown;
-	};
+		  })
+		| null;
 	execution_id: string | null;
 	input_position: number;
 	intent_epoch: number;
@@ -517,17 +519,18 @@ export interface NodeInputReceiptWire {
 	conversation_id: string | null;
 	created_at: string;
 	created_by: string;
-	data: (
-		| (ExternalInput | ModelOutput | RuntimeTool | Delivery)
-		| {
+	data:
+		| ((
+				| (ExternalInput | ModelOutput | RuntimeTool | Delivery)
+				| {
+						[k: string]: unknown;
+				  }
+		  ) & {
+				datums?: DatumWire[];
+				sessionMessage?: SessionMessageWire;
 				[k: string]: unknown;
-		  }
-		| null
-	) & {
-		datums?: DatumWire[];
-		sessionMessage?: SessionMessageWire;
-		[k: string]: unknown;
-	};
+		  })
+		| null;
 	execution_id: string | null;
 	input_position: number;
 	intent_epoch: number;

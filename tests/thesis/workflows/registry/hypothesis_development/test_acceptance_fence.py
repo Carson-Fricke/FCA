@@ -36,6 +36,7 @@ from ._support import (
     _node_record,
     _null_test_envelope,
     _request,
+    _research_envelope,
     _variation_envelope,
 )
 
@@ -90,6 +91,7 @@ def test_every_edge_live_and_replay_use_declared_pipe_once(
         "discovery": _discovery_envelope(),
         "hypothesis": _hypothesis_envelope(),
         "trials": [],
+        "research": _research_envelope(),
         "verdict": {"outcome": "refuted", "reason": "accepted"},
         "strategy": {
             "workspaceId": WORKSPACE,

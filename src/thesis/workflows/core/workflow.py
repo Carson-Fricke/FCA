@@ -186,7 +186,7 @@ class WorkflowDoctrine[RequestT: WorkflowRequest, StateT: WorkflowState, Outcome
     activity: Mapping[str, str]
     default_activity: str
     mcp_tools: Mapping[str, tuple[str, ...]]
-    request_of: Callable[[WorkflowExecution, str], RequestT]
+    request_of: Callable[[WorkflowExecution, str, Mapping[str, object]], RequestT]
     context_of: Callable[
         [Workflow[RequestT, StateT, OutcomeT], RequestT], WorkflowContext
     ]
@@ -197,7 +197,7 @@ class WorkflowDoctrine[RequestT: WorkflowRequest, StateT: WorkflowState, Outcome
         [Workflow[RequestT, StateT, OutcomeT], StateT, object],
         Mapping[str, object] | None,
     ]
-    validate_launch: Callable[[str, str | None, str | None], None]
+    validate_launch: Callable[[str, str | None, str | None, Mapping[str, object]], None]
     reduce_transition: Callable[
         [StateT, StoreTransition, Mapping[tuple[str, str], Callable[[StateT], StateT]]],
         StateT,
@@ -436,6 +436,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         *,
         actor_id: str,
         ideas: str,
+        launch_options: Mapping[str, object] | None = None,
         trigger_message_id: str | None = None,
         investigation_id: str | None = None,
         anchor_sub_agent_id: str | None = None,
@@ -448,7 +449,10 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         workflow node → phase agents.
         """
         doctrine, chat = self._require_doctrine_chat()
-        doctrine.validate_launch(ideas, trigger_message_id, anchor_sub_agent_id)
+        options = dict(launch_options or {})
+        doctrine.validate_launch(
+            ideas, trigger_message_id, anchor_sub_agent_id, options
+        )
         execution = chat.launch_workflow(
             workspace_id,
             chat_id,
@@ -457,7 +461,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             message_id=trigger_message_id,
             investigation_id=investigation_id,
         )
-        request = doctrine.request_of(execution, ideas)
+        request = doctrine.request_of(execution, ideas, options)
         self._record_launch(request)
         self._create_workflow_node(request, anchor_sub_agent_id)
         try:
@@ -477,6 +481,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         *,
         ideas: str,
         investigation_id: str | None = None,
+        launch_options: Mapping[str, object] | None = None,
     ) -> Mapping[str, object]:
         """Launch one execution at ``context``'s anchor and return its handle."""
         request = self.launch(
@@ -484,6 +489,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             context.chat_id,
             actor_id=context.actor_id,
             ideas=ideas,
+            launch_options=launch_options,
             trigger_message_id=context.trigger_message_id,
             investigation_id=investigation_id,
             anchor_sub_agent_id=context.anchor_sub_agent_id,

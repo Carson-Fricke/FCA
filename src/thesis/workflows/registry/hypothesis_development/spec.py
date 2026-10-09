@@ -20,19 +20,15 @@ from functools import cache
 from types import MappingProxyType
 from typing import Any, Literal, cast
 
-from thesis.agent.router import ModelRouter, Role
 from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.runtime.schema import render_violations, validate_arguments
-from thesis.agent.subagents import SubagentContextFactory
 from thesis.chat.service import ChatService
 from thesis.experiments.mandate import (
     ResearchMandate,
     derive_launch_mandate,
     mandate_section,
 )
-from thesis.persistence.journal import CommandJournal
 from thesis.research.hypothesis import HypothesisStore, InMemoryHypothesisStore
-from thesis.strategies.validation import StrategySandboxValidator
 from thesis.workflows.backtests import BacktestRunner
 from thesis.workflows.core.builder import WorkflowBuilder
 from thesis.workflows.core.execution_store import ExecutionStore
@@ -1248,8 +1244,8 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
             },
             "coding",
             "Thesis null-testing orchestrator",
-            "Submit one block-permutation null run per seed for the selected candidate and record the observed statistic, exceedance count, and p-value honestly.",
-            "Running the block-permutation null batch.",
+            "Freeze a supported permutation method and sufficient seeds, submit bounded chunks, and record the observed statistic, conservative exceedance count, and conditional p-value honestly.",
+            "Running the declared permutation null experiment.",
             "nullTesting",
             _null_testing_validator,
             _null_testing_seed,
@@ -1319,9 +1315,7 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
         ),
     )
     names = [item.spec.phase for item in declarations]
-    if len(set(names)) != len(names) or set(names) != {
-        item.value for item in phase if item is not phase.HYPOTHESIS_CREATION
-    }:
+    if len(set(names)) != len(names) or set(names) != {item.value for item in phase}:
         raise WorkflowError(
             "phase declarations must cover every live phase exactly once"
         )
@@ -1349,19 +1343,13 @@ def build_hypothesis_development_spec() -> WorkflowSpec[
 def build_hypothesis_development_workflow(
     *,
     chat: ChatService | None = None,
-    router: ModelRouter | None = None,
     runner: BacktestRunner | None = None,
     research_runner: ResearchModelRunner | None = None,
     programs: ProgramSnapshots | None = None,
-    validator: StrategySandboxValidator | None = None,
     hypothesis_store: HypothesisStore | None = None,
-    subagent_factory: SubagentContextFactory | None = None,
-    journal: CommandJournal | None = None,
     clock: Callable[[], datetime] = _utc_now,
     id_factory: Callable[[str], str] = _new_id,
-    research_role: Role = "research",
     experiment_id: str | None = None,
-    knowledge_cutoff: datetime | None = None,
     subagent_mcp_tools: Mapping[str, tuple[str, ...]] | None = None,
     conversations: Conversations | None = None,
     execution_store: ExecutionStore | None = None,
@@ -1377,7 +1365,6 @@ def build_hypothesis_development_workflow(
     The same construction path serves the registered specification (no ports)
     and the production runtime (all ports, services, and doctrine bound).
     """
-    del subagent_factory, knowledge_cutoff
     from .doctrine import hypothesis_development_doctrine
     from .phases import workflow_definition
 
@@ -1398,13 +1385,8 @@ def build_hypothesis_development_workflow(
         store=(
             InMemoryHypothesisStore() if hypothesis_store is None else hypothesis_store
         ),
-        router=router,
-        runner=runner,
         research_runner=resolved_research_runner,
         programs=programs,
-        validator=validator,
-        journal=journal,
-        research_role=research_role,
         experiment_id=experiment_id,
         mcp_tools=tools,
         phase_mcp_tools={item.spec.phase: item.mcp_tools for item in declarations},

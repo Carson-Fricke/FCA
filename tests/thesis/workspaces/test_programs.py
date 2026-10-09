@@ -12,7 +12,7 @@ from tests.thesis.workspaces._support import MemoryGitFactory, Repositories
 
 from thesis.experiments.mandate import (
     DataWindowPolicy,
-    default_launch_partition,
+    LaunchPartition,
     derive_mandate,
     rfc3339,
 )
@@ -21,9 +21,7 @@ from thesis.workspaces.local import LocalWorkspaceProvider
 from thesis.workspaces.manifest import WorkspaceManifest, load_workspace_manifest
 from thesis.workspaces.programs import (
     INDICATOR_TEMPLATE,
-    MAX_BATCH_POINTS,
     MAX_NULL_BLOCK_SIZE,
-    MAX_NULL_SEEDS,
     PROGRAM_TEMPLATES,
     STUDY_TEMPLATE,
     ProgramArtifactError,
@@ -448,33 +446,6 @@ def test_indicator_wrapper_transitive_dependencies_and_cycles(
         )
 
 
-def test_sdk_templates_match_actual_source_signatures(
-    programs: Programs,
-) -> None:
-    service = programs[0]
-    consumer = (service.sdk_root / "src/consumer.rs").read_text(encoding="utf-8")
-    program = (service.sdk_root / "src/program.rs").read_text(encoding="utf-8")
-    indicator = (service.sdk_root / "src/indicator.rs").read_text(encoding="utf-8")
-    assert "fn subscriptions(&self) -> Vec<Subscription>" in consumer
-    assert (
-        "fn on_bar(&mut self, _frame: &BarFrame, _context: &mut Self::Context)"
-        in consumer
-    )
-    assert "StudyProgram: MarketConsumer<Context = ObservationContext>" in program
-    assert "StrategyProgram: MarketConsumer<Context = OrderSink>" in program
-    assert "fn publish(&mut self, name: &str, value: f64)" in program
-    assert "fn value(&self) -> Option<Decimal>" in indicator
-    for kind, template in PROGRAM_TEMPLATES.items():
-        reference = service.read_sdk_reference(kind)
-        assert reference["source"] == template
-        assert reference["sdkVersion"] == "0.1.0" and reference["sdkAbiVersion"] == 4
-    assert service.read_sdk_reference("consumer", start_line=19, end_line=22)[
-        "source"
-    ] == "".join(consumer.splitlines(keepends=True)[18:22])
-    with pytest.raises(ProgramArtifactError):
-        service.read_sdk_reference("../program")
-
-
 def test_missing_harness_fails_closed(
     programs: Programs,
 ) -> None:
@@ -715,12 +686,6 @@ def test_reads_bound_characters_not_only_lines(
     assert result["source"] == source[:100] and result["truncated"] is True
     reference = service.read_sdk_reference("program", max_chars=100)
     assert len(cast(str, reference["source"])) == 100 and reference["truncated"] is True
-    assert service.read_sdk_reference("indicator_api")["source"] == (
-        service.sdk_root / "src/indicator.rs"
-    ).read_text(encoding="utf-8")
-    decimal = service.read_sdk_reference("decimal", start_line=260, end_line=300)
-    assert "pub fn to_f64" in cast(str, decimal["source"])
-    assert "to_f64_checked" in cast(str, decimal["source"])
 
 
 def test_configuration_diagnostics_are_actionable(
@@ -1970,7 +1935,6 @@ def test_run_batch_validates_every_point_before_any_submission(
     programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
 ) -> None:
     service, _, harness = programs
-    assert MAX_BATCH_POINTS == 16
     _author_strategy(service)
     service.validate("workspace-one", "strategy", "alpha")
     count = len(harness.calls)
@@ -1982,8 +1946,7 @@ def test_run_batch_validates_every_point_before_any_submission(
             [{"lookback": 10, "mode": "fast"}, {"mode": "fast", "lookback": 10}],
             "duplicat",
         ),
-        ([{"lookback": 10}] * (MAX_BATCH_POINTS + 1), "1 to 16"),
-        ([], "1 to 16"),
+        ([], "at least one"),
         ("nope", "array"),
         ([{"lookback": 10}, "nope"], "assignment object"),
         ([{"lookback": 10}, {"lookback": 0}], "at least"),
@@ -2069,7 +2032,7 @@ def _launch_request(cutoff: datetime) -> dict[str, object]:
     """The launch request persisted for a cutoff with the default partition."""
     return {
         "createdAt": cutoff.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "partition": default_launch_partition().as_dict(),
+        "partition": LaunchPartition(1825, 90, 1, 0).as_dict(),
     }
 
 
@@ -2125,7 +2088,9 @@ def test_run_batch_fails_fast_before_any_submission_when_window_crosses(
     submitted = len(_run_points(harness))
     assert submitted == 2
     rejected = _policy(datetime(2024, 1, 1, tzinfo=UTC))
-    with pytest.raises(ProgramArtifactError, match="outside the allowed development window"):
+    with pytest.raises(
+        ProgramArtifactError, match="outside the allowed development window"
+    ):
         service.run_batch(
             "workspace-one",
             "strategy",
@@ -2345,7 +2310,7 @@ def test_run_null_batch_validates_before_any_submission(
     programs: tuple[WorkspacePrograms, LocalWorkspaceProvider, Harness],
 ) -> None:
     service, _, harness = programs
-    assert MAX_NULL_SEEDS == 16 and MAX_NULL_BLOCK_SIZE == 10_000
+    assert MAX_NULL_BLOCK_SIZE == 10_000
     _author_strategy(service)
     service.validate("workspace-one", "strategy", "alpha")
     count = len(harness.calls)
@@ -2354,8 +2319,7 @@ def test_run_null_batch_validates_before_any_submission(
         (10001, [1], "1 to 10000"),
         (True, [1], "1 to 10000"),
         (1.5, [1], "1 to 10000"),
-        (5, [], "1 to 16"),
-        (5, list(range(MAX_NULL_SEEDS + 1)), "1 to 16"),
+        (5, [], "at least one"),
         (5, [1, 1], "unique"),
         (5, [-1], "at least 0"),
         (5, [1.5], "integer"),
@@ -2439,7 +2403,9 @@ def test_run_null_batch_fails_fast_before_any_submission_when_window_crosses(
     service.validate("workspace-one", "strategy", "alpha")
     rejected = _policy(datetime(2024, 1, 1, tzinfo=UTC))
     count = len(harness.calls)
-    with pytest.raises(ProgramArtifactError, match="outside the allowed development window"):
+    with pytest.raises(
+        ProgramArtifactError, match="outside the allowed development window"
+    ):
         service.run_null_batch(
             "workspace-one",
             "strategy",
@@ -2460,3 +2426,45 @@ def test_run_null_batch_fails_fast_before_any_submission_when_window_crosses(
     )
     assert result["ok"] is True
     assert len(_run_points(harness)) == 2
+
+
+def test_large_null_design_is_submitted_in_explicit_bounded_chunks(
+    programs: Programs,
+) -> None:
+    service, _, harness = programs
+    _author_strategy(service)
+    service.validate("workspace-one", "strategy", "alpha")
+    seeds = list(range(70))
+    first = service.run_null_batch(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        block_size=1,
+        seeds=seeds,
+        mode="permutation",
+        chunk_size=40,
+    )
+    second = service.run_null_batch(
+        "workspace-one",
+        "strategy",
+        "alpha",
+        block_size=1,
+        seeds=seeds,
+        mode="permutation",
+        offset=40,
+        chunk_size=40,
+    )
+    assert first["batchId"] == second["batchId"]
+    assert first["completedSubmission"] is False
+    assert first["nextOffset"] == 40
+    assert second["completedSubmission"] is True
+    assert second["nextOffset"] == 70
+    assert len(_run_points(harness)) == 70
+    points = cast(list[dict[str, object]], first["points"]) + cast(
+        list[dict[str, object]], second["points"]
+    )
+    assert [point["seed"] for point in points] == seeds
+    assert len({point["jobId"] for point in points}) == 70
+    assert all(
+        _null_config(call)["mode"] == "permutation" for call in _run_points(harness)
+    )

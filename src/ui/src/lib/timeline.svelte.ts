@@ -5,6 +5,7 @@ import { TimelineStream } from './sse';
 import { fixtureTimeline } from './fixture-timeline';
 import type { ChatMessage, ExecutionEvent, TimelineItem, WorkflowExecutionRecord } from './types';
 import { deriveWorkflowLive, hasActiveWorkflow } from './workflow-live';
+import { toChatMessage } from './transcript';
 
 export class TimelineController {
 	items = $state.raw<TimelineItem[]>([]);
@@ -32,7 +33,7 @@ export class TimelineController {
 				? String(item.payload.data?.subAgentId ?? 'root')
 				: item.kind === 'event' ? String(item.payload.payload.subAgentId ?? 'root') : 'root');
 			if (item.kind === 'message') {
-				const message = { ...item.payload, seq: item.seq, threadId: item.threadId };
+				const message = { ...toChatMessage(item.payload), seq: item.seq, threadId: item.threadId };
 				messages.push(message);
 				const bucket = messagesByThread.get(thread) ?? [];
 				bucket.push(message);

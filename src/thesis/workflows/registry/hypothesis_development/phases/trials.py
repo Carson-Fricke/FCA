@@ -27,7 +27,6 @@ from ..composers.hypothesis import (
     _compose_research_model,
     _compose_universe,
     _optional_compose_text,
-    decode_persisted_model,
 )
 from ..contracts.creation import HypothesisDevelopmentRequest
 from ..contracts.evidence import (
@@ -216,14 +215,10 @@ def _research_evidence(
     )
 
 
-def _draft_from_contract(
-    payload: Mapping[str, object], *, persisted: bool = False
-) -> HypothesisDraft:
+def _draft_from_contract(payload: Mapping[str, object]) -> HypothesisDraft:
     """Compose the typed hypothesis draft from the accepted contract payload."""
     try:
-        model = (decode_persisted_model if persisted else _compose_research_model)(
-            payload.get("model")
-        )
+        model = _compose_research_model(payload.get("model"))
         return HypothesisDraft(
             claim=_required_text(payload, "claim"),
             disagreement=_required_text(payload, "disagreement"),
@@ -233,7 +228,7 @@ def _draft_from_contract(
             horizon=_optional_compose_text(
                 payload, "horizon", _DEFAULT_HORIZON, max_length=4_096
             ),
-            universe=_compose_universe(payload.get("universe"), model),
+            universe=_compose_universe(payload.get("universe")),
             falsifiers=_compose_falsifiers(payload.get("falsifiers")),
             model=model,
             sizing=None,

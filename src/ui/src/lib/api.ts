@@ -23,6 +23,7 @@ import { fixtures } from './fixtures';
 import { fetchJson, ThesisApiError } from './transport';
 import { fixtureTimeline } from './fixture-timeline';
 import { decodeWire } from './wire';
+import { toChatMessage } from './transcript';
 import type { TimelinePageWire, CreateMessageResponseWire, SubAgentNodeWire, ChatThreadWire, NodeInputReceiptWire } from './generated';
 export { ThesisApiError } from './transport';
 import type {
@@ -342,7 +343,7 @@ const store: {
 	widgets: itemsOf(fixtures.widgets),
 	screeners: itemsOf(fixtures.screeners),
 	screenerResults: itemsOf(fixtures.screenerResults),
-	messages: itemsOf(fixtures.chatMessages),
+	messages: Object.fromEntries(Object.entries(itemsOf(fixtures.chatMessages)).map(([id, messages]) => [id, messages.map(toChatMessage)])),
 	nextId: 1
 };
 
@@ -716,7 +717,7 @@ export function postMessage(
 function messageResult(raw: CreateMessageResponseWire): PostMessageResult {
 	const { steering, ...message } = raw;
 	return {
-		message,
+		message: toChatMessage(message),
 		// The API returns the persisted message directly and, for a steering
 		// message, nests the percolation under `steering`; normalize it to the
 		// `PostMessageResult` shape the components consume.
@@ -861,26 +862,7 @@ export function postNodeMessage(
 
 function nodeMessage(receipt: NodeInputReceiptWire): ChatMessage {
 	const { subAgentId, operatorPolicy, ...message } = receipt;
-	return { ...message, kind: 'sub_agent', data: { ...(message.data ?? {}), subAgentId } };
-}
-
-/** Fetch one workflow execution record by its execution id. */
-export function getWorkflowExecution(
-	workspaceId: string,
-	executionId: string
-): Promise<WorkflowExecutionRecord | null> {
-	if (fixtureMode) {
-		return wait(5).then(() => {
-			const found = Object.values(fixtures.executions).find(
-				(record) => record.execution_id === executionId
-			);
-			return found ? decodeWire('WorkflowExecutionWire', plain(found), 'fixture/execution') : null;
-		});
-	}
-	return apiFetchOptional<unknown>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/executions/${encodeURIComponent(executionId)}`,
-		null
-	).then((raw) => raw === null ? null : decodeWire('WorkflowExecutionWire', raw, `/executions/${executionId}`));
+	return { ...toChatMessage(message), kind: 'sub_agent', data: { ...(message.data ?? {}), subAgentId } };
 }
 
 export function listStrategies(workspaceId: string): Promise<Strategy[]> {

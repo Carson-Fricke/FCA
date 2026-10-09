@@ -812,7 +812,6 @@ def serving_app_from_environment() -> FastAPI:
         execution_store=(open_execution_store() if harness_tools is not None else None),
         detach=daemon_thread,
         workspace_repositories=repositories,
-        strategy_artifacts=workspace_data.strategy_artifacts,
     )
     return create_app(
         bearer_token=bearer_token,

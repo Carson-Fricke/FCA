@@ -26,14 +26,12 @@ from .contracts import (
 from .errors import (
     FalsificationComposeError,
     HypothesisDevelopmentIntakeError,
-    InvalidPhaseTransition,
     WorkflowError,
 )
 from .phases import (
     HypothesisDevelopmentPhase,
     PhaseTransition,
     phase_from_value,
-    transition_phase,
     workflow_definition,
 )
 from .piping import (
@@ -86,7 +84,6 @@ __all__ = [
     "HypothesisDevelopmentServices",
     "HypothesisDevelopmentState",
     "HypothesisDraft",
-    "InvalidPhaseTransition",
     "PhaseTransition",
     "PlaceboControl",
     "RcaDiagnosis",
@@ -105,5 +102,4 @@ __all__ = [
     "reset_discovery",
     "reset_premise",
     "services_of",
-    "transition_phase",
 ]

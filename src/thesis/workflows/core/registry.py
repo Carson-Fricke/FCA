@@ -40,6 +40,7 @@ class WorkflowExecute(Protocol):
         *,
         ideas: str,
         investigation_id: str | None = None,
+        launch_options: Mapping[str, object] | None = None,
     ) -> Mapping[str, object]:
         """Launch the workflow at ``context``'s anchor and return its handle."""
 

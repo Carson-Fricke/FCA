@@ -226,153 +226,6 @@ class HarnessToolResult:
         }
 
 
-@dataclass(frozen=True, slots=True)
-class RunBacktestArgs:
-    """Typed arguments for ``run_backtest``."""
-
-    config_path: str
-    workspace: str | None = None
-    job_id: str | None = None
-
-    def __post_init__(self) -> None:
-        _required_text(self.config_path, "config_path")
-        if self.workspace is not None:
-            _required_text(self.workspace, "workspace")
-        if self.job_id is not None:
-            _required_text(self.job_id, "job_id")
-
-    def to_arguments(self) -> dict[str, object]:
-        """Return the MCP ``tools/call`` arguments for this request."""
-        arguments: dict[str, object] = {"config_path": self.config_path}
-        if self.workspace is not None:
-            arguments["workspace"] = self.workspace
-        if self.job_id is not None:
-            arguments["job_id"] = self.job_id
-        return arguments
-
-
-@dataclass(frozen=True, slots=True)
-class RunStudyArgs:
-    """Typed arguments for ``run_study``."""
-
-    config_path: str
-    workspace: str | None = None
-    job_id: str | None = None
-
-    def __post_init__(self) -> None:
-        _required_text(self.config_path, "config_path")
-        if self.workspace is not None:
-            _required_text(self.workspace, "workspace")
-        if self.job_id is not None:
-            _required_text(self.job_id, "job_id")
-
-    def to_arguments(self) -> dict[str, object]:
-        """Return the MCP ``tools/call`` arguments for this request."""
-        arguments: dict[str, object] = {"config_path": self.config_path}
-        if self.workspace is not None:
-            arguments["workspace"] = self.workspace
-        if self.job_id is not None:
-            arguments["job_id"] = self.job_id
-        return arguments
-
-
-@dataclass(frozen=True, slots=True)
-class RunScreenerArgs:
-    """Typed arguments for ``run_screener``."""
-
-    config_path: str
-    workspace: str | None = None
-    job_id: str | None = None
-
-    def __post_init__(self) -> None:
-        _required_text(self.config_path, "config_path")
-        if self.workspace is not None:
-            _required_text(self.workspace, "workspace")
-        if self.job_id is not None:
-            _required_text(self.job_id, "job_id")
-
-    def to_arguments(self) -> dict[str, object]:
-        """Return the MCP ``tools/call`` arguments for this request."""
-        arguments: dict[str, object] = {"config_path": self.config_path}
-        if self.workspace is not None:
-            arguments["workspace"] = self.workspace
-        if self.job_id is not None:
-            arguments["job_id"] = self.job_id
-        return arguments
-
-
-@dataclass(frozen=True, slots=True)
-class GetJobStatusArgs:
-    """Typed arguments for ``get_job_status``."""
-
-    job_id: str
-
-    def __post_init__(self) -> None:
-        _required_text(self.job_id, "job_id")
-
-    def to_arguments(self) -> dict[str, object]:
-        """Return the MCP ``tools/call`` arguments for this request."""
-        return {"job_id": self.job_id}
-
-
-@dataclass(frozen=True, slots=True)
-class GetJobResultArgs:
-    """Typed arguments for ``get_job_result``."""
-
-    job_id: str
-
-    def __post_init__(self) -> None:
-        _required_text(self.job_id, "job_id")
-
-    def to_arguments(self) -> dict[str, object]:
-        """Return the MCP ``tools/call`` arguments for this request."""
-        return {"job_id": self.job_id}
-
-
-@dataclass(frozen=True, slots=True)
-class ListArtifactsArgs:
-    """Typed arguments for ``list_artifacts``."""
-
-    job_id: str
-
-    def __post_init__(self) -> None:
-        _required_text(self.job_id, "job_id")
-
-    def to_arguments(self) -> dict[str, object]:
-        """Return the MCP ``tools/call`` arguments for this request."""
-        return {"job_id": self.job_id}
-
-
-@dataclass(frozen=True, slots=True)
-class ReadArtifactArgs:
-    """Typed arguments for ``read_artifact``."""
-
-    job_id: str
-    name: str
-
-    def __post_init__(self) -> None:
-        _required_text(self.job_id, "job_id")
-        _required_text(self.name, "name")
-
-    def to_arguments(self) -> dict[str, object]:
-        """Return the MCP ``tools/call`` arguments for this request."""
-        return {"job_id": self.job_id, "name": self.name}
-
-
-@dataclass(frozen=True, slots=True)
-class LaunchTraderArgs:
-    """Typed arguments for ``launch_trader``."""
-
-    config_path: str
-
-    def __post_init__(self) -> None:
-        _required_text(self.config_path, "config_path")
-
-    def to_arguments(self) -> dict[str, object]:
-        """Return the MCP ``tools/call`` arguments for this request."""
-        return {"config_path": self.config_path}
-
-
 class InProcessMcpHandler(Protocol):
     """Structural contract for an injected in-process MCP handler."""
 
@@ -499,26 +352,6 @@ class HarnessToolProvider:
                     )
         return result
 
-    def run_backtest(self, args: RunBacktestArgs) -> HarnessToolResult:
-        """Call ``run_backtest`` with typed arguments."""
-        return self.call_tool(TOOL_RUN_BACKTEST, args.to_arguments())
-
-    def run_study(self, args: RunStudyArgs) -> HarnessToolResult:
-        """Call ``run_study`` with typed arguments."""
-        return self.call_tool(TOOL_RUN_STUDY, args.to_arguments())
-
-    def run_screener(self, args: RunScreenerArgs) -> HarnessToolResult:
-        """Call ``run_screener`` with typed arguments."""
-        return self.call_tool(TOOL_RUN_SCREENER, args.to_arguments())
-
-    def validate_study(self, *, model: Mapping[str, object]) -> HarnessToolResult:
-        """Call ``validate_study`` to compile one authored model program."""
-        return self.call_tool(TOOL_VALIDATE_STUDY, {"model": dict(model)})
-
-    def validate_strategy(self, *, model: Mapping[str, object]) -> HarnessToolResult:
-        """Validate a strategy and preserve structured diagnostics in a typed result."""
-        return self.call_tool(TOOL_VALIDATE_STRATEGY, {"model": dict(model)})
-
     def current_server_info(self) -> Mapping[str, object]:
         """Fetch fresh serving SDK/compiler metadata, not the catalog cache."""
         return self._client.current_server_info()
@@ -530,34 +363,6 @@ class HarnessToolProvider:
     def read_sdk_reference(self, **arguments: object) -> HarnessToolResult:
         """Read serving SDK metadata or bounded source with typed failure handling."""
         return self.call_tool(TOOL_READ_SDK_REFERENCE, arguments)
-
-    def backtest_config_template(self) -> HarnessToolResult:
-        """Call ``backtest_config_template`` for a starter configuration."""
-        return self.call_tool(TOOL_BACKTEST_CONFIG_TEMPLATE, {})
-
-    def screener_config_template(self) -> HarnessToolResult:
-        """Call ``screener_config_template`` for a starter screen configuration."""
-        return self.call_tool(TOOL_SCREENER_CONFIG_TEMPLATE, {})
-
-    def get_job_status(self, args: GetJobStatusArgs) -> HarnessToolResult:
-        """Call ``get_job_status`` with typed arguments."""
-        return self.call_tool(TOOL_GET_JOB_STATUS, args.to_arguments())
-
-    def get_job_result(self, args: GetJobResultArgs) -> HarnessToolResult:
-        """Call ``get_job_result`` with typed arguments."""
-        return self.call_tool(TOOL_GET_JOB_RESULT, args.to_arguments())
-
-    def list_artifacts(self, args: ListArtifactsArgs) -> HarnessToolResult:
-        """Call ``list_artifacts`` with typed arguments."""
-        return self.call_tool(TOOL_LIST_ARTIFACTS, args.to_arguments())
-
-    def read_artifact(self, args: ReadArtifactArgs) -> HarnessToolResult:
-        """Call ``read_artifact`` with typed arguments."""
-        return self.call_tool(TOOL_READ_ARTIFACT, args.to_arguments())
-
-    def launch_trader(self, args: LaunchTraderArgs) -> HarnessToolResult:
-        """Call ``launch_trader`` with typed arguments."""
-        return self.call_tool(TOOL_LAUNCH_TRADER, args.to_arguments())
 
     def close(self) -> None:
         """Close the underlying harness MCP transport."""
@@ -773,8 +578,6 @@ __all__ = [
     "HARNESS_MCP_SKILL_VERSION",
     "HARNESS_TOOL_NAMES",
     "FailureKind",
-    "GetJobResultArgs",
-    "GetJobStatusArgs",
     "HarnessToolCatalog",
     "HarnessToolError",
     "HarnessToolFailure",
@@ -783,12 +586,6 @@ __all__ = [
     "HarnessToolResult",
     "HarnessToolSpec",
     "InProcessMcpHandler",
-    "LaunchTraderArgs",
-    "ListArtifactsArgs",
-    "ReadArtifactArgs",
-    "RunBacktestArgs",
-    "RunScreenerArgs",
-    "RunStudyArgs",
     "harness_mcp_skill",
     "harness_mcp_skill_ref",
     "open_harness_mcp_composition",

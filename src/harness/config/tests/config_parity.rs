@@ -163,6 +163,13 @@ fn null_block_is_optional_strict_and_hash_conditional() {
             ("seed".into(), integer("7")),
         ])),
     );
+    let mut ordinary = base();
+    ordinary.insert("null".into(), null("permutation", 1, 7));
+    let ordinary = build_backtest(&ordinary).expect("valid ordinary permutation");
+    assert_eq!(
+        ordinary["null"],
+        serde_json::json!({"mode": "permutation", "block_size": 1, "seed": 7})
+    );
     let accepted = build_backtest(&with).expect("valid null block");
     assert_eq!(
         accepted["null"],
@@ -212,6 +219,11 @@ fn null_block_is_optional_strict_and_hash_conditional() {
     );
 
     for (label, value, expected) in [
+        (
+            "ordinary permutation block size",
+            null("permutation", 3, 1),
+            "permutation requires block_size=1",
+        ),
         (
             "unknown mode",
             null("shuffle", 3, 1),

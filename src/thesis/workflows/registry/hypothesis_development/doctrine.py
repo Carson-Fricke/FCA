@@ -10,24 +10,28 @@ general object plus this data.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
-from thesis.research.hypothesis import (
-    HypothesisArtifactError,
-    HypothesisDocument,
+from thesis.experiments.mandate import (
+    declared_launch_partition,
+    derive_launch_mandate,
+    rfc3339,
 )
 from thesis.workflows.core.spec import WorkflowContext
 from thesis.workflows.core.workflow import Workflow, WorkflowDoctrine
 
 from .artifacts import (
     discovery_report_artifact,
+    forward_report_artifact,
     variation_report_artifact,
 )
 from .contracts.creation import HypothesisDevelopmentRequest
+from .design import frozen_design
 from .errors import (
     HypothesisDevelopmentIntakeError,
     WorkflowError,
 )
+from .exposure import submitted_exposures
 from .phases import (
     _DISCOVERY,
     _FORWARD_VALIDATION,
@@ -47,7 +51,7 @@ from .primitives import (
     _text,
 )
 from .rebuild import fold_transition, rebuild_state
-from .services import HypothesisDevelopmentServices, services_of
+from .services import HypothesisDevelopmentServices
 from .state import HypothesisDevelopmentOutcome, HypothesisDevelopmentState
 
 _DEFAULT_ACTIVITY = "Preparing the next workflow step."
@@ -106,7 +110,9 @@ def hypothesis_development_doctrine(
 # -- launch and trusted context ---------------------------------------------
 
 
-def _request_of(execution: Any, ideas: str) -> HypothesisDevelopmentRequest:
+def _request_of(
+    execution: Any, ideas: str, launch_options: Mapping[str, object]
+) -> HypothesisDevelopmentRequest:
     """Bind one durable execution and the supplied idea into a request."""
     return HypothesisDevelopmentRequest(
         workspace_id=execution.workspace_id,
@@ -115,6 +121,8 @@ def _request_of(execution: Any, ideas: str) -> HypothesisDevelopmentRequest:
         trigger_message_id=execution.trigger_message_id,
         requested_by=execution.requested_by,
         ideas=ideas,
+        partition=declared_launch_partition(launch_options.get("partition")),
+        dependencies=dict(cast(Mapping[str, object], launch_options["partition"])),
         intent_epoch=execution.intent_epoch,
         created_at=execution.created_at,
     )
@@ -144,8 +152,14 @@ def _validate_launch(
     ideas: str,
     trigger_message_id: str | None,
     anchor_sub_agent_id: str | None,
+    launch_options: Mapping[str, object],
 ) -> None:
     """Reject an invalid intake before a durable execution exists."""
+    if set(launch_options) != {"partition"}:
+        raise HypothesisDevelopmentIntakeError(
+            "launch_options must contain the explicit partition declaration"
+        )
+    declared_launch_partition(launch_options.get("partition"))
     try:
         _text(ideas, "ideas", max_length=8_192)
     except WorkflowError as error:
@@ -188,19 +202,6 @@ def _reconstruct_state(
         initial_phase=_DISCOVERY,
         pipes=workflow.spec.piping,
     )
-
-
-def _load_hypothesis(
-    workflow: Workflow[Any, Any, Any],
-    request: HypothesisDevelopmentRequest,
-) -> HypothesisDocument | None:
-    """Load the execution's hypothesis artifact when it was finalized."""
-    try:
-        return services_of(workflow).store.load(
-            f"h-{request.execution_id}", workspace_id=request.workspace_id
-        )
-    except HypothesisArtifactError:
-        return None
 
 
 # -- phase projections -------------------------------------------------------
@@ -297,6 +298,41 @@ def _phase_report(
     if phase is None:
         return None
     resolved = phase_from_value(_phase_value(phase))
+    if resolved is _FORWARD_VALIDATION:
+        report = forward_report_artifact(state)
+        store = workflow.execution_store
+        if report is None or store is None:
+            return report
+        document = store.get(state.execution_id)
+        mandate = derive_launch_mandate(
+            store, workspace_id=state.workspace_id, execution_id=state.execution_id
+        )
+        if mandate is None:
+            raise WorkflowError("forward report requires its frozen partition")
+        design = frozen_design(
+            state,
+            rfc3339(mandate.forward_window.start_ns),
+            rfc3339(mandate.forward_window.end_ns),
+        )
+        exposures = submitted_exposures(workflow, state.execution_id)
+        prior_designs = {
+            str(item.get("designSha256"))
+            for item in exposures
+            if item.get("phase") == "forward_validation"
+            and item.get("designSha256") != design.sha256()
+        }
+        report.update(
+            {
+                "frozenDesign": design.as_dict(),
+                "launchDesign": dict(document.launch_request),
+                "submissionExposures": list(exposures),
+                "priorForwardDesignCount": len(prior_designs),
+                "forwardEvidenceScope": "adaptive_holdout_reuse"
+                if prior_designs
+                else "frozen_design_holdout",
+            }
+        )
+        return report
     if resolved is _VARIATION:
         if state.variation is None:
             return None
@@ -337,7 +373,6 @@ def _project(
         null_testing=state.null_testing,
         variation=state.variation,
         forward_validation=state.forward_validation,
-        journal_id=state.journal_id,
         detail=state.detail,
     )
 

@@ -1,10 +1,4 @@
-"""Research-domain records for the Thesis vertical.
-
-The first capability in this package is the append-only strategy revision
-lineage (:mod:`thesis.research.lineage`) that records which job and revision
-descended from which, with the rationale and the experiment-contract
-transition for every material adaptation.
-"""
+"""Hypothesis artifacts, study models, and canonical research evidence."""
 
 from thesis.research.hypothesis import (
     FALSIFIER_CONDITIONS,
@@ -23,13 +17,6 @@ from thesis.research.hypothesis import (
     parse_hypothesis,
     render_hypothesis,
     slugify,
-)
-from thesis.research.lineage import (
-    JobIdentity,
-    LineageError,
-    RevisionLineage,
-    RevisionNode,
-    RevisionOutcome,
 )
 from thesis.research.models import (
     MODEL_DIRECTORY,
@@ -56,13 +43,8 @@ __all__ = [
     "HypothesisStatus",
     "HypothesisStore",
     "InMemoryHypothesisStore",
-    "LineageError",
     "MODEL_DIRECTORY",
     "InMemoryResearchModelStore",
-    "JobIdentity",
-    "RevisionLineage",
-    "RevisionNode",
-    "RevisionOutcome",
     "ResearchModel",
     "ResearchModelError",
     "ResearchModelRef",

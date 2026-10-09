@@ -50,9 +50,3 @@ def _optional_compose_text(
         return _text(value, key, max_length=max_length)
     except WorkflowError as error:
         raise FalsificationComposeError(str(error)) from error
-
-
-def _model_text(value: object, label: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise FalsificationComposeError(f"{label} must be non-empty text")
-    return value.strip()

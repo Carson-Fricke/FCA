@@ -11,7 +11,18 @@ have observation-only contexts, while strategies receive an order sink.
   dependency-first routing. Cycles and zero-sized dependencies are rejected.
 - `program.rs` defines program construction, lifecycle, metrics, orders, and
   the separate screening surface.
-- `indicator.rs` defines composable indicator values and decimal arithmetic.
+- `indicator.rs` defines symbol-aware values, mandatory `IndicatorSequence`
+  history, and decimal arithmetic. Every owned indicator exposes `value(symbol)`,
+  `sequence()`, and `sequence_mut()`; the shared router records its outputs after
+  dependencies and callbacks and before the owner sees the event. Bar-derived
+  output preserves each source frame's interval, availability, and missing
+  symbols. Undefined/warm-up values remain explicit, including partial windows.
+  Tick indicators construct `IndicatorSequence::ticks(interval_ns)` to request
+  output fidelity. Accepted trade/quote values form per-symbol OHLC output bars
+  on epoch-aligned half-open windows. Empty gaps are omitted; values never carry
+  forward across missing input. `completed()` excludes `in_progress()`. Only
+  observed causal time advances seal windows; stopping does not invent a final
+  completed window. Mutable output cadence is rejected by frozen routing checks.
 - `events.rs` defines borrowed exact-decimal quotes, trades, interval-identified
   atomic frames, fills, and startup facts.
 - `abi.rs` defines versioned C layouts and program vtables. Requirements cross

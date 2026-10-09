@@ -205,8 +205,6 @@ def test_runtime_caches_default_workflow_per_chat() -> None:
     from thesis.workflows.core.execution_store import InMemoryExecutionStore
     from thesis.workflows.runtime import build_model_router
 
-    from ._support import FakeValidator
-
     chat = ChatService()
     conversations = Conversations(chat=chat)
     router = build_model_router(
@@ -215,7 +213,6 @@ def test_runtime_caches_default_workflow_per_chat() -> None:
     runtime = WorkflowRuntime(
         router=router,
         runner=cast("Any", SimpleNamespace(run=lambda request: None)),
-        validator=FakeValidator(),
         conversations=conversations,
         execution_store=InMemoryExecutionStore(),
     )

@@ -18,7 +18,7 @@ export class WireDecodeError extends Error {
 /** The registry must be the generated schema artifact, never an independently authored UI contract. */
 export function createWireDecoder<Types extends object = Record<string, unknown>>(schema: SchemaObject) {
 	const ajv = new Ajv2020({ strict: false, allErrors: true, validateFormats: false });
-	const registry = { ...schema, $id: 'urn:fca:thesis:wire' };
+	const registry: SchemaObject = { ...schema, $id: 'urn:fca:thesis:wire' };
 	ajv.addSchema(registry);
 	const validators = new Map<string, ReturnType<typeof ajv.compile>>();
 	const validateRecord = (schemaName: string, value: unknown, path: string): void => {

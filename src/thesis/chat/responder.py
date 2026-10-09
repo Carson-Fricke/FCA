@@ -109,6 +109,7 @@ class LaunchableDevelopmentWorkflow(Protocol):
         *,
         actor_id: str,
         ideas: str,
+        launch_options: Mapping[str, object] | None = None,
         investigation_id: str | None = None,
         trigger_message_id: str | None = None,
     ) -> HypothesisDevelopmentRequest:
@@ -121,7 +122,6 @@ _ACTIVE_DEVELOPMENT_PHASES = frozenset(
         "requested",
         "discovery",
         "model_creation",
-        "hypothesis_creation",
         "falsification_trials",
         "rca",
         "verdict",

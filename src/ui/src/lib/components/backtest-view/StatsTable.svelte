@@ -3,39 +3,47 @@
 	let { stats = {} } = $props();
 
 	const KNOWN = {
-		totalReturn: { label: 'Total return', group: 'Returns', format: 'pct', sign: true },
+		total_return: { label: 'Total return', group: 'Returns', format: 'pct', sign: true },
 		cagr: { label: 'CAGR', group: 'Returns', format: 'pct', sign: true },
-		maxDrawdown: { label: 'Max drawdown', group: 'Returns', format: 'pct', sign: false },
-		maxDrawdownDurationNs: { label: 'Max DD duration', group: 'Returns', format: 'duration', sign: false },
-		maxDrawdownRecovered: { label: 'DD recovered', group: 'Returns', format: 'bool', sign: false },
-		sharpePerSample: { label: 'Sharpe (per sample)', group: 'Returns', format: 'ratio', sign: false },
+		max_drawdown: { label: 'Max drawdown', group: 'Returns', format: 'pct', sign: false },
+		max_drawdown_duration_ns: { label: 'Max DD duration', group: 'Returns', format: 'duration', sign: false },
+		max_drawdown_recovered: { label: 'DD recovered', group: 'Returns', format: 'bool', sign: false },
+		sharpe_per_sample: { label: 'Sharpe (per sample)', group: 'Returns', format: 'ratio', sign: false },
 		sortino: { label: 'Sortino ratio', group: 'Returns', format: 'ratio', sign: false },
-		tradeCount: { label: 'Trades', group: 'Trades', format: 'int', sign: false },
-		winCount: { label: 'Wins', group: 'Trades', format: 'int', sign: false },
-		lossCount: { label: 'Losses', group: 'Trades', format: 'int', sign: false },
-		hitRate: { label: 'Hit rate', group: 'Trades', format: 'pct', sign: false },
-		totalPnl: { label: 'Total PnL', group: 'Trades', format: 'money', sign: true },
-		grossProfit: { label: 'Gross profit', group: 'Trades', format: 'money', sign: true },
-		grossLoss: { label: 'Gross loss', group: 'Trades', format: 'money', sign: true },
-		profitFactor: { label: 'Profit factor', group: 'Trades', format: 'ratio', sign: false },
-		averageWin: { label: 'Average win', group: 'Trades', format: 'money', sign: true },
-		averageLoss: { label: 'Average loss', group: 'Trades', format: 'money', sign: true },
-		largestWin: { label: 'Largest win', group: 'Trades', format: 'money', sign: true },
-		largestLoss: { label: 'Largest loss', group: 'Trades', format: 'money', sign: true },
-		fillCount: { label: 'Fills', group: 'Execution', format: 'int', sign: false },
-		feesTotal: { label: 'Fees', group: 'Execution', format: 'money', sign: false },
-		slippageTotal: { label: 'Slippage cost', group: 'Execution', format: 'money', sign: false },
-		latencyMeanNs: { label: 'Mean fill latency', group: 'Execution', format: 'ms', sign: false },
-		latencyMaxNs: { label: 'Max fill latency', group: 'Execution', format: 'ms', sign: false },
-		ordersTotal: { label: 'Orders', group: 'Execution', format: 'int', sign: false },
-		ordersFilled: { label: 'Orders filled', group: 'Execution', format: 'int', sign: false },
-		ordersRejected: { label: 'Orders rejected', group: 'Execution', format: 'int', sign: false },
-		ordersCancelled: { label: 'Orders cancelled', group: 'Execution', format: 'int', sign: false }
+		trade_count: { label: 'Trades', group: 'Trades', format: 'int', sign: false },
+		win_count: { label: 'Wins', group: 'Trades', format: 'int', sign: false },
+		loss_count: { label: 'Losses', group: 'Trades', format: 'int', sign: false },
+		hit_rate: { label: 'Hit rate', group: 'Trades', format: 'pct', sign: false },
+		net_pnl: { label: 'Net PnL', group: 'Trades', format: 'money', sign: true },
+		gross_profit: { label: 'Gross profit', group: 'Trades', format: 'money', sign: true },
+		gross_loss: { label: 'Gross loss', group: 'Trades', format: 'money', sign: true },
+		gross_pnl: { label: 'Gross PnL', group: 'Trades', format: 'money', sign: true },
+		closed_trade_net_pnl: { label: 'Closed-trade net PnL', group: 'Trades', format: 'money', sign: true },
+		closed_trade_gross_pnl: { label: 'Closed-trade gross PnL', group: 'Trades', format: 'money', sign: true },
+		fees: { label: 'Closed-trade fees', group: 'Trades', format: 'money', sign: false },
+		open_fees: { label: 'Open-position fees', group: 'Execution', format: 'money', sign: false },
+		net_profit: { label: 'Net profit', group: 'Trades', format: 'money', sign: true },
+		net_loss: { label: 'Net loss', group: 'Trades', format: 'money', sign: false },
+		profit_factor: { label: 'Profit factor', group: 'Trades', format: 'ratio', sign: false },
+		average_net_win: { label: 'Average win', group: 'Trades', format: 'money', sign: true },
+		average_net_loss: { label: 'Average loss', group: 'Trades', format: 'money', sign: true },
+		largest_net_win: { label: 'Largest win', group: 'Trades', format: 'money', sign: true },
+		largest_net_loss: { label: 'Largest loss', group: 'Trades', format: 'money', sign: true },
+		fill_count: { label: 'Fills', group: 'Execution', format: 'int', sign: false },
+		fees_total: { label: 'Fees', group: 'Execution', format: 'money', sign: false },
+		slippage_total: { label: 'Slippage cost', group: 'Execution', format: 'money', sign: false },
+		latency_mean_ns: { label: 'Mean fill latency', group: 'Execution', format: 'ms', sign: false },
+		latency_max_ns: { label: 'Max fill latency', group: 'Execution', format: 'ms', sign: false },
+		orders_total: { label: 'Orders', group: 'Execution', format: 'int', sign: false },
+		orders_filled: { label: 'Orders filled', group: 'Execution', format: 'int', sign: false },
+		orders_rejected: { label: 'Orders rejected', group: 'Execution', format: 'int', sign: false },
+		orders_cancelled: { label: 'Orders cancelled', group: 'Execution', format: 'int', sign: false }
 	};
 	const GROUP_ORDER = ['Returns', 'Trades', 'Execution', 'Other'];
 
 	function fmtValue(value, format) {
 		if (value == null || (typeof value === 'number' && !Number.isFinite(value))) return '—';
+		if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) value = Number(value);
 		if (typeof value !== 'number') return format === 'bool' ? (value ? 'yes' : 'no') : String(value);
 		switch (format) {
 			case 'pct':
@@ -84,12 +92,17 @@
 		const buckets = new Map();
 		const unknown = [];
 		for (const [key, value] of Object.entries(stats)) {
+			if (key.endsWith('_reason')) {
+				const metric = key.slice(0, -7);
+				if (value == null || metric in stats) continue;
+			}
 			const spec = KNOWN[key];
+			const reason = value == null ? stats[`${key}_reason`] ?? (spec?.group === 'Trades' ? stats.trades_unavailable_reason : null) : null;
 			if (spec) {
 				if (!buckets.has(spec.group)) buckets.set(spec.group, []);
-				buckets.get(spec.group).push({ label: spec.label, value, format: spec.format, sign: spec.sign });
+				buckets.get(spec.group).push({ label: spec.label, value, format: spec.format, sign: spec.sign, reason });
 			} else {
-				unknown.push({ label: prettify(key), value, format: guessFormat(value), sign: false });
+				unknown.push({ label: prettify(key), value, format: guessFormat(value), sign: false, reason });
 			}
 		}
 		if (unknown.length) buckets.set('Other', unknown);
@@ -111,7 +124,7 @@
 						<tr>
 							<th scope="row">{row.label}</th>
 							<td class:pos={signed(row) === 'pos'} class:neg={signed(row) === 'neg'}>
-								{fmtValue(row.value, row.format)}
+								{fmtValue(row.value, row.format)}{#if row.reason} <span class="text-xs">({row.reason})</span>{/if}
 							</td>
 						</tr>
 					{/each}

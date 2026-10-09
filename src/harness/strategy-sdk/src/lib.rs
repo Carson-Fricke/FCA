@@ -56,7 +56,7 @@ pub use consumer::{
 pub use events::{BarEvent, BarFrame, Fill, ProgramStart, QuoteEvent, TradeEvent};
 pub use indicator::{
     indicator_add, indicator_context, indicator_div, indicator_mul, indicator_sub, Indicator,
-    INDICATOR_CONTEXT_PRECISION,
+    IndicatorBar, IndicatorMissing, IndicatorSequence, INDICATOR_CONTEXT_PRECISION,
 };
 pub use program::{
     Bar, MetricPublisher, OrderSink, OrderType, PublishError, ScreenContext, ScreenRow,

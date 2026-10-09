@@ -66,6 +66,7 @@ async fn launch_with_shell(
     record.data_start = configuration.data_start;
     record.data_end = configuration.data_end;
     record.configuration_digest = Some(configuration.configuration_digest.clone());
+    record.accepted_input = configuration.document.clone();
     match state.job_store.admit(record) {
         Err(StoreError::Conflict(detail)) => return Err(ApiError::job_conflict(&detail)),
         Err(error) => return Err(ApiError::store_error(&error.to_string())),

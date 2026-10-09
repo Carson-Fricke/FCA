@@ -64,6 +64,7 @@ _STRATEGY_DESIGN_COMPLETION_PROTOCOL = (
 #: What the design itself must satisfy.
 _STRATEGY_DESIGN_RULES = (
     "Design rules:",
+    "- Obey the launch-frozen informationHorizonDays, positionHorizonDays and liquidationDays bounds across every parameter assignment. Each partition execution resets strategy/account state and admits no preboundary inputs or carried positions; warm-up consumes only the permitted window. If the proposed design requires longer dependencies, ask conversationally for a new launch rather than silently widening the mandate. These declarations are conservative research constraints, not static proof of code dependency bounds.",
     "- Separate trading exits from assumption monitors. Trading exits may act "
     "per trade: time stops, profit-taking, inventory or exposure management, "
     "and any falsifier re-check that is causally recomputable while a position "

@@ -39,11 +39,9 @@ from ..errors import WorkflowError
 from ..primitives import _text
 from .nulls import (
     _OBSERVED_SCHEMA,
-    _REPLICATE_SCHEMA,
     MAX_NULL_BLOCK_SIZE,
-    MAX_NULL_REPLICATES,
     NULL_DIRECTIONS,
-    NULL_TRANSFORM_MODE,
+    NULL_TEST_EVALUATION_PAYLOAD_SCHEMA,
     NullTestEvaluation,
     NullTestObservation,
     NullTestReplicate,
@@ -51,9 +49,7 @@ from .nulls import (
     null_test_evaluation_payload_errors,
 )
 from .variation import (
-    _CENTER_SCHEMA,
-    _POINT_SCHEMA,
-    MAX_VARIATION_POINTS,
+    VARIATION_PAYLOAD_SCHEMA,
     VariationCenter,
     VariationEvaluation,
     VariationPoint,
@@ -78,75 +74,46 @@ _WINDOW_SCHEMA: dict[str, object] = {
     "required": ["start", "end"],
 }
 
+_NULL_KEYS = (
+    "batchId",
+    "mode",
+    "blockSize",
+    "replicates",
+    "exceedanceCount",
+    "pValue",
+    "signalAdequacy",
+    "evidenceScope",
+    "failedReplicatePolicy",
+    "targetResolution",
+)
+_VARIATION_KEYS = (
+    "batchId",
+    "center",
+    "points",
+    "parameters",
+    "stability",
+    "method",
+    "interactions",
+)
 _NULL_SCHEMA: dict[str, object] = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
-        "batchId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": _MAX_BATCH_ID,
-            "pattern": r"\S",
-        },
-        "blockSize": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": MAX_NULL_BLOCK_SIZE,
-        },
-        "replicates": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": MAX_NULL_REPLICATES,
-            "items": _REPLICATE_SCHEMA,
-        },
-        "exceedanceCount": {"type": "integer", "minimum": 0},
-        "pValue": {"type": "number", "minimum": 0, "maximum": 1},
+        key: cast(
+            Mapping[str, object], NULL_TEST_EVALUATION_PAYLOAD_SCHEMA["properties"]
+        )[key]
+        for key in _NULL_KEYS
     },
-    "required": [
-        "batchId",
-        "blockSize",
-        "replicates",
-        "exceedanceCount",
-        "pValue",
-    ],
+    "required": list(_NULL_KEYS),
 }
-
 _VARIATION_SCHEMA: dict[str, object] = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
-        "batchId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": _MAX_BATCH_ID,
-            "pattern": r"\S",
-        },
-        "center": _CENTER_SCHEMA,
-        "points": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": MAX_VARIATION_POINTS,
-            "items": _POINT_SCHEMA,
-        },
-        "parameters": {
-            "type": "array",
-            "minItems": 1,
-            "uniqueItems": True,
-            "items": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 128,
-                "pattern": r"\S",
-            },
-        },
-        "stability": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 4_096,
-            "pattern": r"\S",
-        },
+        key: cast(Mapping[str, object], VARIATION_PAYLOAD_SCHEMA["properties"])[key]
+        for key in _VARIATION_KEYS
     },
-    "required": ["batchId", "center", "points", "parameters", "stability"],
+    "required": list(_VARIATION_KEYS),
 }
 
 #: The advertised wire shape of one forward-validation payload.
@@ -187,12 +154,9 @@ FORWARD_PAYLOAD_SCHEMA: dict[str, object] = {
 }
 
 
-def _field(payload: Mapping[str, object], *keys: str) -> Any:
-    """Return the first present spelling of one wire field."""
-    for key in keys:
-        if key in payload:
-            return payload[key]
-    return None
+def _field(payload: Mapping[str, object], key: str) -> Any:
+    """Read one canonical wire field for typed contract construction."""
+    return payload.get(key)
 
 
 def _window_errors(window: Mapping[str, object]) -> list[str]:
@@ -233,8 +197,8 @@ def forward_payload_errors(payload: Mapping[str, object]) -> list[str]:
     if isinstance(null, Mapping):
         nested = {
             "strategy": strategy,
-            "batchId": null.get("batchId"),
-            "mode": NULL_TRANSFORM_MODE,
+            **{key: null.get(key) for key in _NULL_KEYS},
+            "mode": null.get("mode"),
             "blockSize": null.get("blockSize"),
             "statistic": payload.get("statistic"),
             "direction": payload.get("direction"),
@@ -251,7 +215,7 @@ def forward_payload_errors(payload: Mapping[str, object]) -> list[str]:
     if isinstance(variation, Mapping):
         nested_variation = {
             "strategy": strategy,
-            "batchId": variation.get("batchId"),
+            **{key: variation.get(key) for key in _VARIATION_KEYS},
             "center": variation.get("center"),
             "points": variation.get("points"),
             "parameters": variation.get("parameters"),
@@ -301,13 +265,18 @@ class ForwardWindow:
 
 @dataclass(frozen=True, slots=True)
 class ForwardNullEvidence:
-    """The block-permutation null design re-run on the forward window."""
+    """The frozen permutation null design re-run on the forward window."""
 
     batch_id: str
     block_size: int
+    mode: str
     replicates: tuple[NullTestReplicate, ...]
     exceedance_count: int
     p_value: float
+    signal_adequacy: Mapping[str, object]
+    evidence_scope: str
+    failed_replicate_policy: str
+    target_resolution: float
 
     def __post_init__(self) -> None:
         _text(
@@ -324,10 +293,8 @@ class ForwardNullEvidence:
             )
         if isinstance(self.replicates, str) or not isinstance(self.replicates, tuple):
             raise WorkflowError("forward null evidence replicates must be a tuple")
-        if not 1 <= len(self.replicates) <= MAX_NULL_REPLICATES:
-            raise WorkflowError(
-                f"forward null evidence requires 1 to {MAX_NULL_REPLICATES} replicates"
-            )
+        if not len(self.replicates):
+            raise WorkflowError("forward null evidence requires at least one replicate")
         if any(not isinstance(item, NullTestReplicate) for item in self.replicates):
             raise WorkflowError(
                 "forward null evidence replicates must be NullTestReplicate values"
@@ -353,9 +320,14 @@ class ForwardNullEvidence:
         return {
             "batchId": self.batch_id,
             "blockSize": self.block_size,
+            "mode": self.mode,
             "replicates": [item.as_dict() for item in self.replicates],
             "exceedanceCount": self.exceedance_count,
             "pValue": self.p_value,
+            "signalAdequacy": dict(self.signal_adequacy),
+            "evidenceScope": self.evidence_scope,
+            "failedReplicatePolicy": self.failed_replicate_policy,
+            "targetResolution": self.target_resolution,
         }
 
     @classmethod
@@ -367,14 +339,19 @@ class ForwardNullEvidence:
         if isinstance(replicates, str) or not isinstance(replicates, Sequence):
             raise WorkflowError("forward null evidence requires a replicates list")
         return cls(
-            batch_id=_field(payload, "batchId", "batch_id"),
-            block_size=_field(payload, "blockSize", "block_size"),
+            batch_id=_field(payload, "batchId"),
+            block_size=_field(payload, "blockSize"),
+            mode=_field(payload, "mode"),
             replicates=tuple(
                 NullTestReplicate.from_dict(cast(Mapping[str, object], item))
                 for item in replicates
             ),
-            exceedance_count=_field(payload, "exceedanceCount", "exceedance_count"),
-            p_value=_field(payload, "pValue", "p_value"),
+            exceedance_count=_field(payload, "exceedanceCount"),
+            p_value=_field(payload, "pValue"),
+            signal_adequacy=cast(Mapping[str, object], payload.get("signalAdequacy")),
+            evidence_scope=cast(str, payload.get("evidenceScope")),
+            failed_replicate_policy=cast(str, payload.get("failedReplicatePolicy")),
+            target_resolution=cast(float, payload.get("targetResolution")),
         )
 
 
@@ -387,6 +364,8 @@ class ForwardVariationEvidence:
     points: tuple[VariationPoint, ...]
     parameters: tuple[str, ...]
     stability: str
+    method: str = "one_at_a_time"
+    interactions: tuple[tuple[str, ...], ...] = ()
 
     def __post_init__(self) -> None:
         _text(
@@ -400,10 +379,9 @@ class ForwardVariationEvidence:
             )
         if isinstance(self.points, (str, bytes)) or not isinstance(self.points, tuple):
             raise WorkflowError("forward variation evidence points must be a tuple")
-        if not 1 <= len(self.points) <= MAX_VARIATION_POINTS:
+        if not len(self.points):
             raise WorkflowError(
-                "forward variation evidence requires 1 to "
-                f"{MAX_VARIATION_POINTS} points"
+                "forward variation evidence requires at least one point"
             )
         if any(not isinstance(item, VariationPoint) for item in self.points):
             raise WorkflowError(
@@ -439,6 +417,8 @@ class ForwardVariationEvidence:
             "points": [item.as_dict() for item in self.points],
             "parameters": list(self.parameters),
             "stability": self.stability,
+            "method": self.method,
+            "interactions": [list(group) for group in self.interactions],
         }
 
     @classmethod
@@ -456,7 +436,7 @@ class ForwardVariationEvidence:
         if isinstance(parameters, str) or not isinstance(parameters, Sequence):
             raise WorkflowError("forward variation evidence requires a parameters list")
         return cls(
-            batch_id=_field(payload, "batchId", "batch_id"),
+            batch_id=_field(payload, "batchId"),
             center=VariationCenter.from_dict(center),
             points=tuple(
                 VariationPoint.from_dict(cast(Mapping[str, object], item))
@@ -464,6 +444,13 @@ class ForwardVariationEvidence:
             ),
             parameters=tuple(cast(str, item) for item in parameters),
             stability=_field(payload, "stability"),
+            method=cast(str, payload.get("method", "one_at_a_time")),
+            interactions=tuple(
+                tuple(group)
+                for group in cast(
+                    Sequence[Sequence[str]], payload.get("interactions", [])
+                )
+            ),
         )
 
 
@@ -529,7 +516,7 @@ class ForwardEvaluation:
         NullTestEvaluation(
             strategy=self.strategy,
             batch_id=self.null.batch_id,
-            mode=NULL_TRANSFORM_MODE,
+            mode=self.null.mode,
             block_size=self.null.block_size,
             statistic=self.statistic,
             direction=self.direction,
@@ -537,6 +524,10 @@ class ForwardEvaluation:
             replicates=self.null.replicates,
             exceedance_count=self.null.exceedance_count,
             p_value=self.null.p_value,
+            signal_adequacy=self.null.signal_adequacy,
+            evidence_scope=self.null.evidence_scope,
+            failed_replicate_policy=self.null.failed_replicate_policy,
+            target_resolution=self.null.target_resolution,
         )
         VariationEvaluation(
             strategy=self.strategy,
@@ -545,6 +536,8 @@ class ForwardEvaluation:
             points=self.variation.points,
             parameters=self.variation.parameters,
             stability=self.variation.stability,
+            method=self.variation.method,
+            interactions=self.variation.interactions,
         )
 
     def as_dict(self) -> dict[str, object]:

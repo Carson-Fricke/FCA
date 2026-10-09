@@ -39,7 +39,6 @@ from thesis.providers.session_adapter import NativeSessionAdapter
 from thesis.providers.transports import EnvironmentApiKeySource, HttpOpenRouterTransport
 from thesis.research.hypothesis import HypothesisStore, WorkspaceHypothesisStore
 from thesis.research.models import ResearchModelStore, WorkspaceResearchModelStore
-from thesis.strategies import StructuralStrategyValidator, WorkspaceStrategyArtifacts
 from thesis.workflows.backtests import BacktestRunRequest
 from thesis.workflows.core.execution_store import ExecutionStore
 from thesis.workflows.core.registry import WorkflowRegistry
@@ -174,7 +173,6 @@ def build_serving_workflow_runtime(
         ),
         harness_tools=harness_tools,
         programs=programs,
-        strategy_validator=StructuralStrategyValidator(),
         hypothesis_store=hypothesis_store,
         conversations=conversations,
         execution_store=execution_store,
@@ -228,7 +226,6 @@ def build_serving_stack(
     control_factory: Callable[..., ControlToolService] = ControlToolService,
     on_turn_error: Callable[[tuple[str, str, Exception]], None] | None = None,
     workspace_repositories: WorkspaceRepositoryProvider | None = None,
-    strategy_artifacts: WorkspaceStrategyArtifacts | None = None,
     knowledge_service: KnowledgeService | None = None,
 ) -> ServingStack:
     """Compose one conversation runner and bind workflow-owned session services."""
@@ -353,7 +350,6 @@ def build_serving_stack(
         chat=chat_service,
         store=store,
         activity=conversations.execute_runtime_tool,
-        strategy_artifacts=strategy_artifacts,
         programs=programs,
         knowledge_scope=validate_scope(
             os.environ.get("THESIS_KNOWLEDGE_SCOPE", "both")

@@ -1,6 +1,6 @@
 //! Pure, deterministic metrics for backtest results.
 //!
-//! Port of `harness.results.metrics`. Every function is a pure mapping from
+//! The canonical financial statistics implementation. Every function maps
 //! plain data to plain data: no I/O, wall clock, randomness, or network. Money
 //! and ratio arithmetic uses the scale-18 fixed-point kernel. Only the two
 //! statistics that need a square root or a fractional exponent (the sample
@@ -10,8 +10,9 @@
 //! Undefined values are explicit. A metric that cannot be defined is
 //! `Err(reason)` with a closed reason name (see [`Outcome`]); the job publishes
 //! it as JSON null beside a `*_reason` key, never as zero. Exact arithmetic
-//! that leaves the decimal128(38,18) bound is a [`MetricsError`], so a job
-//! fails instead of publishing a partial sum.
+//! that leaves the decimal128(38,18) bound is a [`MetricsError`]. Ledger totals
+//! fail the job rather than publish partial sums; independent equity statistics
+//! publish an `arithmetic_overflow` reason while retaining valid ledger totals.
 //!
 //! Equity points must be ordered by non-decreasing timestamp. The job builds
 //! them in dispatch order and checks that order before calling these functions.
@@ -292,8 +293,8 @@ pub fn total_return(points: &[EquityPoint]) -> Result<Outcome<Decimal18>, Metric
 ///
 /// # Errors
 ///
-/// Returns [`MetricsError`] when the exact growth ratio leaves the decimal
-/// bound or the annualized value is not finite.
+/// Arithmetic that cannot be represented, including nonfinite annualization,
+/// yields the explicit `arithmetic_overflow` undefined reason.
 pub fn cagr(points: &[EquityPoint]) -> Result<Outcome<f64>, MetricsError> {
     if let Some(reason) = ratio_reason(points) {
         return Ok(Err(reason));
@@ -301,18 +302,21 @@ pub fn cagr(points: &[EquityPoint]) -> Result<Outcome<f64>, MetricsError> {
     let first = points[0];
     let last = points[points.len() - 1];
     let Some(span) = last.timestamp_ns.checked_sub(first.timestamp_ns) else {
-        return Err(overflow("cagr"));
+        return Ok(Err("arithmetic_overflow"));
     };
     if span <= 0 {
         return Ok(Err("nonpositive_span"));
     }
-    let growth = div(last.equity, first.equity, "cagr")?.to_f64();
+    let Ok(growth) = div(last.equity, first.equity, "cagr") else {
+        return Ok(Err("arithmetic_overflow"));
+    };
+    let growth = growth.to_f64();
     let years = span as f64 / NANOS_PER_YEAR_365 as f64;
     let value = growth.powf(1.0 / years) - 1.0;
     if value.is_finite() {
         Ok(Ok(value))
     } else {
-        Err(overflow("cagr"))
+        Ok(Err("arithmetic_overflow"))
     }
 }
 
@@ -455,19 +459,17 @@ pub fn sharpe_per_sample(points: &[EquityPoint]) -> Result<Outcome<f64>, Metrics
     }
 }
 
-/// Return every equity-curve metric for one curve at once.
-///
-/// # Errors
-///
-/// Returns [`MetricsError`] when a metric's exact arithmetic overflows.
-pub fn equity_curve_metrics(points: &[EquityPoint]) -> Result<EquityMetrics, MetricsError> {
-    Ok(EquityMetrics {
-        total_return: total_return(points)?,
-        cagr: cagr(points)?,
-        max_drawdown: max_drawdown(points)?,
-        drawdown: longest_drawdown(points)?,
-        sharpe_per_sample: sharpe_per_sample(points)?,
-    })
+/// Return every equity-curve metric, preserving each undefined statistic.
+/// Numeric-statistic overflow is evidence about that statistic, not a failure
+/// of an otherwise exact cash/fill ledger.
+pub fn equity_curve_metrics(points: &[EquityPoint]) -> EquityMetrics {
+    EquityMetrics {
+        total_return: total_return(points).unwrap_or(Err("arithmetic_overflow")),
+        cagr: cagr(points).unwrap_or(Err("arithmetic_overflow")),
+        max_drawdown: max_drawdown(points).unwrap_or(Err("arithmetic_overflow")),
+        drawdown: longest_drawdown(points).unwrap_or(Err("arithmetic_overflow")),
+        sharpe_per_sample: sharpe_per_sample(points).unwrap_or(Err("arithmetic_overflow")),
+    }
 }
 
 /// Mean of a slice of decimals, or `None` when it is empty.

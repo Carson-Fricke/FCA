@@ -130,7 +130,7 @@ def test_envelope_round_trips_and_folds_after_pure_rebuild() -> None:
     assert [trial.test_id for trial in state.trials] == ["T01"]
 
 
-def test_legacy_trials_completion_without_envelope_still_folds() -> None:
+def test_trials_completion_requires_authoritative_evidence_envelope() -> None:
     state = HypothesisDevelopmentState(
         workspace_id=WORKSPACE,
         execution_id="execution-legacy-trials",
@@ -138,11 +138,8 @@ def test_legacy_trials_completion_without_envelope_still_folds() -> None:
         intent_epoch=0,
     )
 
-    folded = fold_transition(state, _trials_transition(sequence=1, research=None))
-
-    assert folded.phase is HypothesisDevelopmentPhase.VERDICT
-    assert folded.research_evidence is None
-    assert [trial.test_id for trial in folded.trials] == ["T01"]
+    with pytest.raises(WorkflowError, match="requires a research envelope"):
+        fold_transition(state, _trials_transition(sequence=1, research=None))
 
 
 def test_non_finite_fitted_parameters_are_rejected_by_decode() -> None:

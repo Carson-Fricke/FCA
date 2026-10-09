@@ -4,12 +4,23 @@
  */
 
 import { isWorkflowNodeRole, parseToolResult, type SubAgentTreeNode } from './subagent';
+import type { ChatMessageWire } from './generated';
 import type {
 	ChatMessage,
 	ExecutionEvent,
 	SubAgentNode,
 	ToolResult
 } from './types';
+
+/** Present neutral deliveries without inventing a model-requested tool identity. */
+export function toChatMessage(message: ChatMessageWire): ChatMessage {
+    const datum = message.tool_result;
+    return { ...message, tool_result: datum ? {
+        ...datum,
+        callId: typeof datum.callId === 'string' ? datum.callId : null,
+        tool: typeof datum.tool === 'string' ? datum.tool : null
+    } : null };
+}
 
 /** The data payload carried by a falsification report artifact. */
 export interface FalsificationTrialItem {
@@ -55,11 +66,16 @@ export interface FalsificationReportData {
 /** One run observed by a parameter-variation report: its vector and metrics. */
 export interface VariationRunData {
 	parameters: Record<string, string | number | boolean>;
+ parameterIdentity: string | null;
+ levelIdentities: Record<string, string>;
+ levelLabels: Record<string, string>;
 	jobId: string | null;
 	state: string | null;
 	/** Metric keys present in the payload; a null value is an explicit gap. */
 	metrics: Record<string, number | null>;
 	error: string | null;
+ metricReasons?: Record<string, string>;
+ raw?: Record<string, unknown>;
 }
 
 /** The data payload carried by a parameter-variation phase report artifact. */
@@ -69,6 +85,13 @@ export interface VariationReportData {
 	points: VariationRunData[];
 	parameters: string[];
 	stability: string;
+ dataset?: string;
+ forwardEvidenceScope?: string;
+ comparison?: string;
+ limitations?: string;
+ interactions?: string[][];
+ matchedDevelopment?: VariationReportData | null;
+ raw?: Record<string, unknown>;
 }
 
 function recordValue(value: unknown): Record<string, unknown> | null {
@@ -99,7 +122,8 @@ function decodeVariationMetrics(value: unknown): Record<string, number | null> {
 	const metrics: Record<string, number | null> = {};
 	if (!source) return metrics;
 	for (const [key, entry] of Object.entries(source)) {
-		metrics[key] = typeof entry === 'number' && Number.isFinite(entry) ? entry : null;
+        const number = typeof entry === 'number' ? entry : typeof entry === 'string' && entry.trim() !== '' ? Number(entry) : NaN;
+        metrics[key] = Number.isFinite(number) ? number : null;
 	}
 	return metrics;
 }
@@ -110,12 +134,21 @@ function decodeVariationRun(value: unknown): VariationRunData | null {
 	const jobId = source['jobId'];
 	const state = source['state'];
 	const error = source['error'];
-	return {
+ const reasons: Record<string, string> = {};
+ for (const [key, value] of Object.entries(recordValue(source['metrics']) ?? {})) {
+   if (key.endsWith('_reason') && typeof value === 'string') reasons[key.slice(0, -7)] = value;
+ }
+ return {
 		parameters: decodeVariationVector(source['parameters']),
+        parameterIdentity: typeof source['parameterIdentity'] === 'string' ? source['parameterIdentity'] : null,
+        levelIdentities: Object.fromEntries(Object.entries(recordValue(source['levelIdentities']) ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
+        levelLabels: Object.fromEntries(Object.entries(recordValue(source['levelLabels']) ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
 		jobId: typeof jobId === 'string' && jobId.length > 0 ? jobId : null,
 		state: typeof state === 'string' && state.length > 0 ? state : null,
 		metrics: decodeVariationMetrics(source['metrics']),
-		error: typeof error === 'string' && error.length > 0 ? error : null
+		error: typeof error === 'string' && error.length > 0 ? error : null,
+    metricReasons: reasons,
+    raw: source
 	};
 }
 
@@ -154,12 +187,22 @@ export function decodeVariationReport(value: unknown): VariationReportData | nul
 		? [...new Set(source['parameters'].filter((name): name is string => typeof name === 'string' && name.length > 0))]
 		: [];
 	const stability = source['stability'];
+ const evidence = recordValue(source['evidence']);
+ const variation = recordValue(evidence?.['variation']) ?? evidence;
+ const interactions = variation?.['interactions'];
 	return {
 		type: 'variation',
 		center,
 		points,
 		parameters: declared.length ? declared : deriveVariationParameters(center, points),
-		stability: typeof stability === 'string' ? stability : ''
+		stability: typeof stability === 'string' ? stability : '',
+    dataset: typeof source['dataset'] === 'string' ? source['dataset'] : 'development',
+    forwardEvidenceScope: typeof source['forwardEvidenceScope'] === 'string' ? source['forwardEvidenceScope'] : undefined,
+    comparison: typeof source['comparison'] === 'string' ? source['comparison'] : '',
+    limitations: typeof source['limitations'] === 'string' ? source['limitations'] : '',
+    interactions: Array.isArray(interactions) ? interactions.filter((group): group is string[] => Array.isArray(group) && group.every((key) => typeof key === 'string')) : [],
+    matchedDevelopment: source['matchedDevelopment'] ? decodeVariationReport(source['matchedDevelopment']) : null,
+    raw: source
 	};
 }
 

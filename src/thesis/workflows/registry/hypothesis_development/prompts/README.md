@@ -16,30 +16,16 @@ sibling transcripts, perform publication, or enforce operator approval in code.
 - `strategy_design.py` prompts prose-first design, conversational acceptance,
   committed Rust authoring, latest-ID validation, and reference-based
   completion, separating trading exits from assumption monitors.
-- `candidates.py` prompts the bounded candidate-evaluation phase: compose at
-  most 16 parameter assignments from the committed declaration, submit them
-  once through the batch boundary, inspect every run, record states and metrics
-  honestly, and select an evidence-based shortlist with its selection rule.
-- `nulls.py` prompts the block-permutation null-testing phase: reuse the
-  shortlisted candidate's parameters and recorded metrics (or one
-  `run_backtest`), choose `block_size` and 1..16 unique seeds explicitly,
-  submit one `run_null_batch`, inspect every replicate run, copy metrics
-  exactly, and record the observed statistic, direction, exceedance count, and
-  p-value computed honestly from the returned metrics.
-- `variation.py` prompts the deterministic parameter-variation phase: read the
-  committed strategy's declared parameters through `read_strategy`, take the
-  best shortlisted candidate from the recorded evaluation as the center (its
-  recorded run and metrics, or one `run_backtest`), construct a one-at-a-time
-  neighborhood within the declared bounds/levels, submit one
-  `run_backtest_batch`, inspect every point run, copy metrics exactly, and
-  record the per-parameter stability assessment and honest limitations.
-- `forward.py` prompts the protected forward out-of-sample validation phase:
-  re-run the same center (`run_backtest`), the same null design
-  (`run_null_batch`), and the same variation points (`run_backtest_batch`) on
-  the forward window the phase policy rewrites automatically, inspect every
-  run, copy metrics exactly, compute the exceedance count and p-value honestly,
-  and report degradation versus development rather than retuning on forward
-  data.
+- `candidates.py` prompts declared finite parameter searches without a universal
+  point ceiling; authoritative job results support the shortlist.
+- `nulls.py` prompts ordinary or block permutation with declared signal
+  dependency and preserved properties. Full frozen seeds submit in bounded
+  chunks; target precision determines replicate count. Failed replicates count
+  conservatively, and significance is explicitly conditional on selection.
+- `variation.py` prompts deterministic marginal or declared joint experiments.
+  All vectors, methods and interaction groups freeze before forward exposure.
+- `forward.py` repeats the complete frozen design on protected forward data,
+  compares matched evidence and identifies adaptive holdout reuse.
 - `sdk.py` maintains the SDK reference, targeted patch, validation, and repair
   guidance reused by discovery, model creation, and strategy design, and states
   that execution is phase-scoped: discovery may run studies only; backtests

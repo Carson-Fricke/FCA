@@ -1,8 +1,8 @@
 """Falsifiable hypothesis artifacts as workspace Markdown documents.
 
 A hypothesis artifact is one Markdown page. Published versions live under
-``hypotheses/<slug>/<sha256>.md``; legacy ``hypotheses/<slug>.md`` pages remain
-readable within their explicitly selected workspace. Its
+``hypotheses/<slug>/<sha256>.md`` and are resolved through their committed
+publication manifests. Their
 front matter is a small, strictly validated document rendered in the
 deterministic JSON subset of YAML 1.2, exactly like the workspace manifest, so
 no additional YAML dependency is required.  The prose body carries the agent's
@@ -232,7 +232,7 @@ class HypothesisDocument:
     @property
     def relative_path(self) -> str:
         """Return the workspace-relative artifact path."""
-        return f"{HYPOTHESIS_DIRECTORY}/{self.slug}.md"
+        return _version_path(self.hypothesis_id, self.content_sha256)
 
     @property
     def media_type(self) -> str:
@@ -389,9 +389,8 @@ class WorkspaceHypothesisStore:
     """Publish immutable Markdown and a latest-version manifest per workspace.
 
     All paths come from the verified repository provider. The journal and Git
-    fences isolate publication from unrelated worktree/index edits. Legacy
-    ``hypotheses/<slug>.md`` is readable only in the selected workspace; no
-    provider-root fallback or cross-workspace discovery is performed.
+    fences isolate publication from unrelated worktree/index edits. Committed
+    manifests and immutable versions are the only publication authority.
     """
 
     def __init__(self, workspaces: WorkspaceRepositoryProvider) -> None:
@@ -403,14 +402,13 @@ class WorkspaceHypothesisStore:
         self._workspaces = workspaces
 
     def path_for(self, hypothesis_id: str, *, workspace_id: str) -> Path:
-        """Return the latest immutable artifact, or its scoped legacy path."""
+        """Return the latest immutable artifact from its publication manifest."""
         _validate_workspace_id(workspace_id)
         _validate_hypothesis_id(hypothesis_id)
         manifest = self._manifest(hypothesis_id, workspace_id=workspace_id)
         if manifest is None:
-            relative = f"{HYPOTHESIS_DIRECTORY}/{slugify(hypothesis_id)}.md"
-        else:
-            relative = _version_path(hypothesis_id, manifest["contentSha256"])
+            raise HypothesisArtifactError(f"hypothesis {hypothesis_id!r} was not found")
+        relative = _version_path(hypothesis_id, manifest["contentSha256"])
         return self._workspaces.resolve_path(workspace_id, relative)
 
     def save(self, document: HypothesisDocument, *, workspace_id: str) -> str:
@@ -425,10 +423,9 @@ class WorkspaceHypothesisStore:
         payload = document.to_bytes()
         with transaction.publication_lock():
             previous = self._manifest(document.hypothesis_id, workspace_id=workspace_id)
-            legacy = self._workspaces.resolve_path(workspace_id, document.relative_path)
-            if previous is not None or legacy.exists():
+            if previous is not None:
                 existing = self.load(document.hypothesis_id, workspace_id=workspace_id)
-                if previous is not None and existing == document:
+                if existing == document:
                     self._workspaces.publish(workspace_id)
                     return relative
             path = self._workspaces.resolve_path(workspace_id, relative)
@@ -504,11 +501,9 @@ class WorkspaceHypothesisStore:
         _validate_workspace_id(workspace_id)
         _validate_hypothesis_id(hypothesis_id)
         manifest = self._manifest(hypothesis_id, workspace_id=workspace_id)
-        relative = (
-            f"{HYPOTHESIS_DIRECTORY}/{slugify(hypothesis_id)}.md"
-            if manifest is None
-            else _version_path(hypothesis_id, manifest["contentSha256"])
-        )
+        if manifest is None:
+            raise HypothesisArtifactError(f"hypothesis {hypothesis_id!r} was not found")
+        relative = _version_path(hypothesis_id, manifest["contentSha256"])
         path = self._workspaces.resolve_path(workspace_id, relative)
         try:
             payload = path.read_bytes()
@@ -521,32 +516,30 @@ class WorkspaceHypothesisStore:
             raise HypothesisArtifactError(
                 "stored hypothesis identity does not match its path"
             )
-        if manifest is not None and (
+        if (
             document.content_sha256 != manifest["contentSha256"]
             or payload != document.to_bytes()
         ):
             raise HypothesisArtifactError(
                 "stored hypothesis content hash does not match"
             )
-        if manifest is not None:
-            coordinator = GitCoordinator(self._workspaces.open(workspace_id).root)
-            head = coordinator.head()
-            manifest_relative = _manifest_path(hypothesis_id)
-            manifest_payload = self._workspaces.resolve_path(
-                workspace_id, manifest_relative
-            ).read_bytes()
-            if head is None or not (
-                coordinator.file_matches(head, relative, payload)
-                and coordinator.file_matches(head, manifest_relative, manifest_payload)
-            ):
-                raise HypothesisArtifactError(
-                    "hypothesis publication differs from committed content"
-                )
+        coordinator = GitCoordinator(self._workspaces.open(workspace_id).root)
+        head = coordinator.head()
+        manifest_relative = _manifest_path(hypothesis_id)
+        manifest_payload = self._workspaces.resolve_path(
+            workspace_id, manifest_relative
+        ).read_bytes()
+        if head is None or not (
+            coordinator.file_matches(head, relative, payload)
+            and coordinator.file_matches(head, manifest_relative, manifest_payload)
+        ):
+            raise HypothesisArtifactError(
+                "hypothesis publication differs from committed content"
+            )
         return document
 
     def list(self, *, workspace_id: str) -> tuple[str, ...]:
         _validate_workspace_id(workspace_id)
-        directory = self._workspaces.resolve_path(workspace_id, HYPOTHESIS_DIRECTORY)
         manifests = self._workspaces.resolve_path(workspace_id, ".thesis/hypotheses")
         coordinator = GitCoordinator(self._workspaces.open(workspace_id).root)
         for relative in coordinator.tracked_paths(".thesis/hypotheses"):
@@ -574,16 +567,6 @@ class WorkspaceHypothesisStore:
                     "invalid hypothesis publication manifest"
                 ) from error
             identifiers.add(identity)
-        for path in sorted(directory.glob("*.md")):
-            resolved = self._workspaces.resolve_path(
-                workspace_id, f"hypotheses/{path.name}"
-            )
-            document = HypothesisDocument.parse(resolved.read_text(encoding="utf-8"))
-            if document.relative_path != f"hypotheses/{path.name}":
-                raise HypothesisArtifactError(
-                    "stored hypothesis identity does not match its path"
-                )
-            identifiers.add(document.hypothesis_id)
         return tuple(sorted(identifiers))
 
 

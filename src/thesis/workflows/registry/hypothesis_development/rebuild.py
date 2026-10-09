@@ -18,10 +18,6 @@ the phase and carries its completion contract; the fold dispatches on
 - the verdict→discovery restart records the verdict and resets everything per
   ``reset_discovery`` semantics.
 
-Stored runs written before the model-creation rename name the retired
-``hypothesis_creation`` value; :func:`phase_from_value` decodes it to
-``model_creation`` so the old transitions fold through the live handlers.
-
 The hypothesis document side-store is deliberately not read: the fold is
 store-only, so a rebuild never reaches into the workspace.  Strategy-chain
 payload handlers are additive follow-ups in the dispatch table.
@@ -103,7 +99,7 @@ def _fold_draft(
         "hypothesis",
         (_MODEL_CREATION.value, _FALSIFICATION_TRIALS.value),
     )
-    return replace(state, draft=_draft_from_contract(payload, persisted=True))
+    return replace(state, draft=_draft_from_contract(payload))
 
 
 def _fold_trials(
@@ -113,16 +109,13 @@ def _fold_trials(
 
     The envelope is the trials phase's portable output: it restores the plan,
     the model and fit references, the fitted parameters, the runtime
-    configuration, and the typed evidence record.  Store records written before
-    the envelope carried only ``trials`` and restore exactly that.
+    configuration, and the typed evidence record.
     """
     raw = completion.get("trials")
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
         raise WorkflowError("the trials→verdict completion requires a trials list")
     trials = tuple(FalsificationTrial.from_dict(item) for item in raw)
     raw_research = completion.get("research")
-    if raw_research is None:
-        return replace(state, trials=trials)
     if not isinstance(raw_research, Mapping) or not raw_research:
         raise WorkflowError(
             "the trials→verdict completion requires a research envelope"
@@ -256,8 +249,6 @@ def rebuild_state(
     rests in before its first transition: live runs start at the workflow's
     declared initial phase.
     """
-    if transitions and transitions[0].from_phase == "hypothesis_creation":
-        initial_phase = _MODEL_CREATION
     state = HypothesisDevelopmentState(
         workspace_id=workspace_id,
         execution_id=execution_id,

@@ -553,7 +553,7 @@ fn build_null_transform(value: YamlValue) -> Result<Value, ConfigError> {
         .ok_or_else(|| ConfigError("Field required: null.mode".to_string()))?;
     let mode = enum_value(
         &as_str(mode_value, "null.mode")?,
-        &["block_permutation"],
+        &["permutation", "block_permutation"],
         "null.mode",
     )?;
     let block_size_value = map
@@ -564,6 +564,9 @@ fn build_null_transform(value: YamlValue) -> Result<Value, ConfigError> {
         return Err(ConfigError(
             "null.block_size must be between 1 and 10000".to_string(),
         ));
+    }
+    if mode == "permutation" && block_size != 1 {
+        return Err(ConfigError("permutation requires block_size=1".into()));
     }
     let seed_value = map
         .remove("seed")

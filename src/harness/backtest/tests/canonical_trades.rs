@@ -11,7 +11,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 
-use backtest::backtest::config::{BacktestConfig, FeeBasis, FeeRule};
+use backtest::backtest::config::{BacktestConfig, FeeBasis, FeeRule, StrategyInstanceConfig};
 use backtest::backtest::engine_core::{
     BacktestOutcome, EngineMarket, EngineOptions, EngineOrder, MarketSubscription,
     StrategyInstance, StrategyRuntime, StrategyStart,
@@ -475,7 +475,7 @@ fn negative_equity_leaves_return_drawdown_cagr_and_sharpe_undefined_with_reasons
     let start = parse_timestamp_ns("2024-01-02T14:30:00Z").expect("start");
     let minute = 60_000_000_000;
     // A 5-cash account buys two units at 10, then sells both at 1. Equity runs
-    // 5, 5, 5, and then -13: cash is -13 with no position left.
+    // includes quote marks before/after fills; it ends at -13 with no position left.
     let mut configured = config();
     configured.initial_cash = "5".to_string();
     configured.initial_cash_decimal = num::Decimal::from_i128(5);
@@ -491,7 +491,7 @@ fn negative_equity_leaves_return_drawdown_cagr_and_sharpe_undefined_with_reasons
         &[("buy", 1), ("buy", 1), ("sell", 2)],
     );
     let equity = &metrics["equity"];
-    assert_eq!(equity["samples"], 4);
+    assert_eq!(equity["samples"], 7); // opening capital + three quote marks + three fills
     assert!(equity["total_return"].is_null(), "no zero stands in for it");
     assert_eq!(equity["total_return_reason"], "negative_equity");
     assert!(equity["cagr"].is_null());
@@ -538,4 +538,132 @@ fn a_fill_whose_notional_overflows_the_decimal_bound_fails_the_job_by_name() {
     assert!(message.contains("overflows"), "{message}");
     assert!(!directory.join("backtest.json").exists());
     assert!(!directory.join("metrics.json").exists());
+}
+
+#[test]
+fn open_position_market_movement_fees_and_unused_capital_reconcile_every_artifact() {
+    let mut configured = config();
+    configured.initial_cash = "1000000".into();
+    configured.initial_cash_decimal = num::Decimal::from_i128(1000000);
+    configured.fees.rules = vec![per_unit_fee("1")];
+    configured.strategy_instances = vec![StrategyInstanceConfig {
+        instance_id: "trader".into(),
+        implementation: "scripted".into(),
+        bundle_hash: "scripted".into(),
+        parameters: BTreeMap::new(),
+        symbols: vec!["SPY".into()],
+        capital_fraction: "0.5".into(),
+    }];
+    let start = configured.start_ns;
+    let quotes = [
+        quote(start, "9", "10"),
+        quote(start + 60_000_000_000, "14", "16"),
+        quote(start + 120_000_000_000, "7", "9"),
+        quote(start + 180_000_000_000, "19", "21"),
+    ];
+    let (result, directory) = run_scripted_job(
+        "open-marked-unused-capital",
+        &configured,
+        &quotes,
+        &[("buy", 2)],
+    );
+    let (outcome, _) = result.unwrap();
+    assert_eq!(
+        outcome
+            .portfolio
+            .initial_cash
+            .cmp_value(num::Decimal::from_i128(1000000)),
+        std::cmp::Ordering::Equal
+    );
+    assert_eq!(
+        outcome
+            .portfolio
+            .equity()
+            .unwrap()
+            .cmp_value(num::Decimal::from_i128(1000018)),
+        std::cmp::Ordering::Equal
+    );
+    let metrics: Value =
+        serde_json::from_slice(&std::fs::read(directory.join("metrics.json")).unwrap()).unwrap();
+    assert_eq!(metrics["equity"]["samples"], 6); // opening + four marks + one fill
+    assert_eq!(
+        decimal(&metrics["equity"]["net_pnl"]),
+        Decimal18::from_i64(18)
+    );
+    assert_eq!(
+        decimal(&metrics["equity"]["gross_pnl"]),
+        Decimal18::from_i64(20)
+    );
+    assert_eq!(decimal(&metrics["equity"]["fees"]), Decimal18::from_i64(2));
+    assert_eq!(
+        decimal(&metrics["equity"]["total_return"]),
+        "0.000018".parse().unwrap()
+    );
+    assert_eq!(decimal(&metrics["trades"]["net_pnl"]), Decimal18::ZERO);
+    assert_eq!(
+        decimal(&metrics["trades"]["open_fees"]),
+        Decimal18::from_i64(2)
+    );
+    assert_eq!(
+        metrics["trades"]["profit_factor_reason"],
+        "no_closed_trades"
+    );
+    // Inspect the canonical recorder output, not an independently constructed equity fixture.
+    let file = std::fs::File::open(directory.join("artifacts").join("equity.parquet")).unwrap();
+    let batches: Vec<_> =
+        parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(file)
+            .unwrap()
+            .build()
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+    let last = batches.last().unwrap();
+    let text = |name: &str| {
+        let column = last
+            .column_by_name(name)
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow_array::StringArray>()
+            .unwrap();
+        column
+            .value(last.num_rows() - 1)
+            .parse::<Decimal18>()
+            .unwrap()
+    };
+    assert_eq!(text("equity"), Decimal18::from_i64(1000018));
+    assert_eq!(text("cash"), Decimal18::from_i64(999978));
+    assert_eq!(text("market_value"), Decimal18::from_i64(40));
+    assert_eq!(text("realized_pnl"), Decimal18::ZERO);
+    assert_eq!(text("unrealized_pnl"), Decimal18::from_i64(18));
+    assert_eq!(text("total_pnl"), Decimal18::from_i64(18));
+    assert!(
+        (decimal(&metrics["equity"]["max_drawdown"]).to_f64() - 14.0 / 1000008.0).abs() < 1e-12
+    );
+}
+
+#[test]
+fn unrepresentable_annualization_is_undefined_without_losing_valid_job_results() {
+    let mut configured = config();
+    configured.initial_cash = "100".into();
+    configured.initial_cash_decimal = num::Decimal::from_i128(100);
+    let start = configured.start_ns;
+    let (metrics, _) = run_job_with(
+        "cagr-overflow",
+        configured,
+        &[
+            quote(start, "9", "10"),
+            quote(start + 60_000_000_000, "19", "21"),
+        ],
+        &[("buy", 2)],
+    );
+    assert!(metrics["equity"]["cagr"].is_null());
+    assert_eq!(metrics["equity"]["cagr_reason"], "arithmetic_overflow");
+    assert_eq!(
+        decimal(&metrics["equity"]["net_pnl"]),
+        Decimal18::from_i64(20)
+    );
+    assert_eq!(
+        decimal(&metrics["equity"]["total_return"]),
+        "0.2".parse().unwrap()
+    );
 }

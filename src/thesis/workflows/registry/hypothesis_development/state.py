@@ -64,8 +64,6 @@ class HypothesisDevelopmentState:
     null_testing: NullTestEvaluation | None = None
     variation: VariationEvaluation | None = None
     forward_validation: ForwardEvaluation | None = None
-    model_provenance: Mapping[str, object] | None = None
-    journal_id: str | None = None
     error_message: str | None = None
     detail: str | None = None
     fenced: bool = False
@@ -99,7 +97,6 @@ class HypothesisDevelopmentOutcome:
     null_testing: NullTestEvaluation | None = None
     variation: VariationEvaluation | None = None
     forward_validation: ForwardEvaluation | None = None
-    journal_id: str | None = None
     detail: str | None = None
 
     def as_dict(self) -> dict[str, object]:
@@ -118,7 +115,6 @@ class HypothesisDevelopmentOutcome:
                     "path": self.hypothesis.relative_path,
                 }
             ),
-            "journalId": self.journal_id,
             "hypothesisCycles": self.hypothesis_cycles,
             "researchModel": (
                 None

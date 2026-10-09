@@ -53,6 +53,7 @@ type Identity = (usize, &'static str);
 pub(crate) struct RoutingSignature {
     identity: Identity,
     own: Vec<Subscription>,
+    tick_interval_ns: Option<i64>,
     dependencies: Vec<RoutingSignature>,
 }
 
@@ -70,12 +71,27 @@ fn collect<C: MarketConsumer + ?Sized>(
         if std::mem::size_of_val(dependency) == 0 {
             return Err("zero-sized indicator dependencies are not supported".into());
         }
-        dependencies.push(collect(dependency, visiting)?);
+        let mut signature = collect(dependency, visiting)?;
+        signature.tick_interval_ns = dependency.sequence().tick_interval_ns();
+        fn needs_ticks(signature: &RoutingSignature) -> bool {
+            signature
+                .own
+                .iter()
+                .any(|subscription| !matches!(subscription, Subscription::Bars { .. }))
+                || signature.dependencies.iter().any(needs_ticks)
+        }
+        if needs_ticks(&signature) && signature.tick_interval_ns.is_none() {
+            return Err(
+                "tick indicator must declare output fidelity with IndicatorSequence::ticks".into(),
+            );
+        }
+        dependencies.push(signature);
     }
     visiting.remove(&identity);
     Ok(RoutingSignature {
         identity,
         own,
+        tick_interval_ns: None,
         dependencies,
     })
 }
@@ -90,7 +106,9 @@ pub(crate) fn validate_routing<C: MarketConsumer + ?Sized>(
     consumer: &mut C,
     expected: &RoutingSignature,
 ) -> Result<(), String> {
-    if routing_signature(consumer)? != *expected {
+    let mut actual = routing_signature(consumer)?;
+    actual.tick_interval_ns = expected.tick_interval_ns;
+    if actual != *expected {
         return Err(
             "market consumer subscriptions or dependency topology changed after construction"
                 .into(),
@@ -120,6 +138,76 @@ enum Input<'a, 'b> {
     Bar(&'a BarFrame<'b>),
 }
 
+fn input_time(input: &Input<'_, '_>) -> i64 {
+    match input {
+        Input::Quote(event) => event.timestamp_ns,
+        Input::Trade(event) => event.timestamp_ns,
+        Input::Bar(frame) => frame.available_at_ns,
+    }
+}
+fn matches_symbol(
+    signature: &RoutingSignature,
+    symbol: &str,
+    kind: &str,
+    interval: Option<&str>,
+) -> bool {
+    signature.own.iter().any(|subscription| match subscription {
+        Subscription::Quote { symbols } => kind == "quote" && symbols.iter().any(|s| s == symbol),
+        Subscription::Trade { symbols } => kind == "trade" && symbols.iter().any(|s| s == symbol),
+        Subscription::Bars {
+            symbols,
+            interval: cadence,
+        } => {
+            kind == "bars"
+                && interval == Some(cadence.as_str())
+                && symbols.iter().any(|s| s == symbol)
+        }
+    }) || signature
+        .dependencies
+        .iter()
+        .any(|dependency| matches_symbol(dependency, symbol, kind, interval))
+}
+fn capture(
+    indicator: &mut dyn Indicator,
+    input: &Input<'_, '_>,
+    signature: &RoutingSignature,
+) -> Result<(), String> {
+    match input {
+        Input::Quote(event) if matches_symbol(signature, event.symbol, "quote", None) => {
+            let value = indicator.value(event.symbol);
+            indicator
+                .sequence_mut()
+                .record_tick(event.symbol, event.timestamp_ns, value)?;
+        }
+        Input::Trade(event) if matches_symbol(signature, event.symbol, "trade", None) => {
+            let value = indicator.value(event.symbol);
+            indicator
+                .sequence_mut()
+                .record_tick(event.symbol, event.timestamp_ns, value)?;
+        }
+        Input::Bar(frame) => {
+            for symbol in frame
+                .bars_by_symbol
+                .keys()
+                .copied()
+                .chain(frame.missing_symbols.iter().copied())
+            {
+                if matches_symbol(signature, symbol, "bars", Some(frame.interval)) {
+                    let missing = frame.missing_symbols.contains(&symbol);
+                    let value = if missing {
+                        None
+                    } else {
+                        indicator.value(symbol)
+                    };
+                    indicator.sequence_mut().record_bar(symbol, frame, value)?;
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn route<C: MarketConsumer + ?Sized>(
     consumer: &mut C,
     input: &Input<'_, '_>,
@@ -136,7 +224,12 @@ fn route<C: MarketConsumer + ?Sized>(
         .into_iter()
         .zip(&expected.dependencies)
     {
+        let first_visit = !seen.contains(&dependency.consumer_identity());
+        dependency.sequence_mut().advance(input_time(input))?;
         route(dependency, input, &mut ObservationContext, seen, signature)?;
+        if first_visit {
+            capture(dependency, input, signature)?;
+        }
     }
     validate_routing(consumer, expected)?;
     let subscriptions = &expected.own;

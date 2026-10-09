@@ -1,0 +1,1464 @@
+{
+  "development": {
+    "type": "variation",
+    "dataset": "development",
+    "center": {
+      "parameters": {
+        "fast": 5,
+        "slow": 20
+      },
+      "jobId": "strategy-momentum-scope-run-1",
+      "state": "succeeded",
+      "metrics": {
+        "total_return": "0.12",
+        "profit_factor": "1.6"
+      },
+      "error": null,
+      "parameterIdentity": "b97683d55c78ab27011ea720d2feb0bbb3c5905eb730ed7b370cc691f7b883fc",
+      "levelIdentities": {
+        "fast": "{\"fast\":5}",
+        "slow": "{\"slow\":20}"
+      },
+      "levelLabels": {
+        "fast": "5",
+        "slow": "20"
+      }
+    },
+    "points": [
+      {
+        "parameters": {
+          "fast": 4,
+          "slow": 20
+        },
+        "jobId": "strategy-momentum-scope-var-1",
+        "state": "succeeded",
+        "metrics": {
+          "total_return": "0.10",
+          "profit_factor": null,
+          "profit_factor_reason": "no_losing_trades"
+        },
+        "error": null,
+        "parameterIdentity": "bba447eab31f8e9ef375db71a46b8e4e52cf74e6507576a93ac55bba42ddbe4e",
+        "levelIdentities": {
+          "fast": "{\"fast\":4}",
+          "slow": "{\"slow\":20}"
+        },
+        "levelLabels": {
+          "fast": "4",
+          "slow": "20"
+        }
+      },
+      {
+        "parameters": {
+          "fast": 6,
+          "slow": 20
+        },
+        "jobId": "strategy-momentum-scope-var-2",
+        "state": "succeeded",
+        "metrics": {
+          "netTotalReturn": 0.13,
+          "profitFactor": 1.7
+        },
+        "error": null,
+        "parameterIdentity": "4ec8b26a687b953e258defd0c3ff83c5329a73c10e086df7663819e8563d0de6",
+        "levelIdentities": {
+          "fast": "{\"fast\":6}",
+          "slow": "{\"slow\":20}"
+        },
+        "levelLabels": {
+          "fast": "6",
+          "slow": "20"
+        }
+      },
+      {
+        "parameters": {
+          "fast": 5,
+          "slow": 19
+        },
+        "jobId": "strategy-momentum-scope-var-3",
+        "state": "failed",
+        "metrics": null,
+        "error": "run terminated before completing",
+        "parameterIdentity": "d5d491bb6db2d94b424ec368659d89557584feb8a6c0706e18d240a40930c1e8",
+        "levelIdentities": {
+          "fast": "{\"fast\":5}",
+          "slow": "{\"slow\":19}"
+        },
+        "levelLabels": {
+          "fast": "5",
+          "slow": "19"
+        }
+      },
+      {
+        "parameters": {
+          "fast": 5,
+          "slow": 21
+        },
+        "jobId": "strategy-momentum-scope-var-4",
+        "state": "running",
+        "metrics": null,
+        "error": null,
+        "parameterIdentity": "ba3e7bcbe96f9151ccdda203d1fdd9f96343815b5ceda56c956249343a92c5f3",
+        "levelIdentities": {
+          "fast": "{\"fast\":5}",
+          "slow": "{\"slow\":21}"
+        },
+        "levelLabels": {
+          "fast": "5",
+          "slow": "21"
+        }
+      }
+    ],
+    "parameters": [
+      "fast",
+      "slow"
+    ],
+    "stability": "Fast lookback is a plateau: 4, 5 and 6 all keep the edge. Slow lookback is thinner and the cost drag grows at 19.",
+    "evidence": {
+      "strategy": {
+        "workspaceId": "workspace-demo",
+        "kind": "strategy",
+        "programId": "momentum",
+        "gitCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "batchId": "batch-momentum-0123456789ab",
+      "center": {
+        "parameters": {
+          "fast": 5,
+          "slow": 20
+        },
+        "jobId": "strategy-momentum-scope-run-1",
+        "state": "succeeded",
+        "metrics": {
+          "total_return": "0.12",
+          "profit_factor": "1.6"
+        },
+        "error": null
+      },
+      "points": [
+        {
+          "parameters": {
+            "fast": 4,
+            "slow": 20
+          },
+          "jobId": "strategy-momentum-scope-var-1",
+          "state": "succeeded",
+          "metrics": {
+            "total_return": "0.10",
+            "profit_factor": null,
+            "profit_factor_reason": "no_losing_trades"
+          },
+          "error": null
+        },
+        {
+          "parameters": {
+            "fast": 6,
+            "slow": 20
+          },
+          "jobId": "strategy-momentum-scope-var-2",
+          "state": "succeeded",
+          "metrics": {
+            "netTotalReturn": 0.13,
+            "profitFactor": 1.7
+          },
+          "error": null
+        },
+        {
+          "parameters": {
+            "fast": 5,
+            "slow": 19
+          },
+          "jobId": "strategy-momentum-scope-var-3",
+          "state": "failed",
+          "metrics": null,
+          "error": "run terminated before completing"
+        },
+        {
+          "parameters": {
+            "fast": 5,
+            "slow": 21
+          },
+          "jobId": "strategy-momentum-scope-var-4",
+          "state": "running",
+          "metrics": null,
+          "error": null
+        }
+      ],
+      "parameters": [
+        "fast",
+        "slow"
+      ],
+      "stability": "Fast lookback is a plateau: 4, 5 and 6 all keep the edge. Slow lookback is thinner and the cost drag grows at 19.",
+      "limitations": "One-at-a-time variation on one symbol and one window.",
+      "method": "one_at_a_time",
+      "interactions": []
+    },
+    "nullEvidence": null,
+    "candidateEvidence": null,
+    "researchEvidence": null
+  },
+  "joint": {
+    "type": "variation",
+    "dataset": "development",
+    "center": {
+      "parameters": {
+        "fast": 5,
+        "slow": 20
+      },
+      "jobId": "strategy-momentum-scope-run-1",
+      "state": "succeeded",
+      "metrics": {
+        "total_return": "0.12",
+        "profit_factor": "1.6"
+      },
+      "error": null,
+      "parameterIdentity": "b97683d55c78ab27011ea720d2feb0bbb3c5905eb730ed7b370cc691f7b883fc",
+      "levelIdentities": {
+        "fast": "{\"fast\":5}",
+        "slow": "{\"slow\":20}"
+      },
+      "levelLabels": {
+        "fast": "5",
+        "slow": "20"
+      }
+    },
+    "points": [
+      {
+        "parameters": {
+          "fast": 4,
+          "slow": 20
+        },
+        "jobId": "strategy-momentum-scope-var-1",
+        "state": "succeeded",
+        "metrics": {
+          "total_return": "0.10",
+          "profit_factor": null,
+          "profit_factor_reason": "no_losing_trades"
+        },
+        "error": null,
+        "parameterIdentity": "bba447eab31f8e9ef375db71a46b8e4e52cf74e6507576a93ac55bba42ddbe4e",
+        "levelIdentities": {
+          "fast": "{\"fast\":4}",
+          "slow": "{\"slow\":20}"
+        },
+        "levelLabels": {
+          "fast": "4",
+          "slow": "20"
+        }
+      },
+      {
+        "parameters": {
+          "fast": 6,
+          "slow": 20
+        },
+        "jobId": "strategy-momentum-scope-var-2",
+        "state": "succeeded",
+        "metrics": {
+          "netTotalReturn": 0.13,
+          "profitFactor": 1.7
+        },
+        "error": null,
+        "parameterIdentity": "4ec8b26a687b953e258defd0c3ff83c5329a73c10e086df7663819e8563d0de6",
+        "levelIdentities": {
+          "fast": "{\"fast\":6}",
+          "slow": "{\"slow\":20}"
+        },
+        "levelLabels": {
+          "fast": "6",
+          "slow": "20"
+        }
+      },
+      {
+        "parameters": {
+          "fast": 5,
+          "slow": 19
+        },
+        "jobId": "strategy-momentum-scope-var-3",
+        "state": "failed",
+        "metrics": null,
+        "error": "run terminated before completing",
+        "parameterIdentity": "d5d491bb6db2d94b424ec368659d89557584feb8a6c0706e18d240a40930c1e8",
+        "levelIdentities": {
+          "fast": "{\"fast\":5}",
+          "slow": "{\"slow\":19}"
+        },
+        "levelLabels": {
+          "fast": "5",
+          "slow": "19"
+        }
+      },
+      {
+        "parameters": {
+          "fast": 5,
+          "slow": 21
+        },
+        "jobId": "strategy-momentum-scope-var-4",
+        "state": "running",
+        "metrics": null,
+        "error": null,
+        "parameterIdentity": "ba3e7bcbe96f9151ccdda203d1fdd9f96343815b5ceda56c956249343a92c5f3",
+        "levelIdentities": {
+          "fast": "{\"fast\":5}",
+          "slow": "{\"slow\":21}"
+        },
+        "levelLabels": {
+          "fast": "5",
+          "slow": "21"
+        }
+      },
+      {
+        "parameters": {
+          "fast": 6,
+          "slow": 21
+        },
+        "jobId": "strategy-momentum-joint-1",
+        "state": "succeeded",
+        "metrics": {
+          "total_return": "0.08",
+          "profit_factor": "1.1"
+        },
+        "error": null,
+        "parameterIdentity": "ec1aff47fddfeb7089f377f13692775a3fbecc30ac2c94f62329755135d0fc38",
+        "levelIdentities": {
+          "fast": "{\"fast\":6}",
+          "slow": "{\"slow\":21}"
+        },
+        "levelLabels": {
+          "fast": "6",
+          "slow": "21"
+        }
+      }
+    ],
+    "parameters": [
+      "fast",
+      "slow"
+    ],
+    "stability": "Fast lookback is a plateau: 4, 5 and 6 all keep the edge. Slow lookback is thinner and the cost drag grows at 19.",
+    "evidence": {
+      "strategy": {
+        "workspaceId": "workspace-demo",
+        "kind": "strategy",
+        "programId": "momentum",
+        "gitCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "batchId": "batch-momentum-0123456789ab",
+      "center": {
+        "parameters": {
+          "fast": 5,
+          "slow": 20
+        },
+        "jobId": "strategy-momentum-scope-run-1",
+        "state": "succeeded",
+        "metrics": {
+          "total_return": "0.12",
+          "profit_factor": "1.6"
+        },
+        "error": null
+      },
+      "points": [
+        {
+          "parameters": {
+            "fast": 4,
+            "slow": 20
+          },
+          "jobId": "strategy-momentum-scope-var-1",
+          "state": "succeeded",
+          "metrics": {
+            "total_return": "0.10",
+            "profit_factor": null,
+            "profit_factor_reason": "no_losing_trades"
+          },
+          "error": null
+        },
+        {
+          "parameters": {
+            "fast": 6,
+            "slow": 20
+          },
+          "jobId": "strategy-momentum-scope-var-2",
+          "state": "succeeded",
+          "metrics": {
+            "netTotalReturn": 0.13,
+            "profitFactor": 1.7
+          },
+          "error": null
+        },
+        {
+          "parameters": {
+            "fast": 5,
+            "slow": 19
+          },
+          "jobId": "strategy-momentum-scope-var-3",
+          "state": "failed",
+          "metrics": null,
+          "error": "run terminated before completing"
+        },
+        {
+          "parameters": {
+            "fast": 5,
+            "slow": 21
+          },
+          "jobId": "strategy-momentum-scope-var-4",
+          "state": "running",
+          "metrics": null,
+          "error": null
+        },
+        {
+          "parameters": {
+            "fast": 6,
+            "slow": 21
+          },
+          "jobId": "strategy-momentum-joint-1",
+          "state": "succeeded",
+          "metrics": {
+            "total_return": "0.08",
+            "profit_factor": "1.1"
+          },
+          "error": null
+        }
+      ],
+      "parameters": [
+        "fast",
+        "slow"
+      ],
+      "stability": "Fast lookback is a plateau: 4, 5 and 6 all keep the edge. Slow lookback is thinner and the cost drag grows at 19.",
+      "limitations": "One-at-a-time variation on one symbol and one window.",
+      "method": "joint",
+      "interactions": [
+        [
+          "fast",
+          "slow"
+        ]
+      ]
+    },
+    "nullEvidence": null,
+    "candidateEvidence": null,
+    "researchEvidence": null
+  },
+  "forward": {
+    "type": "variation",
+    "dataset": "forward",
+    "center": {
+      "parameters": {
+        "fast": 5,
+        "slow": 20
+      },
+      "jobId": "strategy-momentum-forward-run-1",
+      "state": "succeeded",
+      "metrics": {
+        "sharpe": 0.4,
+        "total_return": "0.05",
+        "profit_factor": "1.2"
+      },
+      "error": null,
+      "parameterIdentity": "b97683d55c78ab27011ea720d2feb0bbb3c5905eb730ed7b370cc691f7b883fc",
+      "levelIdentities": {
+        "fast": "{\"fast\":5}",
+        "slow": "{\"slow\":20}"
+      },
+      "levelLabels": {
+        "fast": "5",
+        "slow": "20"
+      }
+    },
+    "points": [
+      {
+        "parameters": {
+          "fast": 4,
+          "slow": 20
+        },
+        "jobId": "strategy-momentum-forward-var-1",
+        "state": "succeeded",
+        "metrics": {
+          "sharpe": 0.35
+        },
+        "error": null,
+        "parameterIdentity": "bba447eab31f8e9ef375db71a46b8e4e52cf74e6507576a93ac55bba42ddbe4e",
+        "levelIdentities": {
+          "fast": "{\"fast\":4}",
+          "slow": "{\"slow\":20}"
+        },
+        "levelLabels": {
+          "fast": "4",
+          "slow": "20"
+        }
+      },
+      {
+        "parameters": {
+          "fast": 6,
+          "slow": 20
+        },
+        "jobId": "strategy-momentum-forward-var-2",
+        "state": "succeeded",
+        "metrics": {
+          "sharpe": 0.45
+        },
+        "error": null,
+        "parameterIdentity": "4ec8b26a687b953e258defd0c3ff83c5329a73c10e086df7663819e8563d0de6",
+        "levelIdentities": {
+          "fast": "{\"fast\":6}",
+          "slow": "{\"slow\":20}"
+        },
+        "levelLabels": {
+          "fast": "6",
+          "slow": "20"
+        }
+      },
+      {
+        "parameters": {
+          "fast": 5,
+          "slow": 19
+        },
+        "jobId": "strategy-momentum-forward-var-3",
+        "state": "failed",
+        "metrics": null,
+        "error": "run terminated before completing",
+        "parameterIdentity": "d5d491bb6db2d94b424ec368659d89557584feb8a6c0706e18d240a40930c1e8",
+        "levelIdentities": {
+          "fast": "{\"fast\":5}",
+          "slow": "{\"slow\":19}"
+        },
+        "levelLabels": {
+          "fast": "5",
+          "slow": "19"
+        }
+      }
+    ],
+    "parameters": [
+      "fast",
+      "slow"
+    ],
+    "stability": "Fast lookback thins on the forward window: 4 and 6 hold a weaker edge and the failed slow point leaves it untested.",
+    "comparison": "Development Sharpe was 1.0; the forward Sharpe is 0.4 with p=0.667 and thinner neighborhood stability. The edge degraded but did not invert, so the design is reportable rather than refuted.",
+    "limitations": "One protected window and three seeds.",
+    "window": {
+      "start": "2026-06-06T12:00:00Z",
+      "end": "2026-09-04T12:00:00Z"
+    },
+    "evidence": {
+      "strategy": {
+        "workspaceId": "workspace-demo",
+        "kind": "strategy",
+        "programId": "momentum",
+        "gitCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "window": {
+        "start": "2026-06-06T12:00:00Z",
+        "end": "2026-09-04T12:00:00Z"
+      },
+      "statistic": "sharpe",
+      "direction": "upper",
+      "observed": {
+        "jobId": "strategy-momentum-forward-run-1",
+        "metrics": {
+          "netTotalReturn": 0.05,
+          "sharpe": 0.4
+        },
+        "value": 0.4
+      },
+      "null": {
+        "batchId": "null-momentum-forward-0123456789ab",
+        "blockSize": 7,
+        "mode": "block_permutation",
+        "replicates": [
+          {
+            "seed": 1,
+            "jobId": "strategy-momentum-forward-null-1",
+            "state": "succeeded",
+            "metrics": {
+              "sharpe": 0.5
+            },
+            "error": null
+          },
+          {
+            "seed": 2,
+            "jobId": "strategy-momentum-forward-null-2",
+            "state": "succeeded",
+            "metrics": {
+              "sharpe": 0.1
+            },
+            "error": null
+          },
+          {
+            "seed": 3,
+            "jobId": "strategy-momentum-forward-null-3",
+            "state": "failed",
+            "metrics": null,
+            "error": "run terminated before completing"
+          }
+        ],
+        "exceedanceCount": 1,
+        "pValue": 0.75,
+        "signalAdequacy": {
+          "signal": "lagged price relationship",
+          "destroyedDependency": "inter_block_order",
+          "preservedProperties": [
+            "marginal_returns",
+            "within_block_dependence"
+          ],
+          "limitations": "Within-block dependence remains; calendar volatility schedule is not preserved."
+        },
+        "evidenceScope": "selection_conditional",
+        "failedReplicatePolicy": "conservative_exceedance",
+        "targetResolution": 0.25
+      },
+      "variation": {
+        "batchId": "batch-momentum-forward-0123456789ab",
+        "center": {
+          "parameters": {
+            "fast": 5,
+            "slow": 20
+          },
+          "jobId": "strategy-momentum-forward-run-1",
+          "state": "succeeded",
+          "metrics": {
+            "sharpe": 0.4,
+            "total_return": "0.05",
+            "profit_factor": "1.2"
+          },
+          "error": null
+        },
+        "points": [
+          {
+            "parameters": {
+              "fast": 4,
+              "slow": 20
+            },
+            "jobId": "strategy-momentum-forward-var-1",
+            "state": "succeeded",
+            "metrics": {
+              "sharpe": 0.35
+            },
+            "error": null
+          },
+          {
+            "parameters": {
+              "fast": 6,
+              "slow": 20
+            },
+            "jobId": "strategy-momentum-forward-var-2",
+            "state": "succeeded",
+            "metrics": {
+              "sharpe": 0.45
+            },
+            "error": null
+          },
+          {
+            "parameters": {
+              "fast": 5,
+              "slow": 19
+            },
+            "jobId": "strategy-momentum-forward-var-3",
+            "state": "failed",
+            "metrics": null,
+            "error": "run terminated before completing"
+          }
+        ],
+        "parameters": [
+          "fast",
+          "slow"
+        ],
+        "stability": "Fast lookback thins on the forward window: 4 and 6 hold a weaker edge and the failed slow point leaves it untested.",
+        "method": "one_at_a_time",
+        "interactions": []
+      },
+      "comparison": "Development Sharpe was 1.0; the forward Sharpe is 0.4 with p=0.667 and thinner neighborhood stability. The edge degraded but did not invert, so the design is reportable rather than refuted.",
+      "limitations": "One protected window and three seeds."
+    },
+    "nullEvidence": {
+      "batchId": "null-momentum-forward-0123456789ab",
+      "blockSize": 7,
+      "mode": "block_permutation",
+      "replicates": [
+        {
+          "seed": 1,
+          "jobId": "strategy-momentum-forward-null-1",
+          "state": "succeeded",
+          "metrics": {
+            "sharpe": 0.5
+          },
+          "error": null
+        },
+        {
+          "seed": 2,
+          "jobId": "strategy-momentum-forward-null-2",
+          "state": "succeeded",
+          "metrics": {
+            "sharpe": 0.1
+          },
+          "error": null
+        },
+        {
+          "seed": 3,
+          "jobId": "strategy-momentum-forward-null-3",
+          "state": "failed",
+          "metrics": null,
+          "error": "run terminated before completing"
+        }
+      ],
+      "exceedanceCount": 1,
+      "pValue": 0.75,
+      "signalAdequacy": {
+        "signal": "lagged price relationship",
+        "destroyedDependency": "inter_block_order",
+        "preservedProperties": [
+          "marginal_returns",
+          "within_block_dependence"
+        ],
+        "limitations": "Within-block dependence remains; calendar volatility schedule is not preserved."
+      },
+      "evidenceScope": "selection_conditional",
+      "failedReplicatePolicy": "conservative_exceedance",
+      "targetResolution": 0.25
+    },
+    "matchedDevelopment": {
+      "type": "variation",
+      "dataset": "development",
+      "center": {
+        "parameters": {
+          "fast": 5,
+          "slow": 20
+        },
+        "jobId": "strategy-momentum-scope-run-1",
+        "state": "succeeded",
+        "metrics": {
+          "total_return": "0.12",
+          "profit_factor": "1.6"
+        },
+        "error": null,
+        "parameterIdentity": "b97683d55c78ab27011ea720d2feb0bbb3c5905eb730ed7b370cc691f7b883fc",
+        "levelIdentities": {
+          "fast": "{\"fast\":5}",
+          "slow": "{\"slow\":20}"
+        },
+        "levelLabels": {
+          "fast": "5",
+          "slow": "20"
+        }
+      },
+      "points": [
+        {
+          "parameters": {
+            "fast": 4,
+            "slow": 20
+          },
+          "jobId": "strategy-momentum-scope-var-1",
+          "state": "succeeded",
+          "metrics": {
+            "total_return": "0.10",
+            "profit_factor": null,
+            "profit_factor_reason": "no_losing_trades"
+          },
+          "error": null,
+          "parameterIdentity": "bba447eab31f8e9ef375db71a46b8e4e52cf74e6507576a93ac55bba42ddbe4e",
+          "levelIdentities": {
+            "fast": "{\"fast\":4}",
+            "slow": "{\"slow\":20}"
+          },
+          "levelLabels": {
+            "fast": "4",
+            "slow": "20"
+          }
+        },
+        {
+          "parameters": {
+            "fast": 6,
+            "slow": 20
+          },
+          "jobId": "strategy-momentum-scope-var-2",
+          "state": "succeeded",
+          "metrics": {
+            "netTotalReturn": 0.13,
+            "profitFactor": 1.7
+          },
+          "error": null,
+          "parameterIdentity": "4ec8b26a687b953e258defd0c3ff83c5329a73c10e086df7663819e8563d0de6",
+          "levelIdentities": {
+            "fast": "{\"fast\":6}",
+            "slow": "{\"slow\":20}"
+          },
+          "levelLabels": {
+            "fast": "6",
+            "slow": "20"
+          }
+        },
+        {
+          "parameters": {
+            "fast": 5,
+            "slow": 19
+          },
+          "jobId": "strategy-momentum-scope-var-3",
+          "state": "failed",
+          "metrics": null,
+          "error": "run terminated before completing",
+          "parameterIdentity": "d5d491bb6db2d94b424ec368659d89557584feb8a6c0706e18d240a40930c1e8",
+          "levelIdentities": {
+            "fast": "{\"fast\":5}",
+            "slow": "{\"slow\":19}"
+          },
+          "levelLabels": {
+            "fast": "5",
+            "slow": "19"
+          }
+        },
+        {
+          "parameters": {
+            "fast": 5,
+            "slow": 21
+          },
+          "jobId": "strategy-momentum-scope-var-4",
+          "state": "running",
+          "metrics": null,
+          "error": null,
+          "parameterIdentity": "ba3e7bcbe96f9151ccdda203d1fdd9f96343815b5ceda56c956249343a92c5f3",
+          "levelIdentities": {
+            "fast": "{\"fast\":5}",
+            "slow": "{\"slow\":21}"
+          },
+          "levelLabels": {
+            "fast": "5",
+            "slow": "21"
+          }
+        }
+      ],
+      "parameters": [
+        "fast",
+        "slow"
+      ],
+      "stability": "Fast lookback is a plateau: 4, 5 and 6 all keep the edge. Slow lookback is thinner and the cost drag grows at 19.",
+      "evidence": {
+        "strategy": {
+          "workspaceId": "workspace-demo",
+          "kind": "strategy",
+          "programId": "momentum",
+          "gitCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "batchId": "batch-momentum-0123456789ab",
+        "center": {
+          "parameters": {
+            "fast": 5,
+            "slow": 20
+          },
+          "jobId": "strategy-momentum-scope-run-1",
+          "state": "succeeded",
+          "metrics": {
+            "total_return": "0.12",
+            "profit_factor": "1.6"
+          },
+          "error": null
+        },
+        "points": [
+          {
+            "parameters": {
+              "fast": 4,
+              "slow": 20
+            },
+            "jobId": "strategy-momentum-scope-var-1",
+            "state": "succeeded",
+            "metrics": {
+              "total_return": "0.10",
+              "profit_factor": null,
+              "profit_factor_reason": "no_losing_trades"
+            },
+            "error": null
+          },
+          {
+            "parameters": {
+              "fast": 6,
+              "slow": 20
+            },
+            "jobId": "strategy-momentum-scope-var-2",
+            "state": "succeeded",
+            "metrics": {
+              "netTotalReturn": 0.13,
+              "profitFactor": 1.7
+            },
+            "error": null
+          },
+          {
+            "parameters": {
+              "fast": 5,
+              "slow": 19
+            },
+            "jobId": "strategy-momentum-scope-var-3",
+            "state": "failed",
+            "metrics": null,
+            "error": "run terminated before completing"
+          },
+          {
+            "parameters": {
+              "fast": 5,
+              "slow": 21
+            },
+            "jobId": "strategy-momentum-scope-var-4",
+            "state": "running",
+            "metrics": null,
+            "error": null
+          }
+        ],
+        "parameters": [
+          "fast",
+          "slow"
+        ],
+        "stability": "Fast lookback is a plateau: 4, 5 and 6 all keep the edge. Slow lookback is thinner and the cost drag grows at 19.",
+        "limitations": "One-at-a-time variation on one symbol and one window.",
+        "method": "one_at_a_time",
+        "interactions": []
+      },
+      "nullEvidence": null,
+      "candidateEvidence": null,
+      "researchEvidence": null
+    }
+  },
+  "typedIdentity": {
+    "type": "variation",
+    "dataset": "forward",
+    "center": {
+      "parameters": {
+        "fast": 5,
+        "slow": 20
+      },
+      "jobId": "strategy-momentum-forward-run-1",
+      "state": "succeeded",
+      "metrics": {
+        "sharpe": 0.4,
+        "total_return": "0.05",
+        "profit_factor": "1.2"
+      },
+      "error": null,
+      "parameterIdentity": "b97683d55c78ab27011ea720d2feb0bbb3c5905eb730ed7b370cc691f7b883fc",
+      "levelIdentities": {
+        "fast": "{\"fast\":5}",
+        "slow": "{\"slow\":20}"
+      },
+      "levelLabels": {
+        "fast": "5",
+        "slow": "20"
+      }
+    },
+    "points": [
+      {
+        "parameters": {
+          "fast": 4,
+          "slow": 20
+        },
+        "jobId": "strategy-momentum-forward-var-1",
+        "state": "succeeded",
+        "metrics": {
+          "sharpe": 0.35
+        },
+        "error": null,
+        "parameterIdentity": "bba447eab31f8e9ef375db71a46b8e4e52cf74e6507576a93ac55bba42ddbe4e",
+        "levelIdentities": {
+          "fast": "{\"fast\":4}",
+          "slow": "{\"slow\":20}"
+        },
+        "levelLabels": {
+          "fast": "4",
+          "slow": "20"
+        }
+      },
+      {
+        "parameters": {
+          "fast": 6,
+          "slow": 20
+        },
+        "jobId": "strategy-momentum-forward-var-2",
+        "state": "succeeded",
+        "metrics": {
+          "sharpe": 0.45
+        },
+        "error": null,
+        "parameterIdentity": "4ec8b26a687b953e258defd0c3ff83c5329a73c10e086df7663819e8563d0de6",
+        "levelIdentities": {
+          "fast": "{\"fast\":6}",
+          "slow": "{\"slow\":20}"
+        },
+        "levelLabels": {
+          "fast": "6",
+          "slow": "20"
+        }
+      },
+      {
+        "parameters": {
+          "fast": 5,
+          "slow": 19
+        },
+        "jobId": "strategy-momentum-forward-var-3",
+        "state": "failed",
+        "metrics": null,
+        "error": "run terminated before completing",
+        "parameterIdentity": "d5d491bb6db2d94b424ec368659d89557584feb8a6c0706e18d240a40930c1e8",
+        "levelIdentities": {
+          "fast": "{\"fast\":5}",
+          "slow": "{\"slow\":19}"
+        },
+        "levelLabels": {
+          "fast": "5",
+          "slow": "19"
+        }
+      },
+      {
+        "parameters": {
+          "fast": 5.0,
+          "slow": 20
+        },
+        "jobId": "strategy-momentum-float-forward",
+        "state": "succeeded",
+        "metrics": {
+          "total_return": "0.09",
+          "profit_factor": "1.3"
+        },
+        "error": null,
+        "parameterIdentity": "4fabc1e8919648305c0e2893ac3924634cc43b77fbd77b2783f948ff8df73c01",
+        "levelIdentities": {
+          "fast": "{\"fast\":5.0}",
+          "slow": "{\"slow\":20}"
+        },
+        "levelLabels": {
+          "fast": "5.0",
+          "slow": "20"
+        }
+      }
+    ],
+    "parameters": [
+      "fast",
+      "slow"
+    ],
+    "stability": "Fast lookback thins on the forward window: 4 and 6 hold a weaker edge and the failed slow point leaves it untested.",
+    "comparison": "Development Sharpe was 1.0; the forward Sharpe is 0.4 with p=0.667 and thinner neighborhood stability. The edge degraded but did not invert, so the design is reportable rather than refuted.",
+    "limitations": "One protected window and three seeds.",
+    "window": {
+      "start": "2026-06-06T12:00:00Z",
+      "end": "2026-09-04T12:00:00Z"
+    },
+    "evidence": {
+      "strategy": {
+        "workspaceId": "workspace-demo",
+        "kind": "strategy",
+        "programId": "momentum",
+        "gitCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "window": {
+        "start": "2026-06-06T12:00:00Z",
+        "end": "2026-09-04T12:00:00Z"
+      },
+      "statistic": "sharpe",
+      "direction": "upper",
+      "observed": {
+        "jobId": "strategy-momentum-forward-run-1",
+        "metrics": {
+          "netTotalReturn": 0.05,
+          "sharpe": 0.4
+        },
+        "value": 0.4
+      },
+      "null": {
+        "batchId": "null-momentum-forward-0123456789ab",
+        "blockSize": 7,
+        "mode": "block_permutation",
+        "replicates": [
+          {
+            "seed": 1,
+            "jobId": "strategy-momentum-forward-null-1",
+            "state": "succeeded",
+            "metrics": {
+              "sharpe": 0.5
+            },
+            "error": null
+          },
+          {
+            "seed": 2,
+            "jobId": "strategy-momentum-forward-null-2",
+            "state": "succeeded",
+            "metrics": {
+              "sharpe": 0.1
+            },
+            "error": null
+          },
+          {
+            "seed": 3,
+            "jobId": "strategy-momentum-forward-null-3",
+            "state": "failed",
+            "metrics": null,
+            "error": "run terminated before completing"
+          }
+        ],
+        "exceedanceCount": 1,
+        "pValue": 0.75,
+        "signalAdequacy": {
+          "signal": "lagged price relationship",
+          "destroyedDependency": "inter_block_order",
+          "preservedProperties": [
+            "marginal_returns",
+            "within_block_dependence"
+          ],
+          "limitations": "Within-block dependence remains; calendar volatility schedule is not preserved."
+        },
+        "evidenceScope": "selection_conditional",
+        "failedReplicatePolicy": "conservative_exceedance",
+        "targetResolution": 0.25
+      },
+      "variation": {
+        "batchId": "batch-momentum-forward-0123456789ab",
+        "center": {
+          "parameters": {
+            "fast": 5,
+            "slow": 20
+          },
+          "jobId": "strategy-momentum-forward-run-1",
+          "state": "succeeded",
+          "metrics": {
+            "sharpe": 0.4,
+            "total_return": "0.05",
+            "profit_factor": "1.2"
+          },
+          "error": null
+        },
+        "points": [
+          {
+            "parameters": {
+              "fast": 4,
+              "slow": 20
+            },
+            "jobId": "strategy-momentum-forward-var-1",
+            "state": "succeeded",
+            "metrics": {
+              "sharpe": 0.35
+            },
+            "error": null
+          },
+          {
+            "parameters": {
+              "fast": 6,
+              "slow": 20
+            },
+            "jobId": "strategy-momentum-forward-var-2",
+            "state": "succeeded",
+            "metrics": {
+              "sharpe": 0.45
+            },
+            "error": null
+          },
+          {
+            "parameters": {
+              "fast": 5,
+              "slow": 19
+            },
+            "jobId": "strategy-momentum-forward-var-3",
+            "state": "failed",
+            "metrics": null,
+            "error": "run terminated before completing"
+          },
+          {
+            "parameters": {
+              "fast": 5.0,
+              "slow": 20
+            },
+            "jobId": "strategy-momentum-float-forward",
+            "state": "succeeded",
+            "metrics": {
+              "total_return": "0.09",
+              "profit_factor": "1.3"
+            },
+            "error": null
+          }
+        ],
+        "parameters": [
+          "fast",
+          "slow"
+        ],
+        "stability": "Fast lookback thins on the forward window: 4 and 6 hold a weaker edge and the failed slow point leaves it untested.",
+        "method": "one_at_a_time",
+        "interactions": []
+      },
+      "comparison": "Development Sharpe was 1.0; the forward Sharpe is 0.4 with p=0.667 and thinner neighborhood stability. The edge degraded but did not invert, so the design is reportable rather than refuted.",
+      "limitations": "One protected window and three seeds."
+    },
+    "nullEvidence": {
+      "batchId": "null-momentum-forward-0123456789ab",
+      "blockSize": 7,
+      "mode": "block_permutation",
+      "replicates": [
+        {
+          "seed": 1,
+          "jobId": "strategy-momentum-forward-null-1",
+          "state": "succeeded",
+          "metrics": {
+            "sharpe": 0.5
+          },
+          "error": null
+        },
+        {
+          "seed": 2,
+          "jobId": "strategy-momentum-forward-null-2",
+          "state": "succeeded",
+          "metrics": {
+            "sharpe": 0.1
+          },
+          "error": null
+        },
+        {
+          "seed": 3,
+          "jobId": "strategy-momentum-forward-null-3",
+          "state": "failed",
+          "metrics": null,
+          "error": "run terminated before completing"
+        }
+      ],
+      "exceedanceCount": 1,
+      "pValue": 0.75,
+      "signalAdequacy": {
+        "signal": "lagged price relationship",
+        "destroyedDependency": "inter_block_order",
+        "preservedProperties": [
+          "marginal_returns",
+          "within_block_dependence"
+        ],
+        "limitations": "Within-block dependence remains; calendar volatility schedule is not preserved."
+      },
+      "evidenceScope": "selection_conditional",
+      "failedReplicatePolicy": "conservative_exceedance",
+      "targetResolution": 0.25
+    },
+    "matchedDevelopment": {
+      "type": "variation",
+      "dataset": "development",
+      "center": {
+        "parameters": {
+          "fast": 5,
+          "slow": 20
+        },
+        "jobId": "strategy-momentum-scope-run-1",
+        "state": "succeeded",
+        "metrics": {
+          "total_return": "0.12",
+          "profit_factor": "1.6"
+        },
+        "error": null,
+        "parameterIdentity": "b97683d55c78ab27011ea720d2feb0bbb3c5905eb730ed7b370cc691f7b883fc",
+        "levelIdentities": {
+          "fast": "{\"fast\":5}",
+          "slow": "{\"slow\":20}"
+        },
+        "levelLabels": {
+          "fast": "5",
+          "slow": "20"
+        }
+      },
+      "points": [
+        {
+          "parameters": {
+            "fast": 4,
+            "slow": 20
+          },
+          "jobId": "strategy-momentum-scope-var-1",
+          "state": "succeeded",
+          "metrics": {
+            "total_return": "0.10",
+            "profit_factor": null,
+            "profit_factor_reason": "no_losing_trades"
+          },
+          "error": null,
+          "parameterIdentity": "bba447eab31f8e9ef375db71a46b8e4e52cf74e6507576a93ac55bba42ddbe4e",
+          "levelIdentities": {
+            "fast": "{\"fast\":4}",
+            "slow": "{\"slow\":20}"
+          },
+          "levelLabels": {
+            "fast": "4",
+            "slow": "20"
+          }
+        },
+        {
+          "parameters": {
+            "fast": 6,
+            "slow": 20
+          },
+          "jobId": "strategy-momentum-scope-var-2",
+          "state": "succeeded",
+          "metrics": {
+            "netTotalReturn": 0.13,
+            "profitFactor": 1.7
+          },
+          "error": null,
+          "parameterIdentity": "4ec8b26a687b953e258defd0c3ff83c5329a73c10e086df7663819e8563d0de6",
+          "levelIdentities": {
+            "fast": "{\"fast\":6}",
+            "slow": "{\"slow\":20}"
+          },
+          "levelLabels": {
+            "fast": "6",
+            "slow": "20"
+          }
+        },
+        {
+          "parameters": {
+            "fast": 5,
+            "slow": 19
+          },
+          "jobId": "strategy-momentum-scope-var-3",
+          "state": "failed",
+          "metrics": null,
+          "error": "run terminated before completing",
+          "parameterIdentity": "d5d491bb6db2d94b424ec368659d89557584feb8a6c0706e18d240a40930c1e8",
+          "levelIdentities": {
+            "fast": "{\"fast\":5}",
+            "slow": "{\"slow\":19}"
+          },
+          "levelLabels": {
+            "fast": "5",
+            "slow": "19"
+          }
+        },
+        {
+          "parameters": {
+            "fast": 5,
+            "slow": 21
+          },
+          "jobId": "strategy-momentum-scope-var-4",
+          "state": "running",
+          "metrics": null,
+          "error": null,
+          "parameterIdentity": "ba3e7bcbe96f9151ccdda203d1fdd9f96343815b5ceda56c956249343a92c5f3",
+          "levelIdentities": {
+            "fast": "{\"fast\":5}",
+            "slow": "{\"slow\":21}"
+          },
+          "levelLabels": {
+            "fast": "5",
+            "slow": "21"
+          }
+        },
+        {
+          "parameters": {
+            "fast": 5.0,
+            "slow": 20
+          },
+          "jobId": "strategy-momentum-float-development",
+          "state": "succeeded",
+          "metrics": {
+            "total_return": "0.22",
+            "profit_factor": "2.2"
+          },
+          "error": null,
+          "parameterIdentity": "4fabc1e8919648305c0e2893ac3924634cc43b77fbd77b2783f948ff8df73c01",
+          "levelIdentities": {
+            "fast": "{\"fast\":5.0}",
+            "slow": "{\"slow\":20}"
+          },
+          "levelLabels": {
+            "fast": "5.0",
+            "slow": "20"
+          }
+        }
+      ],
+      "parameters": [
+        "fast",
+        "slow"
+      ],
+      "stability": "Fast lookback is a plateau: 4, 5 and 6 all keep the edge. Slow lookback is thinner and the cost drag grows at 19.",
+      "evidence": {
+        "strategy": {
+          "workspaceId": "workspace-demo",
+          "kind": "strategy",
+          "programId": "momentum",
+          "gitCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "batchId": "batch-momentum-0123456789ab",
+        "center": {
+          "parameters": {
+            "fast": 5,
+            "slow": 20
+          },
+          "jobId": "strategy-momentum-scope-run-1",
+          "state": "succeeded",
+          "metrics": {
+            "total_return": "0.12",
+            "profit_factor": "1.6"
+          },
+          "error": null
+        },
+        "points": [
+          {
+            "parameters": {
+              "fast": 4,
+              "slow": 20
+            },
+            "jobId": "strategy-momentum-scope-var-1",
+            "state": "succeeded",
+            "metrics": {
+              "total_return": "0.10",
+              "profit_factor": null,
+              "profit_factor_reason": "no_losing_trades"
+            },
+            "error": null
+          },
+          {
+            "parameters": {
+              "fast": 6,
+              "slow": 20
+            },
+            "jobId": "strategy-momentum-scope-var-2",
+            "state": "succeeded",
+            "metrics": {
+              "netTotalReturn": 0.13,
+              "profitFactor": 1.7
+            },
+            "error": null
+          },
+          {
+            "parameters": {
+              "fast": 5,
+              "slow": 19
+            },
+            "jobId": "strategy-momentum-scope-var-3",
+            "state": "failed",
+            "metrics": null,
+            "error": "run terminated before completing"
+          },
+          {
+            "parameters": {
+              "fast": 5,
+              "slow": 21
+            },
+            "jobId": "strategy-momentum-scope-var-4",
+            "state": "running",
+            "metrics": null,
+            "error": null
+          },
+          {
+            "parameters": {
+              "fast": 5.0,
+              "slow": 20
+            },
+            "jobId": "strategy-momentum-float-development",
+            "state": "succeeded",
+            "metrics": {
+              "total_return": "0.22",
+              "profit_factor": "2.2"
+            },
+            "error": null
+          }
+        ],
+        "parameters": [
+          "fast",
+          "slow"
+        ],
+        "stability": "Fast lookback is a plateau: 4, 5 and 6 all keep the edge. Slow lookback is thinner and the cost drag grows at 19.",
+        "limitations": "One-at-a-time variation on one symbol and one window.",
+        "method": "one_at_a_time",
+        "interactions": []
+      },
+      "nullEvidence": null,
+      "candidateEvidence": null,
+      "researchEvidence": null
+    }
+  }
+}

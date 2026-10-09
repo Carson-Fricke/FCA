@@ -76,6 +76,7 @@ class AnchoredWorkflowLaunch(Protocol):
         *,
         actor_id: str,
         ideas: str,
+        launch_options: Mapping[str, object] | None = None,
         trigger_message_id: str | None = None,
         investigation_id: str | None = None,
         anchor_sub_agent_id: str | None = None,
@@ -125,12 +126,16 @@ class RuntimeWorkflowLauncher:
         context: WorkflowContext,
         *,
         ideas: str,
+        launch_options: Mapping[str, object] | None = None,
         investigation_id: str | None = None,
     ) -> Mapping[str, object]:
         """Resolve ``workflow_id`` and launch it through its registration."""
         registration = self._registry.resolve(workflow_id)
         return registration.execute(
-            context, ideas=ideas, investigation_id=investigation_id
+            context,
+            ideas=ideas,
+            investigation_id=investigation_id,
+            launch_options=launch_options,
         )
 
     def start_hypothesis_development(
@@ -140,6 +145,7 @@ class RuntimeWorkflowLauncher:
         chat_id: str,
         actor_id: str,
         ideas: str,
+        launch_options: Mapping[str, object] | None = None,
         investigation_id: str | None = None,
         trigger_message_id: str | None = None,
         anchor_sub_agent_id: str | None = None,
@@ -155,6 +161,7 @@ class RuntimeWorkflowLauncher:
                 anchor_sub_agent_id=anchor_sub_agent_id,
             ),
             ideas=ideas,
+            launch_options=launch_options,
             investigation_id=investigation_id,
         )
 
@@ -163,6 +170,7 @@ class RuntimeWorkflowLauncher:
         context: WorkflowContext,
         *,
         ideas: str,
+        launch_options: Mapping[str, object] | None = None,
         investigation_id: str | None = None,
     ) -> Mapping[str, object]:
         """Launch one hypothesis-development execution and return its handle.
@@ -206,6 +214,7 @@ class RuntimeWorkflowLauncher:
             chat_id,
             actor_id=context.actor_id,
             ideas=ideas,
+            launch_options=launch_options,
             investigation_id=resolved_investigation,
             trigger_message_id=trigger_message_id,
             anchor_sub_agent_id=context.anchor_sub_agent_id,

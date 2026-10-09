@@ -63,7 +63,7 @@ def test_canonical_metadata_schema_types_session_and_datums_without_requiring_th
         "CreateMessageResponseWire",
         "NodeInputReceiptWire",
     ):
-        metadata = components[name]["properties"]["data"]["allOf"][1]
+        metadata = components[name]["properties"]["data"]["anyOf"][0]["allOf"][1]
         assert "required" not in metadata
         assert metadata["properties"] == {
             "sessionMessage": {"$ref": "#/components/schemas/SessionMessageWire"},

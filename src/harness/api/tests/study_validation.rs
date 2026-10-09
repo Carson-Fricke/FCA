@@ -1,13 +1,13 @@
 //! Full local validation result reuse and structured diagnostic boundary.
 
-use crate::local::NativeStudyValidator;
+use api::local::NativeStudyValidator;
 use mcp::tools::StudyValidator;
 use serde_json::json;
 
 #[test]
 fn local_validator_reuses_full_success_and_deterministic_failure_results() {
     let model = json!({
-        "source": include_str!("../../../strategy-jit/tests/fixtures/study_program.rs"),
+        "source": include_str!("../../strategy-jit/tests/fixtures/study_program.rs"),
         "harnessConfiguration": {
             "start": "2024-01-02T14:30:00Z", "end": "2024-01-04T21:00:00Z",
             "symbols": ["AAA", "BBB", "CCC"],

@@ -11,9 +11,6 @@ from thesis.agent.context import PromptContext
 from thesis.agent.router import (
     ModelProfile,
     ModelResponse,
-    ModelRouter,
-    PolicyBundle,
-    Role,
     RolePolicy,
 )
 from thesis.agent.runtime.conversation import Conversations
@@ -25,24 +22,17 @@ from thesis.agent.runtime.specs import (
     DEFAULT_MAX_DEPTH,
 )
 from thesis.agent.runtime.store import PersistenceSubAgentStore
-from thesis.agent.skills import SkillRegistry
-from thesis.agent.subagents import SubagentContext, SubagentContextFactory
 from thesis.chat.contracts import (
     WORKFLOW_NODE_ROLE,
     SubAgentRecord,
 )
 from thesis.chat.service import ChatService
 from thesis.execution.events import ExecutionEventType
-from thesis.persistence import CommandJournal
 from thesis.providers.invocations import ChatMessage as ProviderChatMessage
 from thesis.providers.invocations import ModelCompletion
 from thesis.providers.invocations import Role as ProviderRole
 from thesis.research.hypothesis import (
     InMemoryHypothesisStore,
-)
-from thesis.strategies.validation import (
-    StrategyValidationRequest,
-    StrategyValidationResult,
 )
 from thesis.workflows.backtests import (
     BacktestRunError,
@@ -318,6 +308,15 @@ def _null_test_envelope() -> dict[str, object]:
         },
         "batchId": "null-momentum-0123456789ab",
         "mode": "block_permutation",
+        "signalAdequacy": {
+            "signal": "lagged price relationship",
+            "destroyedDependency": "inter_block_order",
+            "preservedProperties": ["marginal_returns", "within_block_dependence"],
+            "limitations": "Within-block dependence remains; calendar volatility schedule is not preserved.",
+        },
+        "evidenceScope": "selection_conditional",
+        "failedReplicatePolicy": "conservative_exceedance",
+        "targetResolution": 0.25,
         "blockSize": 7,
         "statistic": "sharpe",
         "direction": "upper",
@@ -350,7 +349,7 @@ def _null_test_envelope() -> dict[str, object]:
             },
         ],
         "exceedanceCount": 1,
-        "pValue": 2 / 3,
+        "pValue": 3 / 4,
         "limitations": "Three seeds and one block size on one symbol.",
     }
 
@@ -403,6 +402,8 @@ def _variation_envelope() -> dict[str, object]:
             },
         ],
         "parameters": ["fast", "slow"],
+        "method": "one_at_a_time",
+        "interactions": [],
         "stability": (
             "Fast lookback is a plateau: 4, 5 and 6 all keep the edge. Slow "
             "lookback is thinner and the cost drag grows at 19."
@@ -432,6 +433,16 @@ def _forward_envelope() -> dict[str, object]:
             "value": 0.4,
         },
         "null": {
+            "mode": "block_permutation",
+            "signalAdequacy": {
+                "signal": "lagged price relationship",
+                "destroyedDependency": "inter_block_order",
+                "preservedProperties": ["marginal_returns", "within_block_dependence"],
+                "limitations": "Within-block dependence remains; calendar volatility schedule is not preserved.",
+            },
+            "evidenceScope": "selection_conditional",
+            "failedReplicatePolicy": "conservative_exceedance",
+            "targetResolution": 0.25,
             "batchId": "null-momentum-forward-0123456789ab",
             "blockSize": 7,
             "replicates": [
@@ -458,7 +469,7 @@ def _forward_envelope() -> dict[str, object]:
                 },
             ],
             "exceedanceCount": 1,
-            "pValue": 2 / 3,
+            "pValue": 3 / 4,
         },
         "variation": {
             "batchId": "batch-momentum-forward-0123456789ab",
@@ -493,6 +504,8 @@ def _forward_envelope() -> dict[str, object]:
                 },
             ],
             "parameters": ["fast", "slow"],
+            "method": "one_at_a_time",
+            "interactions": [],
             "stability": (
                 "Fast lookback thins on the forward window: 4 and 6 hold a "
                 "weaker edge and the failed slow point leaves it untested."
@@ -701,30 +714,6 @@ class FakeRunner:
         )
 
 
-class FakeValidator:
-    """Always-accepting sandbox validator behind the published port."""
-
-    def __init__(self) -> None:
-        self.requests: list[StrategyValidationRequest] = []
-
-    def validate(self, request: StrategyValidationRequest) -> StrategyValidationResult:
-        self.requests.append(request)
-        return StrategyValidationResult(True, (), validation_id="validation-1")
-
-
-class RecordingSubagentFactory:
-    """Subagent factory wrapper that records every fresh context it creates."""
-
-    def __init__(self) -> None:
-        self._inner = SubagentContextFactory()
-        self.created: list[SubagentContext] = []
-
-    def create(self, **kwargs: Any) -> SubagentContext:
-        context = self._inner.create(**kwargs)
-        self.created.append(context)
-        return context
-
-
 class _Kit:
     def __init__(
         self,
@@ -739,8 +728,6 @@ class _Kit:
         native_provider: FakeNativeFixture,
         runner: FakeRunner,
         store: InMemoryHypothesisStore,
-        factory: RecordingSubagentFactory,
-        journal: CommandJournal,
         conversations: Conversations,
         execution_store: InMemoryExecutionStore,
         woke: list[object],
@@ -751,8 +738,6 @@ class _Kit:
         self.native_provider = native_provider
         self.runner = runner
         self.store = store
-        self.factory = factory
-        self.journal = journal
         self.conversations = conversations
         self.execution_store = execution_store
         self.woke = woke
@@ -784,54 +769,7 @@ def _kit(
             *queued,
         ]
     provider = FakeProvider(*queued)
-    profiles = {
-        "research-profile": ModelProfile(
-            profile_id="research-profile",
-            version="1.0.0",
-            provider="fake",
-            model="research-model",
-        ),
-        "critique-profile": ModelProfile(
-            profile_id="critique-profile",
-            version="1.0.0",
-            provider="fake",
-            model="critique-model",
-        ),
-        "coding-profile": ModelProfile(
-            profile_id="coding-profile",
-            version="1.0.0",
-            provider="fake",
-            model="coding-model",
-        ),
-    }
-    policies: dict[Role, RolePolicy] = {
-        "research": RolePolicy(
-            role="research", version="1.0.0", model_profile="research-profile"
-        ),
-        "critique": RolePolicy(
-            role="critique", version="1.0.0", model_profile="critique-profile"
-        ),
-        "coding": RolePolicy(
-            role="coding", version="1.0.0", model_profile="coding-profile"
-        ),
-    }
-    router = ModelRouter(
-        role_policies=policies,
-        model_profiles=profiles,
-        providers={"fake": provider},
-        skills=SkillRegistry(),
-        bundle=PolicyBundle(
-            bundle_id="thesis-platform",
-            version="1.0.0",
-            bundle_sha256="a" * 64,
-            policy_sha256="b" * 64,
-        ),
-        clock=clock,
-        id_factory=lambda: id_factory("invocation"),
-    )
     store = InMemoryHypothesisStore()
-    factory = RecordingSubagentFactory()
-    journal = CommandJournal(tmp_path / "journal.sqlite3")
     runner_results = list(results)
     if insert_strategy_success and len(runner_results) >= 2:
         runner_results.insert(1, ("succeeded", {"sharpe": 1.0}))
@@ -857,12 +795,8 @@ def _kit(
     execution_store = InMemoryExecutionStore()
     workflow = build_hypothesis_development_workflow(
         chat=chat,
-        router=router,
         runner=runner,
-        validator=FakeValidator(),
         hypothesis_store=store,
-        subagent_factory=cast("SubagentContextFactory", factory),
-        journal=journal,
         clock=clock,
         id_factory=id_factory,
         experiment_id="experiment-1",
@@ -883,8 +817,6 @@ def _kit(
         native_provider=native_provider,
         runner=runner,
         store=store,
-        factory=factory,
-        journal=journal,
         conversations=conversations,
         execution_store=execution_store,
         woke=woke,
@@ -902,6 +834,15 @@ def _request(kit: _Kit, ideas: str = IDEAS):
         actor_id=OWNER,
         ideas=ideas,
         trigger_message_id=trigger.message_id,
+        launch_options={
+            "partition": {
+                "historyDays": 1825,
+                "forwardDays": 90,
+                "informationHorizonDays": 1,
+                "positionHorizonDays": 1,
+                "liquidationDays": 0,
+            }
+        },
     )
 
 

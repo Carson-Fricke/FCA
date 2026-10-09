@@ -112,16 +112,42 @@ pub fn artifact_metrics(artifacts: &BTreeMap<String, Vec<u8>>) -> BTreeMap<Strin
         ("total_return", equity),
         ("max_drawdown", equity),
         ("cagr", equity),
+        ("sharpe_per_sample", equity),
         ("fill_count", execution),
         ("fees_total", execution),
         ("profit_factor", trades),
         ("trade_count", trades),
-        ("net_pnl", trades),
+        ("net_pnl", equity),
+        ("gross_pnl", equity),
+        ("fees", trades),
+        ("open_fees", trades),
+        ("net_profit", trades),
+        ("net_loss", trades),
+        ("gross_profit", trades),
+        ("gross_loss", trades),
     ] {
+        let reason_key = format!("{key}_reason");
+        if let Some(reason) = section
+            .and_then(|section| section.get(&reason_key))
+            .and_then(Value::as_str)
+        {
+            metrics.insert(reason_key, reason.to_string());
+        }
         if let Some(value) = section.and_then(|section| section.get(key)) {
             if let Some(text) = scalar_string(value) {
                 metrics.insert(key.to_string(), text);
             }
+        }
+    }
+    for (source, target) in [
+        ("net_pnl", "closed_trade_net_pnl"),
+        ("gross_pnl", "closed_trade_gross_pnl"),
+    ] {
+        if let Some(value) = trades
+            .and_then(|section| section.get(source))
+            .and_then(scalar_string)
+        {
+            metrics.insert(target.to_string(), value);
         }
     }
     if let Some(custom) = document.get("custom").and_then(Value::as_object) {
@@ -173,6 +199,7 @@ pub fn mark_failed(
         record.data_start = existing.data_start;
         record.data_end = existing.data_end;
         record.configuration_digest = existing.configuration_digest;
+        record.accepted_input = existing.accepted_input;
     }
     jobs.put_result(record, BTreeMap::new())?;
     Ok(())

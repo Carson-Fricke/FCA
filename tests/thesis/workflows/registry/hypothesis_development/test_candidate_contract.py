@@ -187,7 +187,7 @@ def test_candidate_completion_schema_and_validator_accept_the_evaluation() -> No
         (_duplicate_assignment_vector, "duplicates an earlier parameter assignment"),
         (_duplicate_assignment_job_id, "duplicates an earlier assignment jobId"),
         (_non_finite_metrics, "must be finite numbers"),
-        (_wrong_strategy_kind, "must be 'strategy'"),
+        (_wrong_strategy_kind, "is not one of"),
     ],
 )
 def test_candidate_evaluation_rejections(mutate, marker: str) -> None:

@@ -43,7 +43,7 @@ def test_strategy_provider_preserves_typed_result_and_compiler_failure() -> None
     for failure in (False, True):
         transport = Transport(failure=failure)
         provider = HarnessToolProvider(HarnessMcpClient(transport))
-        result = provider.validate_strategy(model=model)
+        result = provider.call_tool("validate_strategy", {"model": model})
         assert result.ok is not failure
         assert result.structured["kind"] == "strategy"
         assert result.structured["shell"] == "backtest"

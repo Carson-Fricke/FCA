@@ -21,7 +21,7 @@ from thesis.experiments import (
     PartitionRole,
     ResearchMandate,
     datetime_ns,
-    default_launch_partition,
+    declared_launch_partition,
     derive_launch_mandate,
     derive_mandate,
     mandate_section,
@@ -74,9 +74,19 @@ def _absent_value(execution_id: str) -> object:
     raise ValueError(f"execution {execution_id} was not found")
 
 
-def test_launch_defaults_are_the_persisted_partition_shape() -> None:
-    assert default_launch_partition().as_dict() == PARTITION
-    assert LaunchPartition.from_dict(PARTITION) == default_launch_partition()
+def test_launch_declares_partition_and_dependency_horizons() -> None:
+    declared = declared_launch_partition(
+        {
+            "historyDays": 365,
+            "forwardDays": 60,
+            "informationHorizonDays": 3,
+            "positionHorizonDays": 7,
+            "liquidationDays": 2,
+        }
+    )
+    assert declared == LaunchPartition(365, 60, 7, 2)
+    with pytest.raises(MandateError, match="explicitly declare"):
+        declared_launch_partition({"historyDays": 365})
 
 
 def test_partitions_are_derived_from_the_persisted_partition() -> None:

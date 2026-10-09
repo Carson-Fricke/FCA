@@ -38,8 +38,8 @@ describe('exported offline API and shared chat host', () => {
 		const chat = await createChat('offline-node');
 		await postMessage('offline-node', chat.chat_id, { body: 'root' });
 		await postNodeMessage('offline-node', chat.chat_id, { kind: 'sub_agent', id: 'node' }, { body: 'midturn feedback' });
-		expect((await listTimelinePage('offline-node', chat.chat_id, 'root', null)).items.map((item) => item.payload.body)).toEqual(['root']);
-		expect((await listTimelinePage('offline-node', chat.chat_id, 'node', null)).items.map((item) => item.payload.body)).toEqual(['midturn feedback']);
+		expect((await listTimelinePage('offline-node', chat.chat_id, 'root', null)).items.flatMap((item) => item.kind === 'message' ? [item.payload.body] : [])).toEqual(['root']);
+		expect((await listTimelinePage('offline-node', chat.chat_id, 'node', null)).items.flatMap((item) => item.kind === 'message' ? [item.payload.body] : [])).toEqual(['midturn feedback']);
 		await deleteChat('offline-node', chat.chat_id);
 	});
 	it('updates seeded workspace chat counts after create/delete', async () => {

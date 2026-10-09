@@ -143,24 +143,11 @@ planned. The signal kernels (MODWT with circular/reflection boundaries,
 additive MRA, wavelet variance, Hilbert envelope/phase features, and an
 exploratory Morlet CWT scalogram) are implemented natively in the `backtest`
 crate under `backtest::signal`, ported from the retired `harness.signal`
-module. The native core is the
-Rust `native` crate (C ABI v2 with the Arrow C Data Interface bridge,
-pinned scale-18 fixed point, and the ported event kernel, OMS state machine,
-virtual book accounting, K-way replay merge, bar derivation, resting-order
-matching venue, SimpleTouch, latency-size, and trade-through fill models, the
-ported metrics modules, and the float64 batch quant kernels — the
-Cox-Ross-Rubinstein option pricer with tree greeks plus bracketed implied
-time-to-expiry and implied-underlying inversions). The shared image compiles
-the native library in a Rust build stage, and CI gates it with
-`cargo fmt --all --check`,
-`cargo clippy`, and `cargo test`. The native-core parity suites assert
-byte-identical determinism artifacts against the pinned Python-reference
-goldens (masking the per-engine `manifest.code_fingerprint`); the Python
-oracle modules were deleted with the harness Python packages.
+module. The retired `native` C-ABI crate and its removed Python loader have no product consumers and are deleted. Active replay, accounting, matching, and result computation live in `backtest`; authored programs cross the separate SDK/JIT ABI.
 
 The Rust migration is complete. The engine workspace lives under
 `src/harness/` and provides the authoritative engine core (clock, event
-bus, replay, matching/fills, fees, portfolio, risk, results, sweeps, and the
+bus, replay, matching/fills, fees, portfolio, risk, results, and the
 backtest runtime) plus the `harness`, `api`, `mcp`, `backtest-job`, and
 `screen-job` processes. The Python engine and the embedded-Python authoring surface have
 been deleted: strategies, indicators, studies, and screeners are authored in
@@ -274,7 +261,6 @@ packages were deleted in the native-authoring wave.
 src/harness/
 |-- Cargo.toml                 Workspace manifest (resolver 2)
 |-- rust-toolchain.toml        Pinned stable toolchain
-|-- native/                    C ABI native core (`cdylib` + `rlib`)
 |-- num/                       Numeric kernels
 |-- marketdata/                Market-data port
 |-- backtest/                  Backtest, sweeps, and results port
@@ -434,8 +420,13 @@ The implemented contract is:
   use `Context = OrderSink`. `StudyProgram` owns `new(parameters)` and
   `on_stop(&mut MetricPublisher)` and exports with `export_study_program!`.
   `StrategyProgram` owns `new`, `on_start`, `on_fill`, and `on_stop` and exports
-  with `export_strategy_program!`. `Indicator` adds `value()` to the common
-  observation-only contract. Requirements and dependency topology remain stable
+  with `export_strategy_program!`. `Indicator` requires symbol-aware `value(symbol)`, `sequence()` and
+  `sequence_mut()` over `IndicatorSequence`. The dependency router records
+  completed outputs including undefined warm-up and missing-input values.
+  Tick indicators declare nanosecond window fidelity; trade/quote outputs
+  retain OHLC and counts separately from the unfinished window. Native
+  indicators expose `samples()`, `advance()` and `in_progress()` with the same
+  causal distinction; no forced flush promotes a partial window. Requirements and dependency topology remain stable
   after construction; cycles and zero-sized indicator dependencies are rejected.
   Dependencies update before their parent, and each consumer receives only its
   own subscribed types, symbols, and interval. Bars are atomic frames, not raw
@@ -483,13 +474,17 @@ The implemented contract is:
   then generated execution events. Frames become available at interval end,
   never at bar start. Study artifacts remain `study.json` and `metrics.json`.
 - Signal-destruction nulls. A backtest or study configuration may carry an
-  optional strict top-level `null` block (`mode: block_permutation`,
+  optional strict top-level `null` block (`mode: permutation | block_permutation`,
   `block_size`, `seed`). Before preflight and replay fingerprints, the harness
   permutes per-symbol bar log-return blocks with a symbol-domain-separated
   seed, rescales OHLC exactly through `checked_mul_div`, and scales
   quote/trade ticks by the enclosing bar's factor, so manifests and
   fingerprints describe exactly the transformed data the strategy saw. A
   symbol with events but no bars fails the job instead of silently no-opping.
+  Ordinary permutation requires `block_size: 1`; block permutation preserves
+  within-block dependence. Both move return magnitudes across timestamps, so
+  neither preserves calendar volatility scheduling. Fewer than two return
+  blocks and constant-return designs fail rather than report null evidence.
   Absent `null` leaves configuration hashes and goldens unchanged.
 - Screening. A screening configuration declares `shell: screen` and carries
   the LF-normalized authored source and its `bundle_hash`, the `as_of` date,
@@ -792,3 +787,31 @@ stores rather than source control.
 - Gate deployment progressively: local tests, development infrastructure,
   bounded data soaks, paper and shadow qualification, then explicit live
   eligibility.
+
+
+Research evidence crosses one shared boundary in `thesis.research.evidence`:
+canonical parameter vectors retain JSON numeric types, and harness decimal
+statistics are parsed for presentation without reconstructing trade ledgers.
+Harness admission retains the immutable `accepted_input` document with the
+single `job_id`; joining and publishing reject changed inputs. Thesis retains
+the submitted-input digest before dispatch and checks every job-backed phase
+assessment against the authoritative result and accepted input. The harness
+owns closed trades, exact partial-close/flip fee allocation, gross/net fields,
+and undefined-statistic reasons. Workspace imports retain entry/exit fees and
+open fees rather than deriving another ledger.
+
+
+Native replay records sparse causal mark updates with the observed fill-prefix
+count. The canonical job ledger values every market/frame/fill sample using the
+configured initial capital, including unallocated cash; fills are no longer the
+only equity observations. Headline `equity.net_pnl` is final marked equity minus
+initial capital and `equity.gross_pnl` adds all execution fees. Closed trade
+`trades.net_pnl`/`gross_pnl` remain separate, with allocated entry/exit fees and
+open-lot fees. API job receipts expose headline `net_pnl`/`gross_pnl` and explicit
+`closed_trade_net_pnl`/`closed_trade_gross_pnl`; undefined statistic reasons are
+retained. Imported workspace headline PnL uses the equity block without another
+calculation, while closed-trade figures and profit factor retain their meaning.
+
+The backtest results package owns financial statistics. The unused native metrics copy is removed; exact decimal primitives remain in the native kernel.
+
+Research migration cleanup removes the retired trait-driven engine/result model, unused lineage package, dormant HTTP workflow adapter, typed tool argument wrappers, obsolete scanner, and inert workflow dependencies. Product composition supplies an explicit MCP-backed runner. Imported report statistics use one snake_case projection; UI headlines read the canonical harness quantities and undefined reasons.

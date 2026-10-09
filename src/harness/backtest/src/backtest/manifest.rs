@@ -8,9 +8,8 @@
 
 use crate::canonical_json::JsonValue;
 use crate::results::recorder::manifest::digest_bytes;
-use crate::sha256::{digest_hex, Sha256};
+use crate::sha256::Sha256;
 
-use super::errors::BacktestStatus;
 use super::fixture::DataPreflight;
 
 use super::config::BacktestConfig;
@@ -87,14 +86,10 @@ pub fn run_digest(job_id: &str, digests: &std::collections::BTreeMap<String, Str
 /// module name and an 8-byte big-endian length.
 #[must_use]
 pub fn code_fingerprint() -> String {
-    const MODULES: [(&str, &str); 13] = [
+    const MODULES: [(&str, &str); 12] = [
         (
             "harness-backtest.backtest.config",
             include_str!("config.rs"),
-        ),
-        (
-            "harness-backtest.backtest.engine",
-            include_str!("engine.rs"),
         ),
         (
             "harness-backtest.backtest.engine_core",
@@ -353,123 +348,6 @@ impl BacktestManifest {
             }
         }
         value
-    }
-}
-
-/// The subset of one deterministic backtest outcome the staged port records.
-///
-/// The full Python `BacktestResult` also carries fills, fee assessments, the
-/// portfolio snapshot, and risk decisions; those domain types arrive with the
-/// engine, portfolio, and risk ports, so this result carries the reproducibility
-/// manifest, preflight evidence, dispatch identity, and outcome counts.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BacktestResult {
-    /// Reproducibility manifest.
-    pub manifest: BacktestManifest,
-    /// Terminal status.
-    pub status: BacktestStatus,
-    /// Abort reason, if any.
-    pub reason: Option<String>,
-    /// Preflight evidence.
-    pub preflight: DataPreflight,
-    /// Event bus dispatch hash.
-    pub dispatch_hash: String,
-    /// Events dispatched on the bus.
-    pub dispatched_count: u64,
-    /// Market events consumed.
-    pub market_event_count: u64,
-    /// Orders submitted.
-    pub order_count: u64,
-    /// Fills produced.
-    pub fill_count: u64,
-    /// Approved orders in dispatch order.
-    pub orders: Vec<super::engine::OrderIntent>,
-    /// Fills produced in dispatch order.
-    pub fills: Vec<super::engine::Fill>,
-    /// Risk decisions recorded.
-    pub risk_decision_count: u64,
-    /// Halted strategies.
-    pub halted_strategies: Vec<String>,
-    /// Stopped strategies.
-    pub stopped_strategies: Vec<String>,
-    /// Teardown errors.
-    pub teardown_errors: Vec<String>,
-    /// Lookahead violations.
-    pub lookahead_violations: Vec<String>,
-}
-
-impl BacktestResult {
-    /// Whether the run replayed its complete fixture.
-    #[must_use]
-    pub fn completed(&self) -> bool {
-        self.status == BacktestStatus::Completed
-    }
-
-    /// Return the canonical, JSON-ready run artifacts.
-    #[must_use]
-    pub fn artifacts(&self) -> JsonValue {
-        JsonValue::object([
-            ("manifest", self.manifest.to_json()),
-            ("status", JsonValue::string(self.status.value())),
-            (
-                "reason",
-                match &self.reason {
-                    Some(reason) => JsonValue::String(reason.clone()),
-                    None => JsonValue::Null,
-                },
-            ),
-            ("preflight", self.preflight.to_json()),
-            (
-                "dispatch_hash",
-                JsonValue::String(self.dispatch_hash.clone()),
-            ),
-            (
-                "counts",
-                JsonValue::object([
-                    ("dispatched", JsonValue::UInt(self.dispatched_count)),
-                    ("market_events", JsonValue::UInt(self.market_event_count)),
-                    ("orders", JsonValue::UInt(self.order_count)),
-                    ("fills", JsonValue::UInt(self.fill_count)),
-                    ("risk_decisions", JsonValue::UInt(self.risk_decision_count)),
-                ]),
-            ),
-            (
-                "strategies",
-                JsonValue::object([
-                    ("halted", string_array(&self.halted_strategies)),
-                    ("stopped", string_array(&self.stopped_strategies)),
-                    ("teardown_errors", string_array(&self.teardown_errors)),
-                    (
-                        "lookahead_violations",
-                        string_array(&self.lookahead_violations),
-                    ),
-                ]),
-            ),
-        ])
-    }
-
-    /// Return the stable byte-for-byte artifact document for this run.
-    #[must_use]
-    pub fn artifact_json(&self) -> String {
-        self.artifacts().to_canonical_string()
-    }
-
-    /// Return the SHA-256 digest of the complete run artifact.
-    #[must_use]
-    pub fn artifact_digest(&self) -> String {
-        digest_hex(self.artifact_json().as_bytes())
-    }
-
-    /// Return the SHA-256 digest of the run outcome without provenance.
-    #[must_use]
-    pub fn outcome_digest(&self) -> String {
-        let artifacts = self.artifacts();
-        let JsonValue::Object(mut entries) = artifacts else {
-            unreachable!("artifacts is an object")
-        };
-        entries.remove("manifest");
-        entries.remove("preflight");
-        digest_hex(JsonValue::Object(entries).to_canonical_string().as_bytes())
     }
 }
 

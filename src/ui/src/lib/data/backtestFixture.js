@@ -133,8 +133,8 @@ export const fixture = (() => {
 	const ratios = annualizedRatios(equity, 252);
 	const wins = trades.filter((t) => t.pnl >= 0);
 	const losses = trades.filter((t) => t.pnl < 0);
-	const grossProfit = wins.reduce((a, t) => a + t.pnl, 0);
-	const grossLoss = losses.reduce((a, t) => a + t.pnl, 0);
+	const gross_profit = wins.reduce((a, t) => a + t.pnl, 0);
+	const gross_loss = losses.reduce((a, t) => a + t.pnl, 0);
 	const fills = trades.length * 2;
 	const firstClose = spy.series[0].close;
 	const benchmark = equity.map((p, i) => ({
@@ -148,34 +148,34 @@ export const fixture = (() => {
 		trades,
 		instruments: [spy, qqq],
 		stats: {
-			totalReturn: last / first - 1,
+			total_return: last / first - 1,
 			cagr: Math.pow(last / first, 1 / years) - 1,
-			maxDrawdown: dd.maxDd,
-			maxDrawdownDurationNs: dd.spanNs * 1e6,
-			maxDrawdownRecovered: true,
+			max_drawdown: dd.maxDd,
+			max_drawdown_duration_ns: dd.spanNs * 1e6,
+			max_drawdown_recovered: true,
 			sharpe: ratios.sharpe,
 			sortino: ratios.sortino,
-			tradeCount: trades.length,
-			winCount: wins.length,
-			lossCount: losses.length,
-			hitRate: wins.length / trades.length,
-			totalPnl: last - first,
-			grossProfit,
-			grossLoss,
-			profitFactor: grossProfit / Math.abs(grossLoss),
-			averageWin: grossProfit / wins.length,
-			averageLoss: grossLoss / losses.length,
-			largestWin: Math.max(...wins.map((t) => t.pnl)),
-			largestLoss: Math.min(...losses.map((t) => t.pnl)),
-			fillCount: fills,
-			feesTotal: fills * 1.0,
-			slippageTotal: fills * 0.8,
-			latencyMeanNs: 840_000,
-			latencyMaxNs: 3_100_000,
-			ordersTotal: fills,
-			ordersFilled: fills,
-			ordersRejected: 0,
-			ordersCancelled: 0
+			trade_count: trades.length,
+			win_count: wins.length,
+			loss_count: losses.length,
+			hit_rate: wins.length / trades.length,
+			net_pnl: last - first,
+			gross_profit,
+			gross_loss,
+			profit_factor: gross_profit / Math.abs(gross_loss),
+			average_net_win: gross_profit / wins.length,
+			average_net_loss: gross_loss / losses.length,
+			largest_net_win: Math.max(...wins.map((t) => t.pnl)),
+			largest_net_loss: Math.min(...losses.map((t) => t.pnl)),
+			fill_count: fills,
+			fees_total: fills * 1.0,
+			slippage_total: fills * 0.8,
+			latency_mean_ns: 840_000,
+			latency_max_ns: 3_100_000,
+			orders_total: fills,
+			orders_filled: fills,
+			orders_rejected: 0,
+			orders_cancelled: 0
 		},
 		panels: [
 			{

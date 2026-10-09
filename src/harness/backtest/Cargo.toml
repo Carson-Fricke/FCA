@@ -2,7 +2,7 @@
 name = "backtest"
 version = "0.1.0"
 edition = "2021"
-description = "Backtest, sweeps, and results kernels for the quant-harness Rust engine (staged port)."
+description = "Native backtest execution and results kernels for the quant-harness Rust engine."
 license = "Apache-2.0"
 publish = false
 

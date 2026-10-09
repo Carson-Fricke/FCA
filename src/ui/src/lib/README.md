@@ -21,7 +21,7 @@ claims don't belong here.
 | `workflow-scope.svelte.ts` | Execution-scoped phase navigation and event selection, node capability snapshots, history selection, and node submission. |
 | `scope.svelte.ts` | Scope path serialization, storage, and navigation stack. |
 | `subagent.ts` | Workflow and sub-agent event projections, including attempt freshness. |
-| `transcript.ts` | UI transcript ordering, tool call/result matching, and pending state. |
+| `transcript.ts` | UI transcript ordering, tool call/result matching, pending state, neutral wire-delivery presentation, and accepted research report decoding. |
 | `workflow-graph.ts` | Workflow topology and display projection. |
 | `workspace.svelte.ts` | Workspace-scoped view state and toasts. |
 | `workspace-context.svelte.ts` | Workspace shell context: render-gate summary plus snapshot detail loaded after render. |
@@ -68,6 +68,12 @@ errors are decoded before UI adaptation. Nested tool
 outcomes in messages and event extension payloads use the same registry. Offline
 sample records are aligned with the complete wire shape and validated, not
 silently accepted through a looser fixture contract.
+
+Neutral delivered datums have no model tool-call identity. The presentation
+adapter retains them with null call/tool fields without modifying canonical
+wire records. Nullable message metadata remains nullable in the backend schema
+and the generated UI types; optional canonical fields are checked on object
+metadata only.
 
 Tree records retain kind, completion mode, phase executor, return anchor, tools,
 budget, contracts, results, attempt ID, spec version, and timestamps. Context

@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import replace
 
+from thesis.research.evidence import parameter_digest, parameter_identity
 from thesis.research.hypothesis import (
     HypothesisDocument,
     HypothesisFrontMatter,
@@ -101,10 +102,21 @@ def variation_report_artifact(
         return None
     return {
         "type": "variation",
+        "dataset": "development",
         "center": _variation_point_artifact(evaluation.center),
         "points": [_variation_point_artifact(point) for point in evaluation.points],
         "parameters": list(evaluation.parameters),
         "stability": evaluation.stability,
+        "evidence": evaluation.as_dict(),
+        "nullEvidence": None
+        if state.null_testing is None
+        else state.null_testing.as_dict(),
+        "candidateEvidence": None
+        if state.candidate_evaluation is None
+        else state.candidate_evaluation.as_dict(),
+        "researchEvidence": None
+        if state.research_evidence is None
+        else state.research_evidence.as_dict(),
     }
 
 
@@ -113,10 +125,44 @@ def _variation_point_artifact(
 ) -> dict[str, object]:
     """Render one center or point with the contract's wire key casing."""
     return {
-        "parameters": dict(point.parameters),
-        "jobId": point.job_id,
-        "state": point.state,
-        "metrics": None if point.metrics is None else dict(point.metrics),
+        **point.as_dict(),
+        "parameterIdentity": parameter_digest(point.parameters),
+        "levelIdentities": {
+            name: parameter_identity({name: value})
+            for name, value in point.parameters.items()
+        },
+        "levelLabels": {
+            name: str(value).lower() if isinstance(value, bool) else str(value)
+            for name, value in point.parameters.items()
+        },
+    }
+
+
+def forward_report_artifact(
+    state: HypothesisDevelopmentState,
+) -> dict[str, object] | None:
+    """Project accepted forward evidence using the development table shape.
+
+    Keep the complete accepted contracts in the export; presentation never
+    estimates absent observations or recomputes financial statistics.
+    """
+    evaluation = state.forward_validation
+    if evaluation is None:
+        return None
+    variation = evaluation.variation
+    return {
+        "type": "variation",
+        "dataset": "forward",
+        "center": _variation_point_artifact(variation.center),
+        "points": [_variation_point_artifact(point) for point in variation.points],
+        "parameters": list(variation.parameters),
+        "stability": variation.stability,
+        "comparison": evaluation.comparison,
+        "limitations": evaluation.limitations,
+        "window": evaluation.window.as_dict(),
+        "evidence": evaluation.as_dict(),
+        "nullEvidence": evaluation.null.as_dict(),
+        "matchedDevelopment": variation_report_artifact(state),
     }
 
 

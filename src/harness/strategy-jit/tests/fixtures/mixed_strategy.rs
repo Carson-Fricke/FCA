@@ -1,11 +1,12 @@
 //! Strategy fixture with a program-owned trade indicator and atomic bar orders.
 use harness_strategy_sdk::{
-    export_strategy_program, BarFrame, Decimal, Indicator, MarketConsumer, MetricPublisher,
-    ObservationContext, OrderSink, OrderType, ProgramStart, QuoteEvent, Side, StrategyProgram,
-    SubmittedOrder, Subscription, TimeInForce, TradeEvent,
+    export_strategy_program, BarFrame, Decimal, Indicator, IndicatorSequence, MarketConsumer,
+    MetricPublisher, ObservationContext, OrderSink, OrderType, ProgramStart, QuoteEvent, Side,
+    StrategyProgram, SubmittedOrder, Subscription, TimeInForce, TradeEvent,
 };
 
 struct TradeCount {
+    sequence: IndicatorSequence,
     count: u64,
     mutate: bool,
 }
@@ -25,7 +26,13 @@ impl MarketConsumer for TradeCount {
     }
 }
 impl Indicator for TradeCount {
-    fn value(&self) -> Option<Decimal> {
+    fn sequence(&self) -> &IndicatorSequence {
+        &self.sequence
+    }
+    fn sequence_mut(&mut self) -> &mut IndicatorSequence {
+        &mut self.sequence
+    }
+    fn value(&self, _: &str) -> Option<Decimal> {
         Some(Decimal::from_i128(self.count as i128))
     }
 }
@@ -45,10 +52,12 @@ impl StrategyProgram for MixedStrategy {
     fn new(parameters: harness_strategy_sdk::serde_json::Value) -> Self {
         Self {
             indicator: TradeCount {
+                sequence: IndicatorSequence::ticks(60_000_000_000).unwrap(),
                 count: 0,
                 mutate: parameters["mutation"] == "dependency",
             },
             alternate: TradeCount {
+                sequence: IndicatorSequence::ticks(60_000_000_000).unwrap(),
                 count: 0,
                 mutate: false,
             },
@@ -67,6 +76,11 @@ impl StrategyProgram for MixedStrategy {
         }
     }
     fn on_stop(&mut self, metrics: &mut MetricPublisher) {
+        assert!(self.indicator.sequence().completed().is_empty());
+        let partial = &self.indicator.sequence().in_progress()["DEP"];
+        assert_eq!(partial.close, Some(Decimal::from_i128(1)));
+        assert_eq!(partial.available_at_ns, None);
+        assert_eq!(partial.observations, 1);
         metrics.publish("quotes", self.quotes as f64).unwrap();
         metrics.publish("trades", self.trades as f64).unwrap();
         metrics.publish("frames", self.frames as f64).unwrap();
@@ -117,7 +131,7 @@ impl MarketConsumer for MixedStrategy {
     fn on_bar(&mut self, frame: &BarFrame, orders: &mut OrderSink) {
         assert_eq!(frame.bars_by_symbol.len(), 1);
         assert!(frame.bars_by_symbol.contains_key("AAA"));
-        assert_eq!(self.indicator.value().unwrap(), Decimal::from_i128(1));
+        assert_eq!(self.indicator.value("DEP").unwrap(), Decimal::from_i128(1));
         self.frames += 1;
         orders
             .submit(SubmittedOrder {

@@ -10,19 +10,17 @@
 use std::collections::BTreeMap;
 
 use backtest::backtest::config::{BacktestConfig, NullTransformConfig};
-use backtest::backtest::engine::{
-    run_backtest, ApproveAll, BacktestOptions, ImmediateFill, TradeBuyStrategy,
-};
 use backtest::backtest::engine_core::{
-    EngineBarFrame, EngineMarket, EngineOptions, EngineOrder, MarketSubscription, StrategyInstance,
-    StrategyRuntime, StrategyStart,
+    build_default_manifest, run_native_engine, EngineBarFrame, EngineMarket, EngineOptions,
+    EngineOrder, MarketSubscription, StrategyInstance, StrategyRuntime, StrategyStart,
 };
 use backtest::backtest::errors::BacktestError;
 use backtest::backtest::fixture::{
-    ExchangeSession, MarketEvent, ReplayFingerprints, ReplayFixture,
+    ExchangeSession, MarketEvent, ReplayFingerprints, ReplayFixture, SyntheticDataOptions,
 };
 use backtest::backtest::job::{parse_timestamp_ns, run_native_study_job_with_lake_client};
 use backtest::backtest::null::apply_null_transform;
+use backtest::backtest::preflight::preflight_data;
 use harness_lakeclient::testing::{bars_stream, FakeBarRow, FakeLakeConfig, FakeLakeServer};
 use harness_lakeclient::{BlockingLakeClient, LakeClientConfig};
 use num::Decimal18;
@@ -128,15 +126,22 @@ fn fixture(config: &BacktestConfig, events: Vec<MarketEvent>) -> ReplayFixture {
 }
 
 fn run_config(config: &BacktestConfig, fixture: &ReplayFixture) -> String {
-    run_backtest(
+    let transformed = apply_null_transform(config, fixture).expect("null transform");
+    let preflight = preflight_data(config, &transformed).expect("preflight");
+    let manifest = build_default_manifest(config, &transformed, &preflight).expect("manifest");
+    run_native_engine(
         config,
-        Some(fixture),
-        &BacktestOptions::default(),
-        &mut TradeBuyStrategy::default(),
-        &mut ApproveAll,
-        &mut ImmediateFill,
+        &transformed,
+        &preflight,
+        manifest,
+        &EngineOptions::default(),
+        vec![StrategyInstance {
+            instance_id: "null-observer".into(),
+            runtime: Box::new(NoopProgram(config.symbols.clone())),
+        }],
+        &SyntheticDataOptions::default(),
     )
-    .expect("deterministic run")
+    .expect("deterministic native run")
     .artifact_json()
 }
 
@@ -445,6 +450,8 @@ fn non_positive_closes_are_rejected_instead_of_leaking_nan() {
             bar("SPY", config.start_ns + 2 * MINUTE, 11),
             bar("AAPL", config.start_ns + MINUTE, 20),
             bar("AAPL", config.start_ns + 2 * MINUTE, 21),
+            bar("AAPL", config.start_ns + 3 * MINUTE, 19),
+            bar("AAPL", config.start_ns + 4 * MINUTE, 22),
         ],
     );
     let mut broken = original.clone();
@@ -461,6 +468,8 @@ fn non_positive_tick_prices_fail_preflight_by_name_before_rescaling() {
     let bars = [
         bar("SPY", config.start_ns + MINUTE, 10),
         bar("SPY", config.start_ns + 2 * MINUTE, 11),
+        bar("SPY", config.start_ns + 3 * MINUTE, 13),
+        bar("SPY", config.start_ns + 4 * MINUTE, 12),
     ];
     let broken_ticks = [
         ("bid", quote("SPY", config.start_ns, 0, 10)),
@@ -481,13 +490,13 @@ fn non_positive_tick_prices_fail_preflight_by_name_before_rescaling() {
     }
 }
 
-struct NoopProgram;
+struct NoopProgram(Vec<String>);
 
 impl StrategyRuntime for NoopProgram {
     fn subscriptions(&self) -> Option<Vec<MarketSubscription>> {
         Some(vec![MarketSubscription {
             data_type: "bars".into(),
-            symbols: vec!["SPY".into()],
+            symbols: self.0.clone(),
             interval: Some("1min".into()),
         }])
     }
@@ -550,7 +559,7 @@ fn run_study(config: &BacktestConfig, name: &str) -> Value {
         Some(&directory),
         vec![StrategyInstance {
             instance_id: "null-study".to_string(),
-            runtime: Box::new(NoopProgram),
+            runtime: Box::new(NoopProgram(config.symbols.clone())),
         }],
         &client(&server),
     )
@@ -608,4 +617,79 @@ fn study_job_consumes_the_null_transform_before_manifest_and_replay() {
         first["preflight"]["bar_count"],
         baseline["preflight"]["bar_count"]
     );
+}
+
+#[test]
+fn ordinary_permutation_shuffles_single_returns_and_preserves_their_distribution() {
+    let mut config = base_config(17);
+    config.null_transform.as_mut().unwrap().mode = "permutation".into();
+    config.null_transform.as_mut().unwrap().block_size = 1;
+    let events: Vec<_> = [10, 11, 9, 13, 12, 15, 14, 17]
+        .into_iter()
+        .enumerate()
+        .map(|(index, close)| bar("SPY", config.start_ns + index as i64 * MINUTE, close))
+        .collect();
+    let original = fixture(&config, events);
+    let permuted = apply_null_transform(&config, &original).unwrap();
+    let ratios = |fixture: &ReplayFixture| {
+        let closes: Vec<_> = fixture
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                MarketEvent::Bar { close, .. } => Some(close.to_f64()),
+                _ => None,
+            })
+            .collect();
+        let mut values: Vec<_> = closes
+            .windows(2)
+            .map(|pair| (pair[1] / pair[0]).ln())
+            .collect();
+        values.sort_by(f64::total_cmp);
+        values
+    };
+    for (left, right) in ratios(&original).iter().zip(ratios(&permuted)) {
+        assert!((left - right).abs() < 1e-12);
+    }
+    assert_ne!(original.fingerprints.data, permuted.fingerprints.data);
+    assert_eq!(permuted, apply_null_transform(&config, &original).unwrap());
+    let mut block_one = config.clone();
+    block_one.null_transform.as_mut().unwrap().mode = "block_permutation".into();
+    assert_eq!(
+        permuted,
+        apply_null_transform(&block_one, &original).unwrap()
+    );
+    let document = json!({"shell": "backtest", "job_id": "ordinary-null", "data": {"symbols": ["SPY"], "subscriptions": [{"data_type": "bars", "symbols": ["SPY"], "interval": "1min"}]}, "null": {"mode": "permutation", "block_size": 1, "seed": 17}});
+    let parsed = BacktestConfig::from_yaml(&document.to_string()).unwrap();
+    assert_eq!(
+        parsed.canonical_json().to_serde_value()["null"]["mode"],
+        "permutation"
+    );
+}
+#[test]
+fn null_designs_without_movable_return_blocks_fail_preflight() {
+    let config = base_config(17);
+    for closes in [
+        vec![],
+        vec![10],
+        vec![10, 11],
+        vec![10, 11, 13],
+        vec![10, 10, 10, 10],
+    ] {
+        let events = closes
+            .into_iter()
+            .enumerate()
+            .map(|(index, close)| bar("SPY", config.start_ns + index as i64 * MINUTE, close))
+            .collect();
+        let error = apply_null_transform(&config, &fixture(&config, events)).unwrap_err();
+        assert!(matches!(error, BacktestError::DataPreflight(_)), "{error}");
+    }
+    for (mode, block_size) in [("permutation", 2), ("block_permutation", 0), ("unknown", 1)] {
+        let mut invalid = config.clone();
+        let null = invalid.null_transform.as_mut().unwrap();
+        null.mode = mode.into();
+        null.block_size = block_size;
+        let error = apply_null_transform(&invalid, &fixture(&invalid, sample_events(&invalid)))
+            .unwrap_err();
+        assert!(matches!(error, BacktestError::Configuration(_)), "{error}");
+    }
 }

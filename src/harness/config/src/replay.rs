@@ -2,6 +2,35 @@
 
 use crate::{ConfigError, YamlValue};
 use serde_json::Value;
+
+/// Decode the submitted document without resolving defaults or changing its identity.
+pub fn submitted_document(text: &str) -> Result<Value, ConfigError> {
+    fn convert(value: YamlValue) -> Result<Value, ConfigError> {
+        Ok(match value {
+            YamlValue::Null => Value::Null,
+            YamlValue::Bool(value) => Value::Bool(value),
+            YamlValue::Int(value) => Value::from(value),
+            YamlValue::Decimal(value) => {
+                serde_json::from_str(&value).map_err(|error| ConfigError(error.to_string()))?
+            }
+            YamlValue::Str(value) => Value::String(value),
+            YamlValue::Seq(values) => {
+                Value::Array(values.into_iter().map(convert).collect::<Result<_, _>>()?)
+            }
+            YamlValue::Map(values) => Value::Object(
+                values
+                    .into_iter()
+                    .map(|(key, value)| Ok((key, convert(value)?)))
+                    .collect::<Result<_, ConfigError>>()?,
+            ),
+        })
+    }
+    // JSON retains number types exactly; YAML uses the existing safe subset parser.
+    if let Ok(value) = serde_json::from_str::<Value>(text) {
+        return Ok(value);
+    }
+    convert(YamlValue::Map(parse_document(text)?))
+}
 use std::collections::BTreeMap;
 
 pub fn json_to_yaml(value: &Value) -> Result<YamlValue, ConfigError> {

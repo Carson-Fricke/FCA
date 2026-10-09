@@ -280,3 +280,32 @@ fn filesystem_artifact_prefix_round_trips_object_paths() {
     assert_eq!(stored.record.artifact_count, 2);
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn accepted_input_is_immutable_through_admission_and_result_publication() {
+    fn check(store: &dyn JobStore) {
+        let mut original = record("job-input", JobState::Queued);
+        original.accepted_input =
+            serde_json::json!({"start":"2024-01-01", "parameters":{"lookback":5}});
+        store.admit(original.clone()).expect("first admission");
+        store.admit(original.clone()).expect("same execution joins");
+        let mut altered = original.clone();
+        altered.accepted_input["parameters"]["lookback"] = serde_json::json!(6);
+        assert!(store.admit(altered.clone()).is_err());
+        altered.state = JobState::Failed;
+        assert!(store.put_result(altered, BTreeMap::new()).is_err());
+        original.state = JobState::Failed;
+        store
+            .put_result(original.clone(), BTreeMap::new())
+            .expect("unchanged input publishes");
+        assert_eq!(
+            store.get("job-input").unwrap().accepted_input,
+            original.accepted_input
+        );
+    }
+    check(&InMemoryJobStore::new());
+    let root = temp_root("immutable-input");
+    let store = FileSystemJobStore::new(&root);
+    check(&store);
+    std::fs::remove_dir_all(root).unwrap();
+}

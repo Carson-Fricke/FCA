@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "prepare": "svelte-kit sync",
-    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "test:e2e": "playwright test"
   },
@@ -27,6 +27,7 @@
     "@tailwindcss/vite": "4.1.11",
     "@testing-library/jest-dom": "6.6.3",
     "@testing-library/svelte": "5.2.7",
+    "@types/node": "^22.20.5",
     "jsdom": "26.1.0",
     "json-schema-to-typescript": "^16.0.0",
     "svelte": "^5.28.0",

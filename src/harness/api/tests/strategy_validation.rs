@@ -8,14 +8,16 @@ use tower::ServiceExt;
 
 const SOURCE: &str = r#"
 use harness_strategy_sdk::*;
-struct Dependency(u64);
+struct Dependency { sequence: IndicatorSequence }
 impl MarketConsumer for Dependency {
     type Context = ObservationContext;
     fn subscriptions(&self) -> Vec<Subscription> {
         vec![Subscription::Trade { symbols: vec!["SPY".into()] }]
     }
 }
-impl Indicator for Dependency { fn value(&self) -> Option<Decimal> { None } }
+impl Indicator for Dependency { fn value(&self, _: &str) -> Option<Decimal> { None }
+fn sequence(&self) -> &IndicatorSequence { &self.sequence }
+fn sequence_mut(&mut self) -> &mut IndicatorSequence { &mut self.sequence } }
 struct Strategy { dependency: Dependency }
 impl MarketConsumer for Strategy {
     type Context = OrderSink;
@@ -25,7 +27,7 @@ impl MarketConsumer for Strategy {
     fn indicators(&mut self) -> Vec<&mut dyn Indicator> { vec![&mut self.dependency] }
 }
 impl StrategyProgram for Strategy {
-    fn new(_: serde_json::Value) -> Self { Self { dependency: Dependency(0) } }
+    fn new(_: serde_json::Value) -> Self { Self { dependency: Dependency { sequence: IndicatorSequence::ticks(60_000_000_000).unwrap() } } }
 }
 export_strategy_program!(Strategy);
 "#;
@@ -100,7 +102,7 @@ fn native_strategy_validation_really_compiles_loads_constructs_and_checks_depend
     assert!(!missing.message().contains("export_study_program"));
 
     let panic_source = SOURCE.replace(
-        "Self { dependency: Dependency(0) }",
+        "Self { dependency: Dependency { sequence: IndicatorSequence::ticks(60_000_000_000).unwrap() } }",
         "panic!(\"construction rejected\")",
     );
     let rejected = NativeStudyValidator

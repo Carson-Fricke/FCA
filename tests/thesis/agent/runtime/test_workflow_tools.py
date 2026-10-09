@@ -46,6 +46,7 @@ def test_start_workflow_handle_carries_workflow_identity() -> None:
         *,
         ideas: str,
         investigation_id: str | None = None,
+        launch_options: Mapping[str, object] | None = None,
     ) -> Mapping[str, object]:
         launched.append(ideas)
         return {"executionId": "exec-1", "phase": "requested", "summary": "started"}
@@ -54,7 +55,11 @@ def test_start_workflow_handle_carries_workflow_identity() -> None:
     (tool,) = workflow_registered_tools(_Launcher(registry), _context())
 
     execution = tool.handler(
-        {"workflow": HYPOTHESIS_DEVELOPMENT_WORKFLOW, "idea": "an edge"}
+        {
+            "workflow": HYPOTHESIS_DEVELOPMENT_WORKFLOW,
+            "idea": "an edge",
+            "launch_options": {},
+        }
     )
 
     spec = registry.resolve(HYPOTHESIS_DEVELOPMENT_WORKFLOW).spec

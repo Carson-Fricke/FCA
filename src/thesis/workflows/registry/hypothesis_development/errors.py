@@ -11,10 +11,6 @@ class WorkflowError(RuntimeError):
     """Base error for invalid hypothesis-development workflow operations."""
 
 
-class InvalidPhaseTransition(WorkflowError):
-    """A phase cannot move directly to the requested phase."""
-
-
 class HypothesisDevelopmentIntakeError(WorkflowError):
     """Raised when a hypothesis-development request is not valid intake."""
 

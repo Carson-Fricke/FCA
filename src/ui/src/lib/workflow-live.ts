@@ -37,10 +37,11 @@ export function deriveWorkflowLive(
 			if (!data || typeof data !== 'object' || Array.isArray(data)) continue;
 			const execution = workflowAnchor(message, data);
 			if (!execution || anchors.has(execution.execution_id)) continue;
-			const phases: WorkflowPhase[] = Array.isArray(data.phases) ? data.phases.flatMap((item) => {
+			const phases: WorkflowPhase[] = Array.isArray(data.phases) ? data.phases.flatMap((item: unknown) => {
 				if (typeof item === 'string') return [{ name: item, status: 'pending' as const }];
-				if (!item || typeof item !== 'object' || typeof item.name !== 'string') return [];
-				return [{ name: item.name, status: item.status === 'done' || item.status === 'active' ? item.status : 'pending' } satisfies WorkflowPhase];
+				if (!item || typeof item !== 'object' || !('name' in item) || typeof item.name !== 'string') return [];
+                const status = 'status' in item ? item.status : null;
+				return [{ name: item.name, status: status === 'done' || status === 'active' ? status : 'pending' } satisfies WorkflowPhase];
 			}) : [];
 			anchors.set(execution.execution_id, { execution, phases });
 		}
@@ -98,6 +99,7 @@ export function withWorkflowNodes(workflows: Map<string, WorkflowLiveState>, tre
 	for (const [id, live] of workflows) {
 		const phases = new Map(live.phases.map((phase) => [canonicalPhaseName(phase.name), phase]));
 		for (const [key, { item }] of nodes.get(id) ?? []) {
+			if (!item.node.phase) continue;
 			const previous = phases.get(key);
 			phases.set(key, { name: previous?.name ?? item.node.phase,
 				status: live.execution.state === 'completed' || item.node.status === 'completed' ? 'done' : 'active', attempts: previous?.attempts });

@@ -27,6 +27,7 @@ from thesis.agent.harness_tools import HarnessToolProvider, HarnessToolResult
 from thesis.backtests.artifacts import ArtifactReader, HarnessArtifactReader
 from thesis.http.backtests import BacktestRecord
 from thesis.integrations.mcp import TOOL_GET_JOB_RESULT, TOOL_GET_JOB_STATUS
+from thesis.research.evidence import numeric_metric
 
 _PENDING_STATES = frozenset({"queued", "running"})
 _FAILED_STATES = frozenset({"failed", "cancelled"})
@@ -44,6 +45,7 @@ _CANONICAL_TRADE_FIELDS = (
     "hit_rate",
     "gross_pnl",
     "fees",
+    "open_fees",
     "net_pnl",
     "gross_profit",
     "gross_loss",
@@ -66,6 +68,8 @@ _TRADE_DECIMAL_FIELDS = (
     "entry_price",
     "exit_price",
     "gross_pnl",
+    "entry_fee",
+    "exit_fee",
     "fees",
     "net_pnl",
 )
@@ -95,6 +99,10 @@ class _EquityStatistics:
     """The equity-block statistics exactly as the harness published them."""
 
     total_return: float | None
+    net_pnl: float | None
+    net_pnl_reason: str | None
+    gross_pnl: float | None
+    gross_pnl_reason: str | None
     total_return_reason: str | None
     max_drawdown: float | None
     max_drawdown_reason: str | None
@@ -154,6 +162,7 @@ def import_backtest_run(
         trade_reasons,
         equity_reason=None if equity_points else "artifact_unavailable",
         trades_reason=trades_reason,
+        fees_total=_number(_mapping(metrics.get("execution")).get("fees_total")),
     )
     initial_capital = _first_number(
         portfolio.get("initial_cash"),
@@ -308,6 +317,10 @@ def _equity_statistics(metrics: Mapping[str, object]) -> _EquityStatistics:
     equity = _mapping(metrics.get("equity"))
     return _EquityStatistics(
         total_return=_number(equity.get("total_return")),
+        net_pnl=_number(equity.get("net_pnl")),
+        net_pnl_reason=_text(equity.get("net_pnl_reason")),
+        gross_pnl=_number(equity.get("gross_pnl")),
+        gross_pnl_reason=_text(equity.get("gross_pnl_reason")),
         total_return_reason=_text(equity.get("total_return_reason")),
         max_drawdown=_number(equity.get("max_drawdown")),
         max_drawdown_reason=_text(equity.get("max_drawdown_reason")),
@@ -399,6 +412,8 @@ def _trade_record(row: object) -> dict[str, object]:
         "exitPrice": decimals["exit_price"],
         "grossPnl": decimals["gross_pnl"],
         "fees": decimals["fees"],
+        "entryFee": decimals["entry_fee"],
+        "exitFee": decimals["exit_fee"],
         "pnl": decimals["net_pnl"],
     }
 
@@ -410,9 +425,12 @@ def _stats_document(
     *,
     equity_reason: str | None,
     trades_reason: str | None,
+    fees_total: float | None,
 ) -> dict[str, object]:
-    """Project the published statistics under their snake_case and camelCase keys."""
+    """Project canonical snake_case statistics with explicit equity/trade PnL."""
     return {
+        **canonical,
+        **reasons,
         "total_return": equity.total_return,
         "total_return_reason": equity.total_return_reason,
         "max_drawdown": equity.max_drawdown,
@@ -423,27 +441,13 @@ def _stats_document(
         "sharpe_per_sample_reason": equity.sharpe_per_sample_reason,
         "equity_unavailable_reason": equity_reason,
         "trades_unavailable_reason": trades_reason,
-        **canonical,
-        **reasons,
-        "win_rate": canonical["hit_rate"],
-        "totalReturn": equity.total_return,
-        "maxDrawdown": equity.max_drawdown,
-        "sharpePerSample": equity.sharpe_per_sample,
-        "hitRate": canonical["hit_rate"],
-        "tradeCount": canonical["trade_count"],
-        "totalPnl": canonical["net_pnl"],
-        "grossPnl": canonical["gross_pnl"],
-        "netProfit": canonical["net_profit"],
-        "netLoss": canonical["net_loss"],
-        "winCount": canonical["win_count"],
-        "lossCount": canonical["loss_count"],
-        "grossProfit": canonical["gross_profit"],
-        "grossLoss": canonical["gross_loss"],
-        "profitFactor": canonical["profit_factor"],
-        "averageWin": canonical["average_net_win"],
-        "averageLoss": canonical["average_net_loss"],
-        "largestWin": canonical["largest_net_win"],
-        "largestLoss": canonical["largest_net_loss"],
+        "net_pnl": equity.net_pnl,
+        "net_pnl_reason": equity.net_pnl_reason,
+        "gross_pnl": equity.gross_pnl,
+        "gross_pnl_reason": equity.gross_pnl_reason,
+        "fees_total": fees_total,
+        "closed_trade_net_pnl": canonical["net_pnl"],
+        "closed_trade_gross_pnl": canonical["gross_pnl"],
     }
 
 
@@ -490,16 +494,8 @@ def _first_number(*values: object) -> float | None:
 
 
 def _number(value: object) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return None
-    return None
+    """Parse finite canonical numeric values without interpreting reasons."""
+    return numeric_metric(value)
 
 
 def _optional_int(value: object) -> int | None:

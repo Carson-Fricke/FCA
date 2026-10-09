@@ -33,6 +33,7 @@ from typing import Any
 
 from thesis.experiments.ledger import AttemptKind, AttemptRecord, LedgerError
 from thesis.persistence.journal import content_hash
+from thesis.research.evidence import document_digest
 from thesis.workflows.core.execution_store import (
     ExecutionDocument,
     ExecutionStoreConflict,
@@ -141,6 +142,20 @@ def record_attempts(
         for record in records:
             if record.attempt_id in known:
                 continue
+            plan = record.payload.get("nullPlan")
+            if isinstance(plan, Mapping):
+                for prior in (*stored, *additions):
+                    previous = prior.payload.get("nullPlan")
+                    if (
+                        isinstance(previous, Mapping)
+                        and prior.payload.get("phase") == record.payload.get("phase")
+                        and prior.payload.get("phaseAttemptId")
+                        == record.payload.get("phaseAttemptId")
+                        and document_digest(previous) != document_digest(plan)
+                    ):
+                        raise LedgerError(
+                            "null seed plan or configuration changed after first submission"
+                        )
             known.add(record.attempt_id)
             additions.append(record)
         if not additions:
@@ -173,6 +188,7 @@ def record_submission_exposure(
     parameter_sha256: str | None,
     design_sha256: str | None = None,
     phase_attempt_id: str | None = None,
+    null_plan: Mapping[str, object] | None = None,
 ) -> AttemptRecord:
     """Durably record one job submission as observed exposure, before dispatch.
 
@@ -197,6 +213,7 @@ def record_submission_exposure(
             "parameterAssignmentSha256": parameter_sha256,
             "phase": phase,
             "phaseAttemptId": phase_attempt_id,
+            "nullPlan": None if null_plan is None else dict(null_plan),
             "toolName": tool_name,
             "windowEnd": window_end,
             "windowStart": window_start,

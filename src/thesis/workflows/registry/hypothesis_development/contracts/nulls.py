@@ -1,20 +1,14 @@
-"""The block-permutation null-testing contract for the null-testing phase.
+"""Explicit signal-destruction methods and conditional null evidence.
 
-The null-testing phase submits one block-permutation null run per seed for the
-selected candidate's committed strategy, inspects every run, and hands forward
-the whole evaluation: the strategy receipt, the deterministic null batch
-identity, the frozen transform settings, the observed statistic and its
-direction, one honest replicate per seed, the extremeness count over the
-succeeded replicates, and the resulting p-value.
-:meth:`NullTestEvaluation.from_dict` is both the rebuild fold's decoder and the
-completion validator's drift guard, so a stored or submitted payload either
-composes exactly here or is rejected with a
-:class:`~.errors.WorkflowError`.
+The complete fixed seed plan has no universal ceiling. Supported method claims
+are checked against ordinary or block permutation. All unsuccessful replicates
+count conservatively in p-values; selection-conditional evidence cannot be
+misrepresented as a search-adjusted test. The typed decoder owns all semantic
+cross-checks for completion and durable replay.
 """
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
@@ -24,6 +18,7 @@ from thesis.agent.runtime.schema import (
     validate_arguments,
     violations,
 )
+from thesis.research.evidence import metric_errors, numeric_metric
 from thesis.workflows.research_models import PROGRAM_REFERENCE_SCHEMA
 
 from ..errors import WorkflowError
@@ -41,11 +36,10 @@ NULL_REPLICATE_STATES: tuple[str, ...] = (
 #: The directions an extremeness comparison may take.
 NULL_DIRECTIONS: tuple[str, ...] = ("upper", "lower")
 
-#: The only frozen null transform mode.
-NULL_TRANSFORM_MODE = "block_permutation"
+#: Explicitly supported frozen null transform modes.
+NULL_TRANSFORM_MODES = ("permutation", "block_permutation")
 
 #: Replicate and block-size bounds mirrored from the workspace service.
-MAX_NULL_REPLICATES = 16
 MAX_NULL_BLOCK_SIZE = 10_000
 
 #: p-value equality tolerance required by the frozen contract.
@@ -58,33 +52,14 @@ _MAX_ERROR = 8_192
 _MAX_LIMITATIONS = 4_096
 
 
-def _field(payload: Mapping[str, object], *keys: str) -> Any:
-    """Return the first present spelling of one wire field."""
-    for key in keys:
-        if key in payload:
-            return payload[key]
-    return None
+def _field(payload: Mapping[str, object], key: str) -> Any:
+    """Read one canonical wire field for typed contract construction."""
+    return payload.get(key)
 
 
 def _finite_number(value: object) -> float | None:
     """Return the value as a finite float, or ``None`` when it is not one."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    number = float(value)
-    return number if math.isfinite(number) else None
-
-
-def _metric_errors(metrics: Mapping[str, object], label: str) -> list[str]:
-    """Collect every metric value that is not a finite number when numeric."""
-    errors: list[str] = []
-    for name, value in metrics.items():
-        if not isinstance(name, str):
-            errors.append(f"{label}: metric names must be strings")
-        elif isinstance(value, bool) or (
-            isinstance(value, (int, float)) and not math.isfinite(value)
-        ):
-            errors.append(f"{label}.{name}: metric values must be finite numbers")
-    return errors
+    return numeric_metric(value)
 
 
 def _strategy_reference_schema() -> dict[str, object]:
@@ -145,7 +120,40 @@ NULL_TEST_EVALUATION_PAYLOAD_SCHEMA: dict[str, object] = {
             "maxLength": _MAX_BATCH_ID,
             "pattern": r"\S",
         },
-        "mode": {"type": "string", "enum": [NULL_TRANSFORM_MODE]},
+        "mode": {"type": "string", "enum": list(NULL_TRANSFORM_MODES)},
+        "evidenceScope": {"type": "string", "enum": ["selection_conditional"]},
+        "failedReplicatePolicy": {
+            "type": "string",
+            "enum": ["conservative_exceedance"],
+        },
+        "targetResolution": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "signalAdequacy": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "signal": {"type": "string", "minLength": 1},
+                "destroyedDependency": {
+                    "type": "string",
+                    "enum": ["serial_order", "inter_block_order"],
+                },
+                "preservedProperties": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": True,
+                    "items": {
+                        "type": "string",
+                        "enum": ["marginal_returns", "within_block_dependence"],
+                    },
+                },
+                "limitations": {"type": "string", "minLength": 1},
+            },
+            "required": [
+                "signal",
+                "destroyedDependency",
+                "preservedProperties",
+                "limitations",
+            ],
+        },
         "blockSize": {
             "type": "integer",
             "minimum": 1,
@@ -162,7 +170,6 @@ NULL_TEST_EVALUATION_PAYLOAD_SCHEMA: dict[str, object] = {
         "replicates": {
             "type": "array",
             "minItems": 1,
-            "maxItems": MAX_NULL_REPLICATES,
             "items": _REPLICATE_SCHEMA,
         },
         "exceedanceCount": {"type": "integer", "minimum": 0},
@@ -183,6 +190,10 @@ NULL_TEST_EVALUATION_PAYLOAD_SCHEMA: dict[str, object] = {
         "replicates",
         "exceedanceCount",
         "pValue",
+        "evidenceScope",
+        "failedReplicatePolicy",
+        "signalAdequacy",
+        "targetResolution",
     ],
 }
 
@@ -199,106 +210,12 @@ def null_test_evaluation_payload_errors(
             NULL_TEST_EVALUATION_PAYLOAD_SCHEMA, payload, "nullTesting"
         )
     ]
-    strategy = payload.get("strategy")
-    if isinstance(strategy, Mapping) and strategy.get("kind") != "strategy":
-        errors.append("nullTesting.strategy.kind must be 'strategy'")
-    block_size = payload.get("blockSize")
-    if type(block_size) is int and not 1 <= block_size <= MAX_NULL_BLOCK_SIZE:
-        errors.append(
-            f"nullTesting.blockSize must be an integer from 1 to {MAX_NULL_BLOCK_SIZE}"
-        )
-    statistic = payload.get("statistic")
-    observed = payload.get("observed")
-    observed_value: float | None = None
-    if isinstance(observed, Mapping):
-        metrics = observed.get("metrics")
-        observed_value = _finite_number(observed.get("value"))
-        if observed_value is None:
-            errors.append("nullTesting.observed.value must be a finite number")
-        if isinstance(metrics, Mapping):
-            errors.extend(_metric_errors(metrics, "nullTesting.observed.metrics"))
-            if isinstance(statistic, str) and statistic:
-                metric = _finite_number(metrics.get(statistic))
-                if metric is None:
-                    errors.append(
-                        "nullTesting.observed.metrics must contain a finite number "
-                        f"at {statistic!r}"
-                    )
-                elif observed_value is not None and metric != observed_value:
-                    errors.append(
-                        "nullTesting.observed.value must equal "
-                        f"nullTesting.observed.metrics[{statistic!r}]"
-                    )
-    direction = payload.get("direction")
-    replicates = payload.get("replicates")
-    seeds: set[int] = set()
-    succeeded: list[float] = []
-    if isinstance(replicates, Sequence) and not isinstance(replicates, (str, bytes)):
-        for index, item in enumerate(replicates):
-            if not isinstance(item, Mapping):
-                continue
-            seed = item.get("seed")
-            if type(seed) is not int or seed < 0:
-                if seed is not None:
-                    errors.append(
-                        f"nullTesting.replicates[{index}].seed must be an integer "
-                        "of at least 0"
-                    )
-            elif seed in seeds:
-                errors.append("nullTesting.replicates seeds must be unique")
-            else:
-                seeds.add(seed)
-            metrics = item.get("metrics")
-            if isinstance(metrics, Mapping):
-                errors.extend(
-                    _metric_errors(metrics, f"nullTesting.replicates[{index}].metrics")
-                )
-            if item.get("state") != "succeeded":
-                continue
-            if not isinstance(metrics, Mapping):
-                errors.append(
-                    f"nullTesting.replicates[{index}].metrics must be an object "
-                    "for a succeeded replicate"
-                )
-                continue
-            if not isinstance(statistic, str) or not statistic:
-                continue
-            metric = _finite_number(metrics.get(statistic))
-            if metric is None:
-                errors.append(
-                    f"nullTesting.replicates[{index}].metrics must contain a "
-                    f"finite number at {statistic!r}"
-                )
-            else:
-                succeeded.append(metric)
-        if not succeeded:
-            errors.append("nullTesting requires at least one succeeded replicate")
-    count = payload.get("exceedanceCount")
-    if type(count) is int and count < 0:
-        errors.append("nullTesting.exceedanceCount must be an integer of at least 0")
-    p_value = _finite_number(payload.get("pValue"))
-    if direction in NULL_DIRECTIONS and observed_value is not None and succeeded:
-        computed = sum(
-            1
-            for metric in succeeded
-            if (
-                metric >= observed_value
-                if direction == "upper"
-                else metric <= observed_value
-            )
-        )
-        if type(count) is int and count >= 0 and count != computed:
-            errors.append(
-                "nullTesting.exceedanceCount must equal the extremeness count over "
-                "the succeeded replicates"
-            )
-        if p_value is not None:
-            expected = (1 + computed) / (1 + len(succeeded))
-            if abs(p_value - expected) > _PVALUE_TOLERANCE:
-                errors.append(
-                    "nullTesting.pValue must equal (1 + exceedanceCount) / "
-                    "(1 + succeeded) for the computed count"
-                )
+    if errors:
+        return errors
+    try:
+        NullTestEvaluation.from_dict(payload)
+    except WorkflowError as error:
+        errors.append(str(error))
     return errors
 
 
@@ -314,7 +231,7 @@ class NullTestObservation:
         _text(self.job_id, "null test observation job_id", max_length=_MAX_JOB_ID)
         if not isinstance(self.metrics, Mapping):
             raise WorkflowError("null test observation metrics must be an object")
-        errors = _metric_errors(self.metrics, "null test observation metrics")
+        errors = metric_errors(self.metrics, "null test observation metrics")
         if errors:
             raise WorkflowError("; ".join(errors))
         object.__setattr__(self, "metrics", dict(self.metrics))
@@ -340,7 +257,7 @@ class NullTestObservation:
         if not isinstance(metrics, Mapping):
             raise WorkflowError("null test observation requires a metrics object")
         return cls(
-            job_id=_field(payload, "jobId", "job_id"),
+            job_id=_field(payload, "jobId"),
             metrics=metrics,
             value=_field(payload, "value"),
         )
@@ -370,7 +287,7 @@ class NullTestReplicate:
         if self.metrics is not None:
             if not isinstance(self.metrics, Mapping):
                 raise WorkflowError("null test replicate metrics must be an object")
-            errors = _metric_errors(self.metrics, "null test replicate metrics")
+            errors = metric_errors(self.metrics, "null test replicate metrics")
             if errors:
                 raise WorkflowError("; ".join(errors))
             object.__setattr__(self, "metrics", dict(self.metrics))
@@ -400,7 +317,7 @@ class NullTestReplicate:
             raise WorkflowError("null test replicate error must be text")
         return cls(
             seed=_field(payload, "seed"),
-            job_id=_field(payload, "jobId", "job_id"),
+            job_id=_field(payload, "jobId"),
             state=_field(payload, "state"),
             metrics=metrics,
             error=error,
@@ -422,8 +339,30 @@ class NullTestEvaluation:
     exceedance_count: int
     p_value: float
     limitations: str | None = None
+    signal_adequacy: Mapping[str, object] | None = None
+    evidence_scope: str = "selection_conditional"
+    failed_replicate_policy: str = "conservative_exceedance"
+    target_resolution: float = 0.05
 
     def __post_init__(self) -> None:
+        if not isinstance(self.signal_adequacy, Mapping):
+            raise WorkflowError(
+                "signalAdequacy must explicitly declare the tested signal dependency"
+            )
+        adequacy_schema = cast(
+            Mapping[str, object], NULL_TEST_EVALUATION_PAYLOAD_SCHEMA["properties"]
+        )["signalAdequacy"]
+        misses = validate_arguments(
+            cast(Mapping[str, object], adequacy_schema), self.signal_adequacy
+        )
+        if misses:
+            raise WorkflowError("invalid signalAdequacy: " + render_violations(misses))
+        if self.evidence_scope != "selection_conditional":
+            raise WorkflowError(
+                "only selection_conditional evidence is supported; the search is not replayed under the null"
+            )
+        if self.failed_replicate_policy != "conservative_exceedance":
+            raise WorkflowError("failedReplicatePolicy must be conservative_exceedance")
         if not isinstance(self.strategy, Mapping):
             raise WorkflowError("null test evaluation strategy must be an object")
         misses = validate_arguments(PROGRAM_REFERENCE_SCHEMA, self.strategy)
@@ -437,16 +376,32 @@ class NullTestEvaluation:
             )
         object.__setattr__(self, "strategy", dict(self.strategy))
         _text(self.batch_id, "null test evaluation batch_id", max_length=_MAX_BATCH_ID)
-        if self.mode != NULL_TRANSFORM_MODE:
+        if self.mode not in NULL_TRANSFORM_MODES:
             raise WorkflowError(
-                f"null test evaluation mode must be {NULL_TRANSFORM_MODE!r}"
+                "null test evaluation mode must be permutation or block_permutation"
             )
+        if self.mode == "permutation" and self.block_size != 1:
+            raise WorkflowError("permutation requires block_size=1")
         if type(self.block_size) is not int or not (
             1 <= self.block_size <= MAX_NULL_BLOCK_SIZE
         ):
             raise WorkflowError(
                 "null test evaluation block_size must be an integer from 1 to "
                 f"{MAX_NULL_BLOCK_SIZE}"
+            )
+        adequacy = self.signal_adequacy
+        dependency = "inter_block_order" if self.block_size > 1 else "serial_order"
+        if adequacy.get("destroyedDependency") != dependency:
+            raise WorkflowError(
+                f"this transform destroys {dependency}; the declared signal dependency is unsupported"
+            )
+        if (
+            "within_block_dependence"
+            in cast(Sequence[str], adequacy.get("preservedProperties", []))
+            and self.block_size == 1
+        ):
+            raise WorkflowError(
+                "within_block_dependence requires block_permutation with blockSize greater than one"
             )
         _text(
             self.statistic, "null test evaluation statistic", max_length=_MAX_STATISTIC
@@ -462,9 +417,14 @@ class NullTestEvaluation:
             )
         if isinstance(self.replicates, str) or not isinstance(self.replicates, tuple):
             raise WorkflowError("null test evaluation replicates must be a tuple")
-        if not 1 <= len(self.replicates) <= MAX_NULL_REPLICATES:
+        if not len(self.replicates):
+            raise WorkflowError("null test evaluation requires at least one replicate")
+        resolution = _finite_number(self.target_resolution)
+        if resolution is None or not 0 < resolution <= 1:
+            raise WorkflowError("targetResolution must be a finite number in (0, 1]")
+        if 1 / (len(self.replicates) + 1) > resolution + _PVALUE_TOLERANCE:
             raise WorkflowError(
-                f"null test evaluation requires 1 to {MAX_NULL_REPLICATES} replicates"
+                "declared replicates cannot achieve targetResolution; extend the frozen seed plan"
             )
         if any(not isinstance(item, NullTestReplicate) for item in self.replicates):
             raise WorkflowError(
@@ -526,10 +486,14 @@ class NullTestEvaluation:
         p_value = _finite_number(self.p_value)
         if p_value is None:
             raise WorkflowError("null test evaluation p_value must be a finite number")
-        if abs(p_value - (1 + computed) / (1 + len(succeeded))) > _PVALUE_TOLERANCE:
+        unsuccessful = len(self.replicates) - len(succeeded)
+        if (
+            abs(p_value - (1 + computed + unsuccessful) / (1 + len(self.replicates)))
+            > _PVALUE_TOLERANCE
+        ):
             raise WorkflowError(
-                "null test evaluation p_value must equal (1 + exceedance_count) / "
-                "(1 + succeeded)"
+                "null test evaluation p_value must equal (1 + exceedance_count + unsuccessful) / "
+                "(1 + declared replicates) under conservative_exceedance"
             )
         object.__setattr__(self, "p_value", p_value)
         if self.limitations is not None:
@@ -553,6 +517,10 @@ class NullTestEvaluation:
             "exceedanceCount": self.exceedance_count,
             "pValue": self.p_value,
             "limitations": self.limitations,
+            "signalAdequacy": dict(self.signal_adequacy or {}),
+            "evidenceScope": self.evidence_scope,
+            "failedReplicatePolicy": self.failed_replicate_policy,
+            "targetResolution": self.target_resolution,
         }
 
     @classmethod
@@ -560,6 +528,9 @@ class NullTestEvaluation:
         """Rebuild one null test evaluation from its portable representation."""
         if not isinstance(payload, Mapping):
             raise WorkflowError("null test evaluation must be an object")
+        misses = validate_arguments(NULL_TEST_EVALUATION_PAYLOAD_SCHEMA, payload)
+        if misses:
+            raise WorkflowError(render_violations(misses))
         strategy = payload.get("strategy")
         if not isinstance(strategy, Mapping):
             raise WorkflowError("null test evaluation requires a strategy receipt")
@@ -571,9 +542,9 @@ class NullTestEvaluation:
             raise WorkflowError("null test evaluation requires a replicates list")
         return cls(
             strategy=strategy,
-            batch_id=_field(payload, "batchId", "batch_id"),
+            batch_id=_field(payload, "batchId"),
             mode=_field(payload, "mode"),
-            block_size=_field(payload, "blockSize", "block_size"),
+            block_size=_field(payload, "blockSize"),
             statistic=_field(payload, "statistic"),
             direction=_field(payload, "direction"),
             observed=NullTestObservation.from_dict(observed),
@@ -581,19 +552,21 @@ class NullTestEvaluation:
                 NullTestReplicate.from_dict(cast(Mapping[str, object], item))
                 for item in replicates
             ),
-            exceedance_count=_field(payload, "exceedanceCount", "exceedance_count"),
-            p_value=_field(payload, "pValue", "p_value"),
+            exceedance_count=_field(payload, "exceedanceCount"),
+            p_value=_field(payload, "pValue"),
             limitations=_field(payload, "limitations"),
+            signal_adequacy=cast(Mapping[str, object], payload.get("signalAdequacy")),
+            evidence_scope=cast(str, payload.get("evidenceScope")),
+            failed_replicate_policy=cast(str, payload.get("failedReplicatePolicy")),
+            target_resolution=cast(float, payload.get("targetResolution")),
         )
 
 
 __all__ = [
     "MAX_NULL_BLOCK_SIZE",
-    "MAX_NULL_REPLICATES",
     "NULL_DIRECTIONS",
     "NULL_REPLICATE_STATES",
     "NULL_TEST_EVALUATION_PAYLOAD_SCHEMA",
-    "NULL_TRANSFORM_MODE",
     "NullTestEvaluation",
     "NullTestObservation",
     "NullTestReplicate",

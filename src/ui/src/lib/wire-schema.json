@@ -78,60 +78,64 @@
           "type": "string"
         },
         "data": {
-          "allOf": [
+          "anyOf": [
             {
-              "anyOf": [
+              "allOf": [
                 {
-                  "discriminator": {
-                    "mapping": {
-                      "delivery": "#/$defs/Delivery",
-                      "external_input": "#/$defs/ExternalInput",
-                      "model_output": "#/$defs/ModelOutput",
-                      "runtime_tool": "#/$defs/RuntimeTool"
-                    },
-                    "propertyName": "activityKind"
-                  },
-                  "oneOf": [
+                  "anyOf": [
                     {
-                      "$ref": "#/$defs/ExternalInput"
+                      "discriminator": {
+                        "mapping": {
+                          "delivery": "#/$defs/Delivery",
+                          "external_input": "#/$defs/ExternalInput",
+                          "model_output": "#/$defs/ModelOutput",
+                          "runtime_tool": "#/$defs/RuntimeTool"
+                        },
+                        "propertyName": "activityKind"
+                      },
+                      "oneOf": [
+                        {
+                          "$ref": "#/$defs/ExternalInput"
+                        },
+                        {
+                          "$ref": "#/$defs/ModelOutput"
+                        },
+                        {
+                          "$ref": "#/$defs/RuntimeTool"
+                        },
+                        {
+                          "$ref": "#/$defs/Delivery"
+                        }
+                      ]
                     },
                     {
-                      "$ref": "#/$defs/ModelOutput"
-                    },
-                    {
-                      "$ref": "#/$defs/RuntimeTool"
-                    },
-                    {
-                      "$ref": "#/$defs/Delivery"
+                      "additionalProperties": true,
+                      "not": {
+                        "required": [
+                          "activityKind"
+                        ]
+                      },
+                      "type": "object"
                     }
                   ]
                 },
                 {
-                  "additionalProperties": true,
-                  "not": {
-                    "required": [
-                      "activityKind"
-                    ]
-                  },
-                  "type": "object"
-                },
-                {
-                  "type": "null"
+                  "properties": {
+                    "datums": {
+                      "items": {
+                        "$ref": "#/$defs/DatumWire"
+                      },
+                      "type": "array"
+                    },
+                    "sessionMessage": {
+                      "$ref": "#/$defs/SessionMessageWire"
+                    }
+                  }
                 }
               ]
             },
             {
-              "properties": {
-                "datums": {
-                  "items": {
-                    "$ref": "#/$defs/DatumWire"
-                  },
-                  "type": "array"
-                },
-                "sessionMessage": {
-                  "$ref": "#/$defs/SessionMessageWire"
-                }
-              }
+              "type": "null"
             }
           ]
         },
@@ -666,60 +670,64 @@
           "type": "string"
         },
         "data": {
-          "allOf": [
+          "anyOf": [
             {
-              "anyOf": [
+              "allOf": [
                 {
-                  "discriminator": {
-                    "mapping": {
-                      "delivery": "#/$defs/Delivery",
-                      "external_input": "#/$defs/ExternalInput",
-                      "model_output": "#/$defs/ModelOutput",
-                      "runtime_tool": "#/$defs/RuntimeTool"
-                    },
-                    "propertyName": "activityKind"
-                  },
-                  "oneOf": [
+                  "anyOf": [
                     {
-                      "$ref": "#/$defs/ExternalInput"
+                      "discriminator": {
+                        "mapping": {
+                          "delivery": "#/$defs/Delivery",
+                          "external_input": "#/$defs/ExternalInput",
+                          "model_output": "#/$defs/ModelOutput",
+                          "runtime_tool": "#/$defs/RuntimeTool"
+                        },
+                        "propertyName": "activityKind"
+                      },
+                      "oneOf": [
+                        {
+                          "$ref": "#/$defs/ExternalInput"
+                        },
+                        {
+                          "$ref": "#/$defs/ModelOutput"
+                        },
+                        {
+                          "$ref": "#/$defs/RuntimeTool"
+                        },
+                        {
+                          "$ref": "#/$defs/Delivery"
+                        }
+                      ]
                     },
                     {
-                      "$ref": "#/$defs/ModelOutput"
-                    },
-                    {
-                      "$ref": "#/$defs/RuntimeTool"
-                    },
-                    {
-                      "$ref": "#/$defs/Delivery"
+                      "additionalProperties": true,
+                      "not": {
+                        "required": [
+                          "activityKind"
+                        ]
+                      },
+                      "type": "object"
                     }
                   ]
                 },
                 {
-                  "additionalProperties": true,
-                  "not": {
-                    "required": [
-                      "activityKind"
-                    ]
-                  },
-                  "type": "object"
-                },
-                {
-                  "type": "null"
+                  "properties": {
+                    "datums": {
+                      "items": {
+                        "$ref": "#/$defs/DatumWire"
+                      },
+                      "type": "array"
+                    },
+                    "sessionMessage": {
+                      "$ref": "#/$defs/SessionMessageWire"
+                    }
+                  }
                 }
               ]
             },
             {
-              "properties": {
-                "datums": {
-                  "items": {
-                    "$ref": "#/$defs/DatumWire"
-                  },
-                  "type": "array"
-                },
-                "sessionMessage": {
-                  "$ref": "#/$defs/SessionMessageWire"
-                }
-              }
+              "type": "null"
             }
           ]
         },
@@ -1470,60 +1478,64 @@
           "type": "string"
         },
         "data": {
-          "allOf": [
+          "anyOf": [
             {
-              "anyOf": [
+              "allOf": [
                 {
-                  "discriminator": {
-                    "mapping": {
-                      "delivery": "#/$defs/Delivery",
-                      "external_input": "#/$defs/ExternalInput",
-                      "model_output": "#/$defs/ModelOutput",
-                      "runtime_tool": "#/$defs/RuntimeTool"
-                    },
-                    "propertyName": "activityKind"
-                  },
-                  "oneOf": [
+                  "anyOf": [
                     {
-                      "$ref": "#/$defs/ExternalInput"
+                      "discriminator": {
+                        "mapping": {
+                          "delivery": "#/$defs/Delivery",
+                          "external_input": "#/$defs/ExternalInput",
+                          "model_output": "#/$defs/ModelOutput",
+                          "runtime_tool": "#/$defs/RuntimeTool"
+                        },
+                        "propertyName": "activityKind"
+                      },
+                      "oneOf": [
+                        {
+                          "$ref": "#/$defs/ExternalInput"
+                        },
+                        {
+                          "$ref": "#/$defs/ModelOutput"
+                        },
+                        {
+                          "$ref": "#/$defs/RuntimeTool"
+                        },
+                        {
+                          "$ref": "#/$defs/Delivery"
+                        }
+                      ]
                     },
                     {
-                      "$ref": "#/$defs/ModelOutput"
-                    },
-                    {
-                      "$ref": "#/$defs/RuntimeTool"
-                    },
-                    {
-                      "$ref": "#/$defs/Delivery"
+                      "additionalProperties": true,
+                      "not": {
+                        "required": [
+                          "activityKind"
+                        ]
+                      },
+                      "type": "object"
                     }
                   ]
                 },
                 {
-                  "additionalProperties": true,
-                  "not": {
-                    "required": [
-                      "activityKind"
-                    ]
-                  },
-                  "type": "object"
-                },
-                {
-                  "type": "null"
+                  "properties": {
+                    "datums": {
+                      "items": {
+                        "$ref": "#/$defs/DatumWire"
+                      },
+                      "type": "array"
+                    },
+                    "sessionMessage": {
+                      "$ref": "#/$defs/SessionMessageWire"
+                    }
+                  }
                 }
               ]
             },
             {
-              "properties": {
-                "datums": {
-                  "items": {
-                    "$ref": "#/$defs/DatumWire"
-                  },
-                  "type": "array"
-                },
-                "sessionMessage": {
-                  "$ref": "#/$defs/SessionMessageWire"
-                }
-              }
+              "type": "null"
             }
           ]
         },

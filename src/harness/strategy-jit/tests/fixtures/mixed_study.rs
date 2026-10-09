@@ -1,10 +1,11 @@
 //! Mixed study with a nested indicator dependency and observation-only context.
 use harness_strategy_sdk::{
-    export_study_program, BarFrame, Decimal, Indicator, MarketConsumer, MetricPublisher,
-    ObservationContext, QuoteEvent, StudyProgram, Subscription, TradeEvent,
+    export_study_program, BarFrame, Decimal, Indicator, IndicatorSequence, MarketConsumer,
+    MetricPublisher, ObservationContext, QuoteEvent, StudyProgram, Subscription, TradeEvent,
 };
 
 struct QuoteCount {
+    sequence: IndicatorSequence,
     count: u64,
 }
 impl MarketConsumer for QuoteCount {
@@ -19,12 +20,19 @@ impl MarketConsumer for QuoteCount {
     }
 }
 impl Indicator for QuoteCount {
-    fn value(&self) -> Option<Decimal> {
+    fn sequence(&self) -> &IndicatorSequence {
+        &self.sequence
+    }
+    fn sequence_mut(&mut self) -> &mut IndicatorSequence {
+        &mut self.sequence
+    }
+    fn value(&self, _: &str) -> Option<Decimal> {
         Some(Decimal::from_i128(self.count as i128))
     }
 }
 
 struct Nested {
+    sequence: IndicatorSequence,
     child: QuoteCount,
 }
 impl MarketConsumer for Nested {
@@ -37,8 +45,14 @@ impl MarketConsumer for Nested {
     }
 }
 impl Indicator for Nested {
-    fn value(&self) -> Option<Decimal> {
-        self.child.value()
+    fn sequence(&self) -> &IndicatorSequence {
+        &self.sequence
+    }
+    fn sequence_mut(&mut self) -> &mut IndicatorSequence {
+        &mut self.sequence
+    }
+    fn value(&self, _: &str) -> Option<Decimal> {
+        self.child.value("DEP")
     }
 }
 
@@ -52,7 +66,11 @@ impl StudyProgram for MixedStudy {
     fn new(_: harness_strategy_sdk::serde_json::Value) -> Self {
         Self {
             indicator: Nested {
-                child: QuoteCount { count: 0 },
+                sequence: IndicatorSequence::ticks(60_000_000_000).unwrap(),
+                child: QuoteCount {
+                    count: 0,
+                    sequence: IndicatorSequence::ticks(60_000_000_000).unwrap(),
+                },
             },
             quotes: 0,
             trades: 0,
@@ -60,6 +78,11 @@ impl StudyProgram for MixedStudy {
         }
     }
     fn on_stop(&mut self, metrics: &mut MetricPublisher) {
+        assert!(self.indicator.sequence().completed().is_empty());
+        let partial = &self.indicator.sequence().in_progress()["DEP"];
+        assert_eq!(partial.close, Some(Decimal::from_i128(1)));
+        assert_eq!(partial.available_at_ns, None);
+        assert_eq!(partial.observations, 1);
         metrics.publish("quotes", self.quotes as f64).unwrap();
         metrics.publish("trades", self.trades as f64).unwrap();
         metrics.publish("frames", self.frames as f64).unwrap();
@@ -95,7 +118,7 @@ impl MarketConsumer for MixedStudy {
     }
     fn on_bar(&mut self, frame: &BarFrame, _: &mut ObservationContext) {
         assert_eq!(frame.bars_by_symbol.len(), 1);
-        assert_eq!(self.indicator.value().unwrap(), Decimal::from_i128(1));
+        assert_eq!(self.indicator.value("DEP").unwrap(), Decimal::from_i128(1));
         self.frames += 1;
     }
 }

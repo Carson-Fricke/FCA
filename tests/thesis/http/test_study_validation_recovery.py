@@ -217,6 +217,15 @@ def setup_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         thread.chat_id,
         actor_id="operator",
         ideas="Study momentum",
+        launch_options={
+            "partition": {
+                "historyDays": 1825,
+                "forwardDays": 90,
+                "informationHorizonDays": 1,
+                "positionHorizonDays": 1,
+                "liquidationDays": 0,
+            }
+        },
         trigger_message_id=trigger.message_id,
     )
     node = workflow.prepare_phase(request)
@@ -765,6 +774,7 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         {
             "program_id": "alpha",
             "parameters": {"fast": 5},
+            "mode": "block_permutation",
             "block_size": 5,
             "seeds": [1, 2],
         },
@@ -777,6 +787,15 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
     null_evaluation = {
         "strategy": executed_reference,
         "batchId": null_batch.structured["batchId"],
+        "signalAdequacy": {
+            "signal": "lagged returns",
+            "destroyedDependency": "inter_block_order",
+            "preservedProperties": ["marginal_returns", "within_block_dependence"],
+            "limitations": "Calendar volatility schedule is not preserved.",
+        },
+        "evidenceScope": "selection_conditional",
+        "failedReplicatePolicy": "conservative_exceedance",
+        "targetResolution": 0.5,
         "mode": "block_permutation",
         "blockSize": 5,
         "statistic": "sharpe",
@@ -875,6 +894,8 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
             }
             for point in variation_points
         ],
+        "method": "one_at_a_time",
+        "interactions": [],
         "parameters": ["fast"],
         "stability": "Fast lookback is a plateau across the tested neighborhood.",
         "limitations": "One parameter at a time on one symbol and one window.",
@@ -913,6 +934,7 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         {
             "program_id": "alpha",
             "parameters": {"fast": 5},
+            "mode": "block_permutation",
             "block_size": 5,
             "seeds": [1, 2],
         },
@@ -974,6 +996,16 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
             "value": 1.0,
         },
         "null": {
+            "signalAdequacy": {
+                "signal": "lagged returns",
+                "destroyedDependency": "inter_block_order",
+                "preservedProperties": ["marginal_returns", "within_block_dependence"],
+                "limitations": "Calendar volatility schedule is not preserved.",
+            },
+            "evidenceScope": "selection_conditional",
+            "failedReplicatePolicy": "conservative_exceedance",
+            "targetResolution": 0.5,
+            "mode": "block_permutation",
             "batchId": forward_null_batch.structured["batchId"],
             "blockSize": 5,
             "replicates": [
@@ -1008,6 +1040,8 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
                 }
                 for point in forward_points
             ],
+            "method": "one_at_a_time",
+            "interactions": [],
             "parameters": ["fast"],
             "stability": (
                 "Fast lookback holds on the forward window across the tested "

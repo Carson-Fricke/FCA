@@ -1,11 +1,15 @@
 //! Signal-destruction null transform for replay fixtures.
 //!
-//! The block-permutation boundary destroys serial dependence in per-symbol
-//! returns: log returns are split into consecutive blocks, the block order is
-//! permuted with a domain-separated CPython-compatible generator, and the
-//! synthetic close path rescales bars and ticks with exact scale-18 arithmetic.
-//! Floats are confined to the return statistics; every published price stays a
-//! checked [`Decimal18`].
+//! Ordinary permutation shuffles individual per-symbol close-to-close log returns;
+//! block permutation shuffles contiguous return blocks and preserves dependence
+//! inside each block. Both move return magnitudes across calendar timestamps:
+//! neither preserves the original calendar volatility schedule or cross-symbol
+//! relationships. Symbols are independently randomized. Source timestamps,
+//! sizes, and bar shape relative to close remain fixed; bars and ticks are
+//! rescaled to the synthetic close path with checked scale-18 arithmetic.
+//! A legitimate random draw may reproduce the original ordering. Designs with
+//! fewer than two movable blocks, no returns, or a constant return sequence
+//! fail preflight rather than masquerading as signal destruction.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -40,12 +44,7 @@ pub fn apply_null_transform(
     let Some(null) = &configuration.null_transform else {
         return Ok(fixture.clone());
     };
-    if null.mode != "block_permutation" {
-        return Err(BacktestError::Configuration(format!(
-            "unknown null transform mode {:?}",
-            null.mode
-        )));
-    }
+    null.validate()?;
 
     let mut bar_indices: BTreeMap<String, Vec<usize>> = BTreeMap::new();
     let mut symbols: BTreeSet<String> = BTreeSet::new();
@@ -58,10 +57,15 @@ pub fn apply_null_transform(
                 .push(index);
         }
     }
+    if symbols.is_empty() {
+        return Err(BacktestError::DataPreflight(
+            "null permutation requires a nonempty return series".into(),
+        ));
+    }
     for symbol in &symbols {
         if !bar_indices.contains_key(symbol) {
             return Err(BacktestError::DataPreflight(format!(
-                "null block permutation requires bar data for symbol {symbol:?}, which only has tick events"
+                "null permutation requires bar data for symbol {symbol:?}, which only has tick events"
             )));
         }
     }
@@ -95,7 +99,7 @@ pub fn apply_null_transform(
         for (timestamp_ns, close) in &closes {
             if !close.is_positive() {
                 return Err(BacktestError::DataPreflight(format!(
-                    "null block permutation requires positive bar closes for symbol \
+                    "null permutation requires positive bar closes for symbol \
                      {symbol:?} at {timestamp_ns}"
                 )));
             }
@@ -177,7 +181,7 @@ fn require_positive_tick(
         return Ok(());
     }
     Err(BacktestError::DataPreflight(format!(
-        "null block permutation requires a positive {field} for symbol {symbol:?} at {timestamp_ns}"
+        "null permutation requires a positive {field} for symbol {symbol:?} at {timestamp_ns}"
     )))
 }
 
@@ -187,14 +191,33 @@ fn permuted_close_path(
     closes: &[(i64, Decimal18)],
     null: &NullTransformConfig,
 ) -> Result<Vec<Decimal18>, BacktestError> {
+    if closes.len() < 2 {
+        return Err(BacktestError::DataPreflight(format!(
+            "null permutation requires observed returns for symbol {symbol:?}"
+        )));
+    }
     let mut returns: Vec<f64> = Vec::with_capacity(closes.len().saturating_sub(1));
     for window in closes.windows(2) {
         let previous = window[0].1.to_f64();
         let current = window[1].1.to_f64();
-        returns.push((current / previous).ln());
+        let value = (current / previous).ln();
+        if !value.is_finite() {
+            return Err(BacktestError::DataPreflight(format!(
+                "null permutation requires finite log returns for symbol {symbol:?}"
+            )));
+        }
+        returns.push(value);
     }
     let block_size = null.block_size as usize;
     let mut blocks: Vec<Vec<f64>> = returns.chunks(block_size).map(<[f64]>::to_vec).collect();
+    if blocks.len() < 2 {
+        return Err(BacktestError::DataPreflight(format!("null permutation requires at least two return blocks for symbol {symbol:?}; {} returns with block_size={block_size}", returns.len())));
+    }
+    if returns.iter().all(|value| *value == returns[0]) {
+        return Err(BacktestError::DataPreflight(format!(
+            "null permutation cannot change a constant return series for symbol {symbol:?}"
+        )));
+    }
     shuffle_blocks(&mut blocks, symbol, null.seed);
     let permuted: Vec<f64> = blocks.into_iter().flatten().collect();
 
@@ -205,7 +228,7 @@ fn permuted_close_path(
         path *= value.exp();
         synthetic.push(Decimal18::from_f64(path).map_err(|error| {
             BacktestError::DataPreflight(format!(
-                "null block permutation produced an unrepresentable close for symbol \
+                "null permutation produced an unrepresentable close for symbol \
                  {symbol:?}: {error}"
             ))
         })?);
@@ -251,7 +274,7 @@ fn scale_price(
 ) -> Result<Decimal18, BacktestError> {
     price.checked_mul_div(synthetic, original).map_err(|error| {
         BacktestError::DataPreflight(format!(
-            "null block permutation could not rescale a price for symbol {symbol:?}: {error}"
+            "null permutation could not rescale a price for symbol {symbol:?}: {error}"
         ))
     })
 }

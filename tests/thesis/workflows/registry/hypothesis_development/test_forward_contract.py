@@ -175,6 +175,7 @@ def test_forward_round_trips_and_rejects_the_snake_case_legacy_shape() -> None:
             "value": observed["value"],
         },
         "null": {
+            "mode": "block_permutation",
             "batch_id": null["batchId"],
             "block_size": null["blockSize"],
             "replicates": [
@@ -258,7 +259,7 @@ def test_forward_completion_schema_and_validator_accept_the_evaluation() -> None
         (_missing_statistic, "must contain a finite number at 'sharpe'"),
         (_observed_value_mismatch, "must equal"),
         (_exceedance_mismatch, "extremeness count"),
-        (_pvalue_mismatch, "pValue must equal"),
+        (_pvalue_mismatch, "p_value must equal"),
         (_duplicate_seed, "seeds must be unique"),
         (_no_succeeded, "at least one succeeded replicate"),
         (_non_finite_metric, "must be finite numbers"),

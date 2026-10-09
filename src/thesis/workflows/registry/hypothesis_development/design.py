@@ -2,7 +2,7 @@
 
 The design is a pure function of accepted state plus the protected forward
 window.  It names the frozen strategy reference, the center parameters, the
-block-permutation null design (statistic, direction, block size, and seeds), the
+explicit null design (mode, statistic, direction, block size, seeds and evidence qualifications), the
 variation neighborhood, and the forward window.  Forward submissions carry its
 digest, so a forward result proves which design it ran under.  Nothing is stored
 as a second copy: the design is recomputed from the folded development state.
@@ -42,11 +42,18 @@ class FrozenDesign:
     window_end: str
     statistic: str
     direction: str
+    mode: str
     block_size: int
     seeds: tuple[int, ...]
     center: Mapping[str, object]
     variation_parameters: tuple[str, ...]
     variation_points: tuple[Mapping[str, object], ...]
+    signal_adequacy: Mapping[str, object]
+    evidence_scope: str
+    failed_replicate_policy: str
+    target_resolution: float
+    variation_method: str
+    variation_interactions: tuple[tuple[str, ...], ...]
 
     def as_dict(self) -> dict[str, object]:
         """Return the canonical document the digest is taken over."""
@@ -54,12 +61,21 @@ class FrozenDesign:
             "blockSize": self.block_size,
             "center": dict(self.center),
             "direction": self.direction,
+            "mode": self.mode,
             "seeds": list(self.seeds),
             "statistic": self.statistic,
             "strategy": dict(self.strategy),
             "variationParameters": list(self.variation_parameters),
             "variationPoints": [dict(point) for point in self.variation_points],
             "window": {"end": self.window_end, "start": self.window_start},
+            "signalAdequacy": dict(self.signal_adequacy),
+            "evidenceScope": self.evidence_scope,
+            "failedReplicatePolicy": self.failed_replicate_policy,
+            "targetResolution": self.target_resolution,
+            "variationMethod": self.variation_method,
+            "variationInteractions": [
+                list(group) for group in self.variation_interactions
+            ],
         }
 
     def sha256(self) -> str:
@@ -93,12 +109,21 @@ def frozen_design(
         window_end=window_end,
         statistic=null.statistic,
         direction=null.direction,
+        mode=null.mode,
         block_size=null.block_size,
         seeds=tuple(sorted(replicate.seed for replicate in null.replicates)),
         center=canonical_parameters(variation.center.parameters),
         variation_parameters=tuple(sorted(variation.parameters)),
         variation_points=tuple(
             canonical_parameters(point.parameters) for point in points
+        ),
+        signal_adequacy=dict(null.signal_adequacy or {}),
+        evidence_scope=null.evidence_scope,
+        failed_replicate_policy=null.failed_replicate_policy,
+        target_resolution=null.target_resolution,
+        variation_method=variation.method,
+        variation_interactions=tuple(
+            sorted(tuple(sorted(group)) for group in variation.interactions)
         ),
     )
 

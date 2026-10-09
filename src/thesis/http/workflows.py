@@ -5,6 +5,8 @@ Expose declared topology, not execution state or executable phase callbacks.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from fastapi import APIRouter, HTTPException
 
 from thesis.http.wire import WorkflowDefinitionWire
@@ -18,6 +20,7 @@ def _execution_unavailable(
     *,
     ideas: str,
     investigation_id: str | None = None,
+    launch_options: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     raise RuntimeError("the definition-only registry cannot execute workflows")
 

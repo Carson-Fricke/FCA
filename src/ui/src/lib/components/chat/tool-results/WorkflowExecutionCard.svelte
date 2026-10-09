@@ -33,6 +33,8 @@
 	const execution = $derived.by<WorkflowExecutionRecord | null>(() => {
 		if (live) return live;
 		if (!executionId) return null;
+        const state = readString(structured, 'state');
+        if (state !== 'queued' && state !== 'running' && state !== 'stopped' && state !== 'cancelled' && state !== 'completed' && state !== 'failed') return null;
 		return {
 			execution_id: executionId,
 			chat_id: '',
@@ -46,7 +48,7 @@
 				readString(structured, 'workflowVersion') ??
 				'',
 			requested_by: '',
-			state: readString(structured, 'state') ?? 'running',
+			state,
 			phase: readString(structured, 'phase'),
 			intent_epoch: 0,
 			steering_message_ids: [],

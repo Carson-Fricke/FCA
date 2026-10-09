@@ -250,12 +250,6 @@ def _reference(value: object, name: str) -> str:
     return value.strip()
 
 
-def _require_object(body: object) -> Mapping[str, object]:
-    if not isinstance(body, Mapping) or any(not isinstance(key, str) for key in body):
-        raise HarnessStatusError("harness status payloads must be JSON objects")
-    return body
-
-
 def _required_text(body: Mapping[str, object], key: str) -> str:
     value = body.get(key)
     if not isinstance(value, str) or not value.strip():

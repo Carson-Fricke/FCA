@@ -10,11 +10,8 @@ from typing import cast
 import pytest
 
 from thesis.agent.harness_tools import (
-    GetJobResultArgs,
     HarnessToolError,
     HarnessToolProvider,
-    ListArtifactsArgs,
-    ReadArtifactArgs,
 )
 from thesis.integrations.mcp import (
     ExecutionCertainty,
@@ -109,7 +106,7 @@ def test_identical_validation_always_calls_server_and_preserves_result(
             "content": [{"type": "text", "text": "server validation result"}],
         }
         for result in (
-            provider.validate_study(model=model),
+            provider.call_tool("validate_study", {"model": model}),
             provider.call_tool("validate_study", {"model": model}),
         ):
             assert result.ok is not is_error
@@ -141,7 +138,7 @@ def test_invalidation_and_refresh_only_affect_catalog() -> None:
     for _ in range(2):
         provider.invalidate()
         assert provider.refresh().ok
-        assert provider.validate_study(model={}).structured == {
+        assert provider.call_tool("validate_study", {"model": {}}).structured == {
             "reused": True,
             "validationIdentity": "compiler-owned-identity",
         }
@@ -169,7 +166,7 @@ def test_compiler_classification_uses_only_structured_boolean(flag: object) -> N
     }
     provider = HarnessToolProvider(HarnessMcpClient(transport))
     for _ in range(2):
-        result = provider.validate_study(model={})
+        result = provider.call_tool("validate_study", {"model": {}})
         assert result.structured == structured
         assert result.failure is not None
         assert result.failure.deterministic_compiler_diagnostic is (flag is True)
@@ -217,7 +214,7 @@ def test_protocol_failure_is_not_cached() -> None:
     transport.result = {}
     provider = HarnessToolProvider(HarnessMcpClient(transport))
     for _ in range(2):
-        failure = provider.validate_study(model={}).failure
+        failure = provider.call_tool("validate_study", {"model": {}}).failure
         assert failure is not None and failure.kind == "protocol"
     assert transport.count("tools/call") == 2
 
@@ -251,7 +248,9 @@ def test_unrelated_call_is_not_blocked_by_provider_validation_lock() -> None:
 
     provider = HarnessToolProvider(ConcurrentClient(Transport()))
     with ThreadPoolExecutor(max_workers=2) as executor:
-        validation = executor.submit(provider.validate_study, model={})
+        validation = executor.submit(
+            provider.call_tool, "validate_study", {"model": {}}
+        )
         try:
             assert started.wait(timeout=5)
             unrelated = executor.submit(
@@ -271,9 +270,11 @@ def test_typed_job_arguments_use_one_job_id() -> None:
         "content": [],
     }
     provider = HarnessToolProvider(HarnessMcpClient(transport))
-    assert provider.get_job_result(GetJobResultArgs("job-1")).ok
-    assert provider.list_artifacts(ListArtifactsArgs("job-1")).ok
-    assert provider.read_artifact(ReadArtifactArgs("job-1", "metrics.json")).ok
+    assert provider.call_tool("get_job_result", {"job_id": "job-1"}).ok
+    assert provider.call_tool("list_artifacts", {"job_id": "job-1"}).ok
+    assert provider.call_tool(
+        "read_artifact", {"job_id": "job-1", "name": "metrics.json"}
+    ).ok
     calls = [
         cast(Mapping[str, object], call["params"])["arguments"]
         for call in transport.calls
@@ -294,7 +295,7 @@ def test_mismatched_returned_job_id_fails_closed() -> None:
         "content": [],
     }
     provider = HarnessToolProvider(HarnessMcpClient(transport))
-    result = provider.get_job_result(GetJobResultArgs("job-1"))
+    result = provider.call_tool("get_job_result", {"job_id": "job-1"})
     assert not result.ok
     assert result.failure is not None
     assert result.failure.kind == "protocol"
@@ -310,7 +311,7 @@ def test_missing_returned_job_id_fails_closed() -> None:
         "content": [],
     }
     provider = HarnessToolProvider(HarnessMcpClient(transport))
-    result = provider.get_job_result(GetJobResultArgs("job-1"))
+    result = provider.call_tool("get_job_result", {"job_id": "job-1"})
     assert not result.ok
     assert result.failure is not None
     assert result.failure.kind == "protocol"

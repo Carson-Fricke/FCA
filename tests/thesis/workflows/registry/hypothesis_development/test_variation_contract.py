@@ -129,14 +129,6 @@ def _empty_points(payload: dict[str, object]) -> None:
     payload["points"] = []
 
 
-def _too_many_points(payload: dict[str, object]) -> None:
-    points = payload["points"]
-    assert isinstance(points, list)
-    entry = points[0]
-    assert isinstance(entry, dict)
-    payload["points"] = [dict(entry) for _ in range(17)]
-
-
 def _empty_parameters(payload: dict[str, object]) -> None:
     payload["parameters"] = []
 
@@ -273,10 +265,9 @@ def test_variation_completion_schema_and_validator_accept_the_evaluation() -> No
         (_missing_point_metrics, "object for a succeeded point"),
         (_non_finite_metric, "must be finite numbers"),
         (_non_finite_parameter, "parameter values must be finite"),
-        (_non_scalar_parameter, "must be scalar"),
-        (_wrong_strategy_kind, "must be 'strategy'"),
+        (_non_scalar_parameter, "expected string or number or boolean"),
+        (_wrong_strategy_kind, "is not one of"),
         (_empty_points, "at least 1 item"),
-        (_too_many_points, "at most 16 item"),
         (_empty_parameters, "at least 1 item"),
         (_blank_stability, "stability"),
         (_center_not_succeeded, "center"),
@@ -315,7 +306,8 @@ def test_variation_evaluation_rejects_foreign_target_and_bad_point_bounds() -> N
     assert isinstance(entry, dict)
     payload["points"] = [dict(entry) for _ in range(17)]
     assert any(
-        "at most 16 item" in error for error in variation_payload_errors(payload)
+        "parameter vectors must be unique" in error
+        for error in variation_payload_errors(payload)
     )
     with pytest.raises(WorkflowError):
         VariationEvaluation.from_dict(payload)
@@ -395,13 +387,33 @@ def test_variation_report_artifact_uses_the_frozen_ui_shape() -> None:
     assert artifact["stability"] == evaluation.stability
 
     center = cast(dict[str, object], artifact["center"])
-    assert set(center) == {"parameters", "jobId", "state", "metrics"}
+    assert set(center) == {
+        "parameters",
+        "parameterIdentity",
+        "levelIdentities",
+        "levelLabels",
+        "jobId",
+        "state",
+        "metrics",
+        "error",
+    }
     assert center["state"] == "succeeded"
 
     points = cast(list[dict[str, object]], artifact["points"])
     assert len(points) == len(evaluation.points)
     assert all(
-        set(point) == {"parameters", "jobId", "state", "metrics"} for point in points
+        set(point)
+        == {
+            "parameters",
+            "parameterIdentity",
+            "levelIdentities",
+            "levelLabels",
+            "jobId",
+            "state",
+            "metrics",
+            "error",
+        }
+        for point in points
     )
     assert points[0]["metrics"] == {"netTotalReturn": 0.10, "profitFactor": 1.4}
     assert points[2]["metrics"] is None and points[2]["state"] == "failed"

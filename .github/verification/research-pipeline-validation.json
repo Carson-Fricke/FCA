@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-08",
+  "branch": "feature/research-pipeline",
+  "base": "93e3222",
+  "scope": [
+    "research steps 3-6",
+    "indicator sequences",
+    "step 7 migration cleanup"
+  ],
+  "steps12": "Previously completed, confirmed by operator",
+  "foundation": {
+    "pytest": {
+      "passed": 1602,
+      "skipped": 1,
+      "seconds": 140.71
+    },
+    "ui": {
+      "passed": 263,
+      "skipped": 1
+    },
+    "rustWorkspace": "passed"
+  },
+  "cleanup": {
+    "firstPytest": {
+      "passed": 1602,
+      "skipped": 1,
+      "seconds": 162.66
+    },
+    "ui": {
+      "passed": 266,
+      "skipped": 1,
+      "seconds": 13.9
+    },
+    "rustWorkspace": "passed",
+    "uiBuild": "passed",
+    "wireGeneration": "passed",
+    "ruff": "passed",
+    "ty": "passed",
+    "rustFmt": "passed",
+    "clippy": "passed",
+    "finalPytest": {
+      "passed": 1602,
+      "skipped": 1,
+      "seconds": 157.77
+    }
+  },
+  "removedRustScannerBodyLines": 7918,
+  "notes": [
+    "First foundation integration had two stale test assertions and typing failures; repaired before final successful run.",
+    "After the final source audit removed the unused exploratory report module and retired phase hint, the final cleanup verification passed.",
+    "Live Cosmos and UI live-backend checks remain opt-in skips.",
+    "Deployment excluded.",
+    "Dormant libraries and product gaps are inventoried in research-pipeline-audit.md."
+  ],
+  "commands": {
+    "python": "uv run --extra dev pytest -p no:cacheprovider",
+    "lint": "uv run --extra dev ruff check .",
+    "format": "uv run --extra dev ruff format --check .",
+    "types": "uv run --extra dev ty check",
+    "rust": [
+      "cargo fmt --all --check",
+      "cargo clippy --workspace --all-targets -- -D warnings",
+      "cargo test --workspace"
+    ],
+    "rustWorkingDirectory": "src/harness"
+  },
+  "mandatedGuards": "Delivery architecture, interruption, acknowledgement mismatch, and duplicate admission behavior tests retained and included in successful integration verification.",
+  "scientificLimits": [
+    "Selection-conditional null evidence; search-adjusted significance is not implemented.",
+    "Supported nulls do not preserve calendar volatility placement or cross-symbol dependence.",
+    "Declared dependency horizons cannot statically prove arbitrary strategy code obeys them."
+  ]
+}

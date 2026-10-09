@@ -1242,9 +1242,9 @@ verdict -> the strategy chain. Phase wiring is as follows.
 | `strategy_design` | conversation | Explain the strategy in prose, ask the operator to confirm or revise, author or patch a committed program, and call `validate_strategy` on its latest ID. | Submit the successful validation's compact program reference; verify committed content and current stored validation, then advance to strategy backtesting. No completion-time compilation or repair. |
 | `strategy_backtesting` | one-shot | The owning agent reads the handed-off strategy ID and calls `run_backtest {program_id: ...}` against latest committed content with current accepted validation, then requests phase completion. | Return the actual recorded backtest receipt; advance to optimization on success or loop to strategy RCA on failure. Stale/rejected validation is reported, not bypassed with inline source. |
 | `strategy_rca` | one-shot | Inspect the failed run, spawn critics if useful, author a diagnosis and revision guidance, then request completion. | Validate diagnosis and revision refs; loop to strategy design or remain. |
-| `optimization` | one-shot | Read the designed strategy's committed parameter declaration, compose a bounded set of parameter assignments (maximum 16), submit them in one `run_backtest_batch` call, follow each run to a terminal state, and select a shortlist on net total return, profit factor, drawdown, trade count, turnover/cost sensitivity, and diversity. | Validate the typed candidate-evaluation contract — honest run states and observed metrics only, shortlist vectors canonically matching submitted assignments, a declared selection rule — and fold it into state; advance to null testing, or loop to strategy RCA when the evidence shows a broken design. No retired `run_sweep` MCP surface is implied. |
-| `null_testing` | one-shot | Fix the observed run and statistic, choose a block size and up to sixteen seeds, submit the null replicates in one `run_null_batch` call, follow each run to a terminal state, and compute the empirical `(1+k)/(1+n)` p-value honestly. | Validate the typed null-test evaluation (observed value matches metrics, every succeeded replicate carries the statistic, exceedance and p-value consistent, unique seeds) and fold it into state; complete, or loop to strategy RCA when the signal does not survive its null. |
-| `variation` | one-shot | Compose a deterministic one-at-a-time neighborhood around the selected candidate within its declared bounds (at most sixteen points), submit it in one `run_backtest_batch` call, follow each run to a terminal state, and assess stability from the recorded metrics. | Validate the typed variation evaluation (one differing key per point, every declared parameter covered, unique vectors, honest metrics) and fold it into state; advance to forward validation, or loop to strategy RCA when the neighborhood is unstable. |
+| `optimization` | one-shot | Read the designed strategy's committed parameter declaration, compose a declared set of parameter assignments, submit them in one `run_backtest_batch` call, follow each run to a terminal state, and select a shortlist on net total return, profit factor, drawdown, trade count, turnover/cost sensitivity, and diversity. | Validate the typed candidate-evaluation contract — honest run states and observed metrics only, shortlist vectors canonically matching submitted assignments, a declared selection rule — and fold it into state; advance to null testing, or loop to strategy RCA when the evidence shows a broken design. No retired `run_sweep` MCP surface is implied. |
+| `null_testing` | one-shot | Fix the observed run and statistic, declare ordinary permutation or block permutation, signal destruction and preserved properties, a target p-value resolution and a frozen seed list; submit bounded chunks using `run_null_batch` offset/chunk_size, follow each run to a terminal state, and compute `(1 + successful exceedances + failed/nonterminal replicates)/(1 + all declared replicates)`, with selection-conditional scope. | Validate the typed null-test evaluation (observed value matches metrics, every succeeded replicate carries the statistic, exceedance and p-value consistent, unique seeds) and fold it into state; complete, or loop to strategy RCA when the signal does not survive its null. |
+| `variation` | one-shot | Compose a frozen deterministic one-at-a-time or declared joint neighborhood around the selected candidate within its declared bounds, submit it in one `run_backtest_batch` call, follow each run to a terminal state, and assess stability from the recorded metrics. | Validate the typed variation evaluation (declared method and interactions, every declared parameter covered, unique vectors, honest metrics) and fold it into state; advance to forward validation, or loop to strategy RCA when the neighborhood is unstable. |
 | `forward_validation` | one-shot | Repeat the frozen observed run, null design, and variation points on the protected forward partition (the phase policy rewrites the committed window; tools cannot supply windows) and compare development and forward evidence without retuning. | Validate the typed forward evaluation (nested null and variation evidence with the same cross-checks, forward window recorded) and fold it into state, recording a holdout-look attempt; complete, or loop to strategy RCA when forward evidence contradicts development. |
 | `completed` | terminal | None | Terminal outcome with no executor or completion contract. |
 | `failed` | terminal | None | Terminal failure with recorded reason and partial evidence. |
@@ -1417,9 +1417,9 @@ evaluation in state, and live and replay share the same decoder.
 The null-testing contract records the observed statistic and its run, the null
 mode and block size, one record per seeded replicate with honest states and
 observed metrics only, the exceedance count, and the empirical
-`(1+k)/(1+n)` p-value; the validator recomputes exceedance and p from the
+`(1+k+failed)/(1+all)` conservative p-value; the validator recomputes exceedance and p from the
 recorded values. The variation contract records the selected center and the
-deterministic one-key-diff neighborhood (at most sixteen points), with honest
+deterministic marginal or declared joint neighborhood without a point ceiling, with honest
 states, metrics only when runs produced them, the varied parameter names, and a
 stability assessment; the phase report projects the same payload for the UI
 charts. The forward-validation contract repeats both designs on the protected
@@ -1917,3 +1917,31 @@ following are true:
    propose/review/confirm and verdict/review/continue-or-loop-back.
 10. The implementation follows the nested package boundaries in this document
     or documents an equivalent decomposition with no replacement monolith.
+
+
+Research protocol launch requires explicit history/forward lengths and declared
+information, position, and liquidation horizons. Purge is the maximum of the
+information and position horizons; liquidation determines the embargo. These
+choices are persisted, verified on recovery, and never replaced by defaults.
+Each execution window begins from clean strategy/account state; the launch
+horizons are research commitments, not static proof of arbitrary authored code.
+Frozen forward design includes the exact center and variation vectors, null
+method, all seeds, target resolution, statistic, signal adequacy, and failure
+policy. Ordinary permutation destroys serial order; block permutation destroys
+inter-block order while retaining within-block dependence. Calendar volatility
+schedule preservation is unsupported by these transforms and must not be
+claimed. Search-adjusted inference is unsupported; selection-conditional
+limitations remain explicit. Null submissions paginate one full frozen seed
+list with stable batch identity, never automatically retrying unknown outcomes.
+
+Development and forward assessments verify the authoritative harness job ID,
+state, reported metrics, immutable accepted input and retained submission digest.
+The submission ledger remains the sole data exposure authority. Forward reports
+export the frozen and launch designs and the submission ledger; earlier forward
+designs on the same holdout downgrade the report to adaptive holdout reuse.
+Reports share immutable accepted evidence tables, including failed, missing,
+undefined and untested states, marginal and declared joint parameter views,
+matched development/forward comparisons and job/artifact inspection. UI fixtures
+are produced by backend contract composition.
+
+The runtime requires an explicitly supplied execution runner. The former HTTP-client fallback, unused validator/journal/subagent-factory dependencies, retired phase aliases, and inline-study replay are removed. Replay requires committed study references and complete accepted research evidence.

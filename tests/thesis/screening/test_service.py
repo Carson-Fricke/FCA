@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from typing import cast
 
 import pytest
 
@@ -321,7 +322,7 @@ def test_a_metric_the_row_did_not_publish_is_absent_not_zero() -> None:
     record = service.run("workspace-one", definition.definition_id, AS_OF)
 
     assert "momentum" not in dict(record.rows[1].metrics)
-    assert record.document()["rows"][1] == {
+    assert cast(list[dict[str, object]], record.document()["rows"])[1] == {
         "symbol": "MSFT",
         "metrics": {"volume": "9000"},
     }

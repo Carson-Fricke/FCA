@@ -112,6 +112,11 @@ fn cagr_annualizes_growth_as_a_fraction_not_a_multiplier() {
 #[test]
 fn cagr_reports_its_reason_and_names_a_zero_span() {
     assert_eq!(
+        cagr(&curve(&["100", "120"], 60_000_000_000)).unwrap(),
+        Err("arithmetic_overflow")
+    );
+
+    assert_eq!(
         cagr(&curve(&["100"], DAY)).expect("arithmetic"),
         Err("fewer_than_two_samples")
     );

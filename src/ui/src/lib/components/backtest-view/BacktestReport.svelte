@@ -62,19 +62,6 @@
 		});
 	}
 
-	const summary = $derived.by(() => {
-		const wins = trades.filter((t) => t.pnl >= 0).length;
-		const realized = trades.reduce((a, t) => a + t.pnl, 0);
-		const first = equity[0]?.v ?? 0;
-		const last = equity.at(-1)?.v ?? 0;
-		return {
-			trades: trades.length,
-			wins,
-			losses: trades.length - wins,
-			realized,
-			returnPct: first ? ((last - first) / first) * 100 : 0
-		};
-	});
 
 	const fillMarkers = $derived(
 		trades.flatMap((tr) => {
@@ -113,8 +100,7 @@
 
 	const drawdown = $derived.by(() => {
 		const dd = drawdownSeriesPercent(equity);
-		const max = dd.length ? Math.min(...dd.map((p) => p.v)) : 0;
-		return { series: [{ name: 'Drawdown', data: dd, color: DOWN }], max };
+		return { series: [{ name: 'Drawdown', data: dd, color: DOWN }] };
 	});
 
 	const securityCharts = $derived(
@@ -189,14 +175,14 @@
 	const riskTiles = $derived.by(() => {
 		if (!stats) return [];
 		const out = [];
-		if (stats.sharpePerSample != null) out.push({ label: 'Sharpe (per sample)', text: stats.sharpePerSample.toFixed(2), cls: '' });
-		if (stats.sortino != null) out.push({ label: 'Sortino', text: stats.sortino.toFixed(2), cls: '' });
-		if (stats.maxDrawdown != null)
-			out.push({ label: 'Max DD', text: `${(stats.maxDrawdown * 100).toFixed(1)}%`, cls: 'neg' });
-		if (stats.profitFactor != null)
-			out.push({ label: 'Profit factor', text: stats.profitFactor.toFixed(2), cls: '' });
-		if (stats.hitRate != null)
-			out.push({ label: 'Hit rate', text: `${(stats.hitRate * 100).toFixed(1)}%`, cls: '' });
+		if (stats.sharpe_per_sample != null) out.push({ label: 'Sharpe (per sample)', text: Number(stats.sharpe_per_sample).toFixed(2), cls: '' });
+		if (stats.sortino != null) out.push({ label: 'Sortino', text: Number(stats.sortino).toFixed(2), cls: '' });
+		if (stats.max_drawdown != null)
+			out.push({ label: 'Max DD', text: `${(stats.max_drawdown * 100).toFixed(1)}%`, cls: 'neg' });
+		if (stats.profit_factor != null)
+			out.push({ label: 'Profit factor', text: Number(stats.profit_factor).toFixed(2), cls: '' });
+		if (stats.hit_rate != null)
+			out.push({ label: 'Hit rate', text: `${(stats.hit_rate * 100).toFixed(1)}%`, cls: '' });
 		return out;
 	});
 
@@ -233,7 +219,7 @@
 
 	const tiles = $derived.by(() => {
 		const out = [];
-		const pnl = stats?.totalPnl ?? null;
+		const pnl = stats?.net_pnl ?? null;
 		out.push({
 			label: 'PnL',
 			text:
@@ -242,23 +228,23 @@
 					: `${pnl >= 0 ? '+' : ''}${pnl.toLocaleString('en-US', { maximumFractionDigits: 0 })}`,
 			cls: pnl == null ? '' : pnl >= 0 ? 'pos' : 'neg'
 		});
-		const ret = stats?.totalReturn ?? null;
+		const ret = stats?.total_return ?? null;
 		out.push({
 			label: 'Return',
 			text: ret == null ? '—' : `${ret * 100 >= 0 ? '+' : ''}${(ret * 100).toFixed(1)}%`,
 			cls: ret == null ? '' : ret >= 0 ? 'pos' : 'neg'
 		});
-		const count = stats?.tradeCount ?? null;
+		const count = stats?.trade_count ?? null;
 		out.push({
 			label: 'Trades',
-			text: count == null ? '—' : `${count} (${stats?.winCount ?? '—'}W/${stats?.lossCount ?? '—'}L)`,
+			text: count == null ? '—' : `${count} (${stats?.win_count ?? '—'}W/${stats?.loss_count ?? '—'}L)`,
 			cls: ''
 		});
-		if (stats?.sharpePerSample != null) {
-			out.push({ label: 'Sharpe (per sample)', text: stats.sharpePerSample.toFixed(2), cls: '' });
+		if (stats?.sharpe_per_sample != null) {
+			out.push({ label: 'Sharpe (per sample)', text: Number(stats.sharpe_per_sample).toFixed(2), cls: '' });
 		}
-		if (stats?.maxDrawdown != null) {
-			out.push({ label: 'Max DD', text: `${(stats.maxDrawdown * 100).toFixed(1)}%`, cls: '' });
+		if (stats?.max_drawdown != null) {
+			out.push({ label: 'Max DD', text: `${(stats.max_drawdown * 100).toFixed(1)}%`, cls: '' });
 		}
 		return out;
 	});
@@ -313,7 +299,7 @@
 					</div>
 				{/if}
 				<TimeSeriesChart bind:camera title="Equity / cumulative PnL" series={equitySeries} render="line" height={height} />
-				<TimeSeriesChart bind:camera title={`Drawdown % \u00b7 max ${drawdown.max.toFixed(1)}%`} series={drawdown.series} render="line" height={Math.round(height * 0.7)} />
+				<TimeSeriesChart bind:camera title={`Drawdown % \u00b7 max ${stats?.max_drawdown == null ? `undefined (${stats?.max_drawdown_reason ?? stats?.equity_unavailable_reason ?? 'not published'})` : `${(Number(stats.max_drawdown) * 100).toFixed(1)}%`}`} series={drawdown.series} render="line" height={Math.round(height * 0.7)} />
 				<HistogramChart values={trades.map((tr) => tr.pnl)} height={200} label="Trade PnL distribution" />
 			{:else}
 				{#each active.charts as entry (entry.key)}

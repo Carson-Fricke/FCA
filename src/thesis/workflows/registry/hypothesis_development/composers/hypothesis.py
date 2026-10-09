@@ -11,8 +11,7 @@ from collections.abc import Mapping, Sequence
 
 from thesis.agent.runtime.schema import render_violations, violations
 from thesis.research.hypothesis import HypothesisFalsifier
-from thesis.research.models import ResearchModel, ResearchModelError
-from thesis.workflows.research_models import StudyProgramReference, study_window
+from thesis.workflows.research_models import StudyProgramReference
 
 from ..contracts.validation import HYPOTHESIS_PAYLOAD_SCHEMA
 from ..errors import (
@@ -20,7 +19,6 @@ from ..errors import (
 )
 from ..primitives import _DEFAULT_UNIVERSE
 from ._shared import (
-    _model_text,
     _optional_compose_text,
 )
 
@@ -43,66 +41,10 @@ def _compose_research_model(value: object) -> StudyProgramReference:
     return StudyProgramReference.from_document(value)
 
 
-def decode_persisted_model(value: object) -> ResearchModel | StudyProgramReference:
-    """Decode historical inline study contracts only at the persisted boundary."""
-    if not isinstance(value, Mapping):
-        raise FalsificationComposeError("persisted hypothesis requires a model object")
-    if "programId" in value:
-        return _compose_research_model(value)
-    outputs = value.get("outputs")
-    tests = value.get("tests")
-    configuration = value.get("harnessConfiguration", {})
-    assert isinstance(outputs, Sequence) and not isinstance(outputs, str)
-    assert isinstance(tests, Mapping)
-    assert isinstance(configuration, Mapping)
-    try:
-        # The fetch window is the model's to declare; validating it here keeps
-        # the composer accepting exactly what the contract collector accepts.
-        study_window(configuration)
-        return ResearchModel(
-            model_id=_model_text(value.get("modelId"), "modelId"),
-            version=_model_text(value.get("version"), "model version"),
-            description=_model_text(value.get("description"), "model description"),
-            source=_model_text(value.get("source"), "model source"),
-            outputs=tuple(outputs),
-            tests=dict(tests),
-            harness_configuration=dict(configuration),
-        )
-    except (ResearchModelError, TypeError) as error:
-        raise FalsificationComposeError(str(error)) from error
-
-
-def _compose_universe(
-    value: object, model: ResearchModel | StudyProgramReference
-) -> tuple[str, ...]:
-    """Return the declared universe, inferring it from the model when absent."""
-    if isinstance(model, StudyProgramReference):
-        return (
-            _compose_symbols(value, "universe")
-            if value is not None
-            else _DEFAULT_UNIVERSE
-        )
-    subscriptions = model.harness_configuration.get("subscriptions")
-    data = model.harness_configuration.get("data")
-    if "subscriptions" not in model.harness_configuration and isinstance(data, Mapping):
-        subscriptions = data.get("subscriptions")
-    if not isinstance(subscriptions, list) or not subscriptions:
-        raise FalsificationComposeError(
-            "model harness_configuration must declare subscriptions"
-        )
-    if value is not None:
-        universe = _compose_symbols(value, "universe")
-        if any(
-            symbol not in universe
-            for item in subscriptions
-            for symbol in item["symbols"]
-        ):
-            raise FalsificationComposeError(
-                "subscription symbols must be present in the declared universe"
-            )
-        return universe
-    return tuple(
-        dict.fromkeys(symbol for item in subscriptions for symbol in item["symbols"])
+def _compose_universe(value: object) -> tuple[str, ...]:
+    """Return the declared universe for the committed study reference."""
+    return (
+        _compose_symbols(value, "universe") if value is not None else _DEFAULT_UNIVERSE
     )
 
 

@@ -92,60 +92,64 @@
             "type": "string"
           },
           "data": {
-            "allOf": [
+            "anyOf": [
               {
-                "anyOf": [
+                "allOf": [
                   {
-                    "discriminator": {
-                      "mapping": {
-                        "delivery": "#/components/schemas/Delivery",
-                        "external_input": "#/components/schemas/ExternalInput",
-                        "model_output": "#/components/schemas/ModelOutput",
-                        "runtime_tool": "#/components/schemas/RuntimeTool"
-                      },
-                      "propertyName": "activityKind"
-                    },
-                    "oneOf": [
+                    "anyOf": [
                       {
-                        "$ref": "#/components/schemas/ExternalInput"
+                        "discriminator": {
+                          "mapping": {
+                            "delivery": "#/components/schemas/Delivery",
+                            "external_input": "#/components/schemas/ExternalInput",
+                            "model_output": "#/components/schemas/ModelOutput",
+                            "runtime_tool": "#/components/schemas/RuntimeTool"
+                          },
+                          "propertyName": "activityKind"
+                        },
+                        "oneOf": [
+                          {
+                            "$ref": "#/components/schemas/ExternalInput"
+                          },
+                          {
+                            "$ref": "#/components/schemas/ModelOutput"
+                          },
+                          {
+                            "$ref": "#/components/schemas/RuntimeTool"
+                          },
+                          {
+                            "$ref": "#/components/schemas/Delivery"
+                          }
+                        ]
                       },
                       {
-                        "$ref": "#/components/schemas/ModelOutput"
-                      },
-                      {
-                        "$ref": "#/components/schemas/RuntimeTool"
-                      },
-                      {
-                        "$ref": "#/components/schemas/Delivery"
+                        "additionalProperties": true,
+                        "not": {
+                          "required": [
+                            "activityKind"
+                          ]
+                        },
+                        "type": "object"
                       }
                     ]
                   },
                   {
-                    "additionalProperties": true,
-                    "not": {
-                      "required": [
-                        "activityKind"
-                      ]
-                    },
-                    "type": "object"
-                  },
-                  {
-                    "type": "null"
+                    "properties": {
+                      "datums": {
+                        "items": {
+                          "$ref": "#/components/schemas/DatumWire"
+                        },
+                        "type": "array"
+                      },
+                      "sessionMessage": {
+                        "$ref": "#/components/schemas/SessionMessageWire"
+                      }
+                    }
                   }
                 ]
               },
               {
-                "properties": {
-                  "datums": {
-                    "items": {
-                      "$ref": "#/components/schemas/DatumWire"
-                    },
-                    "type": "array"
-                  },
-                  "sessionMessage": {
-                    "$ref": "#/components/schemas/SessionMessageWire"
-                  }
-                }
+                "type": "null"
               }
             ]
           },
@@ -752,60 +756,64 @@
             "type": "string"
           },
           "data": {
-            "allOf": [
+            "anyOf": [
               {
-                "anyOf": [
+                "allOf": [
                   {
-                    "discriminator": {
-                      "mapping": {
-                        "delivery": "#/components/schemas/Delivery",
-                        "external_input": "#/components/schemas/ExternalInput",
-                        "model_output": "#/components/schemas/ModelOutput",
-                        "runtime_tool": "#/components/schemas/RuntimeTool"
-                      },
-                      "propertyName": "activityKind"
-                    },
-                    "oneOf": [
+                    "anyOf": [
                       {
-                        "$ref": "#/components/schemas/ExternalInput"
+                        "discriminator": {
+                          "mapping": {
+                            "delivery": "#/components/schemas/Delivery",
+                            "external_input": "#/components/schemas/ExternalInput",
+                            "model_output": "#/components/schemas/ModelOutput",
+                            "runtime_tool": "#/components/schemas/RuntimeTool"
+                          },
+                          "propertyName": "activityKind"
+                        },
+                        "oneOf": [
+                          {
+                            "$ref": "#/components/schemas/ExternalInput"
+                          },
+                          {
+                            "$ref": "#/components/schemas/ModelOutput"
+                          },
+                          {
+                            "$ref": "#/components/schemas/RuntimeTool"
+                          },
+                          {
+                            "$ref": "#/components/schemas/Delivery"
+                          }
+                        ]
                       },
                       {
-                        "$ref": "#/components/schemas/ModelOutput"
-                      },
-                      {
-                        "$ref": "#/components/schemas/RuntimeTool"
-                      },
-                      {
-                        "$ref": "#/components/schemas/Delivery"
+                        "additionalProperties": true,
+                        "not": {
+                          "required": [
+                            "activityKind"
+                          ]
+                        },
+                        "type": "object"
                       }
                     ]
                   },
                   {
-                    "additionalProperties": true,
-                    "not": {
-                      "required": [
-                        "activityKind"
-                      ]
-                    },
-                    "type": "object"
-                  },
-                  {
-                    "type": "null"
+                    "properties": {
+                      "datums": {
+                        "items": {
+                          "$ref": "#/components/schemas/DatumWire"
+                        },
+                        "type": "array"
+                      },
+                      "sessionMessage": {
+                        "$ref": "#/components/schemas/SessionMessageWire"
+                      }
+                    }
                   }
                 ]
               },
               {
-                "properties": {
-                  "datums": {
-                    "items": {
-                      "$ref": "#/components/schemas/DatumWire"
-                    },
-                    "type": "array"
-                  },
-                  "sessionMessage": {
-                    "$ref": "#/components/schemas/SessionMessageWire"
-                  }
-                }
+                "type": "null"
               }
             ]
           },
@@ -1651,60 +1659,64 @@
             "type": "string"
           },
           "data": {
-            "allOf": [
+            "anyOf": [
               {
-                "anyOf": [
+                "allOf": [
                   {
-                    "discriminator": {
-                      "mapping": {
-                        "delivery": "#/components/schemas/Delivery",
-                        "external_input": "#/components/schemas/ExternalInput",
-                        "model_output": "#/components/schemas/ModelOutput",
-                        "runtime_tool": "#/components/schemas/RuntimeTool"
-                      },
-                      "propertyName": "activityKind"
-                    },
-                    "oneOf": [
+                    "anyOf": [
                       {
-                        "$ref": "#/components/schemas/ExternalInput"
+                        "discriminator": {
+                          "mapping": {
+                            "delivery": "#/components/schemas/Delivery",
+                            "external_input": "#/components/schemas/ExternalInput",
+                            "model_output": "#/components/schemas/ModelOutput",
+                            "runtime_tool": "#/components/schemas/RuntimeTool"
+                          },
+                          "propertyName": "activityKind"
+                        },
+                        "oneOf": [
+                          {
+                            "$ref": "#/components/schemas/ExternalInput"
+                          },
+                          {
+                            "$ref": "#/components/schemas/ModelOutput"
+                          },
+                          {
+                            "$ref": "#/components/schemas/RuntimeTool"
+                          },
+                          {
+                            "$ref": "#/components/schemas/Delivery"
+                          }
+                        ]
                       },
                       {
-                        "$ref": "#/components/schemas/ModelOutput"
-                      },
-                      {
-                        "$ref": "#/components/schemas/RuntimeTool"
-                      },
-                      {
-                        "$ref": "#/components/schemas/Delivery"
+                        "additionalProperties": true,
+                        "not": {
+                          "required": [
+                            "activityKind"
+                          ]
+                        },
+                        "type": "object"
                       }
                     ]
                   },
                   {
-                    "additionalProperties": true,
-                    "not": {
-                      "required": [
-                        "activityKind"
-                      ]
-                    },
-                    "type": "object"
-                  },
-                  {
-                    "type": "null"
+                    "properties": {
+                      "datums": {
+                        "items": {
+                          "$ref": "#/components/schemas/DatumWire"
+                        },
+                        "type": "array"
+                      },
+                      "sessionMessage": {
+                        "$ref": "#/components/schemas/SessionMessageWire"
+                      }
+                    }
                   }
                 ]
               },
               {
-                "properties": {
-                  "datums": {
-                    "items": {
-                      "$ref": "#/components/schemas/DatumWire"
-                    },
-                    "type": "array"
-                  },
-                  "sessionMessage": {
-                    "$ref": "#/components/schemas/SessionMessageWire"
-                  }
-                }
+                "type": "null"
               }
             ]
           },

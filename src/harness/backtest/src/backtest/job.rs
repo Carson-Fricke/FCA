@@ -235,19 +235,7 @@ pub fn load_backtest_config_with_job_id(
     config_path: &Path,
     job_id: Option<&str>,
 ) -> Result<BacktestConfig, BacktestJobError> {
-    let text = std::fs::read_to_string(config_path)
-        .map_err(|error| BacktestJobError::Io(error.to_string()))?;
-    let shell = parse_shell(&text).ok_or(BacktestJobError::MissingShell)?;
-    if shell != "backtest" {
-        return Err(BacktestJobError::WrongShell(shell));
-    }
-    let mut value = crate::backtest::yaml::load_yaml(&text)
-        .map_err(|error| BacktestJobError::from(BacktestError::Configuration(error.0)))?;
-    overlay_job_id_yaml(&mut value, job_id)?;
-    resolve_authored_sources(
-        BacktestConfig::from_yaml_value(&value).map_err(BacktestJobError::from)?,
-        config_path,
-    )
+    load_replay_submission(config_path, job_id, "backtest").map(|(configuration, _)| configuration)
 }
 
 /// Load and validate one study configuration document (shell `study`).
@@ -276,19 +264,33 @@ pub fn load_study_config_with_job_id(
     config_path: &Path,
     job_id: Option<&str>,
 ) -> Result<BacktestConfig, BacktestJobError> {
+    load_replay_submission(config_path, job_id, "study").map(|(configuration, _)| configuration)
+}
+
+/// Capture the admitted document and resolved replay configuration from one read.
+///
+/// # Errors
+/// Returns a configuration error before admission for invalid shell, id or source.
+pub fn load_replay_submission(
+    config_path: &Path,
+    job_id: Option<&str>,
+    expected_shell: &str,
+) -> Result<(BacktestConfig, serde_json::Value), BacktestJobError> {
     let text = std::fs::read_to_string(config_path)
         .map_err(|error| BacktestJobError::Io(error.to_string()))?;
     let shell = parse_shell(&text).ok_or(BacktestJobError::MissingShell)?;
-    if shell != "study" {
+    if shell != expected_shell {
         return Err(BacktestJobError::WrongShell(shell));
     }
-    let mut value = crate::backtest::yaml::load_yaml(&text)
-        .map_err(|error| BacktestJobError::from(BacktestError::Configuration(error.0)))?;
-    overlay_job_id_yaml(&mut value, job_id)?;
-    resolve_authored_sources(
-        BacktestConfig::from_yaml_value(&value).map_err(BacktestJobError::from)?,
+    let mut document = config::replay::submitted_document(&text)
+        .map_err(|error| BacktestJobError::Io(error.to_string()))?;
+    overlay_job_id_json(&mut document, job_id)?;
+    let configuration = resolve_authored_sources(
+        BacktestConfig::from_yaml(&document.to_string()).map_err(BacktestJobError::from)?,
         config_path,
-    )
+    )?;
+    document["job_id"] = serde_json::Value::String(configuration.job_id.clone());
+    Ok((configuration, document))
 }
 
 /// Load and validate one screening configuration document (shell `screen`).
@@ -582,7 +584,7 @@ fn write_run_artifacts(
 ) -> Result<PathBuf, BacktestJobError> {
     let fills = ledger_fills_from_outcome(outcome);
     let orders = ledger_orders_from_outcome(outcome);
-    let ledger = build_ledger(configuration, &fills, &orders)?;
+    let ledger = build_ledger(configuration, &fills, &orders, &outcome.valuations)?;
     let directory = output_dir.map_or_else(
         || {
             PathBuf::from(".local")
@@ -951,6 +953,8 @@ struct JobLedger {
     trades: ClosedTrades,
     trade_stats: TradeStats,
     equity_metrics: EquityMetrics,
+    net_pnl: Decimal18,
+    gross_pnl: Decimal18,
     execution: ExecutionStats,
 }
 
@@ -1222,6 +1226,7 @@ fn build_ledger(
     configuration: &BacktestConfig,
     fills: &[LedgerFill],
     orders: &[LedgerOrder],
+    valuations: &[super::engine_core::ValuationSample],
 ) -> Result<JobLedger, BacktestJobError> {
     let mut cash = ledger_decimal(&configuration.initial_cash, "initial_cash")?;
     let mut positions: BTreeMap<String, Decimal18> = BTreeMap::new();
@@ -1240,73 +1245,99 @@ fn build_ledger(
     }];
     let mut ledger_fills = Vec::new();
     let mut last_timestamp_ns = configuration.start_ns;
-    for (index, fill) in fills.iter().enumerate() {
-        let fill_count = index as u64 + 1;
-        let is_buy = fill_is_buy(fill)?;
-        let quantity = fill_decimal(fill, "quantity", &fill.quantity)?;
-        let price = fill_decimal(fill, "price", &fill.price)?;
-        let fee = fill_decimal(fill, "fee", &fill.fee)?;
-        if fill.timestamp_ns < last_timestamp_ns {
-            return Err(BacktestJobError::Engine(format!(
-                "fill {} at {} precedes the previous ledger sample at {last_timestamp_ns}; \
-                 the engine must dispatch fills in time order",
-                fill.fill_id, fill.timestamp_ns
-            )));
+    let mut consumed_fills = 0;
+    for sample in valuations {
+        if sample.timestamp_ns < last_timestamp_ns
+            || sample.fill_count < consumed_fills
+            || sample.fill_count > fills.len()
+        {
+            return Err(BacktestJobError::Engine(
+                "valuation history regresses time or names an invalid fill prefix".into(),
+            ));
         }
-        last_timestamp_ns = fill.timestamp_ns;
-        let notional = overflow_fill(
-            fill,
-            quantity.checked_mul(price),
-            "notional (quantity times price)",
-        )?;
-        let position = positions
-            .entry(fill.symbol.clone())
-            .or_insert(Decimal18::ZERO);
-        if is_buy {
-            cash = overflow_ledger(
-                cash.checked_sub(notional)
-                    .and_then(|value| value.checked_sub(fee)),
-                "cash after a buy",
+        last_timestamp_ns = sample.timestamp_ns;
+        for fill in &fills[consumed_fills..sample.fill_count] {
+            if fill.timestamp_ns > sample.timestamp_ns {
+                return Err(BacktestJobError::Engine(format!(
+                    "valuation uses fill {} before it became available",
+                    fill.fill_id
+                )));
+            }
+            let is_buy = fill_is_buy(fill)?;
+            let quantity = fill_decimal(fill, "quantity", &fill.quantity)?;
+            let price = fill_decimal(fill, "price", &fill.price)?;
+            let fee = fill_decimal(fill, "fee", &fill.fee)?;
+            let notional = overflow_fill(
+                fill,
+                quantity.checked_mul(price),
+                "notional (quantity times price)",
             )?;
-            *position = overflow_ledger(position.checked_add(quantity), "position")?;
-        } else {
-            cash = overflow_ledger(
-                cash.checked_add(notional)
-                    .and_then(|value| value.checked_sub(fee)),
-                "cash after a sell",
-            )?;
-            *position = overflow_ledger(position.checked_sub(quantity), "position")?;
+            let position = positions
+                .entry(fill.symbol.clone())
+                .or_insert(Decimal18::ZERO);
+            if is_buy {
+                cash = overflow_ledger(
+                    cash.checked_sub(notional)
+                        .and_then(|value| value.checked_sub(fee)),
+                    "cash after a buy",
+                )?;
+                *position = overflow_ledger(position.checked_add(quantity), "position")?;
+            } else {
+                cash = overflow_ledger(
+                    cash.checked_add(notional)
+                        .and_then(|value| value.checked_sub(fee)),
+                    "cash after a sell",
+                )?;
+                *position = overflow_ledger(position.checked_sub(quantity), "position")?;
+            }
+            ledger_fills.push(FillRow {
+                fill_id: fill.fill_id.clone(),
+                order_id: fill.order_id.clone(),
+                strategy_id: String::new(),
+                quantity,
+                price,
+                fee,
+                latency_ns: None,
+            });
         }
-        marks.insert(fill.symbol.clone(), price);
+        consumed_fills = sample.fill_count;
+        for (symbol, mark) in &sample.marks {
+            marks.insert(
+                symbol.clone(),
+                ledger_decimal(&mark.to_string(), "valuation mark")?,
+            );
+        }
         let mut market_value = Decimal18::ZERO;
         for (symbol, held) in &positions {
-            if let Some(mark) = marks.get(symbol) {
-                let value = overflow_ledger(held.checked_mul(*mark), "position market value")?;
-                market_value = overflow_ledger(market_value.checked_add(value), "market value")?;
+            if held.is_zero() {
+                continue;
             }
+            let mark = marks.get(symbol).ok_or_else(|| {
+                BacktestJobError::Engine(format!(
+                    "open position {symbol:?} has no observed valuation mark"
+                ))
+            })?;
+            let value = overflow_ledger(held.checked_mul(*mark), "position market value")?;
+            market_value = overflow_ledger(market_value.checked_add(value), "market value")?;
         }
         let equity_value = overflow_ledger(cash.checked_add(market_value), "equity")?;
         equity.push(EquityPoint {
-            timestamp_ns: fill.timestamp_ns,
+            timestamp_ns: sample.timestamp_ns,
             equity: equity_value,
         });
         rows.push(LedgerRow {
-            timestamp_ns: fill.timestamp_ns,
+            timestamp_ns: sample.timestamp_ns,
             cash,
             equity: equity_value,
             market_value,
             position_count: positions.values().filter(|held| !held.is_zero()).count() as u32,
-            fill_count,
+            fill_count: sample.fill_count as u64,
         });
-        ledger_fills.push(FillRow {
-            fill_id: fill.fill_id.clone(),
-            order_id: fill.order_id.clone(),
-            strategy_id: String::new(),
-            quantity,
-            price,
-            fee,
-            latency_ns: None,
-        });
+    }
+    if consumed_fills != fills.len() {
+        return Err(BacktestJobError::Engine(
+            "valuation history does not cover every booked fill".into(),
+        ));
     }
     let ledger_orders: Vec<OrderRow> = orders
         .iter()
@@ -1318,14 +1349,28 @@ fn build_ledger(
         .collect();
     let trades = closed_trades(fills)?;
     let trade_stats = trade_stats(&trades.rows, trades.open_fees).map_err(metrics_overflow)?;
-    let equity_metrics = equity_curve_metrics(&equity).map_err(metrics_overflow)?;
+    let equity_metrics = equity_curve_metrics(&equity);
     let execution = execution_stats(&ledger_fills, &ledger_orders).map_err(metrics_overflow)?;
+    let net_pnl = overflow_ledger(
+        equity
+            .last()
+            .expect("opening capital sample")
+            .equity
+            .checked_sub(equity[0].equity),
+        "marked net PnL",
+    )?;
+    let gross_pnl = overflow_ledger(
+        net_pnl.checked_add(execution.fees_total),
+        "marked gross PnL",
+    )?;
     Ok(JobLedger {
         equity,
         rows,
         trades,
         trade_stats,
         equity_metrics,
+        net_pnl,
+        gross_pnl,
         execution,
     })
 }
@@ -1426,6 +1471,11 @@ fn metrics_json(
             "equity",
             JsonValue::object([
                 ("samples", JsonValue::UInt(ledger.equity.len() as u64)),
+                ("net_pnl", decimal_text(ledger.net_pnl)),
+                ("net_pnl_reason", JsonValue::Null),
+                ("gross_pnl", decimal_text(ledger.gross_pnl)),
+                ("gross_pnl_reason", JsonValue::Null),
+                ("fees", decimal_text(execution.fees_total)),
                 ("total_return", decimal_outcome(equity.total_return)),
                 ("total_return_reason", reason_outcome(equity.total_return)),
                 ("cagr", float_outcome(equity.cagr)),
@@ -1618,7 +1668,44 @@ fn record_artifacts(
             })
             .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
     }
+    let initial_cash = ledger_decimal(&configuration.initial_cash, "initial_cash")?;
+    // Reuse canonical trade slices once; tick-level valuation history must not
+    // scan the entire trade table for every mark. Equal exit sequences share
+    // one causal fill boundary and partition_point includes all their slices.
+    let mut ordered_trades: Vec<_> = ledger.trades.rows.iter().collect();
+    ordered_trades.sort_by_key(|trade| trade.exit_sequence);
+    let mut realized_prefix = Vec::with_capacity(ordered_trades.len());
+    let mut cumulative_net = Decimal18::ZERO;
+    for trade in ordered_trades {
+        cumulative_net = overflow_ledger(
+            cumulative_net.checked_add(trade.net_pnl),
+            "snapshot realized PnL",
+        )?;
+        realized_prefix.push((trade.exit_sequence, cumulative_net));
+    }
+
     for row in &ledger.rows {
+        let total_pnl =
+            overflow_ledger(row.equity.checked_sub(initial_cash), "snapshot total PnL")?;
+        let last_sequence = if row.fill_count == 0 {
+            None
+        } else {
+            fills
+                .get(row.fill_count as usize - 1)
+                .map(|fill| fill.sequence)
+        };
+        let closed_count = last_sequence.map_or(0, |sequence| {
+            realized_prefix.partition_point(|(exit_sequence, _)| *exit_sequence <= sequence)
+        });
+        let realized_pnl = if closed_count == 0 {
+            Decimal18::ZERO
+        } else {
+            realized_prefix[closed_count - 1].1
+        };
+        let unrealized_pnl = overflow_ledger(
+            total_pnl.checked_sub(realized_pnl),
+            "snapshot unrealized PnL",
+        )?;
         recorder
             .record_equity(&EquityRecord {
                 source: "portfolio".to_string(),
@@ -1627,9 +1714,9 @@ fn record_artifacts(
                 cash: row.cash.to_string(),
                 equity: Some(row.equity.to_string()),
                 market_value: Some(row.market_value.to_string()),
-                realized_pnl: "0".to_string(),
-                unrealized_pnl: None,
-                total_pnl: Some(row.equity.to_string()),
+                realized_pnl: realized_pnl.to_string(),
+                unrealized_pnl: Some(unrealized_pnl.to_string()),
+                total_pnl: Some(total_pnl.to_string()),
                 position_count: row.position_count,
                 fill_count: row.fill_count,
                 at_ns: Some(row.timestamp_ns),

@@ -137,12 +137,35 @@ impl Default for RiskPipelineConfig {
 /// absent-null documents keep their shipped identities and hashes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NullTransformConfig {
-    /// Transform mode; only `block_permutation` is defined.
+    /// `permutation` shuffles individual returns; `block_permutation` shuffles blocks.
     pub mode: String,
-    /// Consecutive log-return block size, `1..=10000`.
+    /// Consecutive log-return block size, `1..=10000`; ordinary permutation requires 1.
     pub block_size: u32,
     /// Permutation seed, non-negative.
     pub seed: u64,
+}
+
+impl NullTransformConfig {
+    /// Validate supported method semantics, including programmatically built requests.
+    pub fn validate(&self) -> Result<(), BacktestError> {
+        if self.mode != "block_permutation" && self.mode != "permutation" {
+            return Err(BacktestError::Configuration(format!(
+                "null.mode must be permutation or block_permutation, got {:?}",
+                self.mode
+            )));
+        }
+        if !(1..=10_000).contains(&self.block_size) {
+            return Err(BacktestError::Configuration(
+                "null.block_size must be between 1 and 10000".into(),
+            ));
+        }
+        if self.mode == "permutation" && self.block_size != 1 {
+            return Err(BacktestError::Configuration(
+                "permutation requires block_size=1".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Resource limits for a deployment.
@@ -951,22 +974,12 @@ fn parse_null_transform(
         .and_then(YamlValue::as_str)
         .unwrap_or("block_permutation")
         .to_string();
-    if mode != "block_permutation" {
-        return Err(BacktestError::Configuration(format!(
-            "null.mode must be \"block_permutation\", got {mode:?}"
-        )));
-    }
     let block_size = mapping
         .get("block_size")
         .and_then(YamlValue::as_int)
         .ok_or_else(|| {
             BacktestError::Configuration("null.block_size must be an integer".to_string())
         })?;
-    if !(1..=10_000).contains(&block_size) {
-        return Err(BacktestError::Configuration(
-            "null.block_size must be between 1 and 10000".to_string(),
-        ));
-    }
     let seed = mapping
         .get("seed")
         .and_then(YamlValue::as_int)
@@ -976,11 +989,15 @@ fn parse_null_transform(
             "null.seed must not be negative".to_string(),
         ));
     }
-    Ok(Some(NullTransformConfig {
+    let null = NullTransformConfig {
         mode,
-        block_size: block_size as u32,
+        block_size: u32::try_from(block_size).map_err(|_| {
+            BacktestError::Configuration("null.block_size must be between 1 and 10000".into())
+        })?,
         seed: seed as u64,
-    }))
+    };
+    null.validate()?;
+    Ok(Some(null))
 }
 
 fn parse_deployment(value: Option<&YamlValue>) -> Result<DeploymentConfig, BacktestError> {

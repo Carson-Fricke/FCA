@@ -321,14 +321,14 @@
 							data-testid="parameter-bar-total-return"
 							data-missing={category.totalReturn === null}
 						>
-							{category.totalReturn === null ? 'no data' : formatMetric(category.totalReturn)}
+							{category.totalReturn === null ? category.totalReturnGap ?? 'missing' : formatMetric(category.totalReturn)}
 						</td>
 						<td
 							class="metric {category.profitFactor === null ? 'missing' : ''}"
 							data-testid="parameter-bar-profit-factor"
 							data-missing={category.profitFactor === null}
 						>
-							{category.profitFactor === null ? 'no data' : formatMetric(category.profitFactor)}
+							{category.profitFactor === null ? category.profitFactorGap ?? 'missing' : formatMetric(category.profitFactor)}
 						</td>
 						<td class="state {runStateTone(category.state)}" data-testid="parameter-bar-state">
 							{category.state ?? 'unknown'}

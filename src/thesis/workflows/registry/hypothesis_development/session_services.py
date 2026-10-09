@@ -32,13 +32,14 @@ from thesis.experiments.mandate import (
     rfc3339_ns,
 )
 from thesis.knowledge.service import KnowledgeScope
-from thesis.strategies import WorkspaceStrategyArtifacts
+from thesis.research.evidence import document_digest
 from thesis.workflows.core.state import TERMINAL_EXECUTION_STATES
 from thesis.workflows.core.workflow import Workflow
 from thesis.workflows.research_models import (
     ProgramSnapshots,
     StudyProgramReference,
     resolve_study_reference,
+    study_configuration,
 )
 from thesis.workspaces.programs import JobSettlement, ProgramArtifactError, ProgramKind
 
@@ -46,7 +47,11 @@ from .composers.hypothesis import _compose_universe
 from .contracts.creation import HypothesisDevelopmentRequest
 from .design import frozen_design
 from .errors import FalsificationComposeError, WorkflowError
-from .exposure import record_completion_attempts, record_submission_exposure
+from .exposure import (
+    record_completion_attempts,
+    record_submission_exposure,
+    submitted_exposures,
+)
 from .primitives import _WORKFLOW_ACTOR
 from .provenance import PROVENANCE_PHASES, verify_phase_completion
 from .spec import build_hypothesis_development_workflow
@@ -97,7 +102,6 @@ class HypothesisSessionServices:
         | None = None,
         harness_tools: HarnessToolProvider | None,
         activity: RuntimeToolActivity,
-        strategy_artifacts: WorkspaceStrategyArtifacts | None = None,
         programs: ProgramSnapshots | None = None,
         knowledge_scope: KnowledgeScope = "both",
     ) -> None:
@@ -219,7 +223,7 @@ class HypothesisSessionServices:
             if workflow is None:
                 raise WorkflowError("program submissions require the workflow runtime")
             execution = self._chat.get_execution(context.workspace_id, execution_id)
-            request = HypothesisDevelopmentRequest.from_execution(self._chat, execution)
+            request = self._request_from_execution(execution)
             scoped: dict[str, object] = {**attribution, "phase": phase}
             design_sha256: str | None = None
             if phase == "forward_validation":
@@ -227,6 +231,26 @@ class HypothesisSessionServices:
                     workflow, request, context.workspace_id
                 )
                 scoped["designSha256"] = design_sha256
+            null_plan = attribution.get("nullPlan")
+            if isinstance(null_plan, Mapping):
+                prior = [
+                    entry.get("nullPlan")
+                    for entry in submitted_exposures(workflow, execution_id)
+                    if entry.get("phase") == phase
+                    and entry.get("phaseAttemptId") == context.phase_attempt_id
+                    and entry.get("nullPlan") is not None
+                ]
+                if any(
+                    not isinstance(item, Mapping)
+                    or document_digest(item) != document_digest(null_plan)
+                    for item in prior
+                ):
+                    raise WorkflowError(
+                        "null seed plan or configuration changed after first submission"
+                    )
+            scoped.pop("nullPlan", None)
+            if isinstance(null_plan, Mapping):
+                scoped["nullPlanSha256"] = document_digest(null_plan)
             job = self._chat.submit_tool_job(
                 context.workspace_id,
                 execution_id,
@@ -249,6 +273,7 @@ class HypothesisSessionServices:
                     ),
                     design_sha256=design_sha256,
                     phase_attempt_id=context.phase_attempt_id,
+                    null_plan=null_plan if isinstance(null_plan, Mapping) else None,
                 )
             except Exception as error:  # noqa: BLE001 - exposure precedes dispatch
                 self._chat.record_tool_result(
@@ -297,6 +322,20 @@ class HypothesisSessionServices:
             state, rfc3339(window.start_ns), rfc3339(window.end_ns)
         ).sha256()
 
+    def _request_from_execution(
+        self, execution: WorkflowExecution
+    ) -> HypothesisDevelopmentRequest:
+        """Recover declared partition choices from the durable launch document."""
+        if self._workflow is None:
+            raise WorkflowError("request recovery requires the workflow runtime")
+        store = self._workflow().execution_store
+        if store is None:
+            raise WorkflowError("request recovery requires the execution store")
+        document = store.get(execution.execution_id)
+        return HypothesisDevelopmentRequest.from_execution(
+            self._chat, execution, document.launch_request
+        )
+
     def _resolve_mandate(
         self, workspace_id: str, execution_id: str | None
     ) -> ResearchMandate | None:
@@ -340,7 +379,7 @@ class HypothesisSessionServices:
             return None
         workflow = self._workflow()
         execution = self._chat.get_execution(workspace_id, record.workflow_execution_id)
-        request = HypothesisDevelopmentRequest.from_execution(self._chat, execution)
+        request = self._request_from_execution(execution)
         state = workflow._reconstruct_state(request)
         mandate = self._resolve_mandate(workspace_id, record.workflow_execution_id)
         forward_window = None
@@ -491,7 +530,11 @@ class HypothesisSessionServices:
                         StudyProgramReference.from_document(receipt),
                     )
                     assert isinstance(hypothesis, Mapping)
-                    _compose_universe(hypothesis.get("universe"), model)
+                    study_configuration(
+                        model,
+                        job_id="validation",
+                        universe=_compose_universe(hypothesis.get("universe")),
+                    )
                 return ToolExecution(ok=True)
             except (
                 ValueError,
@@ -568,7 +611,7 @@ class HypothesisSessionServices:
         if self._workflow is not None:
             workflow = self._workflow()
             request = replace(
-                HypothesisDevelopmentRequest.from_execution(self._chat, execution),
+                self._request_from_execution(execution),
                 intent_epoch=epoch,
             )
             state = workflow._reconstruct_state(request)
@@ -599,7 +642,7 @@ class HypothesisSessionServices:
             raise PhaseCompletionRejected(failure)
         execution = self._chat.get_execution(workspace_id, record.workflow_execution_id)
         request = replace(
-            HypothesisDevelopmentRequest.from_execution(self._chat, execution),
+            self._request_from_execution(execution),
             intent_epoch=self._completion_epoch(completion),
         )
         workflow = self._workflow()
@@ -621,7 +664,7 @@ class HypothesisSessionServices:
             )
         except RecordNotFound:
             return
-        request = HypothesisDevelopmentRequest.from_execution(self._chat, execution)
+        request = self._request_from_execution(execution)
         self._workflow().fail_execution(
             request, reason=str(error) or type(error).__name__
         )

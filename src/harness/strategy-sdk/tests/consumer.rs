@@ -4,12 +4,13 @@ use std::rc::Rc;
 
 use harness_strategy_sdk::{
     canonical_subscriptions, effective_subscriptions, route_bar, route_quote, route_trade,
-    BarEvent, BarFrame, Decimal, Indicator, MarketConsumer, ObservationContext, QuoteEvent,
-    Subscription, TradeEvent,
+    BarEvent, BarFrame, Decimal, Indicator, IndicatorSequence, MarketConsumer, ObservationContext,
+    QuoteEvent, Subscription, TradeEvent,
 };
 
 struct Node {
     name: &'static str,
+    sequence: IndicatorSequence,
     own: Vec<Subscription>,
     children: Vec<Node>,
     log: Rc<RefCell<Vec<String>>>,
@@ -46,7 +47,13 @@ impl MarketConsumer for Node {
     }
 }
 impl Indicator for Node {
-    fn value(&self) -> Option<Decimal> {
+    fn sequence(&self) -> &IndicatorSequence {
+        &self.sequence
+    }
+    fn sequence_mut(&mut self) -> &mut IndicatorSequence {
+        &mut self.sequence
+    }
+    fn value(&self, _: &str) -> Option<Decimal> {
         None
     }
 }
@@ -69,6 +76,7 @@ fn quote(symbol: &str) -> QuoteEvent<'_> {
 fn nested_requirements_are_canonical_and_routing_is_dependency_first_and_own_only() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let child = Node {
+        sequence: IndicatorSequence::ticks(10).unwrap(),
         name: "child",
         own: vec![
             Subscription::Quote {
@@ -82,6 +90,7 @@ fn nested_requirements_are_canonical_and_routing_is_dependency_first_and_own_onl
         log: log.clone(),
     };
     let mut parent = Node {
+        sequence: IndicatorSequence::ticks(10).unwrap(),
         name: "parent",
         own: vec![
             Subscription::Quote {
@@ -186,6 +195,7 @@ impl MarketConsumer for Repeated {
 
 struct Cycle {
     _nonzero: u8,
+    sequence: IndicatorSequence,
 }
 impl MarketConsumer for Cycle {
     type Context = ObservationContext;
@@ -199,14 +209,23 @@ impl MarketConsumer for Cycle {
     }
 }
 impl Indicator for Cycle {
-    fn value(&self) -> Option<Decimal> {
+    fn sequence(&self) -> &IndicatorSequence {
+        &self.sequence
+    }
+    fn sequence_mut(&mut self) -> &mut IndicatorSequence {
+        &mut self.sequence
+    }
+    fn value(&self, _: &str) -> Option<Decimal> {
         None
     }
 }
 
 #[test]
 fn dependency_cycles_fail_without_recursing_forever() {
-    let mut cycle = Cycle { _nonzero: 0 };
+    let mut cycle = Cycle {
+        _nonzero: 0,
+        sequence: IndicatorSequence::default(),
+    };
     assert!(effective_subscriptions(&mut cycle)
         .unwrap_err()
         .contains("cycle"));
@@ -219,6 +238,7 @@ fn dependency_cycles_fail_without_recursing_forever() {
 
 struct AliasNode {
     calls: Rc<RefCell<usize>>,
+    sequence: IndicatorSequence,
 }
 impl MarketConsumer for AliasNode {
     type Context = ObservationContext;
@@ -235,7 +255,13 @@ impl MarketConsumer for AliasNode {
     }
 }
 impl Indicator for AliasNode {
-    fn value(&self) -> Option<Decimal> {
+    fn sequence(&self) -> &IndicatorSequence {
+        &self.sequence
+    }
+    fn sequence_mut(&mut self) -> &mut IndicatorSequence {
+        &mut self.sequence
+    }
+    fn value(&self, _: &str) -> Option<Decimal> {
         None
     }
 }
@@ -259,9 +285,11 @@ fn repeated_dependency_identity_is_updated_once() {
     let mut shared = Shared {
         left: AliasNode {
             calls: calls.clone(),
+            sequence: IndicatorSequence::ticks(10).unwrap(),
         },
         right: AliasNode {
             calls: calls.clone(),
+            sequence: IndicatorSequence::ticks(10).unwrap(),
         },
     };
     assert_eq!(effective_subscriptions(&mut shared).unwrap().len(), 1);
@@ -274,6 +302,7 @@ fn equal_addresses_of_parent_and_first_field_do_not_hide_dependencies() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let mut parent = Repeated {
         child: Node {
+            sequence: IndicatorSequence::ticks(10).unwrap(),
             name: "child",
             own: vec![Subscription::Quote {
                 symbols: vec!["AAA".into()],
@@ -295,7 +324,13 @@ impl MarketConsumer for ZeroIndicator {
     }
 }
 impl Indicator for ZeroIndicator {
-    fn value(&self) -> Option<Decimal> {
+    fn sequence(&self) -> &IndicatorSequence {
+        unreachable!()
+    }
+    fn sequence_mut(&mut self) -> &mut IndicatorSequence {
+        unreachable!()
+    }
+    fn value(&self, _: &str) -> Option<Decimal> {
         None
     }
 }
@@ -356,6 +391,7 @@ fn callback_mutation_fails_even_when_effective_union_is_unchanged() {
     let mut root = Mutating {
         changed: false,
         child: Node {
+            sequence: IndicatorSequence::ticks(10).unwrap(),
             name: "child",
             own: vec![Subscription::Quote {
                 symbols: vec!["DEP".into()],
@@ -375,6 +411,7 @@ fn callback_mutation_fails_even_when_effective_union_is_unchanged() {
 
 struct DependencyMutation {
     own: Vec<Subscription>,
+    sequence: IndicatorSequence,
 }
 impl MarketConsumer for DependencyMutation {
     type Context = ObservationContext;
@@ -388,7 +425,13 @@ impl MarketConsumer for DependencyMutation {
     }
 }
 impl Indicator for DependencyMutation {
-    fn value(&self) -> Option<Decimal> {
+    fn sequence(&self) -> &IndicatorSequence {
+        &self.sequence
+    }
+    fn sequence_mut(&mut self) -> &mut IndicatorSequence {
+        &mut self.sequence
+    }
+    fn value(&self, _: &str) -> Option<Decimal> {
         None
     }
 }
@@ -414,6 +457,7 @@ impl MarketConsumer for ParentMutation {
 fn dependency_mutation_fails_before_parent_dispatch_with_unchanged_union() {
     let mut root = ParentMutation {
         dependency: DependencyMutation {
+            sequence: IndicatorSequence::ticks(10).unwrap(),
             own: vec![Subscription::Quote {
                 symbols: vec!["AAA".into()],
             }],

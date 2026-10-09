@@ -21,26 +21,14 @@ from thesis.agent.runtime.store import PersistenceSubAgentStore
 from thesis.chat import ChatService
 from thesis.chat.contracts import SubAgentRecord, WorkflowDefinition
 from thesis.experiments import MandateError, derive_mandate, rfc3339_ns
-from thesis.experiments.mandate import rfc3339
-from thesis.workflows.core.phase import HandoffContext
-from thesis.workflows.registry.hypothesis_development.errors import WorkflowError
-from thesis.workflows.registry.hypothesis_development.phases.trials import (
-    run_falsification_trials,
-)
-from thesis.workflows.registry.hypothesis_development.prompts.discovery import (
-    _discovery_turn_prompt,
-)
-from thesis.workflows.registry.hypothesis_development.services import DevelopmentEngine
 from thesis.workflows.registry.hypothesis_development.session_services import (
     HypothesisSessionServices,
 )
-from thesis.workflows.registry.hypothesis_development.spec import _model_creation_seed
 from thesis.workflows.research_models import ProgramSnapshots
 
 from ._support import (
     WORKSPACE,
     FakePrograms,
-    _discovery_envelope,
     _hypothesis_envelope,
     _kit,
     _request,
@@ -54,7 +42,17 @@ PARTITION: dict[str, object] = {
     "embargoDays": 0,
     "provenance": "launch-v2",
 }
-LAUNCH_REQUEST: dict[str, object] = {"createdAt": CREATED_AT, "partition": PARTITION}
+LAUNCH_REQUEST: dict[str, object] = {
+    "createdAt": CREATED_AT,
+    "partition": PARTITION,
+    "dependencies": {
+        "historyDays": 1825,
+        "forwardDays": 90,
+        "informationHorizonDays": 1,
+        "positionHorizonDays": 1,
+        "liquidationDays": 0,
+    },
+}
 
 
 class WindowPrograms(FakePrograms):
@@ -415,75 +413,3 @@ def test_completion_accepts_a_configuration_ending_at_the_purged_development_end
     assert (
         service.validate_completion("workspace", record, _completion_for(phase)) is None
     )
-
-
-@pytest.mark.parametrize("phase", ["model_creation", "strategy_design"])
-def test_completion_accepts_a_configuration_inside_the_mandate(phase: str) -> None:
-    service, record, _ = _completion_service(phase, FakePrograms())
-    assert (
-        service.validate_completion("workspace", record, _completion_for(phase)) is None
-    )
-
-
-def test_trials_executor_rejects_a_forward_crossing_study_window(
-    tmp_path: Path,
-) -> None:
-    kit = _kit(tmp_path, payloads=[], results=[], programs=_crossing())
-    request = _request(kit)
-    document = kit.execution_store.get(request.execution_id)
-    mandate = derive_mandate(WORKSPACE, request.execution_id, document.launch_request)
-    state = kit.workflow._reconstruct_state(request)
-    with pytest.raises(WorkflowError) as error:
-        run_falsification_trials(
-            cast(DevelopmentEngine, kit.workflow),
-            request,
-            state,
-            HandoffContext(
-                source="model_creation",
-                target="falsification_trials",
-                completion={"hypothesis": _hypothesis_envelope()},
-            ),
-        )
-    assert rfc3339(mandate.forward.start_ns) in str(error.value)
-    assert kit.runner.requests == []
-
-
-def test_discovery_and_model_creation_seeds_carry_the_mandate(
-    tmp_path: Path,
-) -> None:
-    kit = _kit(tmp_path, payloads=[], results=[])
-    request = _request(kit)
-    document = kit.execution_store.get(request.execution_id)
-    mandate = derive_mandate(WORKSPACE, request.execution_id, document.launch_request)
-    boundary = rfc3339(mandate.forward.start_ns)
-    node = kit.workflow.prepare_phase(request)
-    assert node is not None
-    seeds = [
-        message
-        for message in kit.chat.list_messages(WORKSPACE, request.chat_id)
-        if message.data is not None and message.data.get("subAgentId") == node
-    ]
-    assert seeds
-    assert all(boundary in seed.body for seed in seeds)
-    prompt = _model_creation_seed(
-        kit.workflow,
-        request,
-        kit.workflow._reconstruct_state(request),
-        HandoffContext(
-            source="discovery",
-            target="model_creation",
-            completion={"discovery": _discovery_envelope()},
-        ),
-    )
-    assert boundary in prompt
-
-
-def test_discovery_turn_prompt_carries_the_mandate_only_when_given_one() -> None:
-    mandate = derive_mandate(WORKSPACE, "execution-1", LAUNCH_REQUEST)
-    boundary = rfc3339(mandate.forward.start_ns)
-    plain = _discovery_turn_prompt([("user", "A premise.")])
-    assert "A premise." in plain
-    assert boundary not in plain
-    with_mandate = _discovery_turn_prompt([("user", "A premise.")], mandate=mandate)
-    assert boundary in with_mandate
-    assert "A premise." in with_mandate

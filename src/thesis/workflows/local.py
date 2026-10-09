@@ -396,8 +396,6 @@ def build_local_workflow_runtime(
         skills=SkillRegistry(),
         runner=resolved_runner,
         harness_tools=harness_tools,
-        backtest_mode=backtest_mode,
-        metadata=metadata,
         # When the study-backed research runner was composed above it already
         # owns the stores; forwarding them again beside the explicit runner is
         # a composition error, so they are only forwarded for the default

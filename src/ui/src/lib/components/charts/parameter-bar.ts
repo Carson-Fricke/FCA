@@ -11,6 +11,8 @@ export interface ParameterBarCategory {
 	error: string | null;
 	totalReturn: number | null;
 	profitFactor: number | null;
+ totalReturnGap?: string;
+ profitFactorGap?: string;
 }
 
 /** Read a finite metric by its canonical key, tolerating an alternate casing. */
@@ -24,18 +26,6 @@ export function metricValue(
 		if (typeof value === 'number' && Number.isFinite(value)) return value;
 	}
 	return null;
-}
-
-/** Stable identity for one parameter level (never collapses 1 and "1"). */
-export function levelKey(value: string | number | boolean): string {
-	if (typeof value === 'number') return `number:${value}`;
-	if (typeof value === 'boolean') return `boolean:${value}`;
-	return `string:${value}`;
-}
-
-/** Human label for a parameter level; a gap is never rendered as zero. */
-export function levelLabel(value: string | number | boolean): string {
-	return String(value);
 }
 
 /** Harness job states; anything else stays visually distinct as unknown. */
@@ -72,18 +62,21 @@ export function parameterCategories(
 ): ParameterBarCategory[] {
 	const categories = new Map<string, ParameterBarCategory>();
 	const add = (value: string | number | boolean, run: VariationRunData, isCenter: boolean): void => {
-		const key = levelKey(value);
+		const key = run.levelIdentities[parameter];
+        if (!key) return;
 		if (categories.has(key)) return;
 		categories.set(key, {
 			key,
-			label: levelLabel(value),
+			label: run.levelLabels[parameter] ?? String(value),
 			value,
 			center: isCenter,
 			state: run.state,
 			jobId: run.jobId,
 			error: run.error,
-			totalReturn: metricValue(run.metrics, 'total_return', 'totalReturn'),
-			profitFactor: metricValue(run.metrics, 'profit_factor', 'profitFactor')
+			totalReturn: metricValue(run.metrics, 'total_return', 'netTotalReturn', 'totalReturn'),
+			profitFactor: metricValue(run.metrics, 'profit_factor', 'profitFactor'),
+            totalReturnGap: run.metricReasons?.['total_return'] ? `undefined: ${run.metricReasons['total_return']}` : run.state === 'failed' ? 'failed' : !run.jobId ? 'untested' : 'missing',
+            profitFactorGap: run.metricReasons?.['profit_factor'] ? `undefined: ${run.metricReasons['profit_factor']}` : run.state === 'failed' ? 'failed' : !run.jobId ? 'untested' : 'missing'
 		});
 	};
 	const baseline = center?.parameters[parameter];
@@ -91,7 +84,9 @@ export function parameterCategories(
 	for (const point of points) {
 		const value = point.parameters[parameter];
 		if (value === undefined) continue;
-		if (center && baseline !== undefined && levelKey(baseline) === levelKey(value)) continue;
+        if (!point.levelIdentities[parameter]) continue;
+        if (center && Object.keys(point.parameters).some((key) => key !== parameter && point.levelIdentities[key] !== center.levelIdentities[key])) continue;
+		if (center && baseline !== undefined && center.levelIdentities[parameter] === point.levelIdentities[parameter]) continue;
 		add(value, point, false);
 	}
 	const ordered = [...categories.values()];

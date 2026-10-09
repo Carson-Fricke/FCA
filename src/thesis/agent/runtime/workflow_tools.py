@@ -32,7 +32,7 @@ def _start_workflow_schema(workflow_ids: tuple[str, ...]) -> dict[str, object]:
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": ["workflow", "idea"],
+        "required": ["workflow", "idea", "launch_options"],
         "properties": {
             "workflow": {
                 "type": "string",
@@ -45,6 +45,10 @@ def _start_workflow_schema(workflow_ids: tuple[str, ...]) -> dict[str, object]:
                 "description": (
                     "The research idea, hypothesis, or edge to develop and falsify."
                 ),
+            },
+            "launch_options": {
+                "type": "object",
+                "description": "Workflow-specific launch declarations. Hypothesis development requires partition with historyDays, forwardDays, informationHorizonDays, positionHorizonDays and liquidationDays; all are integer calendar-day spans. Freeze these before research; ask conversationally when the partition choice is unclear.",
             },
             "investigation_id": {
                 "type": "string",
@@ -105,6 +109,9 @@ def workflow_registered_tools(
             not isinstance(investigation_id, str) or not investigation_id.strip()
         ):
             return _failure("investigation_id must be non-empty text when set")
+        launch_options = arguments.get("launch_options")
+        if not isinstance(launch_options, Mapping):
+            return _failure("launch_options must be an explicit object")
         # The caller's anchor decides where the execution belongs: the root
         # chat for the top-level agent, the caller's node for a sub-agent.  The
         # trigger is the operator message that requested the launch, so the
@@ -120,6 +127,7 @@ def workflow_registered_tools(
         result = registration.execute(
             execution_context,
             ideas=idea.strip(),
+            launch_options=dict(launch_options),
             investigation_id=(
                 None if investigation_id is None else investigation_id.strip()
             ),

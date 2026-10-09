@@ -21,6 +21,7 @@ from thesis.persistence.git import (
     GitMaterializationError,
     GitPublicationError,
 )
+from thesis.research.evidence import parameter_digest
 from thesis.research.models import (
     MARKET_SUBSCRIPTIONS_SCHEMA,
     ResearchModelError,
@@ -89,10 +90,8 @@ _RESERVED_IDS = {"con", "prn", "aux", "nul"} | {
 PROGRAM_ID_PATTERN = r"^[a-z][a-z0-9_-]{0,63}$"
 MAX_READ_CHARS = 16000
 MAX_LIST_RESULTS = 200
-MAX_BATCH_POINTS = 16
-MAX_NULL_SEEDS = 16
 MAX_NULL_BLOCK_SIZE = 10_000
-NULL_TRANSFORM_MODE = "block_permutation"
+NULL_TRANSFORM_MODES = ("permutation", "block_permutation")
 PARAMETER_NAME_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
 _PARAMETER_TYPES = ("integer", "number", "boolean", "string")
 _PARAMETER_KEYS = frozenset(
@@ -145,21 +144,35 @@ impl StrategyProgram for AuthoredStrategy {
 }
 export_strategy_program!(AuthoredStrategy);
 """
-INDICATOR_TEMPLATE = """use harness_strategy_sdk::{BarFrame, Decimal, Indicator, MarketConsumer,
-    ObservationContext, Subscription};
+INDICATOR_TEMPLATE = """use std::collections::BTreeMap;
+use harness_strategy_sdk::{BarFrame, Decimal, Indicator, IndicatorSequence, MarketConsumer,
+    ObservationContext, QuoteEvent, Subscription, TradeEvent};
 #[derive(Default)]
-pub struct AuthoredIndicator { last: Option<Decimal> }
+pub struct AuthoredIndicator {
+    last: BTreeMap<String, Option<Decimal>>, sequence: IndicatorSequence
+}
 impl MarketConsumer for AuthoredIndicator {
     type Context = ObservationContext;
     fn subscriptions(&self) -> Vec<Subscription> {
         vec![Subscription::Bars { symbols: vec!["SPY".into()], interval: "1min".into() }]
     }
     fn on_bar(&mut self, frame: &BarFrame, _: &mut ObservationContext) {
-        self.last = frame.bars_by_symbol.get("SPY").map(|bar| bar.close);
+        for (symbol, bar) in &frame.bars_by_symbol {
+            self.last.insert((*symbol).into(), Some(bar.close));
+        }
+        for symbol in &frame.missing_symbols { self.last.insert((*symbol).into(), None); }
+    }
+    fn on_trade(&mut self, event: &TradeEvent, _: &mut ObservationContext) {
+        self.last.insert(event.symbol.into(), Some(event.price));
+    }
+    fn on_quote(&mut self, event: &QuoteEvent, _: &mut ObservationContext) {
+        self.last.insert(event.symbol.into(), Some(event.mid()));
     }
 }
 impl Indicator for AuthoredIndicator {
-    fn value(&self) -> Option<Decimal> { self.last }
+    fn value(&self, symbol: &str) -> Option<Decimal> { self.last.get(symbol).copied().flatten() }
+    fn sequence(&self) -> &IndicatorSequence { &self.sequence }
+    fn sequence_mut(&mut self) -> &mut IndicatorSequence { &mut self.sequence }
 }
 """
 PROGRAM_TEMPLATES = {
@@ -236,7 +249,7 @@ def parameter_assignment_sha256(assignment: Mapping[str, object]) -> str:
     chain recomputes it from reported parameters to prove which configuration a
     job actually ran.
     """
-    return _hash(_bytes(dict(assignment)))
+    return parameter_digest(assignment)
 
 
 _HistoryEntries = list[dict[str, object]]
@@ -1107,6 +1120,7 @@ class WorkspacePrograms:
         retain: JobRetention | None,
         batch_id: str | None = None,
         batch_kind: str | None = None,
+        null_plan: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         """Execute one point against a prepared pinned bundle.
 
@@ -1196,6 +1210,7 @@ class WorkspacePrograms:
                         batch_id=batch_id,
                         batch_kind=batch_kind,
                         null_transform=null_transform,
+                        null_plan=null_plan,
                     ),
                 )
             except Exception as error:  # noqa: BLE001 - fail closed, never dispatch
@@ -1308,19 +1323,23 @@ class WorkspacePrograms:
         batch_id: str | None,
         batch_kind: str | None,
         null_transform: Mapping[str, object] | None,
+        null_plan: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
-        """Build the scalar-only tracking attribution for one execution id."""
+        """Build tracking provenance and the frozen null seed plan for one job."""
         attribution: dict[str, object] = {
             "programId": program_id,
             "kind": kind,
             "version": cast(str, snapshot["version"]),
             "gitCommit": commit,
             "parameterAssignmentSha256": parameter_assignment_sha256(assignment),
+            "submittedInputSha256": _hash(_bytes(configuration)),
         }
         if batch_id is not None:
             attribution["batchId"] = batch_id
         if batch_kind is not None:
             attribution["batchKind"] = batch_kind
+        if null_plan is not None:
+            attribution["nullPlan"] = dict(null_plan)
         if null_transform is not None and type(null_transform.get("seed")) is int:
             attribution["seed"] = null_transform["seed"]
         if null_transform is not None:
@@ -1357,9 +1376,9 @@ class WorkspacePrograms:
             raise ProgramArtifactError(
                 "assignments must be an array of parameter assignment objects"
             )
-        if not 1 <= len(assignments) <= MAX_BATCH_POINTS:
+        if not len(assignments):
             raise ProgramArtifactError(
-                f"assignments must contain 1 to {MAX_BATCH_POINTS} parameter points"
+                "assignments must contain at least one parameter point"
             )
         prepared = self._prepare(workspace_id, kind, program_id)
         manifest = cast(dict[str, object], prepared["manifest"])
@@ -1440,6 +1459,7 @@ class WorkspacePrograms:
         return {
             "ok": ok,
             "batchId": batch_id,
+            "label": label,
             "programId": program_id,
             "version": version,
             "points": points,
@@ -1454,11 +1474,14 @@ class WorkspacePrograms:
         *,
         block_size: int,
         seeds: Sequence[int],
+        mode: str = "block_permutation",
+        offset: int = 0,
+        chunk_size: int = 64,
         label: str | None = None,
         data_window: DataWindowPolicy | None = None,
         retain: JobRetention | None = None,
     ) -> dict[str, object]:
-        """Submit one block-permutation null per seed through the run boundary.
+        """Submit declared permutation nulls in bounded chunks through the run boundary.
 
         The assignment, the seed set, and the block size are validated once
         against one pinned snapshot before any submission; every point merges
@@ -1471,6 +1494,10 @@ class WorkspacePrograms:
             raise ProgramArtifactError(
                 "indicators execute only as owned study/strategy dependencies"
             )
+        if mode not in NULL_TRANSFORM_MODES:
+            raise ProgramArtifactError("mode must be permutation or block_permutation")
+        if mode == "permutation" and block_size != 1:
+            raise ProgramArtifactError("permutation requires block_size=1")
         if type(block_size) is not int or not 1 <= block_size <= MAX_NULL_BLOCK_SIZE:
             raise ProgramArtifactError(
                 f"block_size must be an integer from 1 to {MAX_NULL_BLOCK_SIZE}"
@@ -1479,9 +1506,13 @@ class WorkspacePrograms:
             raise ProgramArtifactError(
                 "seeds must be an array of distinct non-negative integers"
             )
-        if not 1 <= len(seeds) <= MAX_NULL_SEEDS:
+        if not len(seeds):
+            raise ProgramArtifactError("seeds must contain at least one value")
+        if type(offset) is not int or not 0 <= offset < len(seeds):
+            raise ProgramArtifactError("offset must select a seed in the frozen list")
+        if type(chunk_size) is not int or not 1 <= chunk_size <= 256:
             raise ProgramArtifactError(
-                f"seeds must contain 1 to {MAX_NULL_SEEDS} values"
+                "chunk_size must be between 1 and 256 admissions"
             )
         checked_seeds: list[int] = []
         for index, seed in enumerate(seeds):
@@ -1511,10 +1542,11 @@ class WorkspacePrograms:
             checked_seeds,
             version,
             self._effective_window(configuration, data_window),
+            mode=mode,
         )
         points: list[dict[str, object]] = []
         ok = True
-        for seed in checked_seeds:
+        for seed in checked_seeds[offset : offset + chunk_size]:
             try:
                 receipt = self._execute_prepared(
                     prepared,
@@ -1524,7 +1556,7 @@ class WorkspacePrograms:
                     assignment,
                     data_window=data_window,
                     null_transform={
-                        "mode": NULL_TRANSFORM_MODE,
+                        "mode": mode,
                         "block_size": block_size,
                         "seed": seed,
                     },
@@ -1532,6 +1564,12 @@ class WorkspacePrograms:
                     retain=retain,
                     batch_id=batch_id,
                     batch_kind="null",
+                    null_plan={
+                        "mode": mode,
+                        "blockSize": block_size,
+                        "seeds": sorted(checked_seeds),
+                        "parameters": assignment,
+                    },
                 )
             except (ProgramArtifactError, OSError) as error:
                 # Raised before retention: nothing was recorded or dispatched.
@@ -1563,9 +1601,14 @@ class WorkspacePrograms:
         return {
             "ok": ok,
             "batchId": batch_id,
+            "label": label,
             "programId": program_id,
             "version": version,
             "points": points,
+            "totalSeeds": len(checked_seeds),
+            "offset": offset,
+            "nextOffset": min(offset + chunk_size, len(checked_seeds)),
+            "completedSubmission": offset + chunk_size >= len(checked_seeds),
         }
 
     def job_result(self, job_id: str) -> dict[str, object]:
@@ -1744,11 +1787,17 @@ class WorkspacePrograms:
             'vec![Subscription::Bars { symbols: vec!["SPY".into()], interval: "1min".into() }]',
             "vec![" + ", ".join(declarations) + "]",
         )
-        if kind == "indicator":
-            source = source.replace(
-                'frame.bars_by_symbol.get("SPY")',
-                "frame.bars_by_symbol.values().next()",
-            )
+        if kind == "indicator" and any(
+            item["data_type"] in {"trade", "quote"} for item in subscriptions
+        ):
+            source = source.replace("#[derive(Default)]\n", "")
+            source += """
+impl Default for AuthoredIndicator {
+    fn default() -> Self {
+        Self { last: BTreeMap::new(), sequence: IndicatorSequence::ticks(60_000_000_000).unwrap() }
+    }
+}
+"""
         return source
 
     def _sdk_identity(self) -> str:
@@ -2225,12 +2274,15 @@ class WorkspacePrograms:
         seeds: Sequence[int],
         version: str,
         window: tuple[str, str],
+        *,
+        mode: str = "block_permutation",
     ) -> str:
         """Return the deterministic provenance identity of one null batch."""
         material = _bytes(
             {
                 "parameters": dict(parameters),
                 "block_size": block_size,
+                "mode": mode,
                 "seeds": sorted(seeds),
                 "version": version,
                 "window": {"start": window[0], "end": window[1]},
@@ -2616,8 +2668,5 @@ __all__ = [
     "PROGRAM_CONFIGURATION_SCHEMA",
     "MAX_READ_CHARS",
     "MAX_LIST_RESULTS",
-    "MAX_BATCH_POINTS",
-    "MAX_NULL_SEEDS",
     "MAX_NULL_BLOCK_SIZE",
-    "NULL_TRANSFORM_MODE",
 ]

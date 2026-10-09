@@ -129,16 +129,6 @@ def _text(value: object, label: str, *, max_length: int) -> str:
     return sanitized
 
 
-def _format_observed(val: float | None) -> str:
-    if val is None or not math.isfinite(val):
-        return "—"
-    if abs(val) < 0.0001 and val != 0:
-        return f"{val:.2e}"
-    if abs(val) < 1:
-        return f"{val:.4f}"
-    return f"{val:.2f}"
-
-
 def _metric(metrics: object | None, observable: str) -> float | None:
     if not isinstance(metrics, Mapping):
         return None

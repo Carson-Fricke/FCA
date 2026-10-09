@@ -160,7 +160,7 @@ def test_serving_authors_template_validates_and_runs_by_id(tmp_path: Path) -> No
         batch_properties = cast(dict[str, object], batch["properties"])
         assert set(batch_properties) == {"program_id", "assignments", "label"}
         assignments = cast(dict[str, object], batch_properties["assignments"])
-        assert assignments["minItems"] == 1 and assignments["maxItems"] == 16
+        assert assignments["minItems"] == 1 and "maxItems" not in assignments
         assert "source" not in batch_properties
     validated = cast(dict[str, object], calls[0][1]["model"])
     document = cast(dict[str, object], calls[1][1]["config"])

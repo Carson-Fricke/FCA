@@ -1,31 +1,13 @@
-"""The deterministic parameter-variation contract for the variation phase.
+"""Deterministic marginal and explicitly declared joint-parameter experiments.
 
-The variation phase measures a one-at-a-time parameter neighborhood around the
-best shortlisted candidate of the accepted candidate evaluation.  The agent
-submits one parameter batch for the committed strategy, inspects every point
-run, and hands forward the whole evaluation: the strategy receipt, the
-deterministic batch identity, the succeeded center with its copied metrics, the
-1..16 varied points, the declared parameter names that were actually varied,
-and the honest stability and limitations prose.
-:meth:`VariationEvaluation.from_dict` is both the rebuild fold's decoder and the
-completion validator's drift guard, so a stored or submitted payload either
-composes exactly here or is rejected with a
-:class:`~.errors.WorkflowError`.
-
-The frozen cross-checks bind the payload to the neighborhood it claims:
-
-- every point differs from the center parameter vector in exactly one key and
-  that key is in ``parameters``;
-- every name in ``parameters`` is the differing key of at least one point;
-- point parameter vectors are unique and none equals the center vector;
-- numeric metric values are finite when present and parameter values are
-  scalar (string, number, or boolean) and finite.
+The typed decoder owns vector identity, changed-key, interaction coverage and
+honest run-state rules for completion and durable replay. There is no universal
+point ceiling. Accepted vectors and interaction groups freeze before forward
+exposure; missing and undefined financial metrics are never synthesized.
 """
 
 from __future__ import annotations
 
-import json
-import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
@@ -35,6 +17,7 @@ from thesis.agent.runtime.schema import (
     validate_arguments,
     violations,
 )
+from thesis.research.evidence import metric_errors, parameter_errors, parameter_identity
 from thesis.workflows.research_models import PROGRAM_REFERENCE_SCHEMA
 
 from ..errors import WorkflowError
@@ -48,9 +31,6 @@ VARIATION_STATES: tuple[str, ...] = (
     "cancelled",
     "unknown",
 )
-
-#: The largest deterministic neighborhood one variation batch may submit.
-MAX_VARIATION_POINTS = 16
 
 _MAX_JOB_ID = 256
 _MAX_BATCH_ID = 256
@@ -69,47 +49,6 @@ def _wire_field(payload: Mapping[str, object], key: str) -> Any:
     return payload.get(key)
 
 
-def _finite_number(value: object) -> float | None:
-    """Return the value as a finite float, or ``None`` when it is not one."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    number = float(value)
-    return number if math.isfinite(number) else None
-
-
-def _metric_errors(metrics: Mapping[str, object], label: str) -> list[str]:
-    """Collect every metric value that is not a finite number when numeric."""
-    errors: list[str] = []
-    for name, value in metrics.items():
-        if not isinstance(name, str):
-            errors.append(f"{label}: metric names must be strings")
-        elif isinstance(value, bool) or (
-            isinstance(value, (int, float)) and not math.isfinite(value)
-        ):
-            errors.append(f"{label}.{name}: metric values must be finite numbers")
-    return errors
-
-
-def _parameter_errors(parameters: Mapping[str, object], label: str) -> list[str]:
-    """Collect every parameter name or value outside the scalar/finite rule."""
-    errors: list[str] = []
-    for name, value in parameters.items():
-        if not isinstance(name, str) or not name:
-            errors.append(f"{label}: parameter names must be non-empty strings")
-            continue
-        if isinstance(value, bool) or isinstance(value, str):
-            continue
-        if isinstance(value, (int, float)):
-            if not math.isfinite(float(value)):
-                errors.append(f"{label}.{name}: parameter values must be finite")
-            continue
-        errors.append(
-            f"{label}.{name}: parameter values must be scalar "
-            "(string, number, or boolean)"
-        )
-    return errors
-
-
 def canonical_parameter_identity(parameters: Mapping[str, object]) -> str:
     """Return the type-strict canonical identity of one parameter vector.
 
@@ -124,16 +63,8 @@ def canonical_parameter_identity(parameters: Mapping[str, object]) -> str:
     Raises :class:`WorkflowError` when a name is not a string or a value is not
     finite JSON.
     """
-    if not all(isinstance(name, str) for name in parameters):
-        raise WorkflowError("parameter names must be strings")
     try:
-        return json.dumps(
-            dict(parameters),
-            allow_nan=False,
-            ensure_ascii=True,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
+        return parameter_identity(parameters)
     except (TypeError, ValueError) as error:
         raise WorkflowError(
             f"parameter values must be finite JSON scalars: {error}"
@@ -227,10 +158,20 @@ VARIATION_PAYLOAD_SCHEMA: dict[str, object] = {
             "pattern": r"\S",
         },
         "center": _CENTER_SCHEMA,
+        "method": {"type": "string", "enum": ["one_at_a_time", "joint"]},
+        "interactions": {
+            "type": "array",
+            "uniqueItems": True,
+            "items": {
+                "type": "array",
+                "minItems": 2,
+                "uniqueItems": True,
+                "items": {"type": "string", "minLength": 1},
+            },
+        },
         "points": {
             "type": "array",
             "minItems": 1,
-            "maxItems": MAX_VARIATION_POINTS,
             "items": _POINT_SCHEMA,
         },
         "parameters": {
@@ -262,6 +203,8 @@ VARIATION_PAYLOAD_SCHEMA: dict[str, object] = {
         "points",
         "parameters",
         "stability",
+        "method",
+        "interactions",
     ],
 }
 
@@ -274,95 +217,12 @@ def variation_payload_errors(payload: Mapping[str, object]) -> list[str]:
         miss.render()
         for miss in violations(VARIATION_PAYLOAD_SCHEMA, payload, "variation")
     ]
-    strategy = payload.get("strategy")
-    if isinstance(strategy, Mapping) and strategy.get("kind") != "strategy":
-        errors.append("variation.strategy.kind must be 'strategy'")
-
-    declared: list[str] = []
-    raw_parameters = payload.get("parameters")
-    if isinstance(raw_parameters, Sequence) and not isinstance(
-        raw_parameters, (str, bytes)
-    ):
-        for name in raw_parameters:
-            if isinstance(name, str) and name:
-                declared.append(name)
-
-    center_parameters: Mapping[str, object] = {}
-    center_valid = False
-    center = payload.get("center")
-    if isinstance(center, Mapping):
-        raw_center = center.get("parameters")
-        if isinstance(raw_center, Mapping):
-            center_parameters = raw_center
-            center_errors = _parameter_errors(raw_center, "variation.center.parameters")
-            errors.extend(center_errors)
-            center_valid = not center_errors
-        if center.get("state") != "succeeded":
-            errors.append("variation.center.state must be 'succeeded'")
-        metrics = center.get("metrics")
-        if isinstance(metrics, Mapping):
-            errors.extend(_metric_errors(metrics, "variation.center.metrics"))
-        else:
-            errors.append(
-                "variation.center.metrics must be an object for the succeeded center"
-            )
-
-    points = payload.get("points")
-    vectors: set[str] = set()
-    center_key = (
-        canonical_parameter_identity(center_parameters) if center_valid else None
-    )
-    covered: set[str] = set()
-    if isinstance(points, Sequence) and not isinstance(points, (str, bytes)):
-        for index, item in enumerate(points):
-            if not isinstance(item, Mapping):
-                continue
-            label = f"variation.points[{index}]"
-            raw_point = item.get("parameters")
-            if isinstance(raw_point, Mapping):
-                point_errors = _parameter_errors(raw_point, f"{label}.parameters")
-                errors.extend(point_errors)
-                if not point_errors:
-                    if center_valid:
-                        diff = _differing_names(center_parameters, raw_point)
-                        if len(diff) != 1:
-                            errors.append(
-                                f"{label} must differ from the center in exactly one "
-                                "parameter"
-                            )
-                        else:
-                            key = next(iter(diff))
-                            if key in declared:
-                                covered.add(key)
-                            else:
-                                errors.append(
-                                    f"{label} differs in parameter {key!r} which is "
-                                    "not declared in variation.parameters"
-                                )
-                    vector = canonical_parameter_identity(raw_point)
-                    if vector in vectors:
-                        errors.append(
-                            "variation.points parameter vectors must be unique"
-                        )
-                    vectors.add(vector)
-                    if vector == center_key:
-                        errors.append(
-                            "variation.points must not repeat the center "
-                            "parameter vector"
-                        )
-            metrics = item.get("metrics")
-            if isinstance(metrics, Mapping):
-                errors.extend(_metric_errors(metrics, f"{label}.metrics"))
-            elif item.get("state") == "succeeded":
-                errors.append(
-                    f"{label}.metrics must be an object for a succeeded point"
-                )
-        if center_valid:
-            for name in declared:
-                if name not in covered:
-                    errors.append(
-                        f"variation.parameters name {name!r} is not varied by any point"
-                    )
+    if errors:
+        return errors
+    try:
+        VariationEvaluation.from_dict(payload)
+    except WorkflowError as error:
+        errors.append(str(error))
     return errors
 
 
@@ -379,7 +239,7 @@ class VariationPoint:
     def __post_init__(self) -> None:
         if not isinstance(self.parameters, Mapping) or not self.parameters:
             raise WorkflowError("variation point parameters must be a non-empty object")
-        errors = _parameter_errors(self.parameters, "variation point parameters")
+        errors = parameter_errors(self.parameters, "variation point parameters")
         if errors:
             raise WorkflowError("; ".join(errors))
         object.__setattr__(self, "parameters", dict(self.parameters))
@@ -391,7 +251,7 @@ class VariationPoint:
         if self.metrics is not None:
             if not isinstance(self.metrics, Mapping):
                 raise WorkflowError("variation point metrics must be an object")
-            errors = _metric_errors(self.metrics, "variation point metrics")
+            errors = metric_errors(self.metrics, "variation point metrics")
             if errors:
                 raise WorkflowError("; ".join(errors))
             object.__setattr__(self, "metrics", dict(self.metrics))
@@ -450,7 +310,7 @@ class VariationCenter:
             raise WorkflowError(
                 "variation center parameters must be a non-empty object"
             )
-        errors = _parameter_errors(self.parameters, "variation center parameters")
+        errors = parameter_errors(self.parameters, "variation center parameters")
         if errors:
             raise WorkflowError("; ".join(errors))
         object.__setattr__(self, "parameters", dict(self.parameters))
@@ -461,7 +321,7 @@ class VariationCenter:
             raise WorkflowError(
                 "variation center metrics must be an object for the succeeded center"
             )
-        errors = _metric_errors(self.metrics, "variation center metrics")
+        errors = metric_errors(self.metrics, "variation center metrics")
         if errors:
             raise WorkflowError("; ".join(errors))
         object.__setattr__(self, "metrics", dict(self.metrics))
@@ -514,6 +374,8 @@ class VariationEvaluation:
     parameters: tuple[str, ...]
     stability: str
     limitations: str | None = None
+    method: str = "one_at_a_time"
+    interactions: tuple[tuple[str, ...], ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.strategy, Mapping):
@@ -533,10 +395,8 @@ class VariationEvaluation:
             raise WorkflowError("variation evaluation center must be a VariationCenter")
         if isinstance(self.points, (str, bytes)) or not isinstance(self.points, tuple):
             raise WorkflowError("variation evaluation points must be a tuple")
-        if not 1 <= len(self.points) <= MAX_VARIATION_POINTS:
-            raise WorkflowError(
-                f"variation evaluation requires 1 to {MAX_VARIATION_POINTS} points"
-            )
+        if not len(self.points):
+            raise WorkflowError("variation evaluation requires at least one point")
         if any(not isinstance(item, VariationPoint) for item in self.points):
             raise WorkflowError(
                 "variation evaluation points must be VariationPoint values"
@@ -561,6 +421,22 @@ class VariationEvaluation:
                     "variation evaluation parameter names must be unique"
                 )
             declared.add(name)
+        if self.method not in ("one_at_a_time", "joint"):
+            raise WorkflowError("variation method must be one_at_a_time or joint")
+        groups = {frozenset(group) for group in self.interactions}
+        if len(groups) != len(self.interactions) or any(
+            len(group) < 2
+            or len(set(group)) != len(group)
+            or not set(group) <= declared
+            for group in self.interactions
+        ):
+            raise WorkflowError(
+                "variation interactions must be unique groups of at least two declared parameters"
+            )
+        if self.method == "one_at_a_time" and groups:
+            raise WorkflowError("one_at_a_time variation cannot declare interactions")
+        if self.method == "joint" and not groups:
+            raise WorkflowError("joint variation requires declared interactions")
         _text(
             self.stability,
             "variation evaluation stability",
@@ -577,18 +453,21 @@ class VariationEvaluation:
         center_key = canonical_parameter_identity(self.center.parameters)
         for index, point in enumerate(self.points):
             diff = _differing_names(self.center.parameters, point.parameters)
-            if len(diff) != 1:
+            if not diff:
+                raise WorkflowError(
+                    "variation evaluation points must not repeat the center parameter vector"
+                )
+            if len(diff) != 1 and frozenset(diff) not in groups:
                 raise WorkflowError(
                     f"variation evaluation point[{index}] must differ from the "
-                    "center in exactly one parameter"
+                    "center in exactly one parameter or a declared interaction"
                 )
-            key = next(iter(diff))
-            if key not in declared:
+            if not diff <= declared:
                 raise WorkflowError(
                     f"variation evaluation point[{index}] differs in parameter "
-                    f"{key!r} which is not declared in parameters"
+                    f"{sorted(diff - declared)!r} which is not declared in parameters"
                 )
-            covered.add(key)
+            covered.update(diff)
             vector = canonical_parameter_identity(point.parameters)
             if vector in vectors:
                 raise WorkflowError(
@@ -606,6 +485,14 @@ class VariationEvaluation:
                     f"variation evaluation parameter {name!r} is not varied by "
                     "any point"
                 )
+        for group in groups:
+            if not any(
+                _differing_names(self.center.parameters, point.parameters) == group
+                for point in self.points
+            ):
+                raise WorkflowError(
+                    "every declared interaction must be exercised by a joint point"
+                )
 
     def as_dict(self) -> dict[str, object]:
         """Return the portable variation-evaluation representation."""
@@ -617,6 +504,8 @@ class VariationEvaluation:
             "parameters": list(self.parameters),
             "stability": self.stability,
             "limitations": self.limitations,
+            "method": self.method,
+            "interactions": [list(group) for group in self.interactions],
         }
 
     @classmethod
@@ -624,6 +513,9 @@ class VariationEvaluation:
         """Rebuild one variation evaluation from its portable representation."""
         if not isinstance(payload, Mapping):
             raise WorkflowError("variation evaluation must be an object")
+        misses = validate_arguments(VARIATION_PAYLOAD_SCHEMA, payload)
+        if misses:
+            raise WorkflowError(render_violations(misses))
         strategy = payload.get("strategy")
         if not isinstance(strategy, Mapping):
             raise WorkflowError("variation evaluation requires a strategy receipt")
@@ -647,11 +539,17 @@ class VariationEvaluation:
             parameters=tuple(cast(str, item) for item in parameters),
             stability=_wire_field(payload, "stability"),
             limitations=_wire_field(payload, "limitations"),
+            method=cast(str, payload.get("method", "one_at_a_time")),
+            interactions=tuple(
+                tuple(group)
+                for group in cast(
+                    Sequence[Sequence[str]], payload.get("interactions", [])
+                )
+            ),
         )
 
 
 __all__ = [
-    "MAX_VARIATION_POINTS",
     "VARIATION_PAYLOAD_SCHEMA",
     "VARIATION_STATES",
     "VariationCenter",

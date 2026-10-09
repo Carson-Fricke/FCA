@@ -12,25 +12,15 @@ from thesis.agent.context import PromptContext
 from thesis.agent.router import (
     ModelProfile,
     ModelResponse,
-    ModelRouter,
     PolicyBundle,
     Role,
     RolePolicy,
 )
 from thesis.agent.skills import SkillRegistry, ThesisSkill
-from thesis.integrations import (
-    BacktestRequest,
-    CapabilityReport,
-    CapabilityStatus,
-    HarnessBacktestResult,
-    ThesisHarnessClient,
-)
-from thesis.strategies import StrategyBundle
 from thesis.workflows import (
     BacktestRunner,
     BacktestRunRequest,
     BacktestRunResult,
-    HarnessBacktestRunner,
     WorkflowRuntime,
     WorkflowRuntimeError,
     build_model_router,
@@ -43,13 +33,6 @@ NOW = datetime(2026, 9, 4, 12, 0, tzinfo=UTC)
 CLAIM = (
     "Five-day momentum in SPY predicts positive five-day forward returns; "
     "a momentum probe strategy should realize a Sharpe of at least 1.0."
-)
-
-CAPABILITIES = CapabilityReport.from_statuses(
-    (
-        CapabilityStatus("backtest", True, "available"),
-        CapabilityStatus("result_query", True, "available"),
-    )
 )
 
 
@@ -147,48 +130,12 @@ class FakeRunner:
         )
 
 
-class FakeHarnessPort:
-    """Fake harness adapter exposing the published client port."""
-
-    def __init__(self) -> None:
-        self.launched: list[BacktestRequest] = []
-
-    def capabilities(self) -> CapabilityReport:
-        return CAPABILITIES
-
-    def launch_backtest(self, request: BacktestRequest) -> HarnessBacktestResult:
-        self.launched.append(request)
-        return HarnessBacktestResult(
-            job_id=request.job_id,
-            state="succeeded",
-            manifest={"manifestId": "manifest-1", "sha256": "c" * 64},
-            metrics={"sharpe": 1.5},
-            result_artifacts=[],
-            capability_status=CAPABILITIES,
-            raw={},
-        )
-
-    def query_backtest(self, job_id: str) -> HarnessBacktestResult:
-        raise AssertionError("query_backtest is not expected for a completed job")
-
-
-def _bundle() -> StrategyBundle:
-    return StrategyBundle.create(
-        strategy_id="momentum",
-        version="1.0.0",
-        source={"strategy.py": "from harness.strategy import Strategy\n"},
-        tests={"test_strategy.py": "def test_strategy():\n    assert True\n"},
-        harness_configuration={"seed": 7},
-    )
-
-
 def _runtime(
     *,
     provider: FakeProvider,
     clock: Callable[[], datetime],
     id_factory: Callable[[str], str],
     runner: BacktestRunner | None = None,
-    harness: ThesisHarnessClient | None = None,
 ) -> WorkflowRuntime:
     skills = SkillRegistry(
         (
@@ -241,7 +188,6 @@ def _runtime(
         model_profiles=profiles,
         providers={"fake": provider},
         skills=skills,
-        harness=harness,
         runner=runner,
         bundle=PolicyBundle(
             bundle_id="thesis-platform",
@@ -254,40 +200,8 @@ def _runtime(
     )
 
 
-def test_build_workflow_runtime_composes_router_and_harness_runner() -> None:
-    provider = FakeProvider(_hypothesis_envelope())
-    port = FakeHarnessPort()
-    runtime = _runtime(
-        provider=provider,
-        clock=_clock(),
-        id_factory=_id_factory(),
-        harness=ThesisHarnessClient(port),
-    )
-
-    assert isinstance(runtime.router, ModelRouter)
-    assert isinstance(runtime.runner, HarnessBacktestRunner)
-    decision = runtime.router.resolve("research")
-    assert decision.profile.provider == "fake"
-    assert decision.profile.model == "research-model"
-    assert decision.skill_bundle.versions == ("research@1.0.0",)
-
-    result = runtime.runner.run(
-        BacktestRunRequest(
-            job_id="job-1",
-            workspace_id="workspace-demo",
-            bundle=_bundle(),
-            workflow_execution_id="execution-1",
-            experiment_id="experiment-1",
-        )
-    )
-
-    assert result.succeeded is True
-    assert len(port.launched) == 1
-    assert port.launched[0].job_id == "job-1"
-
-
-def test_build_workflow_runtime_requires_harness_or_runner() -> None:
-    with pytest.raises(WorkflowRuntimeError, match="harness client"):
+def test_build_workflow_runtime_requires_runner() -> None:
+    with pytest.raises(WorkflowRuntimeError, match="backtest runner"):
         _runtime(
             provider=FakeProvider(_hypothesis_envelope()),
             clock=_clock(),

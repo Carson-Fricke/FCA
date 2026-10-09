@@ -65,9 +65,10 @@ impl mcp::tools::BacktestSubmitter for NativeBacktestSubmitter {
         workspace: Option<&str>,
         job_id: Option<&str>,
     ) -> Result<Value, String> {
-        let configuration = backtest::backtest::job::load_backtest_config_with_job_id(
+        let (configuration, accepted_input) = backtest::backtest::job::load_replay_submission(
             Path::new(config_path),
             job_id,
+            "backtest",
         )
         .map_err(|error| error.to_string())?;
         let job_id = configuration.job_id.clone();
@@ -79,6 +80,7 @@ impl mcp::tools::BacktestSubmitter for NativeBacktestSubmitter {
             started,
         );
         populate_replay_record(&mut record, &configuration);
+        record.accepted_input = accepted_input;
         match self
             .job_store
             .admit(record)
@@ -127,9 +129,12 @@ impl mcp::tools::StudySubmitter for NativeStudySubmitter {
         workspace: Option<&str>,
         job_id: Option<&str>,
     ) -> Result<Value, String> {
-        let configuration =
-            backtest::backtest::job::load_study_config_with_job_id(Path::new(config_path), job_id)
-                .map_err(|error| error.to_string())?;
+        let (configuration, accepted_input) = backtest::backtest::job::load_replay_submission(
+            Path::new(config_path),
+            job_id,
+            "study",
+        )
+        .map_err(|error| error.to_string())?;
         let job_id = configuration.job_id.clone();
         let started = Utc::now();
         let mut record = JobRecord::new(
@@ -139,6 +144,7 @@ impl mcp::tools::StudySubmitter for NativeStudySubmitter {
             started,
         );
         populate_replay_record(&mut record, &configuration);
+        record.accepted_input = accepted_input;
         match self
             .job_store
             .admit(record)
@@ -249,10 +255,6 @@ fn populate_screen_record(record: &mut JobRecord, configuration: &ScreenConfig) 
 
 /// Local program validator that compiles, loads, and constructs without a replay.
 pub struct NativeStudyValidator;
-
-#[cfg(test)]
-#[path = "../tests/unit/local_validation.rs"]
-mod validation_tests;
 
 /// Build the runtime study job document from one authored model document.
 ///

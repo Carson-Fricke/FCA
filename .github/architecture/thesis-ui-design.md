@@ -421,3 +421,16 @@ executor-free terminal nodes.
 - Realtime presence, multi-user collaboration, and notification digests.
 - Any change to backend routes or contracts (this specification consumes;
   it never extends).
+
+
+Research variation and forward cards consume backend-produced accepted evidence,
+with numeric-string parsing only for chart display. Per-parameter return and
+profit-factor plots preserve undefined reasons and failed/missing/untested
+states. Declared joint experiments show paired parameter observations; forward
+cards match development vectors by canonical identity. Export retains the full
+evidence and frozen/launch designs, and job drill-down reads authoritative
+harness receipts and artifact references. Reused holdout designs display their
+adaptive evidence scope. UI fixtures are generated from Python contract records,
+not independently authored financial examples.
+
+Backtest statistics use canonical snake_case fields throughout import and rendering. The UI does not reconstruct aliases or headline financial statistics. Drawdown plot titles use the published maximum and its undefined reason; chart series are visualization only.

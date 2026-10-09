@@ -158,6 +158,8 @@ pub struct JobRecord {
     pub metrics: BTreeMap<String, String>,
     /// Accepted-input fingerprint used for admission conflict detection.
     pub input_digest: String,
+    /// Immutable submitted document retained at admission for provenance validation.
+    pub accepted_input: serde_json::Value,
 }
 
 impl JobRecord {
@@ -185,6 +187,7 @@ impl JobRecord {
             total_bytes: 0,
             metrics: BTreeMap::new(),
             input_digest: input_digest.into(),
+            accepted_input: serde_json::Value::Null,
         }
     }
 }
@@ -447,7 +450,9 @@ impl JobStore for InMemoryJobStore {
         let job_id = path_segment(&record.job_id)?.to_string();
         let mut inner = self.lock();
         if let Some(existing) = inner.jobs.get(&job_id) {
-            if existing.input_digest == record.input_digest {
+            if existing.input_digest == record.input_digest
+                && existing.accepted_input == record.accepted_input
+            {
                 return Ok(Admission::Joined(existing.clone()));
             }
             return Err(StoreError::Conflict(job_id));
@@ -482,6 +487,11 @@ impl JobStore for InMemoryJobStore {
             .ok_or_else(|| StoreError::JobNotFound(job_id.clone()))?;
         if existing.state.is_terminal() {
             return Err(StoreError::Terminal(job_id));
+        }
+        if existing.input_digest != record.input_digest
+            || existing.accepted_input != record.accepted_input
+        {
+            return Err(StoreError::Conflict(job_id));
         }
         for (path, payload) in prepared {
             inner.blobs.insert(path, payload);
@@ -639,7 +649,9 @@ impl JobStore for FileSystemJobStore {
         let _guard = self.lock.lock().unwrap_or_else(|error| error.into_inner());
         fs::create_dir_all(self.jobs_dir()).map_err(io_error)?;
         if let Some(existing) = self.read_job(&job_id)? {
-            if existing.input_digest == record.input_digest {
+            if existing.input_digest == record.input_digest
+                && existing.accepted_input == record.accepted_input
+            {
                 return Ok(Admission::Joined(existing));
             }
             return Err(StoreError::Conflict(job_id));
@@ -665,6 +677,11 @@ impl JobStore for FileSystemJobStore {
             .ok_or_else(|| StoreError::JobNotFound(job_id.clone()))?;
         if existing.state.is_terminal() {
             return Err(StoreError::Terminal(job_id));
+        }
+        if existing.input_digest != record.input_digest
+            || existing.accepted_input != record.accepted_input
+        {
+            return Err(StoreError::Conflict(job_id));
         }
         let directory = self.job_object_dir(&job_id);
         let mut digests: BTreeMap<String, String> = BTreeMap::new();

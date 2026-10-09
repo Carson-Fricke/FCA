@@ -14,7 +14,6 @@ payload either composes exactly here or is rejected with a
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
@@ -24,6 +23,7 @@ from thesis.agent.runtime.schema import (
     validate_arguments,
     violations,
 )
+from thesis.research.evidence import metric_errors
 from thesis.workflows.research_models import PROGRAM_REFERENCE_SCHEMA
 
 from ..errors import WorkflowError
@@ -40,7 +40,6 @@ CANDIDATE_ASSIGNMENT_STATES: tuple[str, ...] = (
 )
 
 #: Text caps mirrored from the candidate evaluation payload schema.
-MAX_BATCH_POINTS = 16
 _MAX_JOB_ID = 256
 _MAX_BATCH_ID = 256
 _MAX_ERROR = 8_192
@@ -58,19 +57,6 @@ def _wire_field(payload: Mapping[str, object], key: str) -> Any:
     return payload.get(key)
 
 
-def _metric_errors(metrics: Mapping[str, object], label: str) -> list[str]:
-    """Collect every metric value that is not a finite number when numeric."""
-    errors: list[str] = []
-    for name, value in metrics.items():
-        if not isinstance(name, str):
-            errors.append(f"{label}: metric names must be strings")
-        elif isinstance(value, bool) or (
-            isinstance(value, (int, float)) and not math.isfinite(value)
-        ):
-            errors.append(f"{label}.{name}: metric values must be finite numbers")
-    return errors
-
-
 def _checked_parameters(parameters: object, label: str) -> dict[str, object]:
     """Validate and copy one parameter mapping."""
     if not isinstance(parameters, Mapping):
@@ -86,7 +72,7 @@ def _checked_metrics(metrics: object, label: str) -> dict[str, object] | None:
         return None
     if not isinstance(metrics, Mapping):
         raise WorkflowError(f"{label} must be an object mapping metric names")
-    errors = _metric_errors(metrics, label)
+    errors = metric_errors(metrics, label)
     if errors:
         raise WorkflowError("; ".join(errors))
     return dict(metrics)
@@ -265,13 +251,11 @@ CANDIDATE_EVALUATION_PAYLOAD_SCHEMA: dict[str, object] = {
         "assignments": {
             "type": "array",
             "minItems": 1,
-            "maxItems": MAX_BATCH_POINTS,
             "items": _ASSIGNMENT_SCHEMA,
         },
         "shortlist": {
             "type": "array",
             "minItems": 1,
-            "maxItems": MAX_BATCH_POINTS,
             "items": _SHORTLIST_ENTRY_SCHEMA,
         },
         "selectionRule": {
@@ -307,72 +291,12 @@ def candidate_evaluation_payload_errors(
             CANDIDATE_EVALUATION_PAYLOAD_SCHEMA, payload, "candidateEvaluation"
         )
     ]
-    strategy = payload.get("strategy")
-    if isinstance(strategy, Mapping) and strategy.get("kind") != "strategy":
-        errors.append("candidateEvaluation.strategy.kind must be 'strategy'")
-    # Each assignment's parameter identity keyed by its jobId.  A malformed
-    # parameter vector maps to None: its error is already reported, so no
-    # shortlist binding is judged against it.
-    assignment_identities: dict[str, str | None] = {}
-    seen_vectors: set[str] = set()
-    assignments = payload.get("assignments")
-    if isinstance(assignments, Sequence) and not isinstance(assignments, (str, bytes)):
-        for index, item in enumerate(assignments):
-            if not isinstance(item, Mapping):
-                continue
-            label = f"candidateEvaluation.assignments[{index}]"
-            vector: str | None = None
-            parameters = item.get("parameters")
-            if isinstance(parameters, Mapping):
-                try:
-                    vector = canonical_parameter_identity(parameters)
-                except WorkflowError as error:
-                    errors.append(f"{label}.parameters: {error}")
-            if vector is not None:
-                if vector in seen_vectors:
-                    errors.append(f"{label} duplicates an earlier parameter assignment")
-                seen_vectors.add(vector)
-            job_id = item.get("jobId")
-            if isinstance(job_id, str):
-                if job_id in assignment_identities:
-                    errors.append(
-                        f"{label}.jobId duplicates an earlier assignment jobId"
-                    )
-                else:
-                    assignment_identities[job_id] = vector
-            metrics = item.get("metrics")
-            if isinstance(metrics, Mapping):
-                errors.extend(_metric_errors(metrics, f"{label}.metrics"))
-    shortlist = payload.get("shortlist")
-    if isinstance(shortlist, Sequence) and not isinstance(shortlist, (str, bytes)):
-        for index, item in enumerate(shortlist):
-            if not isinstance(item, Mapping):
-                continue
-            label = f"candidateEvaluation.shortlist[{index}]"
-            entry_vector: str | None = None
-            parameters = item.get("parameters")
-            if isinstance(parameters, Mapping):
-                try:
-                    entry_vector = canonical_parameter_identity(parameters)
-                except WorkflowError as error:
-                    errors.append(f"{label}.parameters: {error}")
-            job_id = item.get("jobId")
-            if isinstance(job_id, str):
-                if job_id not in assignment_identities:
-                    errors.append(
-                        f"{label}.jobId must be the jobId of a submitted assignment"
-                    )
-                else:
-                    referenced = assignment_identities[job_id]
-                    if (
-                        entry_vector is not None
-                        and referenced is not None
-                        and entry_vector != referenced
-                    ):
-                        errors.append(
-                            f"{label}.parameters must match the parameters of the "
-                            "assignment it references"
-                        )
+    if errors:
+        return errors
+    try:
+        CandidateEvaluation.from_dict(payload)
+    except WorkflowError as error:
+        errors.append(str(error))
     return errors
 
 
@@ -403,20 +327,17 @@ class CandidateEvaluation:
         _text(self.batch_id, "candidate evaluation batchId", max_length=_MAX_BATCH_ID)
         if isinstance(self.assignments, str) or not isinstance(self.assignments, tuple):
             raise WorkflowError("candidate evaluation assignments must be a tuple")
-        if not 1 <= len(self.assignments) <= MAX_BATCH_POINTS:
-            raise WorkflowError(
-                f"candidate evaluation requires 1 to {MAX_BATCH_POINTS} assignments"
-            )
+        if not len(self.assignments):
+            raise WorkflowError("candidate evaluation requires at least one assignment")
         if any(not isinstance(item, CandidateAssignment) for item in self.assignments):
             raise WorkflowError(
                 "candidate evaluation assignments must be CandidateAssignment values"
             )
         if isinstance(self.shortlist, str) or not isinstance(self.shortlist, tuple):
             raise WorkflowError("candidate evaluation shortlist must be a tuple")
-        if not 1 <= len(self.shortlist) <= MAX_BATCH_POINTS:
+        if not len(self.shortlist):
             raise WorkflowError(
-                f"candidate evaluation requires 1 to {MAX_BATCH_POINTS} shortlist "
-                "entries"
+                "candidate evaluation requires at least one shortlist entries"
             )
         if any(
             not isinstance(item, CandidateShortlistEntry) for item in self.shortlist
@@ -480,6 +401,9 @@ class CandidateEvaluation:
         """Rebuild one candidate evaluation from its portable representation."""
         if not isinstance(payload, Mapping):
             raise WorkflowError("candidate evaluation must be an object")
+        misses = validate_arguments(CANDIDATE_EVALUATION_PAYLOAD_SCHEMA, payload)
+        if misses:
+            raise WorkflowError(render_violations(misses))
         strategy = payload.get("strategy")
         if not isinstance(strategy, Mapping):
             raise WorkflowError("candidate evaluation requires a strategy receipt")

@@ -126,6 +126,16 @@ def test_local_restart_two_instances_isolation_and_projection(
     one, two = _document(), _document(body="Other workspace")
     relative = first.save(one, workspace_id="workspace-one")
     assert relative == f"hypotheses/h-shared/{one.content_sha256}.md"
+    obsolete = provider.resolve_path("workspace-one", "hypotheses/h-obsolete.md")
+    obsolete.write_bytes(_document(identity="h-obsolete").to_bytes())
+    assert first.list(workspace_id="workspace-one") == (one.hypothesis_id,)
+    with pytest.raises(HypothesisArtifactError, match="not found"):
+        first.load("h-obsolete", workspace_id="workspace-one")
+    with pytest.raises(HypothesisArtifactError, match="not found"):
+        first.path_for("h-obsolete", workspace_id="workspace-one")
+    assert first.path_for(one.hypothesis_id, workspace_id="workspace-one") == (
+        provider.resolve_path("workspace-one", relative)
+    )
     first.save(two, workspace_id="workspace-two")
     restarted = WorkspaceHypothesisStore(LocalWorkspaceProvider(provider.root))
     assert restarted.load(one.hypothesis_id, workspace_id="workspace-one") == one

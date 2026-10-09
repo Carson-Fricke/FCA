@@ -1,4 +1,4 @@
-"""Committed reference acceptance, immutable execution, and historical replay."""
+"""Committed reference acceptance, immutable execution, and replay."""
 
 from dataclasses import replace
 from pathlib import Path
@@ -7,7 +7,7 @@ from typing import cast
 import pytest
 
 from thesis.agent.runtime.store import PersistenceSubAgentStore
-from thesis.research.models import ResearchModel, ResearchModelError
+from thesis.research.models import ResearchModelError
 from thesis.workflows.registry.hypothesis_development.errors import (
     FalsificationComposeError,
 )
@@ -201,7 +201,7 @@ def test_compiler_only_change_requires_revalidation(
     assert service.validate_completion(WORKSPACE, record, completion) is None
 
 
-def test_reference_rebuild_is_io_free_and_historical_inline_is_replay_only(
+def test_reference_rebuild_is_io_free_and_rejects_inline_models(
     tmp_path: Path,
 ) -> None:
     kit = _kit(tmp_path, payloads=[], results=[])
@@ -222,20 +222,16 @@ def test_reference_rebuild_is_io_free_and_historical_inline_is_replay_only(
     reference_state = rebuild_state(WORKSPACE, request.execution_id, transitions)
     assert reference_state.draft is not None
     assert isinstance(reference_state.draft.model, StudyProgramReference)
-    historical = {**_hypothesis_envelope(), "model": _inline_model()}
-    old_transition = replace(
-        transitions[-1],
-        from_phase="hypothesis_creation",
-        completion={"hypothesis": historical},
+    inline_payload = {**_hypothesis_envelope(), "model": _inline_model()}
+    invalid_transition = replace(
+        transitions[-1], completion={"hypothesis": inline_payload}
     )
-    historical_state = rebuild_state(
-        WORKSPACE, request.execution_id, [replace(old_transition, sequence=1)]
-    )
-    assert historical_state.draft is not None
-    assert isinstance(historical_state.draft.model, ResearchModel)
-    assert historical_state.draft.model.source == str(_inline_model()["source"]).strip()
     with pytest.raises(FalsificationComposeError):
-        _draft_from_contract(historical)
+        rebuild_state(
+            WORKSPACE, request.execution_id, [*transitions[:-1], invalid_transition]
+        )
+    with pytest.raises(FalsificationComposeError):
+        _draft_from_contract(inline_payload)
 
 
 def test_shared_sdk_guidance_is_in_every_authoring_prompt() -> None:

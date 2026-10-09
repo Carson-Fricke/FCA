@@ -1562,18 +1562,22 @@ fn validator_returns_recursive_indicator_requirements_without_extras() {
     use mcp::tools::StudyValidator;
     let source = r#"
 use harness_strategy_sdk::serde_json::Value;
-use harness_strategy_sdk::{export_study_program, Decimal, Indicator, MarketConsumer,
+use harness_strategy_sdk::{export_study_program, Decimal, Indicator, IndicatorSequence, MarketConsumer,
     ObservationContext, StudyProgram, Subscription};
-struct Leaf { last: Option<Decimal> }
-impl Indicator for Leaf { fn value(&self) -> Option<Decimal> { self.last } }
+struct Leaf { last: Option<Decimal>, sequence: IndicatorSequence }
+impl Indicator for Leaf { fn value(&self, _: &str) -> Option<Decimal> { self.last }
+fn sequence(&self) -> &IndicatorSequence { &self.sequence }
+fn sequence_mut(&mut self) -> &mut IndicatorSequence { &mut self.sequence } }
 impl MarketConsumer for Leaf {
     type Context = ObservationContext;
     fn subscriptions(&self) -> Vec<Subscription> {
         vec![Subscription::Trade { symbols: vec!["QQQ".into()] }]
     }
 }
-struct Parent { leaf: Leaf }
-impl Indicator for Parent { fn value(&self) -> Option<Decimal> { self.leaf.value() } }
+struct Parent { leaf: Leaf, sequence: IndicatorSequence }
+impl Indicator for Parent { fn value(&self, symbol: &str) -> Option<Decimal> { self.leaf.value(symbol) }
+fn sequence(&self) -> &IndicatorSequence { &self.sequence }
+fn sequence_mut(&mut self) -> &mut IndicatorSequence { &mut self.sequence } }
 impl MarketConsumer for Parent {
     type Context = ObservationContext;
     fn subscriptions(&self) -> Vec<Subscription> { vec![] }
@@ -1581,7 +1585,7 @@ impl MarketConsumer for Parent {
 }
 struct Study { parent: Parent }
 impl StudyProgram for Study {
-    fn new(_: Value) -> Self { Self { parent: Parent { leaf: Leaf { last: None } } } }
+    fn new(_: Value) -> Self { Self { parent: Parent { leaf: Leaf { last: None, sequence: IndicatorSequence::ticks(60_000_000_000).unwrap() }, sequence: IndicatorSequence::ticks(60_000_000_000).unwrap() } } }
 }
 impl MarketConsumer for Study {
     type Context = ObservationContext;
