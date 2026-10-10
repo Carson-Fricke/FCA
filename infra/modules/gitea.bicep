@@ -1,15 +1,12 @@
 targetScope = 'resourceGroup'
 
-// Open-source Gitea only: no managed forge, database service, or public ingress.
+// Open-source Gitea with internal ingress, Azure Files repositories, and
+// a small managed PostgreSQL database. SQLite on SMB failed write-locking
+// during deployment; do not restore it or disable filesystem locking.
 // /data survives replica replacement in an isolated Standard_LRS Azure Files
 // share. LRS is not a backup or regional disaster recovery; operators must back
-// up the repositories, app.ini, and database together and test restoration.
-// SQLite on SMB depends on network filesystem byte-range locking and is not
-// equivalent to local disk. Use DELETE journaling (not WAL), retain SMB locks,
-// and validate locking/recovery under the intended workload before production.
-// One replica and Single revision mode prevent steady-state scale-out, but ACA
-// can overlap old/new replicas during updates. Stop the old writer before an
-// image/config update; never run a second app or bootstrap writer on this share.
+// up repositories and app.ini alongside PostgreSQL backups and test restoration.
+// One replica bounds forge compute; PostgreSQL owns database concurrency.
 // The operator creates the admin, organization, and scoped API token after
 // startup (admin CLI via container exec, then API from inside the environment).
 // Store the token in Key Vault under thesisGiteaTokenSecretName; this module
@@ -32,6 +29,58 @@ param containerAppsEnvironmentResourceId string
 @description('Official rootful image from docker.io/gitea/gitea (or gitea/gitea) or docker.gitea.com/gitea, followed by @sha256: and 64 lowercase hex characters. Invalid references fail closed on image pull.')
 param giteaImageReference string
 
+@secure()
+@description('PostgreSQL password supplied from Key Vault; never exported.')
+param databasePassword string
+
+resource databaseServer 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
+  name: '${appName}-pg'
+  location: location
+  tags: tags
+  sku: {
+    name: 'Standard_B1ms'
+    tier: 'Burstable'
+  }
+  properties: {
+    version: '16'
+    administratorLogin: 'gitea'
+    administratorLoginPassword: databasePassword
+    storage: {
+      storageSizeGB: 32
+    }
+    backup: {
+      backupRetentionDays: 7
+      geoRedundantBackup: 'Disabled'
+    }
+    highAvailability: {
+      mode: 'Disabled'
+    }
+    network: {
+      publicNetworkAccess: 'Enabled'
+    }
+  }
+}
+
+// ACA consumption egress is dynamic. Permit Azure service egress only;
+// PostgreSQL still requires password authentication and verified TLS.
+resource databaseFirewall 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2024-08-01' = {
+  parent: databaseServer
+  name: 'AzureServices'
+  properties: {
+    startIpAddress: '0.0.0.0'
+    endIpAddress: '0.0.0.0'
+  }
+}
+
+resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-01' = {
+  parent: databaseServer
+  name: 'gitea'
+  properties: {
+    charset: 'UTF8'
+    collation: 'en_US.utf8'
+  }
+}
+
 @description('Azure region inherited from the composition.')
 param location string = resourceGroup().location
 
@@ -40,7 +89,7 @@ param tags object = {}
 
 var shareName = 'gitea-data'
 // App-specific registration names avoid collisions in the shared environment.
-var environmentStorageName = '${appName}-data'
+var environmentStorageName = '${appName}-repos'
 var imageDigest = last(split(giteaImageReference, '@sha256:'))
 var imageValid = (startsWith(giteaImageReference, 'docker.io/gitea/gitea@sha256:') || startsWith(giteaImageReference, 'gitea/gitea@sha256:') || startsWith(giteaImageReference, 'docker.gitea.com/gitea@sha256:')) && length(imageDigest) == 64 && empty(filter(range(0, length(imageDigest)), i => !contains('0123456789abcdef', substring(imageDigest, i, 1))))
 
@@ -105,10 +154,19 @@ resource giteaApp 'Microsoft.App/containerApps@2025-07-01' = {
   name: appName
   location: location
   tags: tags
+  dependsOn: [
+    databaseFirewall
+  ]
   properties: {
     environmentId: environment.id
     configuration: {
       activeRevisionsMode: 'Single'
+      secrets: [
+        {
+          name: 'database-password'
+          value: databasePassword
+        }
+      ]
       ingress: {
         external: false
         allowInsecure: false
@@ -186,15 +244,27 @@ resource giteaApp 'Microsoft.App/containerApps@2025-07-01' = {
             }
             {
               name: 'GITEA__database__DB_TYPE'
-              value: 'sqlite3'
+              value: 'postgres'
             }
             {
-              name: 'GITEA__database__PATH'
-              value: '/data/gitea/gitea.db'
+              name: 'GITEA__database__HOST'
+              value: '${databaseServer.properties.fullyQualifiedDomainName}:5432'
             }
             {
-              name: 'GITEA__database__SQLITE_JOURNAL_MODE'
-              value: 'DELETE'
+              name: 'GITEA__database__NAME'
+              value: database.name
+            }
+            {
+              name: 'GITEA__database__USER'
+              value: 'gitea'
+            }
+            {
+              name: 'GITEA__database__PASSWD'
+              secretRef: 'database-password'
+            }
+            {
+              name: 'GITEA__database__SSL_MODE'
+              value: 'verify-full'
             }
             {
               name: 'GITEA__repository__ROOT'

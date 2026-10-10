@@ -193,6 +193,12 @@ jobs:
       THESIS_SWA_NAME: ${{ vars.THESIS_SWA_NAME }}
       THESIS_WORKSPACE_REGISTRY: ${{ vars.THESIS_WORKSPACE_REGISTRY || '[{"workspaceId":"equity-momentum","ownerId":"local-operator"}]' }}
       THESIS_MAILER_CONNECTION_STRING_SECRET_NAME: ${{ vars.THESIS_MAILER_CONNECTION_STRING_SECRET_NAME }}
+      THESIS_MODEL: ${{ vars.THESIS_MODEL }}
+      THESIS_HARNESS_BEARER_TOKEN_SECRET_NAME: ${{ vars.THESIS_HARNESS_BEARER_TOKEN_SECRET_NAME }}
+      THESIS_MODEL_API_KEY_SECRET_NAME: ${{ vars.THESIS_MODEL_API_KEY_SECRET_NAME }}
+      GITEA_IMAGE_REFERENCE: ${{ vars.GITEA_IMAGE_REFERENCE }}
+      THESIS_GITEA_ORGANIZATION: ${{ vars.THESIS_GITEA_ORGANIZATION }}
+      THESIS_GITEA_TOKEN_SECRET_NAME: ${{ vars.THESIS_GITEA_TOKEN_SECRET_NAME }}
       AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -362,6 +368,17 @@ jobs:
             thesis_swa_configured="true"
           fi
 
+          gitea_database_password=""
+          if [[ -n "$GITEA_IMAGE_REFERENCE" ]]; then
+            vault_name="$(az keyvault list --resource-group "$AZURE_RESOURCE_GROUP" --query '[0].name' --output tsv)"
+            gitea_database_password="$(az keyvault secret show --vault-name "$vault_name" --name thesis-gitea-database-password --query value --output tsv --only-show-errors)"
+            if [[ -z "$gitea_database_password" ]]; then
+              echo "::error::Gitea database password is missing from Key Vault"
+              exit 1
+            fi
+            echo "::add-mask::$gitea_database_password"
+          fi
+
           deployment_parameters=(
             "location=$AZURE_LOCATION"
             "resourceNamePrefix=$RESOURCE_NAME_PREFIX"
@@ -382,6 +399,16 @@ jobs:
             "thesisImageReference=$THESIS_IMAGE_REFERENCE"
             "thesisEnableExternalIngress=$thesis_enable_external_ingress"
             "thesisApiAudience=$THESIS_API_AUDIENCE"
+            "thesisModel=$THESIS_MODEL"
+            "thesisHarnessBearerTokenSecretName=$THESIS_HARNESS_BEARER_TOKEN_SECRET_NAME"
+            "thesisModelApiKeySecretName=$THESIS_MODEL_API_KEY_SECRET_NAME"
+            "enableGitea=$([[ -n "$GITEA_IMAGE_REFERENCE" ]] && echo true || echo false)"
+            "giteaImageReference=$GITEA_IMAGE_REFERENCE"
+            "giteaDatabasePassword=$gitea_database_password"
+            "thesisGiteaOrganization=$THESIS_GITEA_ORGANIZATION"
+            "thesisGiteaTokenSecretName=$THESIS_GITEA_TOKEN_SECRET_NAME"
+            "thesisMinReplicas=1"
+            "thesisMaxReplicas=1"
             "thesisMailerConnectionStringSecretName=${THESIS_MAILER_CONNECTION_STRING_SECRET_NAME:-}"
             "thesisCustomDomain=${THESIS_CUSTOM_DOMAIN}"
             "thesisWorkspaceRegistry=$THESIS_WORKSPACE_REGISTRY"

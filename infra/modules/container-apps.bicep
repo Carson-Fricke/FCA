@@ -232,13 +232,13 @@ var traderSecrets = [
     identity: quantIdentityResourceId
   }
 ]
-var quantApiSecrets = [
+var quantApiSecrets = concat(backtestSecrets, [
   {
     name: 'harness-api-bearer-token'
     keyVaultUrl: '${keyVaultUri}secrets/harness-api-bearer-token'
     identity: quantIdentityResourceId
   }
-]
+])
 // Paper and live Alpaca trading endpoints share one key pair, so the
 // credential mode does not change which Key Vault secrets the traders read.
 var rthTraderSecrets = traderSecrets
@@ -265,7 +265,7 @@ var quantBaseEnvironment = [
     value: killSwitchTableName
   }
 ]
-var quantApiEnvironment = concat(quantBaseEnvironment, [
+var quantApiEnvironment = concat(backtestEnvironment, [
   {
     name: 'HARNESS_API_BEARER_TOKEN'
     secretRef: 'harness-api-bearer-token'

@@ -124,6 +124,7 @@ COPY --from=rust /usr/local/rustup /usr/local/rustup
 RUN chown -R lake:lake /usr/local/cargo
 COPY src/harness/strategy-sdk /opt/rust/sdk/strategy-sdk
 COPY src/harness/num /opt/rust/sdk/num
+COPY src/harness/contracts /opt/rust/sdk/contracts
 # The Rust harness process binaries, served directly on PATH (`harness`, `api`,
 # `backtest-job`, `mcp`, `trader`).
 COPY --from=rust \

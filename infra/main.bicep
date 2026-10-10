@@ -126,10 +126,10 @@ param thesisApiAudience string = ''
 @description('OpenRouter model name injected into the Thesis API as THESIS_MODEL. Empty uses the runtime default (deepseek/deepseek-v4.1-flash).')
 param thesisModel string = ''
 
-@description('Harness MCP endpoint for the Thesis workflow runtime. Empty derives the internal market-lake api endpoint so both apps stay in one Container Apps environment.')
+@description('Harness MCP endpoint for the Thesis workflow runtime. Empty derives the quant API HTTPS ingress endpoint.')
 param thesisHarnessMcpUrl string = ''
 
-@description('Key Vault secret name holding the harness API bearer token (operator-provisioned; the market-lake api app consumes the same secret). Empty disables the Thesis workflow runtime.')
+@description('Key Vault secret name holding the quant API bearer token. Empty disables the Thesis workflow runtime.')
 param thesisHarnessBearerTokenSecretName string = ''
 
 @description('Key Vault secret name holding the OpenRouter API key (operator-provisioned). Empty disables model replies and the Thesis workflow runtime.')
@@ -143,6 +143,10 @@ param enableGitea bool = false
 
 @description('Official rootful Gitea image reference pinned by SHA-256 digest, required when enableGitea is true. Empty, mutable, or non-official references fail closed on image pull.')
 param giteaImageReference string = ''
+
+@secure()
+@description('Gitea PostgreSQL administrator password, resolved from Key Vault by deployment composition.')
+param giteaDatabasePassword string = ''
 
 @description('Existing self-hosted Gitea endpoint injected as THESIS_GITEA_URL when enableGitea is false. When enabled, the hosted endpoint takes precedence. Set organization and token secret name explicitly; all empty keeps local workspaces.')
 param thesisGiteaUrl string = ''
@@ -211,7 +215,7 @@ var cryptoTraderAppName = '${namePrefix}-crypto-trader'
 var backtestJobName = '${namePrefix}-backtest'
 var thesisIdentityName = '${namePrefix}-thesis'
 var thesisApiAppName = '${namePrefix}-thesis-api'
-var giteaAppName = '${shortNamePrefix}-gitea-${take(deterministicSuffix, 6)}'
+var giteaAppName = '${namePrefix}-gitea'
 var giteaStorageAccountName = 'gitea${take(deterministicSuffix, 18)}'
 // Static Web App names are globally unique, so the derived fallback mixes the
 // resource group id through deterministicSuffix instead of relying on the
@@ -296,6 +300,7 @@ module keyVault './modules/key-vault.bicep' = {
 module access './modules/access.bicep' = {
   name: 'market-lake-access'
   params: {
+    enableGitea: enableGitea
     runtimePrincipalId: identities.outputs.runtimeIdentity.principalId
     quantPrincipalId: identities.outputs.quantRuntimeIdentity.principalId
     githubDeployerPrincipalId: identities.outputs.githubDeployerIdentity.principalId
@@ -355,6 +360,7 @@ module gitea './modules/gitea.bicep' = if (enableGitea) {
     storageAccountName: giteaStorageAccountName
     containerAppsEnvironmentResourceId: containerApps.outputs.containerAppsEnvironment.resourceId
     giteaImageReference: giteaImageReference
+    databasePassword: giteaDatabasePassword
     location: location
     tags: tags
   }
@@ -426,7 +432,6 @@ module thesisApi './modules/thesis.bicep' = if (deployThesis) {
   params: {
     thesisApiAppName: thesisApiAppName
     containerAppsEnvironmentResourceId: containerApps.outputs.containerAppsEnvironment.resourceId
-    logAnalyticsWorkspaceResourceId: containerApps.outputs.logAnalyticsWorkspace.resourceId
     thesisImageReference: thesisImageReference
     registryLoginServer: containerRegistry.outputs.registry.loginServer
     keyVaultUri: keyVault.outputs.keyVaultUri
@@ -438,10 +443,10 @@ module thesisApi './modules/thesis.bicep' = if (deployThesis) {
     thesisWorkspaceRegistryTableName: deployThesis ? thesisWorkspaces.outputs.registryTableName : 'workspaces'
     thesisCosmosEndpoint: deployThesis ? thesisCosmos.outputs.endpoint : 'https://not-deployed.invalid'
     thesisCosmosDatabaseName: deployThesis ? thesisCosmos.outputs.databaseName : 'thesis'
-    // The workflow runtime reaches the harness over the environment's internal
-    // DNS, so an empty explicit URL derives the market-lake api endpoint.
+    // MCP is hosted by the quant API. ACA ingress terminates TLS on 443;
+    // container target ports are never part of a service's ingress URL.
     thesisModel: thesisModel
-    harnessMcpUrl: empty(thesisHarnessMcpUrl) ? 'http://${containerApps.outputs.api.fqdn}:${containerApps.outputs.api.port}' : thesisHarnessMcpUrl
+    harnessMcpUrl: empty(thesisHarnessMcpUrl) ? 'https://${containerApps.outputs.quantApi.fqdn}' : thesisHarnessMcpUrl
     harnessBearerTokenSecretName: thesisHarnessBearerTokenSecretName
     modelApiKeySecretName: thesisModelApiKeySecretName
     mailerConnectionStringSecretName: thesisMailerConnectionStringSecretName

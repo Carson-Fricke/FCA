@@ -51,10 +51,6 @@ param thesisApiAppName string
 @minLength(1)
 param containerAppsEnvironmentResourceId string
 
-@description('Resource ID of the existing Log Analytics workspace that receives Thesis diagnostics.')
-@minLength(1)
-param logAnalyticsWorkspaceResourceId string
-
 @description('Immutable digest-pinned private ACR image reference for the Thesis backend image built from Dockerfile.thesis.')
 @minLength(1)
 param thesisImageReference string
@@ -104,7 +100,7 @@ param thesisCosmosDatabaseName string = 'thesis'
 @description('OpenRouter model name injected as THESIS_MODEL. Empty leaves the runtime default (deepseek/deepseek-v4.1-flash).')
 param thesisModel string = ''
 
-@description('Harness MCP endpoint injected as HARNESS_MCP_URL. Empty disables the workflow runtime; the composition derives the internal market-lake api endpoint by default.')
+@description('Quant API HTTPS endpoint injected as HARNESS_MCP_URL. Empty disables the workflow runtime.')
 param harnessMcpUrl string = ''
 
 @description('Name of the operator-provisioned Key Vault secret holding the harness API bearer token, injected as HARNESS_API_BEARER_TOKEN. Empty disables the workflow runtime so the module stays deployable before the secret exists.')
@@ -547,20 +543,8 @@ resource thesisApiApp 'Microsoft.App/containerApps@2025-07-01' = {
   }
 }
 
-resource thesisApiDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
-  name: 'logs-to-workspace'
-  scope: thesisApiApp
-  properties: {
-    logAnalyticsDestinationType: 'Dedicated'
-    logs: [
-      {
-        categoryGroup: 'allLogs'
-        enabled: true
-      }
-    ]
-    workspaceId: logAnalyticsWorkspaceResourceId
-  }
-}
+// Console and system logs are collected once at the managed environment.
+// Container App resources do not support the allLogs category group.
 
 @description('Operations surface of the deployed Thesis API. The digest-pinned image reference is reported so the smoke can verify immutability.')
 output thesisApi object = {

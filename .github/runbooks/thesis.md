@@ -53,12 +53,29 @@ repos. Store it in Key Vault; never paste it into a workspace manifest.
 The organization must permit that service account to create repositories.
 The module exposes only internal HTTPS ingress and disables public signup.
 
-The initial host is single-replica SQLite on Azure Files SMB. Test filesystem
-locking and crash recovery before production. Stop the old replica before
-image/configuration updates to avoid overlapping SQLite writers. Back up and
-restore the repositories, database, and Gitea configuration together; LRS
-storage is not a backup. A move to PostgreSQL or another hosting substrate is
-a separate scalability decision, not an implicit scale-out setting.
+The host uses one forge replica, Azure Files repositories, and a Burstable
+PostgreSQL database with verified TLS. SQLite on SMB failed initial write-locking
+and is removed. Store the database password as `thesis-gitea-database-password`
+in Key Vault; the deployment resolves it into a secure Bicep parameter and an
+ACA secret. PostgreSQL keeps seven days of backups. Back up and restore the
+repositories and Gitea configuration alongside database recovery; LRS storage
+is not a backup.
+
+### Workstation browser access to Azure
+
+Run `az login`, install UI dependencies with `npm ci --prefix src/ui`, then run:
+
+```powershell
+uv run --extra dev python scripts/local/run_remote_ui.py
+```
+
+Open `http://127.0.0.1:5174`. This starts only the UI and its loopback proxy;
+Thesis, harness, market data, and persistence run in Azure. The proxy resolves
+the Thesis endpoint and API bearer through Azure CLI. The Azure account needs
+Container App read and Key Vault secret read permission. The bearer stays in
+the server process and is never embedded in the browser bundle. Thesis requires
+external HTTPS ingress with protected routes rejecting anonymous calls. Public
+multi-user hosting requires the independent Entra/Static Web Apps bootstrap.
 
 `WorkspaceRepositoryProvider.publish()` pushes only existing commits. Artifact
 tools must use the accepted publication coordinator before calling it;

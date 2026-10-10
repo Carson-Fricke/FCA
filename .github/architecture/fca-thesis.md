@@ -358,10 +358,10 @@ files. Checkout conflicts fail explicitly without resetting agent work.
 
 Azure hosting is opt-in through `enableGitea` and an official digest-pinned
 image. The initial host is one internal-ingress Container App and an isolated
-Azure Files share, with SQLite DELETE journaling and one replica. This is a
-single-writer deployment, not an HA architecture: SQLite/SMB locking must be
-validated under production load, rolling updates must not overlap writers,
-and backups must capture the database and repositories together. Admin,
+Azure Files share for repositories, with a Burstable PostgreSQL database over
+verified TLS and one forge replica. SQLite on SMB failed initial write-locking
+and is removed. PostgreSQL retains seven days of backups; repository backups
+must be coordinated with database recovery. Admin,
 organization, and token bootstrap remain operator-managed. Existing artifact
 writers are not all connected to remote commit/publication yet; the provider
 does not imply that every workflow artifact is already durable in Gitea.

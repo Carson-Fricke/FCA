@@ -54,9 +54,9 @@ jobs:
       DEPLOYMENT_ENVIRONMENT: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
       ENABLE_EXTERNAL_API_INGRESS: ${{ vars.ENABLE_EXTERNAL_API_INGRESS }}
       ENABLE_CRYPTO_TRADER: ${{ vars.ENABLE_CRYPTO_TRADER }}
-      # The bounded synthetic backtest configuration ships inside the shared
-      # image (Dockerfile copies config/); it runs the deterministic built-in
-      # fixture without any data directory, network access, or credentials.
+      # The bounded market-lake backtest configuration ships inside the shared
+      # image (Dockerfile copies config/); it reads through the authenticated
+      # lake API and compiles the authored strategy with the packaged SDK.
       BACKTEST_SMOKE_CONFIG: config/harness/backtest.yaml
       BACKTEST_SMOKE_DEADLINE_SECONDS: '600'
       GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}
@@ -418,7 +418,7 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Start bounded synthetic backtest smoke
+      - name: Start bounded market-lake backtest smoke
         shell: bash
         run: |
           set -euo pipefail
@@ -437,14 +437,14 @@ jobs:
             --query name \
             --output tsv)"
           if [[ -z "$execution_name" ]]; then
-            echo "::error::The bounded synthetic backtest execution did not start"
+            echo "::error::The bounded market-lake backtest execution did not start"
             exit 1
           fi
 
           execution_status="Running"
           while [[ "$execution_status" != "Succeeded" && "$execution_status" != "Failed" ]]; do
             if (( SECONDS >= BACKTEST_SMOKE_DEADLINE_SECONDS )); then
-              echo "::error::The bounded synthetic backtest execution $execution_name did not finish before the ${BACKTEST_SMOKE_DEADLINE_SECONDS}-second smoke deadline"
+              echo "::error::The bounded market-lake backtest execution $execution_name did not finish before the ${BACKTEST_SMOKE_DEADLINE_SECONDS}-second smoke deadline"
               exit 1
             fi
             sleep 10
@@ -459,13 +459,13 @@ jobs:
           done
 
           if [[ "$execution_status" != "Succeeded" ]]; then
-            echo "::error::The bounded synthetic backtest execution $execution_name finished as $execution_status"
+            echo "::error::The bounded market-lake backtest execution $execution_name finished as $execution_status"
             exit 1
           fi
 
           {
             echo "### Backtest job smoke"
-            echo "- Execution \\`$execution_name\\` succeeded with the bounded synthetic configuration \\`$BACKTEST_SMOKE_CONFIG\\`"
+            echo "- Execution \\`$execution_name\\` succeeded with the bounded market-lake configuration \\`$BACKTEST_SMOKE_CONFIG\\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report trader revision health

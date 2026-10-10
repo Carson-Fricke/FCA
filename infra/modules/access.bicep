@@ -1,5 +1,8 @@
 targetScope = 'resourceGroup'
 
+@description('Allow the deployer to read only the secure Gitea database deployment input.')
+param enableGitea bool = false
+
 @description('Object/principal ID of the runtime user-assigned managed identity.')
 @minLength(36)
 @maxLength(36)
@@ -59,6 +62,21 @@ resource storageTableDataContributorRole 'Microsoft.Authorization/roleDefinition
 resource keyVaultSecretsUserRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' existing = {
   scope: subscription()
   name: '4633458b-17de-408a-b874-0445c86b69e6'
+}
+
+resource giteaDatabasePassword 'Microsoft.KeyVault/vaults/secrets@2026-02-01' existing = {
+  parent: keyVault
+  name: 'thesis-gitea-database-password'
+}
+
+resource giteaDatabasePasswordReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableGitea) {
+  name: guid(giteaDatabasePassword.id, githubDeployerPrincipalId, keyVaultSecretsUserRole.id)
+  scope: giteaDatabasePassword
+  properties: {
+    principalId: githubDeployerPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: keyVaultSecretsUserRole.id
+  }
 }
 
 resource contributorRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' existing = {

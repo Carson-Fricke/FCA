@@ -709,8 +709,18 @@ other artifact writer is not implied by this boundary.
 
 `infra/modules/gitea.bicep` optionally hosts open-source Gitea on internal
 Container Apps ingress with persistent Azure Files storage. It uses one replica
-with SQLite, not a highly available forge cluster. The Thesis image includes
+with a Burstable PostgreSQL database and verified TLS. SQLite on SMB failed
+deployment write-locking and is removed. The Thesis image includes
 native Git; only Thesis receives the forge credential through Key Vault.
+
+Remote deployment resolves model, harness, and forge credentials through Key
+Vault. Thesis calls the quant API HTTPS ingress for MCP; the quant API receives
+the lake endpoint and bearer. Environment diagnostics collect logs for all
+apps. Thesis runs one always-on replica because scheduling is process-local.
+`scripts/local/run_remote_ui.py` starts the existing loopback Vite proxy against
+Azure, resolving the API bearer through Azure CLI without putting it in the
+browser bundle. It requires Azure login and Key Vault secret read permission.
+Public multi-user UI hosting still requires the separate Entra bootstrap.
 
 ## Shared Foundation
 
