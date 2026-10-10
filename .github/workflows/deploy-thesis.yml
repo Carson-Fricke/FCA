@@ -474,6 +474,10 @@ jobs:
       THESIS_IMAGE_REFERENCE: ${{ needs.build-thesis-image.outputs.image-reference }}
       THESIS_IMAGE_DIGEST: ${{ needs.build-thesis-image.outputs.image-digest }}
       EXPECT_THESIS_SERVING: ${{ inputs.expect-thesis-serving || 'false' }}
+      THESIS_HARNESS_BEARER_TOKEN_SECRET_NAME: ${{ vars.THESIS_HARNESS_BEARER_TOKEN_SECRET_NAME }}
+      THESIS_MODEL_API_KEY_SECRET_NAME: ${{ vars.THESIS_MODEL_API_KEY_SECRET_NAME }}
+      THESIS_GITEA_TOKEN_SECRET_NAME: ${{ vars.THESIS_GITEA_TOKEN_SECRET_NAME }}
+      THESIS_MAILER_CONNECTION_STRING_SECRET_NAME: ${{ vars.THESIS_MAILER_CONNECTION_STRING_SECRET_NAME }}
       THESIS_ENABLE_EXTERNAL_INGRESS: ${{ vars.THESIS_ENABLE_EXTERNAL_INGRESS }}
       THESIS_CUSTOM_DOMAIN: ${{ vars.THESIS_CUSTOM_DOMAIN }}
       THESIS_CHECK_CUSTOM_DOMAIN: ${{ vars.THESIS_CHECK_CUSTOM_DOMAIN }}
@@ -587,18 +591,24 @@ jobs:
             exit 1
           fi
 
-          # Secrets must all be Key Vault references: a value-bearing secret
-          # would mean a provider or model secret was committed to the
-          # deployment, which this contract forbids.
+          # Require exactly the configured Key Vault references, including
+          # enabled harness, model, forge, and mailer credentials. Inline
+          # values are never permitted on the Thesis app.
           secrets_json="$(az containerapp show \
             --name "$thesis_api_app_name" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --query properties.configuration.secrets \
             --output json)"
-          if ! jq --exit-status \
-            'length == 1 and .[0].name == "thesis-api-bearer-token" and (.[0] | has("value") | not)' \
+          expected_secrets="$(jq --null-input --compact-output \
+            --arg harness "$THESIS_HARNESS_BEARER_TOKEN_SECRET_NAME" \
+            --arg model "$THESIS_MODEL_API_KEY_SECRET_NAME" \
+            --arg forge "$THESIS_GITEA_TOKEN_SECRET_NAME" \
+            --arg mailer "$THESIS_MAILER_CONNECTION_STRING_SECRET_NAME" \
+            '["thesis-api-bearer-token", $harness, $model, $forge, $mailer] | map(select(length > 0)) | unique')"
+          if ! jq --exit-status --argjson expected "$expected_secrets" \
+            '([.[].name] | sort) == $expected and all(.[]; (has("value") | not) and (.keyVaultUrl | type == "string" and startswith("https://")) and (.identity | type == "string" and length > 0))' \
             <<<"$secrets_json" >/dev/null; then
-            echo "::error::The Thesis API must expose exactly the thesis-api-bearer-token Key Vault secretRef and no plain values"
+            echo "::error::The Thesis API must expose exactly its configured Key Vault references and no inline secret values"
             exit 1
           fi
 
