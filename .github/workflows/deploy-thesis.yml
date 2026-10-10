@@ -612,9 +612,10 @@ jobs:
             exit 1
           fi
 
-          storage_account="$(az storage account list \
+          storage_account="$(az containerapp show \
+            --name "$thesis_api_app_name" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --query "[?tags.product=='thesis' && tags.environment=='${DEPLOYMENT_ENVIRONMENT}'].name | [0]" \
+            --query "properties.template.containers[?name=='thesis-api'] | [0].env[?name=='THESIS_STORAGE_ACCOUNT_NAME'].value | [0]" \
             --output tsv)"
           if [[ -z "$storage_account" ]]; then
             echo "::error::The Thesis workspace storage account is missing"
