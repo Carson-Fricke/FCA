@@ -309,8 +309,9 @@ published client until its consumers migrate.
   The hosted lake container has 2 CPUs and 4 GiB memory for full-session SIP
   ingestion and atomic Parquet staging. The former 512 MiB deployment was
   killed with exit 137 during the live MSFT quote ensure smoke.
-  The bounded backtest job also has 2 CPUs and 4 GiB: its former 1 GiB
-  allocation was killed with exit 137 before a result was produced.
+  The bounded backtest job has 4 CPUs and 8 GiB: the three-session SIP quote
+  replay exceeds 7.5 GiB during data loading. Both 1 GiB and 4 GiB allocations
+  were killed with exit 137. Compilation itself stayed below 512 MiB.
 * **Screener migration (bars and route-only reads).** `lake-contracts` added
   `DataType::Bars` with the `interval=1min|1d` partition dimension and the
   bars Arrow schemas; `lake-providers` fetches provider bars and
