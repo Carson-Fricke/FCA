@@ -18,8 +18,8 @@ issues, or task evidence.
    `infra/main.bicep`, and verifies that the lake API, ingest job, quant API,
    RTH trader, optional crypto trader, and backtest job all reference the same
    mirrored ACR digest. The quant runtime shares the lake image; there is no
-   separate quant image to publish. The quant API runs `harness api`, traders
-   run `harness trader`, and the backtest job runs `backtest-job` from that
+   separate quant image to publish. The quant API runs `api`, traders
+   run `trader`, and the backtest job runs `backtest-job` from that
    one image.
 3. `quant-smoke` calls `.github/workflows/quant-smoke.yml` with the published
    digest and validates the deployed quant runtime without introducing any
@@ -37,13 +37,14 @@ environment selected by the `DEPLOYMENT_ENVIRONMENT` repository variable.
 | Ingress posture | Quant API ingress `external` matches `ENABLE_EXTERNAL_API_INGRESS`, `allowInsecure` is `false`, and the FQDN exists | Yes |
 | Kill-switch storage | The `killswitch` table and the `harness-results` and `harness-state` blob containers exist on the tagged runtime storage account | Yes |
 | Quant API health | Public ingress: `/health` returns `status: ok` and `/v1/auth/check` rejects anonymous access with 401. Private ingress: the app is scaled to one replica, passes all three `/health` probes, and is restored to zero minimum replicas through an exit trap | Yes |
-| Backtest job | `az containerapp job start` launches the in-image bounded synthetic configuration `config/harness/backtest.yaml` and the execution reaches `Succeeded` before the deadline | Yes |
+| Backtest job | `az containerapp job start` launches the in-image bounded market-lake configuration `config/harness/backtest.yaml` and the execution reaches `Succeeded` before the deadline | Yes |
 | Trader revision health | RTH trader and optional crypto trader revisions are reported as `healthy`, `dormant` (zero minimum replicas), or `degraded` | No |
 
 The backtest smoke is bounded and non-destructive: `config/harness/backtest.yaml`
-runs the deterministic synthetic benchmark fixture inside the container with
-no data directory, no network access, and no credentials, writing artifacts
-only to the container filesystem. The smoke polls that one execution with a
+runs the authored strategy against market data through the authenticated lake
+API, writing artifacts to the container filesystem. It requires the SDK and
+its sibling path dependencies in the runtime image, a reachable lake endpoint,
+and the lake bearer supplied through a Key Vault reference. The smoke polls that one execution with a
 deadline (`BACKTEST_SMOKE_DEADLINE_SECONDS`, default 600) and never reads its
 logs for secret material.
 
@@ -117,7 +118,7 @@ gh run watch <run-id> --repo Carson-Fricke/FCA
   `master`-only deployment branch policy is active.
 - The smoke is safe to rerun: it is read-only except for the temporary
   one-replica quant API probe (restored through an exit trap) and the bounded
-  synthetic backtest execution.
+  market-lake backtest execution.
 
 ## Recovery
 

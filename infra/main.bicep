@@ -215,7 +215,7 @@ var cryptoTraderAppName = '${namePrefix}-crypto-trader'
 var backtestJobName = '${namePrefix}-backtest'
 var thesisIdentityName = '${namePrefix}-thesis'
 var thesisApiAppName = '${namePrefix}-thesis-api'
-var giteaAppName = '${namePrefix}-gitea'
+var giteaAppName = '${shortNamePrefix}-gitea'
 var giteaStorageAccountName = 'gitea${take(deterministicSuffix, 18)}'
 // Static Web App names are globally unique, so the derived fallback mixes the
 // resource group id through deterministicSuffix instead of relying on the
