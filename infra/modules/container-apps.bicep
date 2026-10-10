@@ -859,8 +859,10 @@ resource backtestJob 'Microsoft.App/jobs@2025-07-01' = {
           ]
           env: backtestEnvironment
           resources: {
-            cpu: json('0.5')
-            memory: '1Gi'
+            // Runtime Rust compilation and full-session market-data reads
+            // exceed the former 1 GiB smoke-job limit.
+            cpu: json('2.0')
+            memory: '4Gi'
           }
         }
       ]
