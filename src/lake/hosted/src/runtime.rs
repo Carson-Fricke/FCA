@@ -148,9 +148,9 @@ impl HostedRuntime {
             ));
         };
         let settings = LakeSettings::load(None, environ)?;
-        // The Rust identity chain reads AZURE_CLIENT_ID from the environment
-        // natively, so the Python managed-identity-client-id argument maps to
-        // the default credential chain without extra wiring.
+        // ACA startup selects the configured client_id in IDENTITY_ENDPOINT.
+        // The pinned 0.21 App Service credential otherwise requests only the
+        // system-assigned identity; AZURE_CLIENT_ID alone is insufficient.
         let credential: Arc<dyn azure_core::auth::TokenCredential> =
             Arc::new(azure_identity::DefaultAzureCredentialBuilder::new().build()?);
         let blob_url = format!("https://{account}.blob.core.windows.net");

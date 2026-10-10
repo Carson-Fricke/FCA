@@ -301,6 +301,11 @@ published client until its consumers migrate.
   in Azure. Local API commands continue to compose `lake-local` explicitly.
   CLI composition behavior is verified in
   `src/lake/cli/tests/api_composition.rs` and by the deployed backtest smoke.
+  ACA startup selects the configured user-assigned identity by adding
+  `client_id` to the platform identity endpoint before executing the native
+  API. The pinned Rust identity SDK otherwise requests a system identity;
+  direct live token probes verified HTTP 400 without selection and HTTP 200
+  with selection. The platform identity header remains in process memory.
 * **Screener migration (bars and route-only reads).** `lake-contracts` added
   `DataType::Bars` with the `interval=1min|1d` partition dimension and the
   bars Arrow schemas; `lake-providers` fetches provider bars and

@@ -424,9 +424,16 @@ resource apiApp 'Microsoft.App/containerApps@2025-07-01' = {
         {
           name: apiContainerName
           image: sharedImageReference
-          // Docker ENTRYPOINT remains "lake"; args replace only CMD ["--help"].
+          // azure_identity 0.21 selects only the system identity by default.
+          // ACA requires client_id for this user-assigned runtime identity.
+          // Preserve the platform endpoint/header; select the identity in
+          // the child process endpoint before the native API starts.
+          command: [
+            '/bin/sh'
+            '-c'
+          ]
           args: [
-            'api'
+            'export IDENTITY_ENDPOINT="$IDENTITY_ENDPOINT?client_id=$AZURE_CLIENT_ID"; exec lake api'
           ]
           env: apiEnvironment
           resources: {
