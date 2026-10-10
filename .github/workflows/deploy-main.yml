@@ -25,6 +25,7 @@ concurrency:
   # nested resource deployments (e.g. market-lake-storage -> DeploymentActive).
   group: fca-deployment-${{ github.ref }}
   cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read

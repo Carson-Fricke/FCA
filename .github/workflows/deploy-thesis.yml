@@ -52,6 +52,7 @@ concurrency:
   # nested resource deployments.
   group: fca-deployment-${{ github.ref }}
   cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read

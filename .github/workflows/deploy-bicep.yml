@@ -35,6 +35,7 @@ concurrency:
   # infra/main.bicep overlap for the same ref.
   group: fca-deployment-${{ github.ref }}
   cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read
