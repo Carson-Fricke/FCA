@@ -2201,6 +2201,7 @@ dependencies = [
  "lake-configuration",
  "lake-contracts",
  "lake-coverage",
+ "lake-hosted",
  "lake-http",
  "lake-ingestion",
  "lake-local",
@@ -2208,6 +2209,7 @@ dependencies = [
  "lake-storage",
  "serde_json",
  "tokio",
+ "tower",
 ]
 
 [[package]]

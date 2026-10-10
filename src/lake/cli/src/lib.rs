@@ -18,13 +18,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::Router;
 use clap::{Parser, Subcommand};
-use lake_catalog::{
-    MemoryCatalogRepository, MemoryContractRepository, MemoryDailyFrontSetRepository,
-    MemoryJobRepository,
-};
-use lake_configuration::{ConfigError, LakeSettings, UniverseSettings};
+use lake_configuration::{LakeSettings, UniverseSettings};
 use lake_contracts::{Date, DateTime};
-use lake_http::{create_app, ApiClock, LakeApiConfig, LakeApiState};
+use lake_hosted::{api::create_api_router, HostedEnsureError};
+use lake_http::ApiClock;
 use lake_local::{create_local_app, run_local_ingest, LocalIngestOptions, LocalLayout};
 
 /// The TCP port both `api` commands bind when `--port` is absent.
@@ -90,48 +87,12 @@ pub fn execute(argv: &[String], environ: &BTreeMap<String, String>) -> CliOutcom
     }
 }
 
-/// Build the in-memory top-level API router.
+/// Build the published API with Azure storage when configured.
 ///
-/// The Azure-hosted composition is a later phase: this router carries the
-/// in-memory catalog, job, contract, and front-set repositories with no URL
-/// issuer, ensure launcher, or ensure callback. The bearer token comes from
-/// `LAKE_API__BEARER_TOKEN`; without it every protected route fails closed.
-pub fn build_api_router(environ: &BTreeMap<String, String>) -> Result<Router, ConfigError> {
-    let settings = LakeSettings::load(None, environ)?;
-    let deadline = f64::from(settings.api.ensure_wait_deadline_seconds);
-    let bearer_token = environment_value(environ, BEARER_TOKEN_ENV)
-        .filter(|token| !token.trim().is_empty())
-        .or_else(|| {
-            settings
-                .api
-                .bearer_token
-                .clone()
-                .filter(|token| !token.trim().is_empty())
-        });
-    let state = Arc::new(LakeApiState {
-        catalog: Arc::new(MemoryCatalogRepository::new()),
-        jobs: Arc::new(MemoryJobRepository::new()),
-        listings: None,
-        contracts: Some(Arc::new(MemoryContractRepository::new())),
-        front_sets: Some(Arc::new(MemoryDailyFrontSetRepository::new())),
-        sas_issuer: None,
-        read_store: None,
-        ensure_launcher: None,
-        ensure_callback: None,
-        bounded_query: None,
-        authorized_force_override: false,
-        entra: None,
-        ensure_wait_deadline_seconds: deadline,
-        bearer_token,
-        now: Arc::new(system_now),
-    });
-    Ok(create_app(
-        state,
-        LakeApiConfig {
-            bearer_token: None,
-            ensure_wait_deadline_seconds: deadline,
-        },
-    ))
+/// Hosted composition owns durable catalog/jobs, authenticated reads, and
+/// real ingestion. The CLI never constructs an independent in-memory router.
+pub fn build_api_router(environ: &BTreeMap<String, String>) -> Result<Router, HostedEnsureError> {
+    create_api_router(environ, Arc::new(system_now))
 }
 
 /// The command tree published by the binary.

@@ -293,6 +293,14 @@ published client until its consumers migrate.
   and `src/lake/target/{release,debug}` discovery. The Dockerfile compiles
   the binary in a `lake` stage and ships it under `/opt/rust/bin`; CI gates
   the workspace in the `lake-rust` job.
+* **Published hosted API composition.** The `lake api` CLI delegates to
+  `lake-hosted::api::create_api_router`. With `LAKE_STORAGE_ACCOUNT_NAME`
+  configured, the process uses the Azure catalog, durable ensure jobs, SAS
+  reads, and real ingestion. The former independent in-memory CLI router was
+  removed; it incorrectly acknowledged ensure work without storing coverage
+  in Azure. Local API commands continue to compose `lake-local` explicitly.
+  CLI composition behavior is verified in
+  `src/lake/cli/tests/api_composition.rs` and by the deployed backtest smoke.
 * **Screener migration (bars and route-only reads).** `lake-contracts` added
   `DataType::Bars` with the `interval=1min|1d` partition dimension and the
   bars Arrow schemas; `lake-providers` fetches provider bars and
