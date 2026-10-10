@@ -306,6 +306,9 @@ published client until its consumers migrate.
   API. The pinned Rust identity SDK otherwise requests a system identity;
   direct live token probes verified HTTP 400 without selection and HTTP 200
   with selection. The platform identity header remains in process memory.
+  The hosted lake container has 2 CPUs and 4 GiB memory for full-session SIP
+  ingestion and atomic Parquet staging. The former 512 MiB deployment was
+  killed with exit 137 during the live MSFT quote ensure smoke.
 * **Screener migration (bars and route-only reads).** `lake-contracts` added
   `DataType::Bars` with the `interval=1min|1d` partition dimension and the
   bars Arrow schemas; `lake-providers` fetches provider bars and

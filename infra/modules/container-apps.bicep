@@ -437,8 +437,10 @@ resource apiApp 'Microsoft.App/containerApps@2025-07-01' = {
           ]
           env: apiEnvironment
           resources: {
-            cpu: json('0.25')
-            memory: '0.5Gi'
+            // Hosted ensure materializes a complete SIP session before its
+            // atomic Parquet commit; 512 MiB was killed during MSFT ingest.
+            cpu: json('2.0')
+            memory: '4Gi'
           }
           probes: [
             {
