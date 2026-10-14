@@ -21,6 +21,9 @@ pub struct CoverageEntry {
     /// Data type, when the route reports it.
     #[serde(default)]
     pub data_type: Option<String>,
+    /// Persisted row count, when coverage has a partition.
+    #[serde(default)]
+    pub row_count: Option<u64>,
     /// Failure detail when the status is `error`.
     #[serde(default)]
     pub error_message: Option<String>,

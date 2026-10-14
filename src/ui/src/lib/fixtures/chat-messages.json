@@ -23,9 +23,9 @@
 				"tool_result": null,
 				"kind": "message",
 				"data": null,
-				"investigation_ids": [],
 				"input_position": 0,
-				"content_hash": "cd69132b0134b3fd90326ce323e3f423b8cec20bb970ef4d38b8dca5a609669e"
+				"content_hash": "cd69132b0134b3fd90326ce323e3f423b8cec20bb970ef4d38b8dca5a609669e",
+				"references": {}
 			},
 			{
 				"message_id": "msg-2",
@@ -49,9 +49,9 @@
 				"tool_result": null,
 				"kind": "message",
 				"data": null,
-				"investigation_ids": [],
 				"input_position": 0,
-				"content_hash": "9cf62fe4450b5436a0d327a9e5b42846eca174cb8e05b163d7fc555f13ccfb60"
+				"content_hash": "9cf62fe4450b5436a0d327a9e5b42846eca174cb8e05b163d7fc555f13ccfb60",
+				"references": {}
 			},
 			{
 				"message_id": "msg-3",
@@ -75,9 +75,9 @@
 				"tool_result": null,
 				"kind": "message",
 				"data": null,
-				"investigation_ids": [],
 				"input_position": 0,
-				"content_hash": "8a0c3a282029d3507010c68299c548bc1f6b47513da3fc1285087afca8c64c27"
+				"content_hash": "8a0c3a282029d3507010c68299c548bc1f6b47513da3fc1285087afca8c64c27",
+				"references": {}
 			},
 			{
 				"message_id": "msg-4",
@@ -101,9 +101,9 @@
 				"tool_result": null,
 				"kind": "message",
 				"data": null,
-				"investigation_ids": [],
 				"input_position": 0,
-				"content_hash": "ac7d4c92f9bd54190dc889c44294de256c3c588adf4ca71666071272fc0fa964"
+				"content_hash": "ac7d4c92f9bd54190dc889c44294de256c3c588adf4ca71666071272fc0fa964",
+				"references": {}
 			}
 		]
 	},
@@ -133,9 +133,9 @@
 				"tool_result": null,
 				"kind": "message",
 				"data": null,
-				"investigation_ids": [],
 				"input_position": 0,
-				"content_hash": "baf62c9e532e865784d275ff3ff19a825d277b49652d62014e3d22f8ec7b23e7"
+				"content_hash": "baf62c9e532e865784d275ff3ff19a825d277b49652d62014e3d22f8ec7b23e7",
+				"references": {}
 			},
 			{
 				"message_id": "msg-i2",
@@ -159,9 +159,9 @@
 				"tool_result": null,
 				"kind": "message",
 				"data": null,
-				"investigation_ids": [],
 				"input_position": 0,
-				"content_hash": "8a17f05d0712817b3bc3e0b1326a1d7eb9934ff9415de72f7d28f0158da40a23"
+				"content_hash": "8a17f05d0712817b3bc3e0b1326a1d7eb9934ff9415de72f7d28f0158da40a23",
+				"references": {}
 			}
 		]
 	},
@@ -189,9 +189,9 @@
 				"tool_result": null,
 				"kind": "message",
 				"data": null,
-				"investigation_ids": [],
 				"input_position": 0,
-				"content_hash": "c845f1054b4796b28d56709342369ce50697ab241dc495b9085fab47826d2aae"
+				"content_hash": "c845f1054b4796b28d56709342369ce50697ab241dc495b9085fab47826d2aae",
+				"references": {}
 			},
 			{
 				"message_id": "msg-b2",
@@ -215,9 +215,9 @@
 				"tool_result": null,
 				"kind": "message",
 				"data": null,
-				"investigation_ids": [],
 				"input_position": 0,
-				"content_hash": "c034d27db04fb7ccc1496ef562d93247d999c85d084ad6e55a38fe85e23f00b9"
+				"content_hash": "c034d27db04fb7ccc1496ef562d93247d999c85d084ad6e55a38fe85e23f00b9",
+				"references": {}
 			}
 		]
 	}

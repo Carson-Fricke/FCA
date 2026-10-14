@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,14 +12,16 @@ from typing import Any, cast
 import pytest
 from tests.thesis.knowledge.test_service import Repositories, hits, write_page
 
-from thesis.agent.harness_tools import HarnessToolProvider
-from thesis.agent.runtime.context import ToolContext
-from thesis.agent.runtime.conversation import Conversations
-from thesis.agent.runtime.knowledge_tools import knowledge_registered_tools
-from thesis.agent.runtime.session import SessionToolRegistry
-from thesis.chat import ChatService
-from thesis.chat.contracts import ChatThread, SubAgentRecord, WorkflowExecution
-from thesis.http import serving
+from thesis.extensions.tools.knowledge import knowledge_registered_tools
+from thesis.extensions.workflows.hypothesis_development import (
+    build_hypothesis_development_workflow,
+)
+from thesis.extensions.workflows.hypothesis_development.endpoint import (
+    HypothesisExtension,
+)
+from thesis.extensions.workflows.hypothesis_development.session_services import (
+    HypothesisSessionServices,
+)
 from thesis.knowledge.index import (
     KnowledgeIndexError,
     PageRecord,
@@ -35,12 +38,15 @@ from thesis.knowledge.metadata import (
 )
 from thesis.knowledge.search import HashingEmbedder
 from thesis.knowledge.service import KnowledgeCollectionError, KnowledgeService
-from thesis.providers.openrouter import OpenRouterProfile, OpenRouterProvider
-from thesis.workflows.core.workflow import Workflow
-from thesis.workflows.registry.hypothesis_development.session_services import (
-    HypothesisSessionServices,
-)
 from thesis.workspaces.repository import WorkspaceRepositoryProvider
+from thesis_runtime.contracts.context import ToolContext
+from thesis_runtime.contracts.records import (
+    ChatThread,
+    SubAgentRecord,
+    WorkflowExecution,
+)
+from thesis_runtime.conversations import ChatService
+from thesis_runtime.tools.registry import SessionToolRegistry
 
 
 def _metadata(*, collections: tuple[str, ...] = ()) -> PageMetadata:
@@ -250,14 +256,18 @@ def test_tool_dispatch_honors_collections(environment) -> None:
     )
 
     registry = SessionToolRegistry(tools)
-    result = registry.dispatch("search_knowledge", {"query": "momentum"})
+    result = registry.dispatch(
+        "search_knowledge", {"query": "momentum"}, context=context
+    )
     assert result.ok
     assert {hit["page_id"] for hit in hits(dict(result.structured))} == {
         "origin",
         "target",
     }
     rejected = registry.dispatch(
-        "search_knowledge", {"query": "momentum", "collections": ["model-cards"]}
+        "search_knowledge",
+        {"query": "momentum", "collections": ["model-cards"]},
+        context=context,
     )
     assert not rejected.ok
     assert rejected.failure is not None
@@ -266,27 +276,20 @@ def test_tool_dispatch_honors_collections(environment) -> None:
         hit["page_id"]: hit["reference"]
         for hit in hits(service.search("alpha", "momentum", scope="shared"))
     }
-    excluded = registry.dispatch("read_knowledge", {"reference": references["outside"]})
+    excluded = registry.dispatch(
+        "read_knowledge", {"reference": references["outside"]}, context=context
+    )
     assert not excluded.ok
     assert excluded.failure is not None
     assert "allowed collections" in cast(str, excluded.failure["message"])
-    assert registry.dispatch("read_knowledge", {"reference": references["origin"]}).ok
+    assert registry.dispatch(
+        "read_knowledge", {"reference": references["origin"]}, context=context
+    ).ok
 
 
-class _Key:
-    def key(self) -> str:
-        return "test-key"
-
-
-class _Transport:
-    def post(self, *args: object, **kwargs: object) -> tuple[int, str]:
-        raise AssertionError("no model calls during composition")
-
-
-def _serving_registry(
+def _phase_registry(
     tmp_path: Path,
-    monkeypatch: Any,
-    spec: object,
+    spec: SimpleNamespace,
 ) -> tuple[ChatService, Any]:
     repositories = Repositories(tmp_path / "workspaces")
     shared = tmp_path / "shared"
@@ -307,31 +310,6 @@ def _serving_registry(
     knowledge = KnowledgeService(
         cast(WorkspaceRepositoryProvider, repositories), shared
     )
-    captured: dict[str, Any] = {}
-
-    def conversations(**kwargs: Any) -> Conversations:
-        captured["registry"] = kwargs["registry_factory"]
-        return Conversations(**kwargs)
-
-    monkeypatch.setattr(serving, "Conversations", conversations)
-
-    class Runtime:
-        def bind_session_services(self, **kwargs: Any) -> HypothesisSessionServices:
-            return HypothesisSessionServices(
-                **kwargs,
-                harness_tools=None,
-                workflow=lambda: Workflow(cast(Any, spec)),
-            )
-
-    runtime = Runtime()
-    monkeypatch.setattr(
-        serving, "build_serving_workflow_runtime", lambda *args, **kwargs: runtime
-    )
-    monkeypatch.setattr(
-        serving,
-        "RuntimeWorkflowLauncher",
-        lambda *args, **kwargs: SimpleNamespace(workflows=None),
-    )
     chat = ChatService()
     chat.persistence.save(
         ChatThread(
@@ -341,6 +319,9 @@ def _serving_registry(
             chat_id="chat",
             title="Knowledge",
             owner_actor_id="actor",
+            conversation_id="chat",
+            root_conversation_id="chat",
+            parent_conversation_id=None,
         )
     )
     chat.persistence.save(
@@ -354,7 +335,10 @@ def _serving_registry(
             workflow_id="hypothesis-development",
             workflow_version="1.0.0",
             requested_by="actor",
-            phase="trials",
+            active_phases=("trials",),
+            conversation_id="chat",
+            root_conversation_id="chat",
+            parent_conversation_id=None,
         )
     )
     chat.persistence.save(
@@ -369,6 +353,9 @@ def _serving_registry(
             phase="critique",
             phase_executor=True,
             phase_attempt_id="execution:critique:0",
+            conversation_id="phase-node",
+            root_conversation_id="chat",
+            parent_conversation_id="chat",
         )
     )
     chat.persistence.save(
@@ -385,23 +372,46 @@ def _serving_registry(
             phase="critique",
             phase_executor=False,
             allowed_tools=("search_knowledge", "read_knowledge"),
+            conversation_id="helper",
+            root_conversation_id="chat",
+            parent_conversation_id=("phase-node") or "chat",
         )
     )
-    serving.build_serving_stack(
-        chat_service=chat,
-        model_provider=OpenRouterProvider(
-            OpenRouterProfile(profile_id="test", model="test"),
-            _Key(),
-            _Transport(),
+    from thesis.extensions.tools.registry import build_session_registry
+    from thesis_runtime.subagents.store import PersistenceSubAgentStore
+
+    # Exercise real workflow policy and tool dispatch directly. The former
+    # serving stub replaced the internal runtime/launcher and concealed interface
+    # changes; the behavior here is collection confinement at the tool boundary.
+    service = HypothesisSessionServices(
+        chat=chat,
+        store=PersistenceSubAgentStore(chat.persistence),
+        workflow=lambda: build_hypothesis_development_workflow(),
+        extension=replace(
+            cast(
+                HypothesisExtension, build_hypothesis_development_workflow().extension
+            ),
+            knowledge_scope=spec.knowledge_scope,
+            phase_knowledge=spec.phase_knowledge,
         ),
-        harness_tools=cast(HarnessToolProvider, SimpleNamespace(list_tools=lambda: ())),
-        knowledge_service=knowledge,
+        harness_tools=None,
+        activity=lambda context, tool, arguments, execute: execute(),
     )
-    return chat, captured["registry"]
+
+    def registry_for(context):
+        bindings = service.resolve(context)
+        return build_session_registry(
+            context=context,
+            knowledge=knowledge,
+            knowledge_scope=bindings.knowledge_scope,
+            knowledge_collections=bindings.knowledge_collections,
+        )
+
+    return chat, registry_for
 
 
-def test_serving_applies_phase_and_inherited_collections(
-    tmp_path: Path, monkeypatch: Any
+def test_phase_and_inherited_collections_through_tools(
+    tmp_path: Path,
 ) -> None:
     spec = SimpleNamespace(
         knowledge_scope="both",
@@ -411,7 +421,7 @@ def test_serving_applies_phase_and_inherited_collections(
         },
         completion_schemas={},
     )
-    _, registry_for = _serving_registry(tmp_path, monkeypatch, spec)
+    _, registry_for = _phase_registry(tmp_path, spec)
     allowed_tools = ("search_knowledge", "read_knowledge")
     helper = ToolContext(
         "alpha",
@@ -424,7 +434,9 @@ def test_serving_applies_phase_and_inherited_collections(
         phase_attempt_id="execution:critique:0",
         allowed_tools=allowed_tools,
     )
-    result = registry_for(helper).dispatch("search_knowledge", {"query": "momentum"})
+    result = registry_for(helper).dispatch(
+        "search_knowledge", {"query": "momentum"}, context=helper
+    )
     assert result.ok
     assert [hit["page_id"] for hit in hits(dict(result.structured))] == ["origin"]
 
@@ -439,22 +451,22 @@ def test_serving_applies_phase_and_inherited_collections(
         allowed_tools=allowed_tools,
     )
     result = registry_for(phase_node).dispatch(
-        "search_knowledge", {"query": "momentum"}
+        "search_knowledge", {"query": "momentum"}, context=phase_node
     )
     assert result.ok
     assert [hit["page_id"] for hit in hits(dict(result.structured))] == ["outside"]
 
 
 def test_helper_inherits_current_phase_knowledge_without_completion_authority(
-    tmp_path: Path, monkeypatch: Any
+    tmp_path: Path,
 ) -> None:
     from dataclasses import replace
 
-    from thesis.agent.runtime.control_tools import (
+    from thesis_runtime.subagents.control_tools import (
         ControlToolRuntime,
         control_registered_tools,
     )
-    from thesis.agent.runtime.store import PersistenceSubAgentStore
+    from thesis_runtime.subagents.store import PersistenceSubAgentStore
 
     schema = {"type": "object", "properties": {"verdict": {"type": "object"}}}
     spec = SimpleNamespace(
@@ -462,7 +474,7 @@ def test_helper_inherits_current_phase_knowledge_without_completion_authority(
         phase_knowledge={"trials": ("model-cards",), "strategy_design": ("other",)},
         completion_schemas={"strategy_design": schema},
     )
-    chat, _ = _serving_registry(tmp_path, monkeypatch, spec)
+    chat, _ = _phase_registry(tmp_path, spec)
     store = PersistenceSubAgentStore(chat.persistence)
     record = store.get_sub_agent("alpha", "helper")
     assert record is not None and not record.phase_executor
@@ -472,7 +484,14 @@ def test_helper_inherits_current_phase_knowledge_without_completion_authority(
     service = HypothesisSessionServices(
         chat=chat,
         store=store,
-        workflow=lambda: Workflow(cast(Any, spec)),
+        workflow=lambda: build_hypothesis_development_workflow(),
+        extension=replace(
+            cast(
+                HypothesisExtension, build_hypothesis_development_workflow().extension
+            ),
+            knowledge_scope=spec.knowledge_scope,
+            phase_knowledge=spec.phase_knowledge,
+        ),
         harness_tools=None,
         activity=lambda context, tool, arguments, execute: execute(),
     )
@@ -503,13 +522,11 @@ def test_helper_inherits_current_phase_knowledge_without_completion_authority(
         context,
         phase_completion_schema=bindings.completion_schema,
     )
-    names = {
-        cast(Mapping[str, object], tool.spec["function"])["name"] for tool in tools
-    }
+    names = {tool.descriptor["name"] for tool in tools}
     assert "request_phase_completion" not in names
     assert "request_sub_agent_completion" in names
 
-    chat.set_execution_phase("alpha", "execution", "strategy_design")
+    chat.set_execution_phases("alpha", "execution", ("strategy_design",))
     bindings = service.resolve(context)
     assert bindings.knowledge_collections == ("other",)
     assert bindings.completion_schema is None

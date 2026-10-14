@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import inspect
 import re
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import MappingProxyType
-from typing import Literal, Protocol, cast
+from typing import Literal, Protocol
 
 from thesis.agent.context import PromptContext
 from thesis.agent.skills import SkillBundle, SkillRef, SkillRegistry, content_hash
@@ -205,38 +204,8 @@ class ModelProvider(Protocol):
         profile: ModelProfile,
         prompt: PromptContext,
         allowed_tools: tuple[str, ...],
-    ) -> ModelResponse | str: ...
-
-
-class StructuredModelProvider(ModelProvider, Protocol):
-    """Optional provider extension that can constrain output format."""
-
-    def invoke(
-        self,
-        *,
-        profile: ModelProfile,
-        prompt: PromptContext,
-        allowed_tools: tuple[str, ...],
         response_format: Mapping[str, object] | None = None,
     ) -> ModelResponse | str: ...
-
-
-def _provider_accepts_response_format(provider: ModelProvider) -> bool:
-    """Return whether a provider's ``invoke`` can accept ``response_format``.
-
-    Legacy providers that predate the optional constraint keep working: the
-    router only forwards the keyword to providers that declare it (or accept
-    arbitrary keyword arguments).
-    """
-    try:
-        parameters = inspect.signature(provider.invoke).parameters
-    except (TypeError, ValueError):
-        return False
-    return any(
-        parameter.name == "response_format"
-        or parameter.kind is inspect.Parameter.VAR_KEYWORD
-        for parameter in parameters.values()
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -458,21 +427,12 @@ class ModelRouter:
             raise ModelInvocationError("model provider is not configured", provenance)
 
         try:
-            if response_format is not None and _provider_accepts_response_format(
-                provider
-            ):
-                raw_response = cast("StructuredModelProvider", provider).invoke(
-                    profile=route.profile,
-                    prompt=context,
-                    allowed_tools=route.allowed_tools,
-                    response_format=response_format,
-                )
-            else:
-                raw_response = provider.invoke(
-                    profile=route.profile,
-                    prompt=context,
-                    allowed_tools=route.allowed_tools,
-                )
+            raw_response = provider.invoke(
+                profile=route.profile,
+                prompt=context,
+                allowed_tools=route.allowed_tools,
+                response_format=response_format,
+            )
             response = (
                 raw_response
                 if isinstance(raw_response, ModelResponse)
@@ -557,5 +517,4 @@ __all__ = [
     "RolePolicy",
     "RouteDecision",
     "RoutingError",
-    "StructuredModelProvider",
 ]

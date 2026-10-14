@@ -1,6 +1,6 @@
 """Materialize harness backtest jobs into the workspace backtest store.
 
-The chat tool loop emits a :class:`~thesis.chat.responder.ToolResultChunk` for
+The chat tool loop emits a :class:`~thesis_runtime.contracts.reply.ToolResultChunk` for
 every ``run_backtest``/``get_job_result`` call.  The coordinator recognizes
 those results and either imports an already-terminal job (attaching the
 ``job_id`` to the tool message) or reports the job id and state so the UI can
@@ -10,7 +10,7 @@ execution behave the same.
 
 Harness job records own execution state and results; this coordinator only
 projects them into workspace reports.  The tracking classification from
-:mod:`thesis.chat.contracts` decides whether a job id may be treated as a
+:mod:`thesis_runtime.contracts.records` decides whether a job id may be treated as a
 harness execution at all, so a generic/non-harness tool job is never observed,
 queried, or reported here, and a pre-dispatch failure is never presented as a
 failed harness execution.
@@ -22,6 +22,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 
 from thesis.agent.harness_tools import HarnessToolProvider, HarnessToolResult
+from thesis.application.job_classification import is_harness_execution_tool
 from thesis.backtests.run_import import (
     _COMPLETE_STATES,
     _FAILED_STATES,
@@ -29,9 +30,9 @@ from thesis.backtests.run_import import (
     BacktestRunPending,
     import_backtest_run,
 )
-from thesis.chat.contracts import ToolJob
 from thesis.http.backtests import BacktestDataService, BacktestRecord
 from thesis.integrations.mcp import TOOL_GET_JOB_RESULT, TOOL_RUN_BACKTEST
+from thesis_runtime.contracts.records import ToolJob
 
 #: Harness operations whose tool results can carry a backtest observation.
 _OBSERVED_TOOLS = frozenset({TOOL_RUN_BACKTEST, TOOL_GET_JOB_RESULT})
@@ -87,7 +88,7 @@ class BacktestRunCoordinator:
         if job_id is None:
             return None
         tracked = self.tracked_job(workspace_id, job_id)
-        if tracked is not None and not tracked.is_harness_execution:
+        if tracked is not None and not is_harness_execution_tool(tracked.tool_name):
             return None
         state = _state_of(structured)
         if state is not None and state not in _COMPLETE_STATES:
@@ -137,7 +138,7 @@ class BacktestRunCoordinator:
         failure produces ``state`` ``failed``.
         """
         tracked = self.tracked_job(workspace_id, job_id)
-        if tracked is not None and not tracked.is_harness_execution:
+        if tracked is not None and not is_harness_execution_tool(tracked.tool_name):
             return _tracking_card(tracked)
         existing = self.find_by_job(workspace_id, job_id)
         if existing is not None:
@@ -184,7 +185,7 @@ def _tracking_card(job: ToolJob, *, error: str | None = None) -> dict[str, objec
         "job_id": job.job_id,
         "state": job.state.value,
         "executionCertainty": certainty,
-        "harness_execution": job.is_harness_execution,
+        "harness_execution": is_harness_execution_tool(job.tool_name),
     }
     if job.error_message is not None:
         document["error"] = job.error_message

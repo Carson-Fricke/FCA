@@ -299,6 +299,14 @@ published client until its consumers migrate.
   reads, and real ingestion. The former independent in-memory CLI router was
   removed; it incorrectly acknowledged ensure work without storing coverage
   in Azure. Local API commands continue to compose `lake-local` explicitly.
+  Both local and Azure ensure composition delegate to
+  `lake-ingestion::EnsureIngest`: the accepted coverage gap plan selects exact
+  datasets and sessions, tick sessions run with concurrency four and separate
+  staging buffers, and the coverage application alone settles durable jobs.
+  Equity, option and crypto requests share this policy. Bars never prefetch
+  ticks; provider OHLCV may fall back to already stored trades. Coverage reads
+  target symbol/dataset/interval catalog partitions, adding trade partitions
+  only to validate bars provenance, instead of scanning the entire catalog.
   CLI composition behavior is verified in
   `src/lake/cli/tests/api_composition.rs` and by the deployed backtest smoke.
   ACA startup selects the configured user-assigned identity by adding

@@ -29,7 +29,9 @@ type _Commit = Annotated[
 
 
 class _ClosedDocument(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    model_config = ConfigDict(
+        extra="forbid", strict=True, frozen=True, allow_inf_nan=False
+    )
 
 
 class _ReferencePayload(_ClosedDocument):
@@ -48,6 +50,21 @@ class _ComponentPayload(_ClosedDocument):
     program_id: _ArtifactIdentifier = Field(alias="programId")
     version: _Digest
     git_commit: _Commit = Field(alias="gitCommit")
+
+
+class _StrategyComponentPayload(_ComponentPayload):
+    kind: Literal["strategy"]
+
+
+class _PrototypePayload(_ClosedDocument):
+    """The tested policy selection, with evidence remaining in immutable jobs."""
+
+    strategy: _StrategyComponentPayload
+    parameters: dict[str, str | bool | int | float]
+    candidate_job_id: _Identifier = Field(alias="candidateJobId")
+    search_evidence: list[_EvidencePayload] = Field(
+        alias="searchEvidence", min_length=1, max_length=512
+    )
 
 
 class _RepresentationPayload(_ClosedDocument):
@@ -97,6 +114,7 @@ class _SketchPayload(_ClosedDocument):
     assumptions: list[_AssumptionPayload] = Field(min_length=1)
     alternatives: list[_NonemptyText]
     limitations: _NonemptyText
+    prototype: _PrototypePayload | None = None
 
 
 def _inline_sketch_schema(model: type[BaseModel]) -> dict[str, Any]:

@@ -35,11 +35,6 @@ pub trait ReadableBlobStore: BlobStore {
     fn delete_prefix(&self, prefix: &str) -> Result<u64, DataError>;
 }
 
-/// Compatibility alias for the Python `ObjectStore` naming.
-pub trait ObjectStore: BlobStore {}
-
-impl<T: BlobStore + ?Sized> ObjectStore for T {}
-
 /// Boundary for issuing a read-only URL for one object.
 pub trait SasIssuer: Send + Sync {
     /// Issue a read-only access URL for `object_path`.

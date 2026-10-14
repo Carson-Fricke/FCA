@@ -27,10 +27,10 @@ pub(crate) async fn coverage(
         let contracts = contracts_or_default(context.state.contracts.as_deref());
         let like = OptionRequestLike {
             data_type: request.data_type,
+            interval: request.interval.as_deref(),
             symbol: request.symbol.as_deref(),
             underlying: request.underlying.as_deref(),
             contract_symbols: request.contract_symbols.as_deref(),
-            contracts: request.contracts.as_deref(),
             start_date: request.start_date,
             end_date: request.end_date,
         };

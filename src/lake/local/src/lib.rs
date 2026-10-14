@@ -23,6 +23,7 @@ mod application;
 mod committer;
 mod ensure;
 mod ingest;
+mod options;
 mod state;
 
 pub use application::{create_local_app, create_local_app_with, LocalProviders};

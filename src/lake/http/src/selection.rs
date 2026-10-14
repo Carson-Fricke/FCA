@@ -24,14 +24,13 @@ use lake_coverage::{
 pub(crate) struct OptionRequestLike<'a> {
     /// Requested data type.
     pub data_type: DataType,
+    pub interval: Option<&'a str>,
     /// Legacy single-symbol selector.
     pub symbol: Option<&'a str>,
     /// Requested underlying.
     pub underlying: Option<&'a str>,
     /// Explicitly selected OSI contracts.
     pub contract_symbols: Option<&'a [String]>,
-    /// Alias for `contract_symbols`.
-    pub contracts: Option<&'a [String]>,
     /// Inclusive first session date.
     pub start_date: Date,
     /// Inclusive last session date.
@@ -88,7 +87,13 @@ pub(crate) fn option_coverage(
             .get(&session.session_date)
             .map_or(&[][..], Vec::as_slice);
         for symbol in selected {
-            entries.push(option_entry(catalog, request.data_type, symbol, session)?);
+            entries.push(option_entry(
+                catalog,
+                request.data_type,
+                request.interval,
+                symbol,
+                session,
+            )?);
         }
     }
     Ok((
@@ -112,16 +117,7 @@ pub(crate) fn resolve_option_selection(
     let dates: Vec<Date> = session_dates.into_iter().collect();
     let mut underlying = canonical_optional(request.underlying)?;
     let symbol = canonical_optional(request.symbol)?;
-    let requested_symbols = request.contract_symbols;
-    let aliases = request.contracts;
-    if requested_symbols.is_some() && aliases.is_some() {
-        return Err(CoverageRequestError::new(
-            "validation_error",
-            "use only one of contract_symbols or contracts",
-            None,
-        ));
-    }
-    let requested = requested_symbols.or(aliases);
+    let requested = request.contract_symbols;
     let mut symbols: Vec<String> = match requested {
         Some(values) => values
             .iter()
@@ -147,7 +143,7 @@ pub(crate) fn resolve_option_selection(
                     .list(Some(symbol), None)
                     .map_err(CoverageRequestError::from)?;
                 if candidates.is_empty() {
-                    select_legacy_symbol(
+                    select_symbol_without_metadata(
                         symbol,
                         &mut symbols,
                         &mut underlying,
@@ -157,7 +153,12 @@ pub(crate) fn resolve_option_selection(
                     underlying = Some(symbol.to_string());
                 }
             } else {
-                select_legacy_symbol(symbol, &mut symbols, &mut underlying, front_set_repository)?;
+                select_symbol_without_metadata(
+                    symbol,
+                    &mut symbols,
+                    &mut underlying,
+                    front_set_repository,
+                )?;
             }
         } else {
             symbols = vec![symbol.to_string()];
@@ -247,12 +248,12 @@ pub(crate) fn resolve_option_selection(
     })
 }
 
-/// Apply the legacy single-symbol spelling when no metadata resolves it.
+/// Resolve the current symbol selector when no contract metadata resolves it.
 ///
 /// Mirrors the Python tail that keeps an OSI-shaped symbol as an explicit
 /// contract, treats any other shape as an underlying, and refuses a
 /// non-OSI symbol when neither metadata nor a persisted front set can help.
-fn select_legacy_symbol(
+fn select_symbol_without_metadata(
     symbol: &str,
     symbols: &mut Vec<String>,
     underlying: &mut Option<String>,
@@ -281,12 +282,19 @@ fn select_legacy_symbol(
 fn option_entry(
     catalog: &dyn CatalogRepository,
     data_type: DataType,
+    interval: Option<&str>,
     symbol: &str,
     session: &CoverageSession,
 ) -> Result<SessionCoverage, CoverageRequestError> {
     let session_date = session.session_date;
     let record = catalog
-        .get(AssetClass::Option, data_type, None, symbol, session_date)
+        .get(
+            AssetClass::Option,
+            data_type,
+            interval,
+            symbol,
+            session_date,
+        )
         .map_err(CoverageRequestError::from)?;
     let state = match &record {
         Some(record) if record.status == CoverageStatus::Empty => CoverageState::Empty,
@@ -360,7 +368,7 @@ fn canonical_optional(value: Option<&str>) -> Result<Option<String>, CoverageReq
     value.map(canonical).transpose()
 }
 
-/// The legacy single-symbol spelling reserved for OSI contracts.
+/// Recognize an OSI contract in the current single-symbol selector.
 fn looks_like_option_symbol(symbol: &str) -> bool {
     let characters: Vec<char> = symbol.chars().collect();
     characters.len() >= 18 && matches!(characters[characters.len() - 9], 'C' | 'P')

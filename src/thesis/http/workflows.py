@@ -9,18 +9,16 @@ from collections.abc import Mapping
 
 from fastapi import APIRouter, HTTPException
 
+from thesis.extensions.workflows import build_workflow_registry
 from thesis.http.wire import WorkflowDefinitionWire
-from thesis.workflows.core.registry import UnknownWorkflowError, WorkflowRegistry
-from thesis.workflows.core.spec import WorkflowContext
-from thesis.workflows.registry import build_workflow_registry
+from thesis_runtime.workflows.phase import SplitPhase
+from thesis_runtime.workflows.registry import UnknownWorkflowError, WorkflowRegistry
+from thesis_runtime.workflows.spec import WorkflowContext
 
 
 def _execution_unavailable(
     context: WorkflowContext,
-    *,
-    ideas: str,
-    investigation_id: str | None = None,
-    launch_options: Mapping[str, object] | None = None,
+    inputs: Mapping[str, object],
 ) -> dict[str, object]:
     raise RuntimeError("the definition-only registry cannot execute workflows")
 
@@ -35,7 +33,7 @@ def create_workflow_router(registry: WorkflowRegistry | None = None) -> APIRoute
     router = APIRouter(prefix="/v1/workflows", tags=["workflows"])
 
     @router.get("/{workflow_id}", response_model=WorkflowDefinitionWire)
-    async def get_workflow_definition(
+    def get_workflow_definition(
         workflow_id: str, version: str | None = None
     ) -> WorkflowDefinitionWire:
         """Return the current topology, rejecting unsupported requested versions."""
@@ -67,6 +65,11 @@ def create_workflow_router(registry: WorkflowRegistry | None = None) -> APIRoute
             transitions={
                 phase: sorted(spec.transitions.get(phase, ()))
                 for phase in spec.phase_names
+            },
+            splits={
+                phase.phase: {"branches": dict(phase.branches), "join": phase.join}
+                for phase in spec.phases
+                if isinstance(phase, SplitPhase)
             },
         )
 

@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from typing import cast
 
 import pytest
+from tests.thesis.submissions import MemorySubmissions
 
 from thesis.integrations.mcp import HarnessMcpTransportError, McpToolResult
 from thesis.screening.definitions import ScreenerDefinition
@@ -173,7 +174,9 @@ def _definition() -> ScreenerDefinition:
 def _service(
     tools: FakeScreeningTools, definition: ScreenerDefinition
 ) -> ScreenerService:
-    service = ScreenerService(tools=tools, sleep=lambda _seconds: None)
+    service = ScreenerService(
+        submissions=MemorySubmissions(), tools=tools, sleep=lambda _seconds: None
+    )
     service.save_definition("workspace-one", definition)
     return service
 
@@ -426,7 +429,9 @@ class TransportFailingTools:
 def test_unknown_outcome_retains_the_submitted_job_id_without_replay() -> None:
     definition = _definition()
     tools = TransportFailingTools()
-    service = ScreenerService(tools=tools, sleep=lambda _seconds: None)
+    service = ScreenerService(
+        submissions=MemorySubmissions(), tools=tools, sleep=lambda _seconds: None
+    )
     service.save_definition("workspace-one", definition)
 
     with pytest.raises(ScreenerUnavailableError) as caught:

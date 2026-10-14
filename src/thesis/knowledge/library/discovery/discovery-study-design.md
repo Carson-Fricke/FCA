@@ -1,13 +1,13 @@
 ---
 id: discovery-study-design
 title: Discovery study design
-version: 2
+version: 4
 created: 2026-10-02
-retrieved: 2026-10-02
+retrieved: 2026-10-13
 source:
   url: https://github.com/Carson-Fricke/FCA
   publisher: FCA Thesis
-  content_hash: 67217c5ace00ff0993da6a4d5292d0c6142cb4ed2086fd1171dc46efd947962e
+  content_hash: ac268ba19d2f3d45a2076ba39110c04ec26a97abb3d04fcc80d40beab949c8bb
 tags:
   - discovery
   - study-design
@@ -16,6 +16,9 @@ collections:
   - discovery
   - validation
 links:
+  - from-market-idea-to-trading-construction
+  - investigating-representations-and-episodes
+  - developing-a-candidate-through-evidence
   - executable-discovery-tool-bag
   - return-continuation-and-reversal
   - signal-size-buckets
@@ -72,54 +75,30 @@ trust:
 ---
 # Discovery study design
 
-Discovery turns a market story into an evolving strategy sketch. Describe the
-mechanism, representation, conditioning, entry/exit/abstention, and assumptions.
-Reach for the [Executable discovery tool bag](executable-discovery-tool-bag)
-before letting existing studies define the search. Compose or author indicators,
-event detectors, shape features, and scale-specific representations. Inspect
-their sequences and events; targeted studies support revision of the sketch.
-Choose bars, trades, or quotes according to the mechanism and information needed.
+Choose an experiment for the decision it informs. Discovery is constructive training
+research: it may fit parameters and explore interactions. Formal preregistration and
+sealed forward validation occur later.
 
-## In brief
+Before a search batch, state the composed policy, objective, feasible support,
+information timing, fill/cost model, parameter ranges and bounded resource allocation.
+This records what the batch means; it does not freeze the entire discovery phase.
+Revise based on evidence and operator steering, preserving all earlier choices.
 
-- Give each investigation a purpose tied to a sketch assumption or design choice.
-- Predeclare the window, the measure, the variants, and the stop rule.
-- Log every attempt, including failures, and note what changed after seeing it.
-- Keep a slice of data untouched for validation.
-- Stop when the effect cannot pay its own costs.
-- Hand off a named candidate, not a chart that looked good.
+Diagnostics assess a representation, episode or calculation. Backtests evaluate
+executable entries, exits, risk and abstention after costs. A diagnostic result must
+not be presented as testing an omitted strategy. Compare conditioned policies with
+appropriate controls and opportunity sets; condition-on-condition means and a policy
+ablation answer different questions. Different holding horizons and occurrence
+weightings define different policies, not simultaneous significance hurdles.
 
-## Predeclare the study
+Verify feature availability at the original decision. Wavelet features use managed
+SDK snapshots, not hand-written transforms or later values attached to old setups.
+Preserve sessions/episodes and overlapping comparison arms in uncertainty calculations.
+Check long/short signs, denominators, per-side costs, fills and feasible independent
+support. No arbitrary sample floor should exceed the available eligible population.
 
-Before looking, write down: the question; the data and window; the signal;
-the measure; the number of variants; and the stop rule. Every attempt gets a
-log line with purpose, data, window, result, and whether anything changed
-after seeing it. Discovery may revise the sketch after observing development
-evidence. Record those revisions and all alternatives tried; they are exploratory
-search, not independent confirmatory evidence. See
-[Exploratory search and multiple attempts](exploratory-search-and-multiple-attempts).
-
-## Keep validation data untouched
-
-Split the calendar before the study starts: a discovery window and a
-validation window. Validation data is opened once, near the end. See
-[Discovery versus validation data](discovery-versus-validation-data).
-
-## Stop conditions
-
-Stop when the question is answered, the effect is below the round-trip
-cost, the effect has no mechanism outside one slice, or the data budget is
-spent. Stopping is a result; record it.
-
-## Hand off a candidate
-
-The handoff names: opportunity; signal; information time; direction;
-holding period; profit source; effect with uncertainty; competing
-explanation; and evidence. Those fields make the candidate testable.
-
-## Interesting is not tradeable
-
-Interesting means larger than noise with a mechanism. Tradeable means it
-survives spread, fees, slippage, and execution delay. Most findings die at
-the cost stage; record that outcome. See [Cost and delay
-sensitivity](cost-and-delay-sensitivity) and [Simple trading economics](simple-trading-economics).
+After finding a useful candidate, examine neighbors, cost stress, concentration and
+null evidence. See [Constructive parameter and interaction search](constructive-parameter-and-interaction-search)
+and [Testing a searched candidate against a null](testing-a-searched-candidate-against-a-null).
+Keep all attempts and scope inference to the actual search and comparison. An
+inconclusive result is uncertainty; a resource limit is a resource limit.

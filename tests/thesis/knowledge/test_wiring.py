@@ -2,36 +2,33 @@
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 from tests.thesis.knowledge.test_service import Repositories, hits, write_page
 
 from thesis.agent.harness_tools import HarnessToolProvider
-from thesis.agent.messages import (
+from thesis.application import composition as serving
+from thesis.extensions.tools.registry import build_session_registry
+from thesis.knowledge.service import KnowledgeScope, KnowledgeService
+from thesis.workspaces.repository import WorkspaceRepositoryProvider
+from thesis_runtime.adapters.providers.openrouter import (
+    OpenRouterProfile,
+    OpenRouterProvider,
+)
+from thesis_runtime.adapters.providers.session_adapter import project_native_messages
+from thesis_runtime.contracts.context import ToolContext
+from thesis_runtime.contracts.messages import (
     MessageContent,
     SessionMessage,
     ToolCorrelation,
     ToolRequest,
     decode_transcript,
 )
-from thesis.agent.runtime.context import ToolContext
-from thesis.agent.runtime.conversation import Conversations
-from thesis.agent.runtime.registry import build_session_registry
-from thesis.chat import ChatService
-from thesis.chat.contracts import MessageRole
-from thesis.http import serving
-from thesis.knowledge.service import KnowledgeScope, KnowledgeService
-from thesis.providers.openrouter import OpenRouterProfile, OpenRouterProvider
-from thesis.providers.session_adapter import project_native_messages
-from thesis.workflows.registry.hypothesis_development.session_services import (
-    HypothesisSessionServices,
-)
-from thesis.workflows.registry.hypothesis_development.spec import (
-    build_hypothesis_development_workflow,
-)
-from thesis.workspaces.repository import WorkspaceRepositoryProvider
+from thesis_runtime.contracts.records import MessageRole
+from thesis_runtime.conversations import ChatService
+from thesis_runtime.conversations.conversation import Conversations
+from thesis_runtime.workflows.execution_store import InMemoryExecutionStore
 
 
 class Key:
@@ -42,6 +39,10 @@ class Key:
 class Transport:
     def post(self, *args: object, **kwargs: object) -> tuple[int, str]:
         raise AssertionError("no model calls during composition")
+
+    def stream(self, *args: object, **kwargs: object):
+        raise AssertionError("no model calls during composition")
+        yield ""
 
 
 @pytest.mark.parametrize("scope", ["both", "shared", "workspace"])
@@ -63,46 +64,51 @@ def test_serving_scopes_phase_and_helper_tools(
 
     monkeypatch.setattr(serving, "Conversations", conversations)
 
-    class Runtime:
-        def bind_session_services(self, **kwargs: Any) -> HypothesisSessionServices:
-            return HypothesisSessionServices(
-                **kwargs,
-                harness_tools=None,
-                workflow=lambda: build_hypothesis_development_workflow(
-                    knowledge_scope=scope
-                ),
-            )
+    class Harness(HarnessToolProvider):
+        def __init__(self):
+            pass
 
-    runtime = Runtime()
-    monkeypatch.setattr(
-        serving, "build_serving_workflow_runtime", lambda *args, **kwargs: runtime
+        def list_tools(self):
+            return ()
+
+    monkeypatch.setenv("THESIS_KNOWLEDGE_SCOPE", scope)
+    chat = ChatService()
+    thread = chat.create_chat("alpha", title="Knowledge", owner_actor_id="operator")
+    trigger = chat.send_message(
+        "alpha", thread.chat_id, actor_id="operator", body="Research momentum"
     )
-    monkeypatch.setattr(
-        serving,
-        "RuntimeWorkflowLauncher",
-        lambda *args, **kwargs: SimpleNamespace(workflows=None),
-    )
-    harness = SimpleNamespace(list_tools=lambda: ())
-    serving.build_serving_stack(
-        chat_service=ChatService(),
+    stack = serving.build_serving_stack(
+        chat_service=chat,
+        execution_store=InMemoryExecutionStore(),
         model_provider=OpenRouterProvider(
             OpenRouterProfile(profile_id="test", model="test"), Key(), Transport()
         ),
-        harness_tools=cast(HarnessToolProvider, harness),
+        harness_tools=Harness(),
         knowledge_service=knowledge,
+    )
+    assert stack.workflow_runtime is not None
+    workflow = stack.workflow_runtime.build_hypothesis_development(chat=chat)
+    request = workflow.launch(
+        "alpha",
+        thread.chat_id,
+        actor_id="operator",
+        inputs={"idea": trigger.body},
+        trigger_message_id=trigger.message_id,
     )
     for node in ("phase", "helper"):
         context = ToolContext(
             "alpha",
-            "chat",
+            thread.chat_id,
             node,
             "agent",
             sub_agent_id=node,
-            workflow_execution_id="execution",
+            workflow_execution_id=request.execution_id,
             allowed_tools=("search_knowledge", "read_knowledge"),
         )
         registry = captured["registry"](context)
-        result = registry.dispatch("search_knowledge", {"query": "momentum"})
+        result = registry.dispatch(
+            "search_knowledge", {"query": "momentum"}, context=context
+        )
         assert result.ok
         assert result.structured["sources"] == (
             ["shared", "workspace"] if scope == "both" else [scope]
@@ -110,12 +116,16 @@ def test_serving_scopes_phase_and_helper_tools(
         if scope != "both":
             other = "shared" if scope == "workspace" else "workspace"
             assert not registry.dispatch(
-                "search_knowledge", {"query": "momentum", "scope": other}
+                "search_knowledge",
+                {"query": "momentum", "scope": other},
+                context=context,
             ).ok
             reference = hits(knowledge.search("alpha", "momentum", scope=other))[0][
                 "reference"
             ]
-            assert not registry.dispatch("read_knowledge", {"reference": reference}).ok
+            assert not registry.dispatch(
+                "read_knowledge", {"reference": reference}, context=context
+            ).ok
 
 
 def test_registry_still_obeys_empty_tool_policy(tmp_path: Path) -> None:
@@ -126,7 +136,11 @@ def test_registry_still_obeys_empty_tool_policy(tmp_path: Path) -> None:
         knowledge=service,
     )
     assert registry.catalog() == ()
-    assert not registry.dispatch("search_knowledge", {"query": "momentum"}).ok
+    assert not registry.dispatch(
+        "search_knowledge",
+        {"query": "momentum"},
+        context=ToolContext("alpha", "chat", "chat", "agent", allowed_tools=()),
+    ).ok
 
 
 def test_canonical_knowledge_result_decodes_to_neutral_input() -> None:
@@ -220,4 +234,8 @@ def test_serving_without_harness_exposes_knowledge(
     registry = captured["registry_factory"](
         ToolContext("alpha", "chat", "chat", "agent")
     )
-    assert registry.dispatch("search_knowledge", {"query": "momentum"}).ok
+    assert registry.dispatch(
+        "search_knowledge",
+        {"query": "momentum"},
+        context=ToolContext("alpha", "chat", "chat", "agent"),
+    ).ok

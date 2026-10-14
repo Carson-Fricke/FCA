@@ -13,6 +13,7 @@
 //! queue handler and later CLI paths — never through the ensure wiring.
 
 pub mod backfill;
+pub mod resolve;
 pub mod selector;
 pub mod transaction;
 pub mod worker;
@@ -23,4 +24,4 @@ pub use backfill::{
 };
 pub use selector::OptionChainSelector;
 pub use transaction::{OptionIngestResult, OptionIngestTransaction, OptionMarketDataClient};
-pub use worker::{OptionQueueHandler, OptionWorker};
+pub use worker::OptionQueueHandler;

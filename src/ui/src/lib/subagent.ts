@@ -18,7 +18,6 @@ import type {
 	SubAgentNode,
 	SubAgentStatus,
 	ToolResult,
-	TranscriptItem,
 	WorkflowExecutionRecord,
 	WorkflowPhase
 } from './types';
@@ -42,11 +41,9 @@ export function isWorkflowNodeRole(role: string | null | undefined): boolean {
 	return role === WORKFLOW_NODE_ROLE;
 }
 
-/** Read a payload field, falling back to the event's top level. */
+/** Read the current event payload. */
 function field(event: ExecutionEvent, key: string): unknown {
-	const payload = event.payload ?? {};
-	if (key in payload) return payload[key];
-	return (event as unknown as Record<string, unknown>)[key];
+	return event.payload[key];
 }
 
 function stringField(event: ExecutionEvent, key: string): string | null {
@@ -145,7 +142,7 @@ function nodeFrom(
 		createdAt: reentry ? event.occurredAt : previous?.createdAt ?? event.occurredAt,
 		updatedAt: event.occurredAt,
 		phaseAttemptId: attempt ?? previous?.phaseAttemptId,
-		phaseExecutor: booleanField(event, 'phaseExecutor') ?? booleanField(event, 'phase_executor') ?? previous?.phaseExecutor,
+		phaseExecutor: booleanField(event, 'phaseExecutor') ?? previous?.phaseExecutor,
 		specVersion: stringField(event, 'specVersion') ?? previous?.specVersion,
 		context: hasContext(event) ? context : (previous?.context ?? context),
 		acceptsInput: ['completed', 'failed', 'cancelled'].includes(status) ? false :
@@ -172,7 +169,8 @@ function hasContext(event: ExecutionEvent): boolean {
  * a user-facing agent. It is dropped from the tree, and its children (the
  * workflow's phase agents) are re-parented to the node's own parent — the
  * anchor that launched the workflow — so phase navigation and back always land
- * on a real agent.
+ * on a real agent. This is a navigation index: transcript presentation keeps
+ * phase executors inside their workflow cards instead of showing them as helpers.
  */
 export function deriveSubAgentTree(
 	events: ExecutionEvent[],
@@ -182,7 +180,7 @@ export function deriveSubAgentTree(
 	const attributed = new Map<string, ExecutionEvent[]>();
 	const hidden = new Set<string>();
 
-	const ordered = [...events].sort((a, b) => (a.seq ?? a.cursor) - (b.seq ?? b.cursor));
+	const ordered = [...events].sort((a, b) => a.seq - b.seq);
 	const snapshotById = new Map(known.map((node) => [node.subAgentId, node]));
 	const snapshots = new Map(snapshotById);
 	const applySnapshot = (snapshot: SubAgentNode): void => {
@@ -197,8 +195,6 @@ export function deriveSubAgentTree(
 	};
 	for (const node of known) {
 		if (isWorkflowNodeRole(node.role)) hidden.add(node.subAgentId);
-		// Unversioned historical records retain snapshot precedence over replay.
-		if (!node.updatedAt && !node.createdAt) applySnapshot(node);
 	}
 	for (const event of ordered) {
 		const subAgentId = eventSubAgentId(event);
@@ -235,8 +231,6 @@ export function deriveSubAgentTree(
 	// nearest visible ancestor, then remove the hidden records entirely.
 	for (const [id, node] of nodes) {
 		let parent = node.parentSubAgentId;
-		// Retained legacy spawn provenance identifies direct children of the workflow record.
-		if (node.phaseExecutor === undefined && parent && hidden.has(parent)) node.phaseExecutor = true;
 		const seen = new Set<string>([id]);
 		while (parent && hidden.has(parent) && !seen.has(parent)) {
 			seen.add(parent);
@@ -279,7 +273,7 @@ export function mergeEvents(
 	const byId = new Map<string, ExecutionEvent>();
 	for (const event of existing) byId.set(event.eventId, event);
 	for (const event of incoming) byId.set(event.eventId, event);
-	return [...byId.values()].sort((a, b) => (a.seq ?? a.cursor) - (b.seq ?? b.cursor));
+	return [...byId.values()].sort((a, b) => a.seq - b.seq);
 }
 
 /** Events belonging to one execution in a chat-wide timeline. */
@@ -293,23 +287,21 @@ export function projectExecution(
 	events: ExecutionEvent[]
 ): WorkflowExecutionRecord {
 	let state = execution.state;
-	let phase = isWorkflowPhase(execution.phase) ? execution.phase : null;
-	const workflowNodes = new Set<string>();
-	for (const event of [...events].sort((a, b) => (a.seq ?? a.cursor) - (b.seq ?? b.cursor))) {
-		const nodeId = stringField(event, 'subAgentId');
-		if (nodeId && isWorkflowNodeRole(stringField(event, 'role'))) workflowNodes.add(nodeId);
-		const eventPhase = event.payload?.phase;
-		const phaseLifecycle = ['workflow.launched', 'workflow.started', 'workflow.phase', 'workflow.stopped',
-			'workflow.cancelled', 'workflow.completed', 'workflow.failed'].includes(event.eventType);
-		const explicitExecutor = booleanField(event, 'phaseExecutor') ?? booleanField(event, 'phase_executor');
-		const parentId = stringField(event, 'parentSubAgentId');
-		const initialExecutor = !phase && event.eventType === 'sub_agent.spawned' &&
-			!isWorkflowNodeRole(stringField(event, 'role')) &&
-			(explicitExecutor === true || (explicitExecutor === null && !!parentId && workflowNodes.has(parentId)));
-		if ((phaseLifecycle || initialExecutor) && typeof eventPhase === 'string' && isWorkflowPhase(eventPhase)) phase = eventPhase;
+	let activePhases = [...execution.active_phases];
+	let controlSequence = execution.control_sequence ?? 0;
+	for (const event of [...events].sort((a, b) => a.seq - b.seq)) {
+        const sequence = event.payload.controlSequence;
+        const active = event.payload.activePhases;
+        if (Array.isArray(active) && typeof sequence === 'number' && sequence >= controlSequence) {
+            activePhases = active.filter((name): name is string => typeof name === 'string');
+            controlSequence = sequence;
+        } else if (event.eventType === 'sub_agent.spawned' && booleanField(event, 'phaseExecutor') === true && controlSequence === 0) {
+            const name = stringField(event, 'phase');
+            if (name && !activePhases.includes(name)) activePhases.push(name);
+        }
 		switch (event.eventType) {
 			case 'workflow.started':
-				state = 'running';
+				if (!['completed', 'failed', 'stopped', 'cancelled'].includes(state)) state = 'running';
 				break;
 			case 'workflow.stopped':
 				state = 'stopped';
@@ -325,12 +317,12 @@ export function projectExecution(
 				break;
 		}
 	}
-	return { ...execution, state, phase };
+	return { ...execution, state, active_phases: activePhases, control_sequence: controlSequence, phase: activePhases.length === 1 ? activePhases[0] : null };
 }
 
-/** Historical workflow status markers are not executable phase names. */
+/** An execution phase is an explicit nonempty name. */
 export function isWorkflowPhase(phase: string | null | undefined): phase is string {
-	return !!phase && !['requested', 'queued', 'running', 'completed', 'failed', 'cancelled', 'stopped', 'paused', 'needs_input'].includes(phase);
+	return typeof phase === 'string' && phase.length > 0;
 }
 
 /** Decode a `tool.result` payload into a `ToolResult`, when present. */
@@ -338,14 +330,14 @@ export function parseToolResult(event: ExecutionEvent): ToolResult | null {
 	if (!event.eventType.startsWith('tool.') && !event.eventType.startsWith('sub_agent.')) {
 		return null;
 	}
-	const raw = field(event, 'toolResult') ?? field(event, 'tool_result');
+	const raw = field(event, 'toolResult');
 	if (typeof raw !== 'object' || raw === null) return null;
 	return raw as ToolResult;
 }
 
 /** Decode the model reasoning trace carried by an event, when present. */
 export function parseReasoning(event: ExecutionEvent): string | null {
-	const value = field(event, 'reasoning') ?? field(event, 'thinking');
+	const value = field(event, 'reasoning');
 	return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
@@ -366,7 +358,7 @@ export function derivePhases(events: ExecutionEvent[]): WorkflowPhase[] {
 	// the attempt counter.
 	const spawns = new Map<string, number>();
 	const entries = new Map<string, number>();
-	for (const event of [...events].sort((a, b) => (a.seq ?? a.cursor) - (b.seq ?? b.cursor))) {
+	for (const event of [...events].sort((a, b) => a.seq - b.seq)) {
 		if (event.eventType === 'workflow.launched') {
 			const workflow = recordField(event, 'workflow');
 			const declared = workflow['phases'];
@@ -408,7 +400,7 @@ export function derivePhases(events: ExecutionEvent[]): WorkflowPhase[] {
 	}
 	if (!started && current === null) return [];
 	if (completed) current = null;
-	return order.map((name) => ({
+	const phases: WorkflowPhase[] = order.map((name) => ({
 		name,
 		attempts: spawns.get(name) ?? entries.get(name) ?? 0,
 		status: name === current
@@ -417,10 +409,23 @@ export function derivePhases(events: ExecutionEvent[]): WorkflowPhase[] {
 					? 'done'
 					: 'pending'
 	}));
+    let controlSequence = -1;
+    let active: string[] | null = null;
+    for (const event of events) {
+        if (typeof event.payload.controlSequence === 'number' && event.payload.controlSequence >= controlSequence && Array.isArray(event.payload.activePhases)) {
+            controlSequence = event.payload.controlSequence;
+            active = event.payload.activePhases.filter((name): name is string => typeof name === 'string');
+        }
+    }
+    if (active !== null) for (const phase of phases) phase.status = completed ? 'done' : active.includes(phase.name) ? 'active' : visited.has(phase.name) ? 'done' : 'pending';
+    return phases;
+
 }
 
 /** One deterministic phase attempt: its progress lines and terminal result. */
 export interface PhaseAttemptRun {
+    jobs?: string[];
+	recoveryError?: string;
 	attempt: number;
 	progress: Array<{ text: string; at: string }>;
 	result: { summary: string; artifact: Record<string, unknown> } | null;
@@ -450,17 +455,30 @@ export function derivePhaseAttempts(
 		runs.push(run);
 		return run;
 	};
-	for (const event of [...events].sort((a, b) => (a.seq ?? a.cursor) - (b.seq ?? b.cursor))) {
-		if (event.payload['phase'] !== phase) continue;
+	let activePhase: string | null = null;
+	for (const event of [...events].sort((a, b) => a.seq - b.seq)) {
 		if (event.eventType === 'workflow.phase') {
+			activePhase = String(event.payload['phase']);
+			if (activePhase !== phase) continue;
 			open();
 			continue;
 		}
+        if (event.eventType === 'tool.submitted' && activePhase === phase &&
+            typeof event.payload['jobId'] === 'string' &&
+            typeof event.payload['toolName'] === 'string' && event.payload['toolName'].startsWith('harness.')) {
+            const run = runs[runs.length - 1] ?? open();
+            run.jobs ??= [];
+            if (!run.jobs.includes(event.payload['jobId'])) run.jobs.push(event.payload['jobId']);
+            continue;
+        }
+        if (event.payload['phase'] !== phase) continue;
 		if (event.eventType !== 'workflow.progress' && event.eventType !== 'workflow.phase_result') {
 			continue;
 		}
 		const run = runs[runs.length - 1] ?? open();
 		if (event.eventType === 'workflow.progress') {
+			run.recoveryError = typeof event.payload['recoveryError'] === 'string'
+				? event.payload['recoveryError'] : undefined;
 			run.progress.push({
 				text: String(event.payload['text'] ?? ''),
 				at: event.occurredAt
@@ -506,7 +524,7 @@ export function derivePhaseSteps(
 				collected.push({
 					phase: node.node.phase,
 					status: node.node.status,
-					cursor: spawn?.seq ?? spawn?.cursor ?? Number.MAX_SAFE_INTEGER
+					cursor: spawn?.seq ?? Number.MAX_SAFE_INTEGER
 				});
 			}
 			visit(node.children);
@@ -523,28 +541,6 @@ export function derivePhaseSteps(
 		});
 	}
 	return [...byPhase.values()];
-}
-
-/**
- * Project a flat event stream into transcript items on the `kind`
- * discriminator. Used by the scoped node transcript; unknown lifecycle
- * events fall back to `workflow` and plain records to `message`.
- */
-export function buildTranscriptItems(events: ExecutionEvent[]): TranscriptItem[] {
-	return [...events]
-		.sort((a, b) => (a.seq ?? a.cursor) - (b.seq ?? b.cursor))
-		.map((event) => {
-			if (event.eventType.startsWith('tool.')) {
-				return { id: event.eventId, kind: 'tool', data: { event } } satisfies TranscriptItem;
-			}
-			if (event.eventType.startsWith('sub_agent.')) {
-				return { id: event.eventId, kind: 'sub_agent', data: { event } } satisfies TranscriptItem;
-			}
-			if (event.eventType.startsWith('workflow.')) {
-				return { id: event.eventId, kind: 'workflow', data: { event } } satisfies TranscriptItem;
-			}
-			return { id: event.eventId, kind: 'message', data: { event } } satisfies TranscriptItem;
-		});
 }
 
 /** The node reference for a sub-agent id. */

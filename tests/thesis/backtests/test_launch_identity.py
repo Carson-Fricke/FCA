@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 import pytest
+from tests.thesis.submissions import MemorySubmissions
 
 from thesis.http.backtests import (
     BacktestDataService,
@@ -77,13 +78,13 @@ class RecordingBoundary:
 
 
 def _request() -> LaunchBacktestRequest:
-    return LaunchBacktestRequest(
-        bundle_ref="a" * 64, config_path="config/harness/backtest.yaml"
-    )
+    return LaunchBacktestRequest(bundle_ref="a" * 64, config={"shell": "backtest"})
 
 
 def _service(boundary: RecordingBoundary) -> BacktestDataService:
-    return BacktestDataService(store=InMemoryBacktestStore(), harness=boundary)
+    return BacktestDataService(
+        submissions=MemorySubmissions(), store=InMemoryBacktestStore(), harness=boundary
+    )
 
 
 def test_launch_allocates_and_reuses_one_job_id() -> None:

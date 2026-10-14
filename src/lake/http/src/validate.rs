@@ -15,7 +15,7 @@ use crate::error::ApiError;
 
 /// Query keys whose single value is still a one-element list, as FastAPI's
 /// `tuple[Symbol, ...]` query parameters accept both spellings.
-const LIST_QUERY_FIELDS: &[&str] = &["contract_symbols", "contracts"];
+const LIST_QUERY_FIELDS: &[&str] = &["contract_symbols"];
 
 /// A body extractor mapping every serde rejection into the validation envelope.
 pub(crate) struct StrictJson(pub Value);
@@ -301,17 +301,6 @@ pub(crate) fn parse_interval(
         )),
         (_, None) => Ok(None),
     }
-}
-
-/// Reject option data types that have no option partition layout.
-pub(crate) fn reject_option_data_type(data_type: lake_contracts::DataType) -> Result<(), ApiError> {
-    if data_type == lake_contracts::DataType::Bars {
-        return Err(ApiError::validation_error(
-            "data_type",
-            "Value error, data_type 'bars' is not supported for options",
-        ));
-    }
-    Ok(())
 }
 
 /// Parse an ISO calendar date.

@@ -2,14 +2,14 @@
 
 The local stack needs the structured chat trigger to execute real workflows
 without a full platform deployment.  :func:`build_local_workflow_runtime`
-composes the same :class:`~thesis.workflows.runtime.WorkflowRuntime` used in
+composes the same :class:`~thesis.application.workflows.WorkflowRuntime` used in
 production over a single OpenRouter-backed model profile and a backtest runner
 that drives the harness ``run_backtest`` MCP tool.
 
 The runner is resolved from the caller's seam: an explicit
 :class:`~thesis.workflows.backtests.BacktestRunner` wins, otherwise a harness
 tool provider is adapted by :class:`McpBacktestRunner`.  Supplying neither is a
-composition error (:class:`~thesis.workflows.runtime.WorkflowRuntimeError`).
+composition error (:class:`~thesis.application.workflows.WorkflowRuntimeError`).
 """
 
 from __future__ import annotations
@@ -25,9 +25,14 @@ from thesis.agent.harness_tools import (
     open_harness_tool_provider,
 )
 from thesis.agent.router import ModelProfile, ModelProvider, Role, RolePolicy
-from thesis.agent.runtime.conversation import Conversations
 from thesis.agent.skills import SkillRegistry
+from thesis.application.workflows import (
+    WorkflowRuntime,
+    WorkflowRuntimeError,
+    build_workflow_runtime,
+)
 from thesis.integrations.mcp import HarnessMcpClient
+from thesis.persistence.submissions import SqliteSubmissionStore, SubmissionStore
 from thesis.research.models import ResearchModelStore
 from thesis.workflows.backtests import (
     BacktestMode,
@@ -41,11 +46,9 @@ from thesis.workflows.research_models import (
     ProgramSnapshots,
     ResearchModelRunner,
 )
-from thesis.workflows.runtime import (
-    WorkflowRuntime,
-    WorkflowRuntimeError,
-    build_workflow_runtime,
-)
+from thesis.workspaces.local import default_workspace_root
+from thesis_runtime.conversations.conversation import Conversations
+from thesis_runtime.storage.ownership import assert_owned
 
 _LOCAL_PROFILE_ID = "local-openrouter"
 _LOCAL_POLICY_VERSION = "1.0.0"
@@ -84,6 +87,7 @@ class McpBacktestRunner:
         harness_tools: HarnessToolProvider,
         *,
         mode: BacktestMode = "local",
+        submissions: SubmissionStore | None = None,
         metadata: Mapping[str, object] | None = None,
         poll_interval_seconds: float = _DEFAULT_POLL_INITIAL_INTERVAL_SECONDS,
         poll_max_interval_seconds: float = _DEFAULT_POLL_MAX_INTERVAL_SECONDS,
@@ -95,6 +99,11 @@ class McpBacktestRunner:
         if mode not in ("local", "remote"):
             raise ValueError("mode must be 'local' or 'remote'")
         self._harness_tools = harness_tools
+        self._submissions = (
+            submissions
+            if submissions is not None
+            else SqliteSubmissionStore(default_workspace_root() / ".submissions.sqlite")
+        )
         self._mode: BacktestMode = mode
         self._metadata = dict(metadata or {})
         if not math.isfinite(poll_interval_seconds) or poll_interval_seconds < 0:
@@ -124,6 +133,20 @@ class McpBacktestRunner:
         if existing is not None:
             return self._resolve(request, existing)
         arguments = self._launch_arguments(request)
+        retained = self._submissions.get(request.workspace_id, request.job_id)
+        if retained is not None:
+            raise BacktestRunError(
+                f"retained job {request.job_id!r} has no visible harness outcome; inspect it without replaying"
+            )
+        self._submissions.retain(
+            request.workspace_id,
+            request.job_id,
+            self._launch_tool,
+            {
+                "arguments": arguments,
+                "workflow_execution_id": request.workflow_execution_id,
+            },
+        )
         self._check_cancelled(request)
         launched = self._harness_tools.call_tool(self._launch_tool, arguments)
         if not launched.ok:
@@ -144,9 +167,9 @@ class McpBacktestRunner:
             }
             document["job_id"] = request.job_id
             return {"config": document}
-        if isinstance(configuration, str) and configuration.strip():
-            return {"config_path": configuration}
-        raise BacktestRunError("harness configuration must be a path or mapping")
+        raise BacktestRunError(
+            "harness configuration must be an immutable inline mapping"
+        )
 
     def _existing_job(self, job_id: str) -> HarnessToolResult | None:
         """Return the harness job for one job id, pending or terminal.
@@ -244,6 +267,7 @@ class McpBacktestRunner:
         return self._result(job_id, resolved)
 
     def _check_cancelled(self, request: BacktestRunRequest) -> None:
+        assert_owned()
         if self._cancelled is not None and self._cancelled(request):
             raise BacktestRunError(f"{self._runner_label} polling cancelled")
 
@@ -349,7 +373,7 @@ def build_local_workflow_runtime(
     opening or initializing a second MCP transport.  The backtest port is the
     injected ``runner`` when supplied, otherwise a :class:`McpBacktestRunner`
     over ``harness_tools``; providing neither raises
-    :class:`~thesis.workflows.runtime.WorkflowRuntimeError`.
+    :class:`~thesis.application.workflows.WorkflowRuntimeError`.
     """
     if harness_tools is None and harness_client is not None:
         harness_tools = open_harness_tool_provider(client=harness_client)

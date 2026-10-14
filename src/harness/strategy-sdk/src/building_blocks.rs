@@ -417,7 +417,7 @@ pub fn perceptually_important_points(values: &[f64], count: usize) -> Result<Vec
 
 /// One orthonormal Haar level, from fine to coarse scale.
 #[derive(Clone, Debug, PartialEq)]
-pub struct HaarLevel {
+pub(crate) struct HaarLevel {
     /// Number of source observations contributing to each coefficient.
     pub support: usize,
     /// Detail coefficients in source order.
@@ -429,7 +429,7 @@ pub struct HaarLevel {
 ///
 /// # Errors
 /// Requires a power-of-two window of at least two finite observations.
-pub fn trailing_haar(values: &[f64]) -> Result<Vec<HaarLevel>, String> {
+pub(crate) fn trailing_haar(values: &[f64]) -> Result<Vec<HaarLevel>, String> {
     if values.len() < 2
         || !values.len().is_power_of_two()
         || values.iter().any(|value| !value.is_finite())

@@ -12,12 +12,8 @@ from thesis.agent.harness_tools import (
     HarnessToolProvider,
     HarnessToolResult,
 )
+from thesis.application.job_classification import HARNESS_RESEARCH_MODEL_TOOL
 from thesis.backtests.coordinator import BacktestRunCoordinator
-from thesis.chat.contracts import (
-    HARNESS_RESEARCH_MODEL_TOOL,
-    ToolJob,
-    ToolJobState,
-)
 from thesis.http.backtests import BacktestDataService, InMemoryBacktestStore
 from thesis.integrations.mcp import (
     TOOL_GET_JOB_RESULT,
@@ -25,6 +21,7 @@ from thesis.integrations.mcp import (
     TOOL_LIST_ARTIFACTS,
     TOOL_READ_ARTIFACT,
 )
+from thesis_runtime.contracts.records import ToolJob, ToolJobState
 
 JOB_ID = "job-0123456789abcdef0123456789abcdef"
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
@@ -104,6 +101,9 @@ def _tool_job(
         state=state,
         result=result,
         error_message=error_message,
+        conversation_id="chat-1",
+        root_conversation_id="chat-1",
+        parent_conversation_id=None,
     )
 
 

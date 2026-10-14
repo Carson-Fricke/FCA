@@ -26,6 +26,7 @@ mod azure;
 mod bars;
 mod common;
 mod crypto;
+mod ensure;
 mod equities;
 mod leased;
 pub mod options;
@@ -39,13 +40,14 @@ pub use bars::{
 };
 pub use common::{AtomicIngestCommitter, PartitionWriter, StagedParquetObject, TransientRetry};
 pub use crypto::{CryptoClock, CryptoIngestResult, CryptoIngestTransaction};
+pub use ensure::{EnsureIngest, EnsureProgress, EnsureProviders};
 pub use equities::{EquityIngestResult, EquityIngestTransaction};
 pub use leased::{scope_for_coverage, LeasedAtomicIngestCommitter};
 pub use options::{
     enqueue_option_backfill, plan_option_backfill, OptionBackfillItem, OptionBackfillPlan,
     OptionBackfillRequest, OptionChainSelector, OptionClock, OptionIngestResult,
     OptionIngestTransaction, OptionMarketDataClient, OptionQueueHandler, OptionSpotProvider,
-    OptionWorker, QueueSender, SpotValues,
+    QueueSender, SpotValues,
 };
 pub use providers::{BarsDataProvider, CryptoDataProvider, EquityDataProvider};
 pub use staging::StagingPartitionWriter;

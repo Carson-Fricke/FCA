@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { canonicalPhaseName } from '$lib/workflow-graph';
 
 	/**
 	 * Capability-gated composer for one sub-agent node. The composer is
@@ -22,22 +21,22 @@
 
 	let submitting = $state(false);
 	const canSend = $derived(acceptsInput && draft.trim().length > 0 && !busy && !submitting);
-	const phaseName = $derived(canonicalPhaseName(phase));
+	const phaseName = $derived(phase);
 	const placeholder = $derived(phaseName ? `Message the ${phaseName.replace(/_/g, ' ')} agent...` : 'Message this sub-agent...');
 
 	async function send(): Promise<void> {
 		if (!canSend) return;
 		const sentBody = draft;
+		draft = '';
 		submitting = true;
 		try {
 			await onSubmit(sentBody.trim());
 		} catch {
-			// Keep the draft so a rejected send can be retried or edited.
+			if (!draft) draft = sentBody;
 			return;
 		} finally {
 			submitting = false;
 		}
-		if (draft === sentBody) draft = '';
 	}
 </script>
 

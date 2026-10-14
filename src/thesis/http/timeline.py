@@ -20,10 +20,6 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Requ
 from fastapi.responses import StreamingResponse
 from pydantic import TypeAdapter
 
-from thesis.chat import ChatService, RecordNotFound
-from thesis.chat.contracts import ChatMessage, WorkflowExecution
-from thesis.chat.persistence import record_from_payload
-from thesis.cosmos.timeline import CosmosTimeline
 from thesis.http.chat import _service_error, get_chat_service
 from thesis.http.streaming import (
     TEXT_EVENT_STREAM_MEDIA_TYPE,
@@ -31,15 +27,19 @@ from thesis.http.streaming import (
     _resume_cursor,
 )
 from thesis.http.wire import TimelineItemWire, TimelinePageWire
+from thesis_runtime.contracts.codec import record_from_payload
+from thesis_runtime.contracts.records import ChatMessage, WorkflowExecution
+from thesis_runtime.conversations import ChatService, RecordNotFound
+from thesis_runtime.conversations.timeline import TimelineReader
 
 DEFAULT_RECOVERY_INTERVAL_SECONDS = 15.0
 DEFAULT_LIMIT = 200
 TIMELINE_ITEM_ADAPTER = TypeAdapter(TimelineItemWire)
 
 
-def _timeline(request: Request) -> CosmosTimeline:
+def _timeline(request: Request) -> TimelineReader:
     timeline = getattr(request.app.state, "timeline", None)
-    if not isinstance(timeline, CosmosTimeline):
+    if not isinstance(timeline, TimelineReader):
         raise HTTPException(
             status_code=503,
             detail={
@@ -126,7 +126,7 @@ def _format(item: dict[str, object]) -> str:
 
 
 async def _timeline_stream(
-    timeline: CosmosTimeline,
+    timeline: TimelineReader,
     *,
     workspace_id: str,
     chat_id: str,
@@ -138,44 +138,60 @@ async def _timeline_stream(
     max_poll_cycles: int | None,
     chat_service: ChatService,
 ) -> AsyncIterator[str]:
-    cursor = after_seq
-    cycles = 0
-    while True:
-        # Snapshot the commit version before reading: a commit between this
-        # snapshot and the wait below still changes the version the wait sees.
-        version = timeline.commits.version(workspace_id, chat_id)
+    changed = asyncio.Event()
+    loop = asyncio.get_running_loop()
+
+    def on_commit() -> None:
         try:
-            await asyncio.to_thread(chat_service.get_chat, workspace_id, chat_id)
-        except RecordNotFound:
-            return
-        items = await asyncio.to_thread(
-            timeline.read_after,
-            workspace_id=workspace_id,
-            chat_id=chat_id,
-            after_seq=cursor,
-            limit=limit,
-            thread_id=thread_id,
-        )
-        try:
-            await asyncio.to_thread(chat_service.get_chat, workspace_id, chat_id)
-        except RecordNotFound:
-            return
-        for item in items:
-            cursor = max(cursor, _seq(item))
-            yield _format(item)
-        cycles += 1
-        if max_poll_cycles is not None and cycles >= max_poll_cycles:
-            return
-        if wait is not None:
-            await wait(recovery_interval_seconds)
-        else:
-            await asyncio.to_thread(
-                timeline.commits.wait,
-                workspace_id,
-                chat_id,
-                version,
-                recovery_interval_seconds,
+            loop.call_soon_threadsafe(changed.set)
+        except RuntimeError:
+            pass  # A disconnected reader may have closed its event loop.
+
+    release = await asyncio.to_thread(
+        timeline.commits.subscribe, workspace_id, chat_id, on_commit
+    )
+    try:
+        cursor = after_seq
+        cycles = 0
+        while True:
+            # Clear before reading: a commit during the read leaves a pending
+            # wake. Waiting is async and consumes no idle thread-pool slot.
+            changed.clear()
+            try:
+                await asyncio.to_thread(chat_service.get_chat, workspace_id, chat_id)
+            except RecordNotFound:
+                return
+            items = await asyncio.to_thread(
+                timeline.read_after,
+                workspace_id=workspace_id,
+                chat_id=chat_id,
+                after_seq=cursor,
+                limit=limit,
+                thread_id=thread_id,
             )
+            try:
+                await asyncio.to_thread(chat_service.get_chat, workspace_id, chat_id)
+            except RecordNotFound:
+                return
+            for item in items:
+                cursor = max(cursor, _seq(item))
+                yield _format(item)
+            cycles += 1
+            if max_poll_cycles is not None and cycles >= max_poll_cycles:
+                return
+            if len(items) >= limit:
+                continue
+            if wait is not None:
+                await wait(recovery_interval_seconds)
+            else:
+                try:
+                    await asyncio.wait_for(
+                        changed.wait(), timeout=recovery_interval_seconds
+                    )
+                except TimeoutError:
+                    pass
+    finally:
+        release()
 
 
 def create_timeline_router(

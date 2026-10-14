@@ -257,13 +257,6 @@ export function setBackend(kind: BackendKind, azureBase?: string): void {
 	location.reload();
 }
 
-/** Backward-compatible fixture toggle used by the error and workspace pages. */
-export function setFixtureMode(enabled: boolean): void {
-	setBackend(
-		enabled ? 'fixtures' : isLocalHosting ? 'local' : canUseRemoteApi ? 'azure' : 'local'
-	);
-}
-
 export const uiEnvironment: string =
 	(import.meta.env.PUBLIC_THESIS_UI_ENV as string | undefined) ?? 'dev';
 
@@ -391,6 +384,27 @@ export function createWorkspace(input: {
 	});
 }
 
+/** Delete the entire workspace scope; hosted storage may be removed later. */
+export async function deleteWorkspace(workspaceId: string): Promise<void> {
+    if (fixtureMode) {
+        await wait(15);
+        const chatIds = fixtures.chats[workspaceId]?.items.map((chat) => chat.chat_id) ?? [];
+        for (const chatId of chatIds) {
+            delete store.messages[chatId];
+            delete fixtures.chatMessages[chatId];
+        }
+        fixtures.workspaces.items = fixtures.workspaces.items.filter((item) => item.id !== workspaceId);
+        for (const records of [fixtures.workspaceSnapshot, fixtures.chats, fixtures.strategies,
+            fixtures.backtests, fixtures.deployments, fixtures.orders, fixtures.portfolio,
+            fixtures.riskDecisions, fixtures.widgets, fixtures.screeners, fixtures.screenerResults,
+            fixtures.workspaceArtifacts, store.widgets, store.screeners, store.screenerResults]) {
+            delete records[workspaceId];
+        }
+        return;
+    }
+    await apiFetch(`/v1/workspaces/${encodeURIComponent(workspaceId)}`, { method: 'DELETE' });
+}
+
 /**
  * Fetch one workspace summary. This is the render gate for a workspace route:
  * it proves the workspace exists and carries its name without loading counts or
@@ -470,9 +484,9 @@ export function listChats(workspaceId: string, signal?: AbortSignal): Promise<Ch
 }
 
 function toChatThread(raw: ChatThreadWire): ChatThread {
-	const investigation_ids = raw.links.investigation_ids ?? [];
+	const investigation_ids = raw.links.references?.['fca.investigation'] ?? [];
 	return { ...raw, kind: investigation_ids.length ? 'investigation' : 'chat',
-		investigation_ids, strategy_ids: raw.links.strategy_ids ?? [] };
+		investigation_ids, strategy_ids: raw.links.references?.['fca.strategy'] ?? [] };
 }
 
 export interface CreateChatInput {
@@ -512,7 +526,7 @@ export function createChat(
 				owner_actor_id: owner,
 				created_at: new Date().toISOString(),
 				updated_at: null,
-				links: { chat_ids: [], investigation_ids: [], strategy_ids: [], experiment_ids: [], workflow_execution_ids: [], job_ids: [] },
+				links: { chat_ids: [], references: {}, workflow_execution_ids: [], job_ids: [] },
 				input_consumed_positions: {},
 				created_by: owner,
 				schema_version: 1,
@@ -638,6 +652,7 @@ export function getWorkflowDefinition(
 
 export interface PostMessageInput {
 	body: string;
+	messageId?: string;
 	attachmentIds?: string[];
 	steeringIntent?: string | null;
 	targetsExecutionId?: string | null;
@@ -654,7 +669,7 @@ export function postMessage(
 			const doc = store.messages[chatId];
 			if (!doc) throw new Error(`unknown chat ${chatId}`);
 			const message: ChatMessage = {
-				message_id: `msg-local-${store.nextId++}`,
+				message_id: input.messageId ?? `msg-local-${store.nextId++}`,
 				chat_id: chatId,
 				conversation_id: chatId, root_conversation_id: chatId, parent_conversation_id: null,
 				workspace_id: workspaceId,
@@ -671,7 +686,7 @@ export function postMessage(
 				schema_version: 1,
 				content_hash: fixtureDigest(JSON.stringify([workspaceId, chatId, store.nextId, input.body])),
 				input_position: 0,
-				investigation_ids: [],
+				references: {},
 				kind: 'message',
 				data: null,
 				reasoning: null,
@@ -707,6 +722,7 @@ export function postMessage(
 				actor_id: localActorId,
 				body: input.body,
 				attachment_ids: input.attachmentIds ?? [],
+				message_id: input.messageId,
 				steering_intent: input.steeringIntent ?? null,
 				targets_execution_id: input.targetsExecutionId ?? null
 			})
@@ -804,6 +820,7 @@ export function listChatSubAgents(
 
 export interface PostNodeMessageInput {
 	body: string;
+	messageId?: string;
 }
 
 /**
@@ -822,7 +839,7 @@ export function postNodeMessage(
 	if (fixtureMode) {
 		return wait(10).then(() => {
 			const receipt = decodeWire('NodeInputReceiptWire', {
-				message_id: `msg-node-${store.nextId++}`,
+				message_id: input.messageId ?? `msg-node-${store.nextId++}`,
 				chat_id: chatId,
 				conversation_id: node.id, root_conversation_id: chatId, parent_conversation_id: chatId,
 				workspace_id: workspaceId,
@@ -841,7 +858,7 @@ export function postNodeMessage(
 				schema_version: 1,
 				content_hash: fixtureDigest(JSON.stringify([workspaceId, chatId, node.id, store.nextId, input.body])),
 				input_position: 0,
-				investigation_ids: [],
+				references: {},
 				reasoning: null,
 				tool_result: null,
 				subAgentId: node.id,
@@ -855,7 +872,7 @@ export function postNodeMessage(
 	}
 	return apiFetch<unknown>(path, {
 		method: 'POST',
-		body: JSON.stringify({ body: input.body }),
+		body: JSON.stringify({ body: input.body, message_id: input.messageId }),
 		signal
 	}).then((raw) => nodeMessage(decodeWire('NodeInputReceiptWire', raw, path)));
 }
@@ -1040,7 +1057,7 @@ export function launchBacktest(
 ): Promise<BacktestLaunchResult> {
 	const body = {
 		bundle_ref: input.bundleRef,
-		config_path: input.configPath,
+		config: input.config,
 		strategy_id: input.strategyId ?? null,
 		name: input.name ?? null,
 		environment: input.environment ?? 'paper'
@@ -1383,9 +1400,12 @@ export function runScreener(
 			return plain(created);
 		});
 	}
-	return apiFetch<ScreeningResult>(path, {
+	return apiFetch<{ job_id: string; state: string }>(path, {
 		method: 'POST',
 		body: JSON.stringify({ definition_id: input.definition_id, as_of: input.as_of })
+	}).then(async (accepted) => {
+		await pollHarnessJob(accepted.job_id);
+		return apiFetch<ScreeningResult>(`${screenerPath(workspaceId)}/jobs/${encodeURIComponent(accepted.job_id)}/materialize`, { method: 'POST' });
 	});
 }
 
@@ -1427,6 +1447,7 @@ export function listWorkspaceArtifacts(workspaceId: string): Promise<WorkspaceAr
 
 export interface ExploratoryOutputPage {
 	job_id: string; artifactName: string; artifactSha256: string;
+	instanceId?: string; name?: string;
 	outputs?: { instanceId: string; name: string; kind: string; count: number | null }[];
 	output?: Record<string, unknown>; total: number; nextOffset: number | null;
 }
@@ -1437,6 +1458,11 @@ export function getExploratoryOutput(jobId: string, instanceId?: string, outputN
 	if (instanceId) query.set('instance_id', instanceId);
 	if (outputName) query.set('output_name', outputName);
 	return apiFetch<ExploratoryOutputPage>(`/v1/jobs/${encodeURIComponent(jobId)}/exploratory-outputs?${query}`);
+}
+
+/** Server-side presentation decisions over immutable, complete study evidence. */
+export function getStudyRecommendations(jobId: string): Promise<import('./research/recommendations').StudyRecommendations> {
+	return apiFetch(`/v1/jobs/${encodeURIComponent(jobId)}/research-recommendations`, { method: 'POST' });
 }
 
 /** Fetch one bounded UTF-8 artifact file for the in-page viewer. */

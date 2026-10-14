@@ -27,14 +27,15 @@ import { withWorkflowNodes } from '$lib/workflow-live';
 import { deriveSubAgentTree, projectExecution } from '$lib/subagent';
 
 const phase = 'discovery';
-function launch(id: string, seq: number): ChatMessage {
+function launch(id: string, seq: number, workflowId = 'hypothesis-development'): ChatMessage {
 	const datum = { datumType: 'workflow_execution', ok: true, summary: `Launched ${id}`, text: '', failure: null,
-		structured: { executionId: id, workflowId: 'hypothesis-development', version: '2.0.0', phase } };
+		structured: { executionId: id, workflowId, version: '5.0.0', activePhases: [phase] } };
 	return { ...aggregateMessage, chat_id: 'chat-1', workspace_id: 'ws-1', seq, message_id: `launch-${id}`, kind: 'message',
 		data: { activityKind: 'delivery', datums: [datum], sessionMessage: { ...aggregateMessage.data.sessionMessage,
 			content: { ...aggregateMessage.data.sessionMessage.content, result: { datums: [datum] } } } } } as ChatMessage;
 }
 function event(id: string, seq: number, type: ExecutionEvent['eventType'], payload: Record<string, unknown>): ExecutionEvent {
+	if (type.startsWith('workflow.') && !['workflow.progress', 'workflow.phase_result'].includes(type) && typeof payload.phase === 'string') payload = { activePhases: [payload.phase], controlSequence: seq, ...payload };
 	return { eventId: `event-${seq}`, executionId: id, eventType: type, cursor: seq, seq,
 		occurredAt: `2026-01-01T00:00:${String(seq).padStart(2, '0')}Z`, payload, workspaceId: 'ws-1',
 		actorId: 'runtime', actorScope: 'workflow', correlationId: id, intentEpoch: 0, lateResult: false };
@@ -47,6 +48,35 @@ const card = (id: string) => screen.getAllByTestId('workflow-card').find((elemen
 beforeEach(() => { streams.length = 0; vi.clearAllMocks(); localStorage.clear(); });
 
 describe('multiple workflows on one timeline', () => {
+	it('keeps parallel critics active, shows the blocked join, and ignores a delayed earlier frontier', async () => {
+		const graph = (seq: number, controlSequence: number, activePhases: string[], arrived: string[]) => event('one', seq, 'workflow.phase', {
+			phase: 'join_reviews', controlSequence, activePhases,
+			joins: { join_reviews: { required: ['strategy', 'correctness'], arrived, splitAttemptId: 'round-one' } }
+		});
+		const reviewer = (name: string, seq: number) => event('one', seq, 'sub_agent.spawned', {
+			subAgentId: name, phase: name, role: 'reviewer', phaseExecutor: true, acceptsInput: true, phaseAttemptId: `attempt-${name}`
+		});
+		const timeline = timelineFixture([launch('one', 1, 'parallel-review')], [graph(2, 1, ['strategy_review', 'correctness_review'], []),
+			reviewer('strategy_review', 3), reviewer('correctness_review', 4)]);
+		render(ChatSurface, { props: { workspaceId: 'ws-1', chatId: 'chat-1', timeline, onSend: vi.fn() } });
+		const step = (name: string) => card('one').querySelector(`[data-phase="${name}"]`)!;
+		expect(step('strategy_review')).toHaveAttribute('data-status', 'active');
+		expect(step('correctness_review')).toHaveAttribute('data-status', 'active');
+		expect(step('join_reviews')).toHaveAttribute('title', 'Waiting for strategy, correctness');
+		timeline.merge(timelineFixture([], [graph(5, 2, ['correctness_review'], ['strategy']),
+			event('one', 6, 'sub_agent.completed', { subAgentId: 'strategy_review', phase: 'strategy_review', phaseExecutor: true, phaseAttemptId: 'attempt-strategy_review' }),
+			graph(7, 1, ['strategy_review', 'correctness_review'], [])]).items);
+		await tick();
+		expect(step('strategy_review')).toHaveAttribute('data-status', 'done');
+		expect(step('correctness_review')).toHaveAttribute('data-status', 'active');
+		expect(step('join_reviews')).toHaveAttribute('title', 'Waiting for correctness');
+		await fireEvent.click(step('correctness_review'));
+		expect(screen.getByTestId('sub-agent-composer-input')).toBeInTheDocument();
+		await fireEvent.click(screen.getByTestId('scope-back'));
+		await fireEvent.click(step('join_reviews'));
+		expect(screen.getByTestId('scope-readonly')).toBeInTheDocument();
+	});
+
 	it('renders aggregate launch handles, isolates failure/attention and navigates the matching agent without resetting on launch', async () => {
 		const timeline = timelineFixture([launch('one', 1)], [spawn('one', 2)]);
 		const onScopeChange = vi.fn();
@@ -147,14 +177,14 @@ describe('multiple workflows on one timeline', () => {
 	it('replays earlier lifecycle evidence over a delayed initial snapshot without resurrecting failures', async () => {
 		const timeline = timelineFixture([launch('one', 1), launch('two', 2)], [event('one', 3, 'workflow.failed', { phase })]);
 		const snapshot = { execution_id: 'one', chat_id: 'chat-1', trigger_message_id: '', workflow_id: '', workflow_version: '',
-			requested_by: '', state: 'running', phase: 'trials', intent_epoch: 0, steering_message_ids: [], created_at: '' } as WorkflowExecutionRecord;
+			requested_by: '', state: 'running', control_sequence: 0, active_phases: ['trials'], intent_epoch: 0, steering_message_ids: [], created_at: '' } as WorkflowExecutionRecord;
 		timeline.merge([{ kind: 'execution', id: 'snapshot-one', seq: 4, payload: snapshot, chatId: 'chat-1', workspaceId: 'ws-1', ts: '' } as TimelineItem]);
 		expect(timeline.workflows.get('one')?.execution.state).toBe('failed');
 		expect(timeline.workflows.get('one')?.execution.phase).toBe(phase);
 		timeline.merge(timelineFixture([], [event('two', 5, 'workflow.failed', { phase })]).items);
 		expect(timeline.workflows.get('one')?.execution.state).toBe('failed');
 		expect(timeline.workflows.get('two')?.execution.state).toBe('failed');
-		timeline.merge([{ kind: 'execution', id: 'later-version', seq: 7, payload: { ...snapshot, phase: 'newer-snapshot' },
+		timeline.merge([{ kind: 'execution', id: 'later-version', seq: 7, payload: { ...snapshot, active_phases: ['newer-snapshot'] },
 			chatId: 'chat-1', workspaceId: 'ws-1', ts: '' } as TimelineItem]);
 		expect(timeline.workflows.get('one')?.execution.state).toBe('failed');
 		expect(timeline.workflows.get('one')?.execution.phase).toBe(phase);
@@ -173,11 +203,11 @@ describe('multiple workflows on one timeline', () => {
 			event('one', 6, 'workflow.progress', { phase: 'old-phase' }),
 			event('one', 7, 'workflow.phase_result', { phase: 'old-phase' })];
 		expect(projectExecution(execution, events).phase).toBe('trials');
-		expect(projectExecution({ ...execution, phase: null }, [spawn('one', 2)]).phase).toBe(phase);
-		expect(projectExecution({ ...execution, phase: null }, [events[2]]).phase).toBeNull();
+		expect(projectExecution({ ...execution, active_phases: [] }, [spawn('one', 2)]).phase).toBe(phase);
+		expect(projectExecution({ ...execution, active_phases: [] }, [events[2]]).phase).toBeNull();
 	});
 
-	it('uses explicit REST executors over earlier helper spawns and retains only trusted legacy parent provenance', async () => {
+	it('uses explicit REST executors over earlier helper spawns and requires explicit executor provenance', async () => {
 		const executor: SubAgentNode = { subAgentId: 'executor', parentSubAgentId: null, phase, role: 'executor',
 			workflowExecutionId: 'one', phaseExecutor: true, status: 'completed', acceptsInput: false, context: null };
 		const helper = event('one', 2, 'sub_agent.spawned', { subAgentId: 'helper', phase,
@@ -191,26 +221,14 @@ describe('multiple workflows on one timeline', () => {
 		expect(live.phases.find((item) => item.name === phase)?.status).toBe('done');
 		await controller.enterPhase('one', phase);
 		expect(controller.activeSegment?.id).toBe('executor');
-		const legacy = deriveSubAgentTree([
-			event('one', 3, 'sub_agent.spawned', { subAgentId: 'record', role: 'workflow-node', phase }),
-			event('one', 4, 'sub_agent.spawned', { subAgentId: 'legacy-executor', parentSubAgentId: 'record', phase }),
-			event('one', 5, 'sub_agent.spawned', { subAgentId: 'legacy-helper', parentSubAgentId: 'legacy-executor', phase })
-		]);
-		expect(legacy[0].node.phaseExecutor).toBe(true);
-		expect(legacy[0].children[0].node.phaseExecutor).not.toBe(true);
-		expect(projectExecution({ ...live.execution, phase: null }, [
-			event('one', 3, 'sub_agent.spawned', { subAgentId: 'record', role: 'workflow-node', phase: 'requested' }),
-			event('one', 4, 'sub_agent.spawned', { subAgentId: 'legacy-executor', parentSubAgentId: 'record', phase })
-		]).phase).toBe(phase);
+        const tree = deriveSubAgentTree([
+            event('one', 3, 'sub_agent.spawned', { subAgentId: 'record', role: 'workflow-node', phase }),
+            event('one', 4, 'sub_agent.spawned', { subAgentId: 'executor', parentSubAgentId: 'record', phase, phaseExecutor: true }),
+            event('one', 5, 'sub_agent.spawned', { subAgentId: 'helper', parentSubAgentId: 'executor', phase, phaseExecutor: false })
+        ]);
+        expect(tree[0].node.phaseExecutor).toBe(true);
+        expect(tree[0].children[0].node.phaseExecutor).toBe(false);
 		controller.detach();
-	});
-
-	it.each(['requested', 'completed', 'failed', 'cancelled', 'paused', 'stopped'])('never renders retired status %s as an active phase', (marker) => {
-		const anchor = { ...launch('one', 1), kind: 'workflow', data: { executionId: 'one', currentPhase: marker,
-			phases: [marker, phase], status: 'running' } } as ChatMessage;
-		const timeline = timelineFixture([anchor], [event('one', 2, 'workflow.phase', { phase: marker })]);
-		expect(timeline.workflows.get('one')?.execution.phase).toBeNull();
-		expect(timeline.workflows.get('one')?.phases.map((item) => item.name)).toEqual([phase]);
 	});
 
 	it.each(['failed', 'completed', 'cancelled', 'stopped'] as const)('opens %s workflow cards read-only even when the node still accepts input', async (state) => {
@@ -260,21 +278,19 @@ describe('multiple workflows on one timeline', () => {
 		controller.detach();
 	});
 
-	it('indexes canonical-only aggregate results and renders multiple handles from one receipt alongside legacy anchors', async () => {
+	it('indexes canonical-only aggregate results and renders multiple handles from one receipt without a separate workflow message format', async () => {
 		const one = launch('one', 1);
 		const two = launch('two', 1);
 		const datums = [...one.data!.datums!, ...two.data!.datums!];
 		const receipt = { ...one, data: { ...one.data, datums, sessionMessage: { ...one.data!.sessionMessage!,
 			content: { ...one.data!.sessionMessage!.content, result: { datums } } } } };
-		const legacy = { ...one, message_id: 'legacy', seq: 2, kind: 'workflow', tool_result: null,
-			data: { executionId: 'legacy', workflowId: 'hypothesis-development', currentPhase: phase, status: 'running' } } as ChatMessage;
 		const canonicalOnly = { ...receipt, data: { sessionMessage: receipt.data.sessionMessage } };
 		expect(timelineFixture([canonicalOnly]).workflows.size).toBe(2);
-		const timeline = timelineFixture([receipt, legacy]);
+		const timeline = timelineFixture([receipt]);
 		render(ChatSurface, { props: { workspaceId: 'ws-1', chatId: 'chat-1', timeline, onSend: vi.fn() } });
-		expect(await screen.findAllByTestId('workflow-card')).toHaveLength(3);
-		expect(timeline.messages).toHaveLength(2);
-		expect(screen.getAllByTestId('workflow-card').map((item) => item.dataset.execution)).toEqual(['one', 'two', 'legacy']);
+		expect(await screen.findAllByTestId('workflow-card')).toHaveLength(2);
+		expect(timeline.messages).toHaveLength(1);
+		expect(screen.getAllByTestId('workflow-card').map((item) => item.dataset.execution)).toEqual(['one', 'two']);
 	});
 
 	it('keeps same-named deterministic phase results and failures execution-specific', async () => {
@@ -299,7 +315,7 @@ describe('multiple workflows on one timeline', () => {
 		const controller = new WorkflowScopeController('ws-1', 'links', timeline);
 		controller.attachChat('chat-1', { scope: 'conversation:chat-1/phase:discovery' });
 		await controller.ensureLoaded();
-		expect(controller.error).toContain('does not identify an execution');
+		expect(controller.error).toContain('is outdated');
 		expect(controller.activeSegment?.executionId).toBeUndefined();
 		await controller.enterPhase('one', phase);
 		const first = controller.scope.toQuery();
@@ -312,10 +328,10 @@ describe('multiple workflows on one timeline', () => {
 		const partialController = new WorkflowScopeController('ws-1', 'partial-links', partial);
 		partialController.attachChat('chat-1', { scope: 'conversation:chat-1/phase:discovery' });
 		expect(partialController.activeSegment?.executionId).toBeUndefined();
-		expect(partialController.error).toContain('does not identify an execution');
+		expect(partialController.error).toContain('is outdated');
 		partialController.detach();
 		controller.attachChat('chat-1', { scope: serializeScope([{ kind: 'conversation', id: 'chat-1', label: '' },
-			{ kind: 'workflow', id: 'one', label: '' }, { kind: 'phase', id: phase, label: '' }]) });
+			{ kind: 'phase', id: phaseScopeId('one', phase), label: '' }]) });
 		expect(controller.activeSegment?.executionId).toBe('one');
 		expect(controller.error).toBe('');
 		controller.detach();

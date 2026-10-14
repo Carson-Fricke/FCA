@@ -19,8 +19,12 @@ terminal transcript, log, issue, or task evidence.
   with `npm install` inside `src/ui`.
 - Docker Desktop for the Cosmos DB emulator that backs durable conversation
   state. The launcher starts Docker when needed and runs the emulator from the
-  vNext image with a named data volume mounted at `/data`, so conversations
-  survive restarts. The legacy emulator image does not persist data.
+  pinned `vnext-EN20260907` image over loopback HTTP with a named data volume
+  mounted at `/data`, so conversations survive restarts. HTTP bypasses this
+  release's TLS buffering defect. Microsoft fixed the HTTPS request-size hangs
+  in `vnext-EN20261008`, but that image fails to query our retained catalog with
+  `unknown type of jsonb container`; do not switch this data volume to it.
+  The legacy emulator image does not persist data.
 - Bearer tokens for market-lake (`LAKE_API__BEARER_TOKEN`), harness
   (`HARNESS_API_BEARER_TOKEN`), and Thesis (`THESIS_API__BEARER_TOKEN`) are
   managed in the ignored repository `.env` by `scripts/local/dev_tokens.py`.
@@ -36,7 +40,7 @@ terminal transcript, log, issue, or task evidence.
 ## 2. Provider Setup
 
 The Thesis backend resolves its model provider through a fail-closed preflight
-(`thesis.providers`); workspace surfaces stay usable offline either way.
+(`thesis_runtime.adapters.providers`); workspace surfaces stay usable offline either way.
 
 ### OpenRouter (env key, default choice)
 
@@ -45,7 +49,7 @@ the process environment:
 
 | Variable | Consumer |
 | --- | --- |
-| `OPENROUTER_API_KEY` | OpenRouter key source (`thesis/providers/openrouter.py`) |
+| `OPENROUTER_API_KEY` | OpenRouter key source (`thesis_runtime/adapters/providers/openrouter.py`) |
 
 Set it with a masked prompt so the value never lands in shell history:
 
@@ -71,7 +75,10 @@ provider into streamed conversation replies: when `OPENROUTER_API_KEY` is
 present, a new user message streams an assistant reply over
 `GET /v1/workspaces/{ws}/chats/{chat}/events/stream`; without it, chat stays a
 durable message surface with no reply. `THESIS_MODEL` overrides the model
-(default `deepseek/deepseek-v4.1-flash`).
+(default `deepseek/deepseek-v4.1-flash`). Local and deployed backends use the same
+control service; local logging must not override phase-completion methods.
+Completion attempt identity is supplied by trusted runtime context.
+
 
 ### Azure AI Foundry (preflight)
 
@@ -117,6 +124,33 @@ powershell -File scripts/local/start-stack.ps1 -Foreground
 
 The launcher adds the base CPython directory to `PATH` for the harness facade
 (see troubleshooting) and reports each server's PID and health.
+
+The local harness uses the Azure development market lake by default:
+`https://fca-ml-dev-api.lemonhill-3b437822.westus2.azurecontainerapps.io`.
+Sign in with `az login`; the launcher reads `api-bearer-token` from the existing
+Key Vault into the harness child's environment only. The Azure token is never
+written to `.env`, and the local lake keeps its generated loopback token.
+`HARNESS_LAKE_BEARER_SECRET_URI` can select a different Key Vault secret.
+
+To use the local lake, put `LAKE_API_URL=http://127.0.0.1:8002` in the ignored
+`.env` and include `lake` when starting the stack. `LAKE_API_BASE_URL` is also
+supported after `LAKE_API_URL`; unset both URL overrides to use Azure again.
+Other explicit endpoints use their configured `LAKE_API__BEARER_TOKEN` unless
+a Key Vault secret URI is supplied. A missing or rejected remote credential
+fails; the harness does not fall back to the local lake.
+
+For a manual harness launch against Azure, resolve its token into the process
+environment rather than loading the loopback lake token from `.env`:
+
+```powershell
+$env:LAKE_API__BEARER_TOKEN = (az keyvault secret show `
+    --vault-name fca-ml-dev-kv-obj3kww --name api-bearer-token --query value -o tsv)
+```
+
+The local Cosmos client defaults to `http://127.0.0.1:8081`, matching the launcher.
+Remove an old local `THESIS_COSMOS_ENDPOINT=https://localhost:8081` override or
+set it to the HTTP endpoint. Gateway, health, and explorer ports bind only to
+`127.0.0.1`; deployed Cosmos endpoints continue using HTTPS.
 
 ### Manual (three terminals)
 
@@ -324,3 +358,5 @@ stage passed.
   means the endpoint/project/deployment names in `config/thesis/runtime.yaml`
   do not resolve to an enabled deployment. Never paste provider keys into
   this runbook, the UI, or any repository file.
+
+The local API script embeds the durable worker against the same Cosmos catalog. Deployed `thesis serve` does not start workers: deploy/run `thesis worker` separately. API replicas may scale independently; always retain worker capacity. Drain active workflow executions before the catalog-partition deployment cutover.

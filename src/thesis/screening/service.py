@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping
+from typing import cast
 from uuid import uuid4
 
 from thesis.integrations.mcp import HarnessMcpError, McpToolResult
+from thesis.persistence.submissions import SubmissionStore, retain_submission
 from thesis.screening.definitions import ScreenerDefinition
 from thesis.screening.runs import (
     COMPLETE_JOB_STATES,
@@ -54,6 +56,7 @@ class ScreenerService:
         *,
         tools: ScreeningToolProvider | None = None,
         store: ScreenerStore | None = None,
+        submissions: SubmissionStore | None = None,
         sleep: Callable[[float], None] = time.sleep,
         poll_interval_seconds: float = 0.25,
         max_polls: int = 240,
@@ -62,6 +65,7 @@ class ScreenerService:
             raise ValueError("poll_interval_seconds must be non-negative")
         if max_polls < 1:
             raise ValueError("max_polls must be a positive integer")
+        self.submissions = submissions
         self._tools = tools
         self._store = store if store is not None else InMemoryScreenerStore()
         self._sleep = sleep
@@ -93,14 +97,16 @@ class ScreenerService:
         )
 
     def run(self, workspace_id: str, definition_id: str, as_of: str) -> ScreeningRecord:
-        """Launch, await, and import one screening run for a definition.
+        """Deterministic callers may wait; HTTP callers use submit and materialize."""
+        accepted = self.submit(workspace_id, definition_id, as_of)
+        job_id = str(accepted["job_id"])
+        self._await_terminal(job_id)
+        return self.materialize(workspace_id, job_id)
 
-        Raises :class:`KeyError` for an unknown definition,
-        :class:`ScreenerUnavailableError` when no harness boundary is composed
-        or the launch/poll transport fails, and :class:`ScreeningRunError` for
-        a terminal harness failure, a status timeout, or an unusable result
-        artifact.  A record is stored only after a complete import.
-        """
+    def submit(
+        self, workspace_id: str, definition_id: str, as_of: str
+    ) -> dict[str, object]:
+        """Retain immutable inputs and submit once, without polling or importing."""
         workspace = _required_text(workspace_id, "workspace id")
         resolved_id = _required_text(definition_id, "definition id")
         definition = self._store.get_definition(workspace, resolved_id)
@@ -113,6 +119,18 @@ class ScreenerService:
         job_id = f"job-{uuid4().hex}"
         try:
             config = definition.materialize_config(as_of=as_of)
+            retain_submission(
+                self.submissions,
+                workspace,
+                job_id,
+                "run_screener",
+                {
+                    "config": config,
+                    "definition_id": resolved_id,
+                    "definition": definition.canonical_document,
+                    "as_of": as_of,
+                },
+            )
             launched = self._tools.run_screener(
                 config=config, workspace=workspace, job_id=job_id
             )
@@ -121,14 +139,6 @@ class ScreenerService:
                     _failure(launched, "run_screener"), job_id=job_id
                 )
             _require_acknowledged_job_id(launched, job_id)
-            self._await_terminal(job_id)
-            record = import_screening_run(
-                tools=self._tools,
-                workspace_id=workspace,
-                definition=definition,
-                job_id=job_id,
-                as_of=as_of,
-            )
         except ScreeningRunError as error:
             if error.job_id is None:
                 error.job_id = job_id
@@ -138,7 +148,42 @@ class ScreenerService:
                 f"the harness MCP screener boundary is unavailable: {error}",
                 job_id=job_id,
             ) from error
-        return self._store.add_record(workspace, record)
+        return {"job_id": job_id, "state": launched.structured.get("state", "accepted")}
+
+    def materialize(self, workspace_id: str, job_id: str) -> ScreeningRecord:
+        """Import one completed retained job, including after a process restart."""
+        if self._tools is None or self.submissions is None:
+            raise ScreenerUnavailableError(
+                "screening tools and submissions are required"
+            )
+        submission = self.submissions.get(workspace_id, job_id)
+        if submission is None or submission["operation"] != "run_screener":
+            raise KeyError(job_id)
+        inputs = cast(Mapping[str, object], submission["inputs"])
+        document = cast(Mapping[str, object], inputs["definition"])
+        definition = ScreenerDefinition(
+            name=cast(str, document["name"]),
+            lookback_days=cast(int, document["lookbackDays"]),
+            bar_intervals=tuple(cast(list[str], document["barIntervals"])),
+            rank_metric=cast(str, document["rankMetric"]),
+            universe_revision=cast(str | None, document["universeRevision"]),
+            source=cast(str, document["source"]),
+            parameters=cast(Mapping[str, object], document["parameters"]),
+        )
+        try:
+            record = import_screening_run(
+                tools=self._tools,
+                workspace_id=workspace_id,
+                definition=definition,
+                job_id=job_id,
+                as_of=cast(str, inputs["as_of"]),
+            )
+            return self._store.add_record(workspace_id, record)
+        except ScreeningRunError as error:
+            error.job_id = job_id
+            raise
+        except HarnessMcpError as error:
+            raise ScreenerUnavailableError(str(error), job_id=job_id) from error
 
     def get_result(self, workspace_id: str, result_id: str) -> ScreeningRecord:
         """Return one imported result, or raise :class:`KeyError` when absent."""

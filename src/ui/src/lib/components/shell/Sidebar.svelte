@@ -1,7 +1,7 @@
 <script lang="ts">
 	import WorkspaceSwitcher from './WorkspaceSwitcher.svelte';
 	import { pinnedWidgets, togglePin } from '$lib/workspace.svelte';
-	import type { WidgetDefinition, WorkspaceSnapshot } from '$lib/types';
+	import type { WidgetDefinition, WorkspaceSnapshot, WorkspaceSummary } from '$lib/types';
 
 	/** Persistent sidebar: brand, switcher, search, nav with counts, pinned, footer. */
 	let {
@@ -13,6 +13,7 @@
 		onSearch,
 		onSwitch,
 		onCreateWorkspace,
+		onDeleteWorkspace,
 		onSettings,
 		canConfigureBackend
 	}: {
@@ -24,6 +25,7 @@
 		onSearch: () => void;
 		onSwitch: (id: string) => void;
 		onCreateWorkspace: () => void;
+		onDeleteWorkspace: (workspace: WorkspaceSummary) => void;
 		onSettings: () => void;
 		canConfigureBackend: boolean;
 	} = $props();
@@ -66,6 +68,7 @@
 			currentId={workspaceId}
 			{onSwitch}
 			onCreate={onCreateWorkspace}
+			onDelete={onDeleteWorkspace}
 		/>
 	</div>
 

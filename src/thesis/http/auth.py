@@ -124,7 +124,7 @@ class _BearerAuthenticator(Protocol):
     principal on ``request.state`` for downstream routes.
     """
 
-    async def __call__(
+    def __call__(
         self,
         request: Request,
         credentials: HTTPAuthorizationCredentials | None,
@@ -146,7 +146,7 @@ class SessionCookieAuthenticator:
     clock: Callable[[], datetime] = _utc_now
     cookie_name: str = SESSION_COOKIE_NAME
 
-    async def __call__(
+    def __call__(
         self,
         request: Request,
         credentials: Annotated[
@@ -170,7 +170,7 @@ class SessionCookieAuthenticator:
             return principal
         if self.fallback is None:
             raise _unauthorized()
-        principal = await self.fallback(request, credentials)
+        principal = self.fallback(request, credentials)
         request.state.authenticated_principal = principal
         return principal
 
@@ -387,7 +387,7 @@ def create_auth_router(
     )
 
     @router.post("/login")
-    async def login(payload: AuthLoginRequest, response: Response) -> dict[str, object]:
+    def login(payload: AuthLoginRequest, response: Response) -> dict[str, object]:
         try:
             if payload.code is not None:
                 if payload.code_verifier is None or payload.redirect_uri is None:
@@ -464,7 +464,7 @@ def create_auth_router(
             "/logout",
             dependencies=[Depends(guard), Depends(session_cookie)],
         )
-        async def logout(response: Response, request: Request) -> dict[str, str]:
+        def logout(response: Response, request: Request) -> dict[str, str]:
             """Revoke the current session server-side and clear the cookie."""
             service.revoke_session(_current_record(request).id)
             _clear_session_cookie(response, browser_policy)
@@ -474,9 +474,7 @@ def create_auth_router(
             "/revoke",
             dependencies=[Depends(guard), Depends(session_cookie)],
         )
-        async def revoke(
-            payload: RevokeSessionRequest, request: Request
-        ) -> dict[str, str]:
+        def revoke(payload: RevokeSessionRequest, request: Request) -> dict[str, str]:
             """Revoke one session owned by the calling operator."""
             record = _current_record(request)
             target = store.get(payload.session_id)

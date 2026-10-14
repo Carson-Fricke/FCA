@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { goto, afterNavigate } from '$app/navigation';
-	import { createWorkspace, fixtureMode, listWorkspaces, setFixtureMode } from '$lib/api';
+	import { createWorkspace, fixtureMode, listWorkspaces, setBackend } from '$lib/api';
 	import CreateWorkspaceDialog from '$lib/components/shell/CreateWorkspaceDialog.svelte';
+	import DeleteWorkspaceDialog from '$lib/components/shell/DeleteWorkspaceDialog.svelte';
 	import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
 	import { notify, setLastWorkspace, ui } from '$lib/workspace.svelte';
 	import type { WorkspaceSummary } from '$lib/types';
@@ -10,6 +11,7 @@
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 	let createOpen = $state(false);
+	let deletingWorkspace = $state<WorkspaceSummary | null>(null);
 	/** Remembered id surfaced as a notice instead of a blind redirect. */
 	let staleNotice = $state<string | null>(null);
 
@@ -128,7 +130,7 @@
 						<button
 							type="button"
 							class="rounded-lg border border-surface-600 px-3 py-1.5 text-xs text-slate-700 hover:border-accent/40 hover:text-accent"
-							onclick={() => setFixtureMode(true)}
+							onclick={() => setBackend('fixtures')}
 							data-testid="picker-use-fixtures"
 						>
 							Continue with fixture data
@@ -159,9 +161,15 @@
 								</div>
 							</div>
 						</button>
+						<button type="button" class="mt-1 px-3 py-1 text-xs text-loss hover:underline"
+							onclick={() => (deletingWorkspace = workspace)} aria-label={`Delete ${workspace.name}`}
+							data-testid="picker-delete-workspace">Delete workspace…</button>
 					</li>
 				{/each}
 			</ul>
+			{#if workspaces.length === 0}
+				<p class="text-center text-sm text-slate-500">No workspaces yet. Create one to get started.</p>
+			{/if}
 			<div class="mt-6 flex items-center justify-center gap-3">
 				<button
 					type="button"
@@ -178,4 +186,13 @@
 
 {#if createOpen}
 	<CreateWorkspaceDialog onClose={() => (createOpen = false)} onCreate={onCreate} />
+{/if}
+
+{#if deletingWorkspace}
+	<DeleteWorkspaceDialog workspace={deletingWorkspace}
+		onClose={() => (deletingWorkspace = null)}
+		onDeleted={() => {
+			workspaces = workspaces.filter((workspace) => workspace.id !== deletingWorkspace?.id);
+			deletingWorkspace = null;
+		}} />
 {/if}

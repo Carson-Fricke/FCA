@@ -14,7 +14,8 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 
-use harness_lakeclient::{BlockingLakeClient, EnsureSpec, ReadSpec};
+use harness_contracts::progress::{ExecutionProgress, ExecutionStage};
+use harness_lakeclient::{BlockingLakeClient, EnsureSpec, LakeClientError, ReadSpec};
 use num::{Decimal18, DecimalError};
 
 use marketdata::{DataType, Date};
@@ -477,7 +478,7 @@ fn resolve_authored_sources(
 /// [`StrategyInstance`]. Writes the canonical `backtest.json` artifact and
 /// returns the outcome with its path.
 ///
-/// The run window's quote and trade data is ensured and streamed through the
+/// The run window's declared data is ensured and streamed through the
 /// injected [`BlockingLakeClient`]; a lake that cannot serve the configured
 /// window fails the job. A run without a configured lake endpoint never reaches
 /// this function: the client cannot be built.
@@ -498,6 +499,9 @@ pub fn run_native_job_with_lake_client(
     let fixture = lake_fixture_with_subscriptions(configuration, client, &subscriptions)?;
     let mut source_configuration = configuration.clone();
     source_configuration.data_source_bar_interval = "1min".into();
+    client
+        .report_progress(ExecutionProgress::stage(ExecutionStage::RunningBacktest))
+        .map_err(|error| BacktestJobError::Io(error.to_string()))?;
     let outcome = run_native_engine_outcome(
         &source_configuration,
         engine_options,
@@ -505,6 +509,9 @@ pub fn run_native_job_with_lake_client(
         fixture,
         &lake_scale_options(),
     )?;
+    client
+        .report_progress(ExecutionProgress::stage(ExecutionStage::WritingArtifacts))
+        .map_err(|error| BacktestJobError::Io(error.to_string()))?;
     let artifact_path = write_run_artifacts(
         configuration,
         &outcome,
@@ -534,6 +541,9 @@ pub fn run_native_study_job_with_lake_client(
     let fixture = lake_fixture_with_subscriptions(configuration, client, &subscriptions)?;
     let mut source_configuration = configuration.clone();
     source_configuration.data_source_bar_interval = "1min".into();
+    client
+        .report_progress(ExecutionProgress::stage(ExecutionStage::RunningStudy))
+        .map_err(|error| BacktestJobError::Io(error.to_string()))?;
     let outcome = run_native_engine_outcome(
         &source_configuration,
         engine_options,
@@ -541,6 +551,9 @@ pub fn run_native_study_job_with_lake_client(
         fixture,
         &lake_scale_options(),
     )?;
+    client
+        .report_progress(ExecutionProgress::stage(ExecutionStage::WritingArtifacts))
+        .map_err(|error| BacktestJobError::Io(error.to_string()))?;
     let artifact_path =
         write_run_artifacts(configuration, &outcome, output_dir, "studies", "study.json")?;
     Ok((outcome, artifact_path))
@@ -759,16 +772,39 @@ pub fn lake_fixture_with_subscriptions(
     );
     let start_text = start_date.isoformat();
     let end_text = end_date.isoformat();
-    let mut events =
-        lake_subscription_events(configuration, client, &start_text, &end_text, &acquisition)?;
+    let mut resolved = BTreeMap::new();
+    for (alias, selector) in &configuration.option_selectors {
+        let as_of = selector
+            .validate()
+            .map_err(|e| BacktestJobError::Io(e.to_string()))?;
+        if as_of.to_nanos_i64() > configuration.start_ns {
+            return Err(BacktestJobError::Io(
+                "option selection must not follow replay start".into(),
+            ));
+        }
+        if !configuration.symbols.contains(alias) {
+            return Err(BacktestJobError::Io(
+                "option input alias must be a configured symbol".into(),
+            ));
+        }
+        resolved.insert(
+            alias.clone(),
+            client
+                .resolve_option(selector)
+                .map_err(|e| BacktestJobError::Io(e.to_string()))?,
+        );
+    }
+    let mut events = lake_subscription_events(
+        configuration,
+        client,
+        &start_text,
+        &end_text,
+        &acquisition,
+        &resolved,
+    )?;
     if events.is_empty() {
-        let expected = if configuration.shell == "study" {
-            "bar"
-        } else {
-            "quote or trade"
-        };
         return Err(BacktestJobError::Io(format!(
-            "the market lake served no {expected} events for the configured window \
+            "the market lake served no requested events for the configured window \
              {start_text}..{end_text} (symbols: {}); ensure the lake covers the run window",
             configuration.symbols.join(", ")
         )));
@@ -784,7 +820,15 @@ pub fn lake_fixture_with_subscriptions(
     let fixture = ReplayFixture {
         sessions,
         events,
-        source_id: format!("lake:{}", client.base_url()),
+        source_id: if resolved.is_empty() {
+            format!("lake:{}", client.base_url())
+        } else {
+            format!(
+                "lake:{};options={}",
+                client.base_url(),
+                serde_json::to_string(&resolved).expect("option resolution JSON")
+            )
+        },
         symbols: configuration.symbols.clone(),
         fingerprints,
         expected_data_fingerprint: None,
@@ -804,8 +848,8 @@ pub fn lake_fixture_with_subscriptions(
 
 /// Ensure and read every normalized symbol/type requirement.
 ///
-/// Every input window is ensured and read concurrently (bounded by the lake
-/// client's fetch concurrency), then merged. Completion order cannot change the
+/// Input windows are ensured concurrently. Arrow batches are then decoded and
+/// consumed incrementally, releasing each batch before the next arrives. Completion order cannot change the
 /// replay: [`lake_fixture`] sorts the merged events by timestamp before any
 /// preflight or engine work.
 fn lake_subscription_events(
@@ -814,6 +858,7 @@ fn lake_subscription_events(
     start_text: &str,
     end_text: &str,
     subscriptions: &[MarketSubscription],
+    resolved: &BTreeMap<String, harness_contracts::ResolvedOption>,
 ) -> Result<Vec<MarketEvent>, BacktestJobError> {
     let mut windows = Vec::new();
     for input in subscriptions {
@@ -828,9 +873,15 @@ fn lake_subscription_events(
             }
         };
         for symbol in &input.symbols {
-            let (asset_class, lake_symbol) = match marketdata::crypto_pair(symbol) {
-                Some(pair) => ("crypto", pair),
-                None => ("equity", symbol.trim().to_uppercase()),
+            let (asset_class, lake_symbol) = if let Some(contract) = resolved.get(symbol) {
+                ("option", contract.symbol.clone())
+            } else if marketdata::lake::canonical_osi_symbol(symbol).is_ok() {
+                ("option", symbol.trim().to_uppercase())
+            } else {
+                match marketdata::crypto_pair(symbol) {
+                    Some(pair) => ("crypto", pair),
+                    None => ("equity", symbol.trim().to_uppercase()),
+                }
             };
             let mut ensure = EnsureSpec::new(
                 asset_class,
@@ -860,42 +911,44 @@ fn lake_subscription_events(
     for (_, outcome) in windows.iter().zip(client.ensure_many(&ensures)) {
         outcome.map_err(|error| BacktestJobError::Io(error.to_string()))?;
     }
-    let reads: Vec<ReadSpec> = windows
-        .iter()
-        .map(|(_, _, _, _, read)| read.clone())
-        .collect();
     let mut events: Vec<MarketEvent> = Vec::new();
-    for ((symbol, lake_symbol, data_type, _, _), batches) in
-        windows.iter().zip(client.read_many(&reads))
-    {
-        let batches = batches.map_err(|error| BacktestJobError::Io(error.to_string()))?;
-        let decoded = marketdata::events_from_arrow(*data_type, lake_symbol, &batches)
-            .map_err(|error| BacktestJobError::Io(error.to_string()))?;
-        // Marketdata DateTime is microsecond-based. Restore Arrow row precision
-        // before enforcing the nanosecond run bounds; decoding preserves row order.
-        let timestamps = batches.iter().flat_map(|batch| {
-            let nanos = batch.column_by_name("timestamp").and_then(|column| {
-                column
-                    .as_any()
-                    .downcast_ref::<arrow_array::TimestampNanosecondArray>()
-            });
-            (0..batch.num_rows()).map(move |row| nanos.map(|array| array.value(row)))
-        });
-        for (event, timestamp) in decoded.iter().zip(timestamps) {
-            let mut event = lake_event(event, symbol);
-            if let Some(timestamp) = timestamp {
-                match &mut event {
-                    MarketEvent::Quote { timestamp_ns, .. }
-                    | MarketEvent::Trade { timestamp_ns, .. }
-                    | MarketEvent::Bar { timestamp_ns, .. } => *timestamp_ns = timestamp,
+    for (symbol, lake_symbol, data_type, _, read) in &windows {
+        client
+            .visit_arrow(read, |batch| {
+                let decoded = marketdata::events_from_arrow(
+                    *data_type,
+                    lake_symbol,
+                    std::slice::from_ref(&batch),
+                )
+                .map_err(|error| LakeClientError::Decode(error.to_string()))?;
+                // Marketdata DateTime is microsecond-based. Restore Arrow row precision
+                // before enforcing the nanosecond run bounds; decoding preserves row order.
+                let timestamps = std::iter::once(&batch).flat_map(|batch| {
+                    let nanos = batch.column_by_name("timestamp").and_then(|column| {
+                        column
+                            .as_any()
+                            .downcast_ref::<arrow_array::TimestampNanosecondArray>()
+                    });
+                    (0..batch.num_rows()).map(move |row| nanos.map(|array| array.value(row)))
+                });
+                for (event, timestamp) in decoded.iter().zip(timestamps) {
+                    let mut event = lake_event(event, symbol);
+                    if let Some(timestamp) = timestamp {
+                        match &mut event {
+                            MarketEvent::Quote { timestamp_ns, .. }
+                            | MarketEvent::Trade { timestamp_ns, .. }
+                            | MarketEvent::Bar { timestamp_ns, .. } => *timestamp_ns = timestamp,
+                        }
+                    }
+                    if event.timestamp_ns() >= configuration.start_ns
+                        && event.timestamp_ns() < configuration.end_ns
+                    {
+                        events.push(event);
+                    }
                 }
-            }
-            if event.timestamp_ns() >= configuration.start_ns
-                && event.timestamp_ns() < configuration.end_ns
-            {
-                events.push(event);
-            }
-        }
+                Ok(())
+            })
+            .map_err(|error| BacktestJobError::Io(error.to_string()))?;
     }
     Ok(events)
 }

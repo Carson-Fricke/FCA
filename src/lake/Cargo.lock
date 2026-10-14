@@ -2327,6 +2327,7 @@ dependencies = [
 name = "lake-local"
 version = "0.1.0"
 dependencies = [
+ "arrow-ipc 59.3.0",
  "axum",
  "futures-util",
  "http-body-util",

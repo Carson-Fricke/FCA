@@ -510,6 +510,7 @@ pub struct Tool {
     pub input_schema: Value,
     /// Capability that publishes this tool.
     pub capability: &'static str,
+    read_only: bool,
     handler: ToolHandler,
 }
 
@@ -531,8 +532,16 @@ impl Tool {
             description: description.to_string(),
             input_schema,
             capability,
+            read_only: false,
             handler: Arc::new(handler),
         }
+    }
+
+    /// Declare a read operation at its registration boundary.
+    #[must_use]
+    pub fn read_only(mut self) -> Self {
+        self.read_only = true;
+        self
     }
 
     /// The `tools/list` entry for this tool.
@@ -542,6 +551,7 @@ impl Tool {
             "name": self.name,
             "description": self.description,
             "inputSchema": self.input_schema,
+            "annotations": {"readOnlyHint": self.read_only},
         })
     }
 
@@ -1690,11 +1700,11 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
              package or stale template. Compare sdkIdentity before using local SDK guidance. \
              Refresh initialize/serverInfo to compare current validationIdentity before running.",
             json!({"type": "object", "additionalProperties": false, "properties": {
-                "topic": {"type": "string", "enum": ["consumer", "program", "indicator_api", "events", "exports", "decimal", "building_blocks", "outputs"]},
+                "topic": {"type": "string", "enum": ["consumer", "program", "indicator_api", "wavelet", "events", "exports", "decimal", "building_blocks", "outputs", "research_views", "research_publishing", "research_recipes"]},
                 "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1},
                 "max_chars": {"type": "integer", "minimum": 1, "maximum": 16000}
             }}), "sdk", move |arguments| handler.read_sdk_reference(arguments),
-        ));
+        ).read_only());
     }
 
     if capabilities.backtest {
@@ -1858,39 +1868,45 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
     }
     if capabilities.backtest {
         let handler = tools.clone();
-        candidates.push(Tool::new(
-            TOOL_BACKTEST_CONFIG_TEMPLATE,
-            "Return a canonical starter backtest configuration document (YAML). \
+        candidates.push(
+            Tool::new(
+                TOOL_BACKTEST_CONFIG_TEMPLATE,
+                "Return a canonical starter backtest configuration document (YAML). \
              Adapt job_id, the time window, symbols, initial_cash, and the \
              strategy parameters, then pass the result as the inline `config` \
              argument of run_backtest when no configuration file exists.",
-            json!({
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {}
-            }),
-            "backtest",
-            move |_arguments| handler.backtest_config_template(),
-        ));
+                json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {}
+                }),
+                "backtest",
+                move |_arguments| handler.backtest_config_template(),
+            )
+            .read_only(),
+        );
     }
     if capabilities.screener {
         let handler = tools.clone();
-        candidates.push(Tool::new(
-            TOOL_SCREENER_CONFIG_TEMPLATE,
-            "Return a canonical starter screening configuration document (YAML, \
+        candidates.push(
+            Tool::new(
+                TOOL_SCREENER_CONFIG_TEMPLATE,
+                "Return a canonical starter screening configuration document (YAML, \
              `shell: screen`) with an inline example program using \
              `export_screening_program!`. Adapt name, as_of, lookback_days, and \
              rank_metric, then recompute bundle_hash/source_sha256 for the edited source \
              and pass the result as the inline `config` argument of run_screener when no \
              configuration file exists.",
-            json!({
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {}
-            }),
-            "screener",
-            move |_arguments| handler.screener_config_template(),
-        ));
+                json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {}
+                }),
+                "screener",
+                move |_arguments| handler.screener_config_template(),
+            )
+            .read_only(),
+        );
     }
     if capabilities.backtest {
         let handler = tools.clone();
@@ -1933,38 +1949,44 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
             }),
             "job_status",
             move |arguments| handler.get_job_status(arguments),
-        ));
+        ).read_only());
     }
     if capabilities.artifacts {
         let result_handler = tools.clone();
-        candidates.push(Tool::new(
-            TOOL_GET_JOB_RESULT,
-            "Read one stored job's result record \
+        candidates.push(
+            Tool::new(
+                TOOL_GET_JOB_RESULT,
+                "Read one stored job's result record \
              {job_id, kind, state, strategy_id, metrics, artifact_count, ...} \
              from the remote harness API.",
-            json!({
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["job_id"],
-                "properties": {"job_id": text_property()}
-            }),
-            "artifacts",
-            move |arguments| result_handler.get_job_result(arguments),
-        ));
+                json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["job_id"],
+                    "properties": {"job_id": text_property()}
+                }),
+                "artifacts",
+                move |arguments| result_handler.get_job_result(arguments),
+            )
+            .read_only(),
+        );
         let list_handler = tools.clone();
-        candidates.push(Tool::new(
-            TOOL_LIST_ARTIFACTS,
-            "List one stored job's artifact manifest entries \
+        candidates.push(
+            Tool::new(
+                TOOL_LIST_ARTIFACTS,
+                "List one stored job's artifact manifest entries \
              {name, uri, sha256, sizeBytes} from the remote harness API.",
-            json!({
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["job_id"],
-                "properties": {"job_id": text_property()}
-            }),
-            "artifacts",
-            move |arguments| list_handler.list_artifacts(arguments),
-        ));
+                json!({
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["job_id"],
+                    "properties": {"job_id": text_property()}
+                }),
+                "artifacts",
+                move |arguments| list_handler.list_artifacts(arguments),
+            )
+            .read_only(),
+        );
         let read_handler = tools.clone();
         candidates.push(Tool::new(
             TOOL_READ_ARTIFACT,
@@ -1985,7 +2007,7 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
             }),
             "artifacts",
             move |arguments| read_handler.read_artifact(arguments),
-        ));
+        ).read_only());
     }
     if capabilities.trader {
         let handler = tools.clone();

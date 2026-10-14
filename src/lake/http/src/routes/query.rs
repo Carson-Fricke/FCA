@@ -289,14 +289,13 @@ trait OptionQuerySelection {
     fn asset_class(&self) -> AssetClass;
     /// Requested data type.
     fn data_type(&self) -> DataType;
+    fn interval(&self) -> Option<&str>;
     /// Requested symbol.
     fn symbol(&self) -> Option<&str>;
     /// Requested underlying.
     fn underlying(&self) -> Option<&str>;
     /// Explicitly selected OSI contracts.
     fn contract_symbols(&self) -> Option<&[String]>;
-    /// Alias for `contract_symbols`.
-    fn contracts(&self) -> Option<&[String]>;
     /// Inclusive first session date.
     fn start_date(&self) -> Date;
     /// Inclusive last session date.
@@ -310,6 +309,9 @@ impl OptionQuerySelection for FileQueryBody {
     fn data_type(&self) -> DataType {
         self.data_type
     }
+    fn interval(&self) -> Option<&str> {
+        self.interval.as_deref()
+    }
     fn symbol(&self) -> Option<&str> {
         self.symbol.as_deref()
     }
@@ -318,9 +320,6 @@ impl OptionQuerySelection for FileQueryBody {
     }
     fn contract_symbols(&self) -> Option<&[String]> {
         self.contract_symbols.as_deref()
-    }
-    fn contracts(&self) -> Option<&[String]> {
-        self.contracts.as_deref()
     }
     fn start_date(&self) -> Date {
         self.start_date
@@ -337,6 +336,9 @@ impl OptionQuerySelection for SqlQueryBody {
     fn data_type(&self) -> DataType {
         self.data_type
     }
+    fn interval(&self) -> Option<&str> {
+        self.interval.as_deref()
+    }
     fn symbol(&self) -> Option<&str> {
         self.symbol.as_deref()
     }
@@ -345,9 +347,6 @@ impl OptionQuerySelection for SqlQueryBody {
     }
     fn contract_symbols(&self) -> Option<&[String]> {
         self.contract_symbols.as_deref()
-    }
-    fn contracts(&self) -> Option<&[String]> {
-        self.contracts.as_deref()
     }
     fn start_date(&self) -> Date {
         self.start_date
@@ -366,10 +365,10 @@ fn run_option_coverage(
     let contracts = contracts_or_default(context.state.contracts.as_deref());
     let like = OptionRequestLike {
         data_type: request.data_type(),
+        interval: request.interval(),
         symbol: request.symbol(),
         underlying: request.underlying(),
         contract_symbols: request.contract_symbols(),
-        contracts: request.contracts(),
         start_date: request.start_date(),
         end_date: request.end_date(),
     };
@@ -392,33 +391,26 @@ async fn invoke_option_ensure(
     let Some(callback) = context.state.ensure_callback.clone() else {
         return Err(ensure_unavailable());
     };
-    let symbol = option_callback_symbol(request);
-    callback(
-        request.asset_class(),
-        request.data_type(),
-        None,
-        symbol,
-        request.start_date(),
-        request.end_date(),
-    )
-    .await
-    .map_err(|_| ensure_failed())
-}
-
-/// Flatten an option selection to the callback's single-symbol boundary.
-fn option_callback_symbol(request: &impl OptionQuerySelection) -> String {
-    if let Some(underlying) = request.underlying() {
-        return underlying.to_string();
+    let report = run_option_coverage(context, request, context.coverage_as_of())?;
+    let symbols: std::collections::BTreeSet<_> = report
+        .entries
+        .iter()
+        .filter(|entry| !entry.is_complete())
+        .map(|entry| entry.symbol.clone())
+        .collect();
+    for symbol in symbols {
+        callback(
+            request.asset_class(),
+            request.data_type(),
+            request.interval().map(str::to_string),
+            symbol,
+            request.start_date(),
+            request.end_date(),
+        )
+        .await
+        .map_err(|_| ensure_failed())?;
     }
-    if let Some(symbol) = request.symbol() {
-        return symbol.to_string();
-    }
-    request
-        .contract_symbols()
-        .or_else(|| request.contracts())
-        .and_then(|values| values.first())
-        .cloned()
-        .unwrap_or_default()
+    Ok(())
 }
 
 /// Split option entries into usable complete files and incomplete sessions.
@@ -450,7 +442,7 @@ fn option_expected_path(entry: &SessionCoverage, data_type: DataType) -> bool {
         entry.session_date(),
         AssetClass::Option,
         data_type,
-        None,
+        record.interval.as_deref(),
         &entry.symbol,
     )
     .is_ok_and(|expected| object_path == expected)
@@ -464,14 +456,17 @@ fn option_ensured_files(entries: &[SessionCoverage], data_type: DataType) -> Vec
         .filter_map(|entry| {
             let record = entry.record.as_ref()?;
             let object_path = record.object_path.as_deref()?;
-            Some(EnsuredQueryFile::new(
-                AssetClass::Option,
-                data_type,
-                entry.symbol.clone(),
-                entry.session_date(),
-                object_path,
-                record.byte_size,
-            ))
+            Some(
+                EnsuredQueryFile::new(
+                    AssetClass::Option,
+                    data_type,
+                    entry.symbol.clone(),
+                    entry.session_date(),
+                    object_path,
+                    record.byte_size,
+                )
+                .with_interval(record.interval.as_deref()),
+            )
         })
         .collect()
 }
@@ -507,7 +502,7 @@ fn build_option_files(
             row_count: record.row_count,
             byte_size: record.byte_size,
             checksum: record.checksum.clone(),
-            interval: None,
+            interval: record.interval.clone(),
         });
     }
     Ok(files)

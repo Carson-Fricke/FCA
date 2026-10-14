@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HarnessExecutionCard from './HarnessExecutionCard.svelte';
 	import FalsificationReportCard from './FalsificationReportCard.svelte';
 	import VariationReportCard from './VariationReportCard.svelte';
 	import type { PhaseAttemptRun } from '$lib/subagent';
@@ -34,6 +35,7 @@
 	const progress = $derived(current?.progress ?? []);
 	const result = $derived(current?.result ?? null);
 	const error = $derived(current?.error ?? null);
+	const recoveryError = $derived(current?.recoveryError ?? null);
 	const latestAttempt = $derived(attempts[attempts.length - 1]?.attempt ?? null);
 
 	function isFalsificationArtifact(artifact: Record<string, unknown>): boolean {
@@ -100,18 +102,22 @@
 					</label>
 				{/if}
 				<span
-					class="rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase {failureMessage
+					class="rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase {failureMessage || recoveryError
 						? 'border-loss/40 bg-loss/10 text-loss'
 						: report || variation
 							? 'border-profit/40 bg-profit/10 text-profit'
 							: 'border-accent/40 bg-accent/10 text-accent'}"
 					data-testid="phase-run-status"
 				>
-					{failureMessage ? 'Failed' : report || variation ? 'Completed' : 'Running'}
+					{failureMessage ? 'Failed' : recoveryError ? 'Recovery error' : report || variation ? 'Completed' : current ? 'Running' : 'Starting or unavailable'}
 				</span>
 			</div>
 		</div>
 	</header>
+
+    {#each current?.jobs ?? [] as jobId (jobId)}
+        <div class="px-3.5"><HarnessExecutionCard {jobId} /></div>
+    {/each}
 
 	{#if progress.length}
 		<ol class="space-y-1.5 px-3.5" data-testid="phase-run-log" aria-label="Phase progress">
@@ -133,6 +139,11 @@
 		</p>
 	{/if}
 
+	{#if recoveryError && !failureMessage}
+		<div class="mx-3.5 mb-3.5 rounded-lg border border-loss/40 bg-loss/10 p-3" role="status">
+			<p class="text-xs text-slate-600">Phase recovery failed: {recoveryError}</p>
+		</div>
+	{/if}
 	{#if failureMessage}
 		<div
 			class="mx-3.5 mb-3.5 rounded-lg border border-loss/40 bg-loss/10 p-3"

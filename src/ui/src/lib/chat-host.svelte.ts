@@ -27,6 +27,7 @@ export class ChatHostController {
 	#generation = 0;
 	#selection = 0;
 	#requests = new AbortController();
+	#failedSend: { chatId: string | null; input: string; messageId: string } | null = null;
 
 	constructor(private readonly navigation?: ChatHostNavigation) {}
 
@@ -120,9 +121,14 @@ export class ChatHostController {
 		const selection = this.#selection;
 		const workspaceId = this.#workspaceId;
 		const signal = this.#requests.signal;
+		const inputKey = JSON.stringify(input);
+		const failed = this.#failedSend;
+		const messageId = failed?.chatId === this.chatId && failed.input === inputKey
+			? failed.messageId : `message-${crypto.randomUUID()}`;
+		this.timeline.beginSend(workspaceId, this.chatId ?? DRAFT_CHAT_ID, input.body, 'root', messageId);
 		this.busy = true;
+		let id = this.chatId;
 		try {
-			let id = this.chatId;
 			if (!id) {
 				const created = await createChat(workspaceId, { title: conversationTitleFrom(input.body) }, signal);
 				signal.throwIfAborted();
@@ -130,13 +136,26 @@ export class ChatHostController {
 				if (generation === this.#generation) {
 					this.chats = [created, ...this.chats];
 					// Keep the persisted thread selected even if its first POST fails.
-					if (selection === this.#selection) this.select(id);
+					if (selection === this.#selection) {
+						this.select(id);
+						this.timeline.beginSend(workspaceId, id, input.body, 'root', messageId);
+					}
 				}
 			}
-			const result = await postMessage(workspaceId, id, input, signal);
+			const result = await postMessage(workspaceId, id, { ...input, messageId }, signal);
+			if (generation === this.#generation && id === this.chatId) {
+				this.timeline.acknowledgeSend(result.message);
+				this.#failedSend = null;
+			}
 			if (generation === this.#generation && result.percolated.length) {
 				this.percolations = { ...this.percolations, [result.message.message_id]: result.percolated };
 			}
+		} catch (error) {
+			if (generation === this.#generation && id === this.chatId) {
+				this.timeline.failSend(messageId);
+				this.#failedSend = { chatId: id, input: inputKey, messageId };
+			}
+			throw error;
 		} finally {
 			if (generation === this.#generation) this.busy = false;
 		}
@@ -144,6 +163,7 @@ export class ChatHostController {
 
 	stop(): void {
 		this.#requests.abort();
+		this.#failedSend = null;
 		this.busy = false;
 		this.#generation += 1;
 		this.#selection += 1;

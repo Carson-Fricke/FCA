@@ -112,7 +112,10 @@ pub fn requested_coverage(
     as_of: DateTime,
     operation: &str,
 ) -> Result<CoverageReport, CoverageRequestError> {
-    if !matches!(spec.asset_class, AssetClass::Equity | AssetClass::Crypto) {
+    if !matches!(
+        spec.asset_class,
+        AssetClass::Equity | AssetClass::Crypto | AssetClass::Option
+    ) {
         let message = if operation == "query" {
             "file queries support equity and crypto only".to_string()
         } else {

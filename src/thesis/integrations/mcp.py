@@ -156,6 +156,7 @@ class McpTool:
     name: str
     description: str
     input_schema: Mapping[str, object]
+    read_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,13 +170,11 @@ class McpToolResult:
 
 
 def outcome_certainty(payload: Mapping[str, object] | None) -> ExecutionCertainty:
-    """Use explicit server certainty; a legacy tool rejection is observed failure."""
+    """Missing or invalid server certainty cannot establish a mutation outcome."""
     value = None if payload is None else payload.get("executionCertainty")
     if value in ("not_started", "observed_failure", "unknown_outcome"):
         return cast(ExecutionCertainty, value)
-    if value is not None:
-        return "unknown_outcome"
-    return "observed_failure"
+    return "unknown_outcome"
 
 
 class McpTransport(Protocol):
@@ -495,6 +494,8 @@ class HarnessMcpClient:
                         name=name,
                         description=str(entry.get("description", "")),
                         input_schema=dict(schema),
+                        read_only=isinstance(entry.get("annotations"), Mapping)
+                        and entry["annotations"].get("readOnlyHint") is True,
                     )
                 )
         return tuple(tools)
@@ -526,16 +527,23 @@ class HarnessMcpClient:
     def run_backtest(
         self,
         *,
-        config_path: str,
+        config: Mapping[str, object] | None = None,
+        config_path: str | None = None,
         workspace: str | None = None,
-        job_id: str | None = None,
+        job_id: str,
     ) -> McpToolResult:
-        """Call the ``run_backtest`` tool."""
-        arguments: dict[str, object] = {"config_path": config_path}
+        """Call the native boundary; serving callers submit retained inline inputs."""
+        if (config is None) == (config_path is None):
+            raise ValueError("supply exactly one of config and config_path")
+        arguments: dict[str, object] = {"job_id": job_id}
+        if config is not None:
+            document = dict(config)
+            document["job_id"] = job_id
+            arguments["config"] = document
+        else:
+            arguments["config_path"] = config_path
         if workspace is not None:
             arguments["workspace"] = workspace
-        if job_id is not None:
-            arguments["job_id"] = job_id
         return self.call_tool(TOOL_RUN_BACKTEST, arguments)
 
     def validate_study(self, *, model: Mapping[str, object]) -> McpToolResult:
@@ -726,7 +734,9 @@ class HarnessMcpBoundary:
         self._reject_credential(bearer_token)
         self._capabilities.require_capability("backtest")
         result = self.client.run_backtest(
-            config_path=request.config_path, job_id=request.job_id
+            config=request.config,
+            config_path=request.config_path if request.config is None else None,
+            job_id=request.job_id or "",
         )
         return self._outcome(request, result)
 

@@ -127,11 +127,6 @@ class HarnessArtifact:
         if not isinstance(self.reproducibility_critical, bool):
             raise ArtifactImportError("reproducibility_critical must be boolean")
 
-    @property
-    def path(self) -> str:
-        """Alias for the harness result URI."""
-        return self.uri
-
     def as_dict(self) -> dict[str, object]:
         """Return the stable manifest representation."""
         return {
@@ -200,15 +195,24 @@ class HarnessManifest:
         """Return the manifest content digest used by provenance."""
         return hashlib.sha256(self.canonical_bytes).hexdigest()
 
-    @property
-    def manifest_sha256(self) -> str:
-        """Alias for the manifest digest."""
-        return self.sha256
-
     @classmethod
     def from_mapping(cls, value: Mapping[str, object]) -> HarnessManifest:
         """Parse the camel-case harness manifest wire shape without network access."""
-        raw_artifacts = value.get("artifacts")
+        required = {
+            "schema",
+            "manifestId",
+            "artifacts",
+            "strategyVersion",
+            "experimentId",
+            "workflowExecutionId",
+        }
+        if required.difference(value):
+            raise ArtifactImportError(
+                "outdated harness manifest: current fields are required"
+            )
+        if value["schema"] != "fca-harness-reproducibility-manifest-v1":
+            raise ArtifactImportError("outdated harness manifest schema")
+        raw_artifacts = value["artifacts"]
         if not isinstance(raw_artifacts, list):
             raise ArtifactImportError("harness manifest artifacts must be an array")
         artifacts: list[HarnessArtifact] = []
@@ -216,7 +220,7 @@ class HarnessManifest:
             if not isinstance(raw, Mapping):
                 raise ArtifactImportError("harness manifest artifact must be an object")
             try:
-                critical = raw.get("reproducibilityCritical", True)
+                critical = raw["reproducibilityCritical"]
                 size_bytes = raw["sizeBytes"]
                 if (
                     not isinstance(critical, bool)
@@ -227,12 +231,10 @@ class HarnessManifest:
                 artifacts.append(
                     HarnessArtifact(
                         name=str(raw["name"]),
-                        uri=str(raw.get("uri", raw.get("path", ""))),
+                        uri=str(raw["uri"]),
                         sha256=str(raw["sha256"]),
                         size_bytes=size_bytes,
-                        media_type=str(
-                            raw.get("mediaType", "application/octet-stream")
-                        ),
+                        media_type=str(raw["mediaType"]),
                         reproducibility_critical=critical,
                     )
                 )
@@ -241,24 +243,17 @@ class HarnessManifest:
                     "invalid harness manifest artifact"
                 ) from error
         return cls(
-            manifest_id=str(value.get("manifestId", value.get("manifest_id", ""))),
+            manifest_id=str(value["manifestId"]),
             artifacts=tuple(artifacts),
-            strategy_version=_optional_text(
-                value, "strategyVersion", "strategy_version"
-            ),
-            experiment_id=_optional_text(value, "experimentId", "experiment_id"),
-            workflow_execution_id=_optional_text(
-                value, "workflowExecutionId", "workflow_execution_id"
-            ),
+            strategy_version=_optional_text(value, "strategyVersion"),
+            experiment_id=_optional_text(value, "experimentId"),
+            workflow_execution_id=_optional_text(value, "workflowExecutionId"),
         )
 
 
-def _optional_text(value: Mapping[str, object], *names: str) -> str | None:
-    for name in names:
-        candidate = value.get(name)
-        if candidate is not None:
-            return str(candidate)
-    return None
+def _optional_text(value: Mapping[str, object], name: str) -> str | None:
+    candidate = value[name]
+    return None if candidate is None else str(candidate)
 
 
 @dataclass(frozen=True, slots=True)

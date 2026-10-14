@@ -151,20 +151,27 @@ impl ValidationService {
                 digest_hex(&std::fs::read(root.join("Cargo.toml"))?),
             );
             let mut count = 0;
-            for entry in std::fs::read_dir(root.join("src"))? {
-                let path = entry?.path();
-                if path.is_file() && path.extension().is_some_and(|extension| extension == "rs") {
-                    let file =
-                        path.file_name()
-                            .and_then(|name| name.to_str())
+            let mut directories = vec![root.join("src")];
+            while let Some(directory) = directories.pop() {
+                for entry in std::fs::read_dir(directory)? {
+                    let path = entry?.path();
+                    if path.is_dir() {
+                        directories.push(path);
+                    } else if path.is_file()
+                        && path.extension().is_some_and(|extension| extension == "rs")
+                    {
+                        let relative = path
+                            .strip_prefix(&root)
+                            .map_err(|e| JitError::Invalid(e.to_string()))?;
+                        let file = relative
+                            .to_str()
                             .ok_or_else(|| {
                                 JitError::Invalid("SDK source filename is not UTF-8".into())
-                            })?;
-                    hashes.insert(
-                        format!("{name}/src/{file}"),
-                        digest_hex(&std::fs::read(&path)?),
-                    );
-                    count += 1;
+                            })?
+                            .replace('\\', "/");
+                        hashes.insert(format!("{name}/{file}"), digest_hex(&std::fs::read(&path)?));
+                        count += 1;
+                    }
                 }
             }
             if count == 0 {
@@ -212,11 +219,21 @@ impl ValidationService {
                 "consumer" => ("src/consumer.rs", "strategy-sdk/src/consumer.rs"),
                 "program" => ("src/program.rs", "strategy-sdk/src/program.rs"),
                 "outputs" => ("src/outputs.rs", "strategy-sdk/src/outputs.rs"),
+                "research_views" => ("src/research/view.rs", "strategy-sdk/src/research/view.rs"),
+                "research_publishing" => (
+                    "src/research/publishing.rs",
+                    "strategy-sdk/src/research/publishing.rs",
+                ),
+                "research_recipes" => (
+                    "src/research/recipes.rs",
+                    "strategy-sdk/src/research/recipes.rs",
+                ),
                 "building_blocks" => (
                     "src/building_blocks.rs",
                     "strategy-sdk/src/building_blocks.rs",
                 ),
                 "indicator_api" => ("src/indicator.rs", "strategy-sdk/src/indicator.rs"),
+                "wavelet" => ("src/wavelet.rs", "strategy-sdk/src/wavelet.rs"),
                 "events" => ("src/events.rs", "strategy-sdk/src/events.rs"),
                 "exports" => ("src/export.rs", "strategy-sdk/src/export.rs"),
                 "decimal" => ("../num/src/decimal.rs", "num/src/decimal.rs"),

@@ -5,8 +5,6 @@ distinct Thesis roles.  This module publishes one immutable, versioned
 :class:`~thesis.agent.skills.ThesisSkill` per phase and registers them into the
 :class:`~thesis.agent.skills.SkillRegistry` alongside ``harness-mcp``:
 
-* ``hypothesis-authoring`` -- RETIRED: persisted references keep resolving, but
-  the research role no longer selects it.  The workflow starts in discovery.
 * ``discovery`` -- develop a committed strategy sketch using the executable
   knowledge-base tool bag, inspect rich outputs, and preserve negative findings.
 * ``model-creation`` -- turn the selected discovery candidate into one
@@ -34,37 +32,34 @@ from dataclasses import replace
 from thesis.agent.router import Role, RolePolicy
 from thesis.agent.skills import SkillRef, SkillRegistry, ThesisSkill
 
-HYPOTHESIS_AUTHORING_SKILL_ID = "hypothesis-authoring"
 DISCOVERY_SKILL_ID = "discovery"
 MODEL_CREATION_SKILL_ID = "model-creation"
 FALSIFICATION_PLANNING_SKILL_ID = "falsification-planning"
 FALSIFICATION_RCA_SKILL_ID = "falsification-rca"
 STRATEGY_AUTHORING_SKILL_ID = "strategy-authoring"
-HYPOTHESIS_DEVELOPMENT_SKILL_VERSION = "1.6.0"
+HYPOTHESIS_DEVELOPMENT_SKILL_VERSION = "1.10.0"
 
 _DISCOVERY = (
-    "Develop an evolving committed strategy sketch from the operator's idea: "
-    "mechanism, profit source, representations, conditioning, entry, exit, "
-    "abstention, assumptions, alternatives and limitations. Draft the initial "
-    "sketch before reading prior study findings. Retrieve knowledge-base method "
-    "cards and executable composition examples, inspect the SDK, and select, "
-    "compose or author suitable building blocks. Use indicators, causal "
-    "multi-timeframe context, event time, path shape, wavelets, duration and "
-    "supported fitted representations where they help reveal the mechanism. "
-    "Studies answer questions raised by the sketch and may combine components "
-    "and investigations. Inspect episodes, sequences, events, tables and "
-    "failure cases through read_study_output; statistics support interpretation. "
-    "Revise the committed sketch, preserving negative findings and explicit "
-    "unknowns. Pin component versions and reference actual jobs/artifacts. "
-    "Read prior studies to challenge or refine the developing argument. "
-    "Choose informative bounded experiments without fixed technique quotas. "
-    "Discovery does not run strategy backtests, select final parameters or "
-    "open forward data. Complete with an exact accepted sketch reference, "
-    "or an honest no-edge conclusion after investigation."
+    "Develop executable training candidates using the operator's suggested features "
+    "in meaningful interacting roles. Keep an evolving committed strategy sketch. "
+    "Build/refine, explore parameters and policy variants, then assess after-cost "
+    "robustness and appropriate null evidence. Use strategy backtests/batches for "
+    "policies and studies for targeted diagnostics; forward data stays sealed. "
+    "A fixed searched winner's null is conditional, not search-adjusted evidence. "
+    "Retain all attempts and preserve selected prototype references/parameters. "
+    "Review intent -> actual test -> justified decision; non-significance or an "
+    "omitted interaction cannot refute a feature family. No forced positive finding. "
+    "Delegate consequential directions through research-investigation, launch "
+    "complementary branches concurrently and triage returns asynchronously. Only "
+    "discovery edits the shared sketch. Incorporate operator steering without "
+    "discarding relevant work; pending jobs retain their original questions/IDs. "
+    "Ask acceptance of the current integrated revision through request_workflow_input "
+    "before completing. Read detailed workflow instructions and knowledge by need."
 )
 
 _MODEL_CREATION = (
-    "Resolve the exact accepted strategy sketch and design targeted assumption "
+    "During model creation (not discovery), resolve the exact accepted "
+    "strategy sketch and design targeted assumption "
     "investigations. Map assumptions to pre-registered falsifier tests that would "
     "refute it, estimated on historical data. Retrieve the model shape first: "
     "search the knowledge cards for the candidate's regularity and the "
@@ -81,52 +76,6 @@ _MODEL_CREATION = (
     "(Layer A); the same published statistic on a trailing window becomes the "
     "strategy's Layer B monitor. Sizing, costs, and execution belong to "
     "strategy design."
-)
-
-_HYPOTHESIS_AUTHORING = (
-    "Turn the operator's intuition about a trading opportunity into one "
-    "statistical model of the assets involved and decide, from historical "
-    "data, whether a regularity matching the intuition exists. Propose the "
-    "model yourself (assets, estimator, sampling frequency, windows, sample "
-    "period) instead of asking which statistics to use; never propose a "
-    "forward-looking experiment. State the claim as the regularity the model "
-    "predicts, the disagreement as what a no-structure null predicts instead, "
-    "the risk factor, the horizon, and the universe. Provide falsifiers with an "
-    "observable statistic, a condition, a threshold, and the computation that "
-    "produces it. The model source is an authored Rust study program compiled "
-    "by the harness JIT: implement MarketConsumer with type Context = "
-    "ObservationContext, subscriptions(&self) -> Vec<Subscription>, and "
-    "on_bar(&BarFrame, &mut ObservationContext), on_quote(&QuoteEvent, "
-    "&mut ObservationContext), or on_trade(&TradeEvent, &mut ObservationContext). "
-    "Separately implement harness_strategy_sdk::StudyProgram with "
-    "new(parameters) and on_stop(&mut MetricPublisher), "
-    "and export it with export_study_program!. Each atomic BarFrame contains "
-    "interval_start_ns, interval_end_ns, available_at_ns, bars_by_symbol and "
-    "missing_symbols. Fold same-interval bars from bars_by_symbol, with their "
-    "exact open, high, low, close and volume decimals, into incremental "
-    "state. Handle missing_symbols explicitly: never align by row index or "
-    "silently carry a previous close. Frames become available at interval end "
-    "under the historical end-of-interval availability assumption. Keep "
-    "publishing every falsifier observable by name in on_stop via "
-    "metrics.publish(name, value); the names must match the declared outputs, "
-    "and at least one fitted parameter must be published as a fit.<parameter> "
-    "metric because the trials phase requires fitted parameters. The study "
-    "declares explicit harnessConfiguration.subscriptions with data_type "
-    "bars, quote or trade and exact symbols; only bars require interval "
-    "(1d or positive canonical Nmin/Nh). Tick-only studies need no interval. "
-    "Multiple bar timeframes are supported; maintain independent symbol/interval "
-    "state, use only completed slower frames, and use canonical uppercase "
-    "market symbols, preserving BTC-USD or BTC/USD as declared. Interval-only "
-    "configuration is rejected; any global symbols must equal the exact "
-    "subscription union. Source "
-    "subscriptions are authoritative; the configuration echo must match their "
-    "union including nested owned indicators exposed through indicators(). "
-    "Indicators implement MarketConsumer<Context = ObservationContext> and "
-    "Indicator::value; the SDK composes and routes dependencies automatically. "
-    "A fired falsifier refutes the claim "
-    "on history (Layer A); the same published statistic on a trailing window "
-    "becomes the strategy's Layer B monitor. Sizing, costs, and execution "
-    "belong to strategy design."
 )
 
 _FALSIFICATION_PLANNING = (
@@ -172,12 +121,6 @@ _STRATEGY_AUTHORING = (
 )
 
 HYPOTHESIS_DEVELOPMENT_SKILLS: tuple[ThesisSkill, ...] = (
-    ThesisSkill(
-        skill_id=HYPOTHESIS_AUTHORING_SKILL_ID,
-        version=HYPOTHESIS_DEVELOPMENT_SKILL_VERSION,
-        instructions=_HYPOTHESIS_AUTHORING,
-        allowed_tools=("read_workspace", "run_backtest"),
-    ),
     ThesisSkill(
         skill_id=DISCOVERY_SKILL_ID,
         version=HYPOTHESIS_DEVELOPMENT_SKILL_VERSION,
@@ -287,7 +230,6 @@ __all__ = [
     "DISCOVERY_SKILL_ID",
     "FALSIFICATION_PLANNING_SKILL_ID",
     "FALSIFICATION_RCA_SKILL_ID",
-    "HYPOTHESIS_AUTHORING_SKILL_ID",
     "HYPOTHESIS_DEVELOPMENT_SKILLS",
     "HYPOTHESIS_DEVELOPMENT_SKILL_VERSION",
     "MODEL_CREATION_SKILL_ID",

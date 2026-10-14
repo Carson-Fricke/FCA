@@ -5,6 +5,17 @@ import json
 from collections.abc import Mapping
 
 
+def _browser_value(value: object) -> object:
+    """Keep exact integral evidence when JSON crosses JavaScript's safe range."""
+    if type(value) is int and abs(value) > 2**53 - 1:
+        return str(value)
+    if isinstance(value, dict):
+        return {key: _browser_value(cell) for key, cell in value.items()}
+    if isinstance(value, list):
+        return [_browser_value(cell) for cell in value]
+    return value
+
+
 def output_page(
     job_id: str,
     content: str,
@@ -51,7 +62,7 @@ def output_page(
                         for key in ("points", "events", "rows")
                         if key in output
                     ),
-                    [],
+                    None,
                 )
                 entries.append(
                     {
@@ -85,7 +96,8 @@ def output_page(
             **identity,
             "instanceId": instance_id,
             "name": output_name,
-            "output": dict(output),
+            "output": _browser_value(dict(output)),
+            "total": 0,
             "nextOffset": None,
         }
     rows = output[row_key]
@@ -98,7 +110,7 @@ def output_page(
         row_size = len(json.dumps(row, allow_nan=False))
         if size + row_size > 32_000:
             break
-        selected.append(row)
+        selected.append(_browser_value(row))
         size += row_size
     if not selected and offset < len(rows):
         raise ValueError(

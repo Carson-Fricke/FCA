@@ -22,7 +22,7 @@ The `thesis-cosmos` module deploys only when `deployThesis` is true:
 - `disableLocalAuth: true`: the account has no keys. Authentication is the
   Thesis runtime user-assigned managed identity and nothing else.
 - Database `thesis` and three containers, matching the closed set in
-  `src/thesis/cosmos/client.py`:
+  `src/thesis_runtime/adapters/cosmos/client.py`:
   | Container | Partition key | Contents |
   | --- | --- | --- |
   | `timeline` | `/chatId` | Messages and execution events per chat |
@@ -43,7 +43,7 @@ az deployment group create \
 ```
 
 Or run the `deploy-thesis` workflow, which supplies the same parameters plus
-the digest-pinned image reference. The `deploymentSummary.thesis.cosmos`
+the digest-pinned image reference. The `deploymentSummary.thesis_runtime.adapters.cosmos`
 output reports the endpoint, database, containers, and role assignment id for
 non-secret verification.
 
@@ -141,7 +141,7 @@ conversations remain durable in the execution store and Cosmos.
   `az containerapp show ... env` and redeploy; the image itself has no
   environment branch and defaults to the emulator.
 - **Schema drift**: a container's partition key must match
-  `src/thesis/cosmos/client.py`. Changing one without the other breaks point
+  `src/thesis_runtime/adapters/cosmos/client.py`. Changing one without the other breaks point
   reads; update both in the same change.
 - **Name collision**: Cosmos account names are globally unique. Re-run the
   deployment in the target resource group (the deterministic suffix includes
@@ -159,3 +159,25 @@ requires key auth, that is a deliberate change requiring all of:
 
 Record the decision before doing it; the identity path has no secret to leak
 and needs no rotation.
+
+
+## Worker notification delivery
+
+Ordinary message admission performs two catalog point reads (sequence and root)
+and one conditional batch containing the message, root bookkeeping, inbox head,
+sequence and runnable work. API admission does not acquire or release a chat
+lease. Root ACK/link/lifecycle updates use ETag merge retries against that same
+revision. Execution leases and transactional worker fences remain required.
+If a batch response is lost, admission looks up the exact message ID and returns
+it only if committed; an unconfirmed outcome is not automatically resubmitted.
+Client-visible latency can still include Cosmos service or throttling delays;
+measure those separately from application round trips.
+
+Workers use the catalog change feed for ordinary dispatch. No additional queue
+or broker is required. On startup, each worker establishes a server-issued feed
+cursor and snapshots retained pending/running work. Empty feed pages retain the
+composite continuation token; replicas may receive duplicate notifications and
+execution claims remain the authority. Short feed cursor polls replace frequent
+runnable-work SQL searches. A bounded reconciliation and workflow-repair pass
+runs once per minute. Pending/running work must remain durable until completion
+or explicit interruption; never purge those records to reset a feed reader.

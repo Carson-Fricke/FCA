@@ -1,5 +1,7 @@
 """Research model test keys must be portable relative paths."""
 
+from dataclasses import replace
+
 import pytest
 
 from thesis.research.models import ResearchModel, ResearchModelError
@@ -12,7 +14,7 @@ _SOURCE = (
 def _model(tests: dict[str, str]) -> ResearchModel:
     return ResearchModel(
         model_id="midquote-model",
-        version="1.0.0",
+        version="a" * 64,
         description="Midquote reversal study",
         source=_SOURCE,
         outputs=("sharpe",),
@@ -35,3 +37,8 @@ def test_unsafe_test_key_is_rejected_at_construction(key: str) -> None:
 def test_portable_test_key_is_accepted() -> None:
     model = _model({"tests/model.rs": "test text"})
     assert tuple(model.tests) == ("tests/model.rs",)
+
+
+def test_semantic_model_version_is_outdated() -> None:
+    with pytest.raises(ResearchModelError, match="content hash"):
+        replace(_model({"tests/model.rs": "test text"}), version="1.0.0")

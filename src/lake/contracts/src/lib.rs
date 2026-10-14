@@ -8,6 +8,7 @@
 
 pub mod decimal;
 pub mod error;
+pub mod options;
 pub mod partitions;
 pub mod schemas;
 pub mod sessions;
@@ -16,6 +17,7 @@ pub mod time;
 
 pub use decimal::{Decimal18, DecimalError};
 pub use error::DataError;
+pub use options::{OptionRight, OptionSelector, ResolvedOption};
 pub use partitions::{
     partition_path, symbol_filename, AssetClass, BarInterval, DataType, Dataset, SUPPORTED_DATASETS,
 };

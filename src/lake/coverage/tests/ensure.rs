@@ -160,8 +160,9 @@ fn requested_coverage_validates_the_interval_pairing() {
         as_of(),
         "ensure",
     )
-    .expect_err("option bars");
-    assert_eq!(option_bars.code, "unsupported_asset_class");
+    .expect("option bars use XNYS sessions");
+    assert_eq!(option_bars.entries.len(), 2);
+    assert_eq!(option_bars.missing().len(), 2);
 
     let report = requested_coverage(&catalog, None, &bars(Some("1min")), as_of(), "ensure")
         .expect("equity bars are supported");

@@ -6,9 +6,15 @@ import { fixtureTimeline } from './fixture-timeline';
 import type { ChatMessage, ExecutionEvent, TimelineItem, WorkflowExecutionRecord } from './types';
 import { deriveWorkflowLive, hasActiveWorkflow } from './workflow-live';
 import { toChatMessage } from './transcript';
+import { ModelOutputProjection } from './model-output';
 
 export class TimelineController {
 	items = $state.raw<TimelineItem[]>([]);
+	#materialItems = $state.raw<TimelineItem[]>([]);
+	#outputs = $state.raw<ChatMessage[]>([]);
+	#outputProjection = new ModelOutputProjection();
+	#itemsById = new Map<string, TimelineItem>();
+	#localMessages = $state.raw<ChatMessage[]>([]);
 	connected = $state(false);
 	initialLoading = $state(false);
 	streamError = $state('');
@@ -28,7 +34,7 @@ export class TimelineController {
 		const eventsByExecution = new Map<string, ExecutionEvent[]>();
 		const snapshots = new Map<string, { execution: WorkflowExecutionRecord; seq: number }>();
 		let nodeRevision = '';
-		for (const item of this.items) {
+		for (const item of this.#materialItems) {
 			const thread = item.threadId ?? (item.kind === 'message'
 				? String(item.payload.data?.subAgentId ?? 'root')
 				: item.kind === 'event' ? String(item.payload.payload.subAgentId ?? 'root') : 'root');
@@ -49,7 +55,7 @@ export class TimelineController {
 				eventsByExecution.set(event.executionId, executionBucket);
 				if (['workflow.phase', 'workflow.started', 'sub_agent.spawned', 'sub_agent.completed', 'sub_agent.failed', 'sub_agent.cancelled', 'sub_agent.needs_input'].includes(event.eventType) ||
 					'acceptsInput' in event.payload || 'capabilities' in event.payload) nodeRevision = `${item.id}:${item.seq}`;
-			} else if (!snapshots.has(item.payload.execution_id)) snapshots.set(item.payload.execution_id, { execution: item.payload, seq: item.seq });
+			} else if (item.kind === 'execution' && !snapshots.has(item.payload.execution_id)) snapshots.set(item.payload.execution_id, { execution: item.payload, seq: item.seq });
 		}
 		return { messages, events, messagesByThread, eventsByThread, eventsByExecution, snapshots, nodeRevision };
 	});
@@ -59,7 +65,39 @@ export class TimelineController {
 	eventsForExecution(id: string): ExecutionEvent[] { return this.#index.eventsByExecution.get(id) ?? []; }
 
 	messagesFor(threadId?: string): ChatMessage[] {
-		return threadId === undefined ? this.#index.messages : this.#index.messagesByThread.get(threadId) ?? [];
+		const durable = threadId === undefined ? this.#index.messages : this.#index.messagesByThread.get(threadId) ?? [];
+		const ids = new Set(this.#index.messages.map((message) => message.message_id));
+		return [...durable, ...[...this.#outputs, ...this.#localMessages].filter((message) => !ids.has(message.message_id) &&
+			(threadId === undefined || message.threadId === threadId))].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+	}
+
+	/** Presentation only: pending sends never advance the durable stream cursor. */
+	beginSend(workspaceId: string, chatId: string, body: string, threadId = 'root', messageId = `message-${crypto.randomUUID()}`): string {
+		this.#localMessages = [...this.#localMessages.filter((message) => message.message_id !== messageId), {
+			message_id: messageId, workspace_id: workspaceId, chat_id: chatId,
+			actor_id: 'you', role: 'user', body, state: 'accepted', attachment_ids: [],
+			created_at: new Date().toISOString(), updated_at: null, execution_id: null, intent_epoch: 0,
+			kind: threadId === 'root' ? 'message' : 'sub_agent', threadId,
+			data: threadId === 'root' ? null : { subAgentId: threadId },
+			seq: Number.POSITIVE_INFINITY, deliveryState: 'sending'
+		}];
+		return messageId;
+	}
+
+	acknowledgeSend(message: ChatMessage): void {
+		const threadId = message.threadId ?? String(message.data?.subAgentId ?? 'root');
+		if (this.#index.messages.some((durable) => durable.message_id === message.message_id)) {
+			this.#localMessages = this.#localMessages.filter((local) => local.message_id !== message.message_id);
+			return;
+		}
+		this.#localMessages = [...this.#localMessages.filter((local) => local.message_id !== message.message_id), {
+			...message, threadId, seq: message.seq ?? Number.POSITIVE_INFINITY
+		}];
+	}
+
+	failSend(messageId: string): void {
+		this.#localMessages = this.#localMessages.map((message) => message.message_id === messageId
+			? { ...message, deliveryState: 'failed' } : message);
 	}
 
 	eventsFor(threadId?: string): ExecutionEvent[] {
@@ -72,9 +110,18 @@ export class TimelineController {
 	append(item: TimelineItem): void { this.merge([item]); }
 
 	merge(items: TimelineItem[]): void {
-		const byId = new Map(this.items.map((item) => [item.id, item]));
-		for (const item of items) byId.set(item.id, item);
-		this.items = [...byId.values()].sort((a, b) => a.seq - b.seq);
+		let last = this.items.at(-1)?.seq ?? 0;
+		const appendOnly = items.every((item) => {
+			const append = !this.#itemsById.has(item.id) && item.seq > last;
+			last = item.seq;
+			return append;
+		});
+		for (const item of items) this.#itemsById.set(item.id, item);
+		this.items = appendOnly ? [...this.items, ...items] : [...this.#itemsById.values()].sort((a, b) => a.seq - b.seq);
+		if (items.some((item) => item.kind !== 'output')) this.#materialItems = this.items.filter((item) => item.kind !== 'output');
+		this.#outputs = this.#outputProjection.merge(items);
+		const messageIds = new Set(this.items.flatMap((item) => item.kind === 'message' ? [item.payload.message_id] : []));
+		this.#localMessages = this.#localMessages.filter((message) => !messageIds.has(message.message_id));
 	}
 
 	/** Partial pages remain visible on failure; aborted and previous-chat replies cannot merge. */
@@ -161,6 +208,11 @@ export class TimelineController {
 	reset(): void {
 		this.stop();
 		this.items = [];
+		this.#materialItems = [];
+		this.#outputs = [];
+		this.#outputProjection = new ModelOutputProjection();
+		this.#itemsById.clear();
+		this.#localMessages = [];
 		this.initialLoading = false;
 		this.history = {};
 		this.streamError = '';

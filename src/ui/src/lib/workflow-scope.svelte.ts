@@ -1,7 +1,6 @@
 /** Navigation, expansion, durable node capabilities and operator submission only. */
 import { listChatSubAgents, postNodeMessage } from './api';
 import { TimelineController } from './timeline.svelte';
-import { canonicalPhaseName } from './workflow-graph';
 import { deriveSubAgentTree, isWorkflowNodeRole, subAgentNodeRef, type SubAgentTreeNode } from './subagent';
 import { applyHashTarget, parseScope, phaseScopeId, phaseScopeTarget, scopeFromHash, scopeStorageKey, serializeScope, ScopeController, type ScopeSegment } from './scope.svelte';
 import type { ChatMessage, SubAgentNode } from './types';
@@ -23,6 +22,7 @@ export class WorkflowScopeController {
 	readonly timeline: TimelineController;
 	#workspaceId: string;
 	#chatId: string | null = null;
+	#failedSend: { nodeId: string; body: string; messageId: string } | null = null;
 	#generation = 0;
 	#initialLoad: Promise<void> | null = null;
 	#refreshingNodes = false;
@@ -44,7 +44,7 @@ export class WorkflowScopeController {
 			for (const item of items) {
 				byId.set(item.node.subAgentId, item);
 				if (item.node.workflowExecutionId && item.node.phase && item.node.phaseExecutor === true) {
-					const key = phaseScopeId(item.node.workflowExecutionId, canonicalPhaseName(item.node.phase));
+					const key = phaseScopeId(item.node.workflowExecutionId, item.node.phase);
 					const bucket = byPhase.get(key) ?? [];
 					bucket.push(item);
 					byPhase.set(key, bucket);
@@ -87,6 +87,7 @@ export class WorkflowScopeController {
 	}
 
 	detach(): void {
+		this.#failedSend = null;
 		this.#requests.abort();
 		this.#generation += 1;
 		this.#pendingPhase = null;
@@ -138,7 +139,7 @@ export class WorkflowScopeController {
 	async ensureLoaded(): Promise<void> { if (this.#initialLoad) await this.#initialLoad; }
 
 	async enterPhase(executionId: string, phase: string, readOnly = false): Promise<void> {
-		const key = phaseScopeId(executionId, canonicalPhaseName(phase));
+		const key = phaseScopeId(executionId, phase);
 		this.#pendingPhase = null;
 		readOnly ||= isTerminalWorkflow(this.timeline.workflows.get(executionId)?.execution);
 		const matches = this.#nodes.byPhase.get(key) ?? [];
@@ -169,31 +170,23 @@ export class WorkflowScopeController {
 			untrack(() => { this.#pendingPhase = null; });
 			return;
 		}
-		if (!this.#nodes.byPhase.get(phaseScopeId(pending.executionId, canonicalPhaseName(pending.phase)))?.length) return;
+		if (!this.#nodes.byPhase.get(phaseScopeId(pending.executionId, pending.phase))?.length) return;
 		untrack(() => { void this.enterPhase(pending.executionId, pending.phase, pending.readOnly); });
 	}
 
 	eventsForPhase(executionId: string, phase: string) {
 		return this.timeline.eventsForExecution(executionId).filter((event) =>
-			['workflow.phase', 'workflow.progress', 'workflow.phase_result'].includes(event.eventType) && canonicalPhaseName(String(event.payload['phase'])) === canonicalPhaseName(phase));
+			['workflow.phase', 'workflow.progress', 'workflow.phase_result'].includes(event.eventType) && String(event.payload['phase']) === phase);
 	}
 
 	private resolvePhaseScope(): void {
-		let workflowId: string | undefined;
 		const segments = this.scope.segments.map((segment) => {
-			if (segment.kind === 'workflow') workflowId = segment.id;
 			if (segment.kind !== 'phase') return segment;
-			let target = phaseScopeTarget(segment.id);
-			if (!target) {
-				const candidates = [...this.timeline.workflows.keys()];
-				const historyComplete = !this.timeline.history.root || this.timeline.history.root.complete;
-				const id = workflowId ?? (historyComplete && candidates.length === 1 ? candidates[0] : undefined);
-				if (!id) {
-					this.error = 'This persisted phase link does not identify an execution. Open the phase from its workflow card.';
-					return { ...segment, readOnly: true };
-				}
-				target = { executionId: id, phase: segment.id };
-			}
+			const target = phaseScopeTarget(segment.id);
+            if (!target) {
+                this.error = 'This phase link is outdated. Open the phase from its workflow card.';
+                return { ...segment, readOnly: true };
+            }
 			return { ...segment, ...target, id: phaseScopeId(target.executionId, target.phase), label: `Phase ${target.phase}`, readOnly: true };
 		});
 		this.scope.reset(segments.filter((segment) => segment.kind !== 'workflow'));
@@ -280,10 +273,24 @@ export class WorkflowScopeController {
 		this.busy = true;
 		const generation = this.#generation;
 		const signal = this.#requests.signal;
+		const failed = this.#failedSend;
+		const messageId = failed?.nodeId === node.subAgentId && failed.body === body.trim()
+			? failed.messageId : `message-${crypto.randomUUID()}`;
+		this.timeline.beginSend(this.#workspaceId, this.#chatId, body.trim(), node.subAgentId, messageId);
 		try {
-			const message = await postNodeMessage(this.#workspaceId, this.#chatId, subAgentNodeRef(node.subAgentId), { body: body.trim() }, signal);
+			const message = await postNodeMessage(this.#workspaceId, this.#chatId, subAgentNodeRef(node.subAgentId), { body: body.trim(), messageId }, signal);
 			signal.throwIfAborted();
+			if (generation === this.#generation) {
+				this.timeline.acknowledgeSend(message);
+				this.#failedSend = null;
+			}
 			return message;
+		} catch (error) {
+			if (generation === this.#generation) {
+				this.timeline.failSend(messageId);
+				this.#failedSend = { nodeId: node.subAgentId, body: body.trim(), messageId };
+			}
+			throw error;
 		} finally { if (generation === this.#generation) this.busy = false; }
 	}
 

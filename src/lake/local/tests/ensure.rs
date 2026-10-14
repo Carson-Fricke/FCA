@@ -7,10 +7,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
-use lake_catalog::{BarSource, CatalogRepository, JsonCatalogStore};
+use lake_catalog::{
+    BarSource, CatalogRepository, JobRepository, JsonCatalogStore, MemoryJobRepository,
+};
 use lake_configuration::{LakeSettings, UniverseSettings};
 use lake_contracts::{AssetClass, BarInterval, DataType, Date, DateTime, Decimal18};
-use lake_coverage::{EnsureJob, EnsureSpec};
+use lake_coverage::{ensure_coverage, EnsureOutcome, EnsureSpec};
 use lake_ingestion::{BarsDataProvider, EquityDataProvider};
 use lake_local::{LocalEnsureLauncher, LocalLayout};
 use lake_providers::{NormalizedBar, NormalizedQuote, NormalizedTrade, ProviderError};
@@ -119,6 +121,8 @@ async fn bars_ensure_fetches_bars_only_and_never_touches_the_equity_provider() {
         }],
     });
 
+    layout.initialize().expect("initialize");
+    let catalog = Arc::new(JsonCatalogStore::open(layout.catalog_path()).expect("catalog"));
     let launcher = Arc::new(
         LocalEnsureLauncher::new(layout.clone(), environ, settings, universes, now)
             .expect("launcher")
@@ -126,13 +130,16 @@ async fn bars_ensure_fetches_bars_only_and_never_touches_the_equity_provider() {
                 Some(Arc::clone(&equity) as Arc<dyn EquityDataProvider>),
                 None,
             )
-            .with_bars_provider(Some(Arc::clone(&bars) as Arc<dyn BarsDataProvider>)),
+            .with_bars_provider(Some(Arc::clone(&bars) as Arc<dyn BarsDataProvider>))
+            .with_catalog(catalog.clone()),
     );
-    let launch = launcher.launcher();
-
-    launch(EnsureJob {
-        job_id: "job-bars-only".to_string(),
-        request: EnsureSpec {
+    let jobs: Arc<dyn JobRepository> = Arc::new(MemoryJobRepository::new());
+    let result = ensure_coverage(
+        catalog.as_ref(),
+        &jobs,
+        None,
+        launcher.launcher(),
+        &EnsureSpec {
             asset_class: AssetClass::Equity,
             data_type: DataType::Bars,
             symbol: "AAPL".to_string(),
@@ -140,10 +147,12 @@ async fn bars_ensure_fetches_bars_only_and_never_touches_the_equity_provider() {
             end_date: date(2024, 1, 18),
             interval: Some("1min".to_string()),
         },
-        gaps: Vec::new(),
-    })
+        now,
+        10.0,
+    )
     .await
     .expect("bars ensure succeeds");
+    assert!(matches!(result, EnsureOutcome::Covered(_)));
 
     assert_eq!(
         equity.calls(),
@@ -183,4 +192,57 @@ async fn bars_ensure_fetches_bars_only_and_never_touches_the_equity_provider() {
         .expect("catalog get")
         .expect("bars coverage row");
     assert_eq!(record.bar_source, Some(BarSource::Provider));
+}
+
+#[tokio::test]
+async fn tick_ensure_fetches_only_its_dataset_and_missing_sessions() {
+    for data_type in [DataType::Quote, DataType::Trade] {
+        let environ = credentials();
+        let settings = LakeSettings::load(None, &environ).expect("settings");
+        let universes = UniverseSettings::load(None, &environ).expect("universes");
+        let temp = tempfile::tempdir().expect("tempdir");
+        let layout = LocalLayout::new(temp.path().join("lake"));
+        layout.initialize().expect("initialize");
+        let catalog = Arc::new(JsonCatalogStore::open(layout.catalog_path()).expect("catalog"));
+        let provider = Arc::new(RecordingEquityProvider::default());
+        let now = instant(2024, 1, 20, 1, 0);
+        let launcher = Arc::new(
+            LocalEnsureLauncher::new(layout, environ, settings, universes, now)
+                .expect("launcher")
+                .with_catalog(catalog.clone())
+                .with_providers(Some(provider.clone()), None),
+        );
+        let jobs: Arc<dyn JobRepository> = Arc::new(MemoryJobRepository::new());
+        for (end_day, expected_calls) in [(18, 1), (19, 2), (19, 2)] {
+            let result = ensure_coverage(
+                catalog.as_ref(),
+                &jobs,
+                None,
+                launcher.launcher(),
+                &EnsureSpec {
+                    asset_class: AssetClass::Equity,
+                    data_type,
+                    symbol: "AAPL".into(),
+                    start_date: date(2024, 1, 18),
+                    end_date: date(2024, 1, end_day),
+                    interval: None,
+                },
+                now,
+                10.0,
+            )
+            .await
+            .expect("ensure");
+            assert!(matches!(result, EnsureOutcome::Covered(_)));
+            assert_eq!(provider.calls(), expected_calls);
+        }
+        let other = if data_type == DataType::Quote {
+            DataType::Trade
+        } else {
+            DataType::Quote
+        };
+        assert!(catalog
+            .get(AssetClass::Equity, other, None, "AAPL", date(2024, 1, 18))
+            .expect("other dataset")
+            .is_none());
+    }
 }

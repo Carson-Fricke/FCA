@@ -61,6 +61,8 @@ pub struct FakeLakeConfig {
     pub universe_body: Value,
     /// `GET /v1/reference/facts` response body.
     pub facts_body: Value,
+    /// Individual option selection response.
+    pub option_resolution: Option<Value>,
 }
 
 impl FakeLakeConfig {
@@ -90,6 +92,7 @@ impl FakeLakeConfig {
             read_bodies_by_type: BTreeMap::new(),
             universe_body: json!({"as_of": "2024-01-02", "symbols": []}),
             facts_body: json!({"as_of": "2024-01-02", "facts": {}}),
+            option_resolution: None,
         }
     }
 }
@@ -241,6 +244,7 @@ impl FakeState {
 fn router(state: Arc<FakeState>) -> Router {
     Router::new()
         .route("/v1/catalog/ensure", post(ensure))
+        .route("/v1/options/resolve", post(resolve_option))
         .route("/v1/jobs/{job_id}", get(job))
         .route("/v1/catalog/coverage", get(coverage))
         .route("/v1/read", get(read))
@@ -279,6 +283,31 @@ async fn ensure(State(state): State<Arc<FakeState>>, headers: HeaderMap, body: B
     let (status, body) = sequence_item(&state.config.ensure_bodies, &state.ensure_index)
         .unwrap_or_else(|| (200, json!({})));
     json_response(status, body)
+}
+
+async fn resolve_option(
+    State(state): State<Arc<FakeState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    state.record(
+        "POST",
+        "/v1/options/resolve",
+        BTreeMap::new(),
+        &headers,
+        Some(body.to_vec()),
+    );
+    if !state.authorized(&headers) {
+        return unauthorized();
+    }
+    match &state.config.option_resolution {
+        Some(value) => Json(value.clone()).into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error":{"code":"option_selection_unavailable"}})),
+        )
+            .into_response(),
+    }
 }
 
 async fn job(

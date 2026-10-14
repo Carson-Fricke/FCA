@@ -104,10 +104,10 @@ fn plan_option(
     let contracts = contracts_or_default(context.state.contracts.as_deref());
     let like = OptionRequestLike {
         data_type: query.data_type,
+        interval: query.interval.as_deref(),
         symbol: Some(query.symbol.as_str()),
         underlying: None,
         contract_symbols: None,
-        contracts: None,
         start_date: query.start_date,
         end_date: query.end_date,
     };

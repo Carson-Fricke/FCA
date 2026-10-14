@@ -31,6 +31,12 @@ impl fmt::Debug for BlockingLakeClient {
 }
 
 impl BlockingLakeClient {
+    pub fn resolve_option(
+        &self,
+        selector: &harness_contracts::OptionSelector,
+    ) -> Result<harness_contracts::ResolvedOption, LakeClientError> {
+        self.block_on(self.client.resolve_option(selector))
+    }
     /// Build a blocking client from resolved configuration.
     ///
     /// # Errors
@@ -63,6 +69,46 @@ impl BlockingLakeClient {
     /// token.
     pub fn from_env() -> Result<Self, LakeClientError> {
         Self::new(LakeClientConfig::from_env()?)
+    }
+
+    /// Create a bridge sharing the HTTP transports with a job-scoped telemetry port.
+    pub fn reporting(
+        &self,
+        reporter: harness_contracts::progress::ProgressReporter,
+    ) -> Result<Self, LakeClientError> {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .map_err(|error| LakeClientError::Config(error.to_string()))?;
+        Ok(Self {
+            client: self.client.clone().with_progress(reporter),
+            runtime: Some(runtime),
+        })
+    }
+
+    /// Attach the execution owner's telemetry port.
+    pub fn with_progress(
+        mut self,
+        reporter: harness_contracts::progress::ProgressReporter,
+    ) -> Self {
+        self.client = self.client.clone().with_progress(reporter);
+        self
+    }
+
+    pub fn report_progress(
+        &self,
+        progress: harness_contracts::progress::ExecutionProgress,
+    ) -> Result<(), LakeClientError> {
+        self.client.report_progress(progress)
+    }
+
+    /// Consume decoded batches without retaining the response or all Arrow batches.
+    pub fn visit_arrow<F>(&self, spec: &ReadSpec, consume: F) -> Result<(), LakeClientError>
+    where
+        F: FnMut(RecordBatch) -> Result<(), LakeClientError> + Send,
+    {
+        self.block_on(self.client.visit_arrow(spec, consume))
     }
 
     /// The resolved base URL with any trailing slash removed.

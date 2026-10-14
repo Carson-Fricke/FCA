@@ -8,10 +8,11 @@ it does not own agent turns, provider projection, or workflow transitions.
 - `__init__.py` exposes workspace identity, repository, and catalog contracts,
   plus `WorkspacePrograms` and its artifact/publication errors.
 - `azure_catalog.py` provisions the Azure blob catalog and operational scopes,
-  using the injected repository provider when configured.
+  using the injected repository provider when configured, and retains workspace
+  deletion markers covering all storage owned by the workspace ID.
 - `azure_contract.py` defines and serializes the Azure workspace resource locator.
 - `catalog.py` derives local workspace summaries from manifests and persists
-  catalog activity over the local provider.
+  catalog activity and atomic workspace deletion markers over the local provider; no ownership migration read path.
 - `gitea.py` provisions private ownership-marked remote repositories and manages
   isolated rebuildable native-Git checkouts and publication.
 - `local.py` creates and verifies local Git workspaces, scaffolds repository
@@ -35,8 +36,11 @@ it does not own agent turns, provider projection, or workflow transitions.
 
 Programs live under `studies/<program_id>/`, `strategies/<program_id>/`, or
 `indicators/<program_id>/` with `program.rs`, `manifest.json`, and, after validation,
-`validation.json`. Agent-facing reads, validation, and runs use latest committed
-contents, never dirty working-tree source. Updates require the current content
+`validation.json`. Workspace reads, validation, and runs use latest committed
+contents, never dirty working-tree source. A study read with `job_id` instead reads
+the exact immutable accepted harness source, with bounded source ranges and bundle
+and source hashes, so later workspace edits cannot change the evidence under review.
+Updates require the current content
 version and an exact single-match source patch, or a configuration-only change.
 Versions cover source and manifest
 digests including transitive indicator dependencies; receipt-only commits do not
@@ -51,6 +55,8 @@ Remote publication failures retain the local commit receipt for explicit
 reconciliation, not re-authoring or automatic execution replay.
 
 `read_sdk_reference` supplies bounded source/template ranges, including the
+`research_views`, `research_publishing`, and `research_recipes` topics for
+saved exhibits, typed evidence and reusable compositions, alongside the
 `decimal` topic from the `num` kernel, and `template=basic`
 renders exact declared subscriptions. Matching local SDK sources are required;
 remote source topics are read from the serving harness after matching its identity.
@@ -68,7 +74,7 @@ source. Agent repair guidance belongs to workflow prompts, not this service.
 
 Focused coverage lives in `tests/thesis/workspaces/test_programs.py` (committed
 content, dependency/SDK invalidation, templates, and wheel assets),
-`tests/thesis/agent/runtime/test_program_tools.py` (trusted ID-only bindings), and
-`tests/thesis/workflows/registry/hypothesis_development/test_program_references.py`
+`tests/thesis/extensions/tools/test_program_tools.py` (trusted ID-only bindings), and
+`tests/thesis/extensions/workflows/hypothesis_development/test_program_references.py`
 (accepted references). Fixture helpers and fake receipts are test scaffolding,
 not a second production program or validation contract.

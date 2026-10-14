@@ -89,7 +89,7 @@ def create_workspace_state_router() -> APIRouter:
     router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["workspace-state"])
 
     @router.get("/state")
-    async def get_workspace_state(
+    def get_workspace_state(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[WorkspaceStateService, Depends(get_workspace_state_service)],
     ) -> dict[str, object]:
@@ -101,7 +101,7 @@ def create_workspace_state_router() -> APIRouter:
             raise service_error(error) from error
 
     @router.put("/state")
-    async def put_workspace_state(
+    def put_workspace_state(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         document: dict[str, object],
         service: Annotated[WorkspaceStateService, Depends(get_workspace_state_service)],

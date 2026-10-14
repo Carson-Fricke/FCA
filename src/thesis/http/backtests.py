@@ -35,6 +35,7 @@ from thesis.integrations.harness_activation import (
     HarnessBoundary,
 )
 from thesis.integrations.mcp import HarnessMcpError
+from thesis.persistence.submissions import SubmissionStore, retain_submission
 
 
 def _utc_now() -> datetime:
@@ -203,7 +204,7 @@ class LaunchBacktestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     bundle_ref: str = Field(min_length=1, max_length=256)
-    config_path: str = Field(min_length=1, max_length=2_048)
+    config: dict[str, object] = Field(min_length=1)
     strategy_id: str | None = Field(default=None, max_length=128)
     name: str | None = Field(default=None, max_length=256)
     environment: ActivationEnvironment = "paper"
@@ -226,9 +227,11 @@ class BacktestDataService:
         store: BacktestStore | None = None,
         *,
         harness: HarnessBoundary | None = None,
+        submissions: SubmissionStore | None = None,
         importer: ArtifactImporter | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
+        self.submissions = submissions
         self._store = store if store is not None else InMemoryBacktestStore()
         self._harness = harness
         self._importer = importer
@@ -270,12 +273,21 @@ class BacktestDataService:
                 "backtest", "no harness adapter configured"
             )
         job_id = f"job-{uuid4().hex}"
+        config = {**request.config, "job_id": job_id}
         activation = HarnessActivationRequest(
             bundle_ref=request.bundle_ref,
-            config_path=request.config_path,
+            config_path="",
+            config=config,
             action="backtest",
             environment=request.environment,
             job_id=job_id,
+        )
+        retain_submission(
+            self.submissions,
+            workspace_id,
+            job_id,
+            "run_backtest",
+            {**request.model_dump(mode="json"), "config": config},
         )
         try:
             outcome = self._harness.run_backtest(activation)
@@ -330,7 +342,7 @@ class BacktestDataService:
         )
         launch_document: dict[str, object] = {
             "bundle_ref": request.bundle_ref,
-            "config_path": request.config_path,
+            "config": request.config,
             "environment": request.environment,
         }
         manifest_document = dict(manifest)
@@ -363,7 +375,7 @@ class BacktestDataService:
             manifest=manifest_document,
             status=_launch_status(outcome),
             bundle_ref=request.bundle_ref,
-            config_path=request.config_path,
+            config_path="config.json",
         )
 
     def _import_artifacts(
@@ -518,14 +530,14 @@ def create_backtest_router() -> APIRouter:
     router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["backtests"])
 
     @router.get("/backtests")
-    async def list_backtests(
+    def list_backtests(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[BacktestDataService, Depends(get_backtest_service)],
     ) -> dict[str, object]:
         return {"items": list(service.list_backtests(workspace_id))}
 
     @router.get("/backtests/jobs/{job_id}")
-    async def materialize_backtest_job(
+    def materialize_backtest_job(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         job_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: Request,
@@ -555,7 +567,7 @@ def create_backtest_router() -> APIRouter:
             raise _service_error(error) from error
 
     @router.get("/backtests/{job_id}")
-    async def get_backtest(
+    def get_backtest(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         job_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[BacktestDataService, Depends(get_backtest_service)],
@@ -565,8 +577,8 @@ def create_backtest_router() -> APIRouter:
         except Exception as error:
             raise _service_error(error) from error
 
-    @router.post("/backtests/launch")
-    async def launch_backtest(
+    @router.post("/backtests/launch", status_code=202)
+    def launch_backtest(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: LaunchBacktestRequest,
         service: Annotated[BacktestDataService, Depends(get_backtest_service)],

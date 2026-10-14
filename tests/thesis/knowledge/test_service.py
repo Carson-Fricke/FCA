@@ -9,9 +9,7 @@ from typing import cast
 
 import pytest
 
-from thesis.agent.runtime.context import ToolContext
-from thesis.agent.runtime.knowledge_tools import knowledge_registered_tools
-from thesis.agent.runtime.session import SessionToolRegistry
+from thesis.extensions.tools.knowledge import knowledge_registered_tools
 from thesis.knowledge.corpus import CorpusError, KnowledgeCorpus
 from thesis.knowledge.metadata import (
     PageMetadata,
@@ -30,6 +28,8 @@ from thesis.knowledge.service import (
 from thesis.workspaces.local import LocalWorkspace, WorkspacePathError
 from thesis.workspaces.manifest import WorkspaceManifest
 from thesis.workspaces.repository import WorkspaceRepositoryProvider
+from thesis_runtime.contracts.context import ToolContext
+from thesis_runtime.tools.registry import SessionToolRegistry
 
 
 class Repositories:
@@ -305,13 +305,15 @@ def test_tools_default_to_trusted_scope_and_reject_authority_arguments(
     properties = cast(dict[str, dict[str, object]], schema["properties"])
     assert properties["scope"]["default"] == "workspace"
     for arguments in ({"query": "momentum"}, {"query": "momentum", "scope": "both"}):
-        result = registry.dispatch("search_knowledge", arguments)
+        result = registry.dispatch("search_knowledge", arguments, context=context)
         assert result.ok
         assert result.structured["sources"] == ["workspace"]
         reference = hits(dict(result.structured))[0]["reference"]
-        assert registry.dispatch("read_knowledge", {"reference": reference}).ok
+        assert registry.dispatch(
+            "read_knowledge", {"reference": reference}, context=context
+        ).ok
     rejected = registry.dispatch(
-        "search_knowledge", {"query": "momentum", "scope": "shared"}
+        "search_knowledge", {"query": "momentum", "scope": "shared"}, context=context
     )
     assert not rejected.ok
     assert rejected.failure is not None
@@ -322,9 +324,10 @@ def test_tools_default_to_trusted_scope_and_reject_authority_arguments(
             "query": "momentum",
             "workspace_id": "bravo",
         },
+        context=context,
     ).ok
     assert not registry.dispatch(
-        "read_knowledge", {"reference": str(shared / "sample.md")}
+        "read_knowledge", {"reference": str(shared / "sample.md")}, context=context
     ).ok
 
 

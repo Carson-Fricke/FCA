@@ -139,11 +139,6 @@ impl OhlcvBar {
     }
 }
 
-/// Descriptive aliases matching the Python surface.
-pub type Bar = OhlcvBar;
-/// Descriptive aliases matching the Python surface.
-pub type Ohlcv = OhlcvBar;
-
 /// Accumulate one symbol's trades into deterministic OHLCV bars.
 #[derive(Debug)]
 pub struct BarAggregator {
@@ -227,9 +222,6 @@ impl BarAggregator {
     }
 }
 
-/// Descriptive alias matching the Python surface.
-pub type BarBuilder = BarAggregator;
-
 fn make_bar(
     start: Nanos,
     interval: Nanos,
@@ -275,22 +267,4 @@ pub fn build_bars<I: IntoIterator<Item = TradeEvent>>(
 ) -> Result<Vec<OhlcvBar>, DataError> {
     let mut aggregator = BarAggregator::new(interval, symbol)?;
     aggregator.aggregate(trades)
-}
-
-/// Descriptive alias matching the Python surface.
-pub fn aggregate_trades<I: IntoIterator<Item = TradeEvent>>(
-    trades: I,
-    interval: &str,
-    symbol: Option<&str>,
-) -> Result<Vec<OhlcvBar>, DataError> {
-    build_bars(trades, interval, symbol)
-}
-
-/// Descriptive alias matching the Python surface.
-pub fn bars_from_trades<I: IntoIterator<Item = TradeEvent>>(
-    trades: I,
-    interval: &str,
-    symbol: Option<&str>,
-) -> Result<Vec<OhlcvBar>, DataError> {
-    build_bars(trades, interval, symbol)
 }

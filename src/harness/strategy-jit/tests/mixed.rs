@@ -105,6 +105,10 @@ fn study_strategy_and_owned_indicators_share_filtered_callbacks_and_effective_re
     assert_eq!(outputs["ind/0/completed"]["rows"], serde_json::json!([]));
     assert_eq!(outputs["signal"]["kind"], "series");
     assert_eq!(
+        outputs["research_view"]["view"]["datasets"][0]["output"],
+        "signal"
+    );
+    assert_eq!(
         study.published_outputs()["signal"]["points"][0]["available_at_ns"],
         25
     );
@@ -267,6 +271,21 @@ fn study_strategy_and_owned_indicators_share_filtered_callbacks_and_effective_re
         .contains("subscriptions or dependency topology changed"));
     assert!(runtime.on_market(&trade("DEP")).is_err());
     drop(runtime);
+    let mut invalid = JitStudyRuntime::from_source(
+        &workspace,
+        include_str!("fixtures/mixed_study.rs"),
+        &json!({"invalid_view":true}),
+    )
+    .unwrap();
+    // No dependency event has arrived; the fixture's indicator assertion needs one.
+    invalid.on_market(&quote("DEP")).unwrap();
+    assert!(invalid
+        .on_stop()
+        .unwrap_err()
+        .to_string()
+        .contains("missing research output"));
+    assert!(invalid.published_outputs().is_empty());
+    drop(invalid);
     drop(study);
     drop(strategy);
     let _ = std::fs::remove_dir_all(directory);

@@ -63,6 +63,7 @@ from thesis.integrations.mcp import (
     open_harness_mcp_client,
     outcome_certainty,
 )
+from thesis_runtime.contracts.errors import ToolCatalogError
 
 #: The harness MCP tools the Thesis agent may discover and call.
 HARNESS_TOOL_NAMES: tuple[str, ...] = (
@@ -107,11 +108,11 @@ FailureKind = Literal[
 ]
 
 
-class HarnessToolError(RuntimeError):
+class HarnessToolError(ToolCatalogError):
     """Raised when the harness tool catalog cannot be used by the agent."""
 
     def __init__(self, failure: HarnessToolFailure) -> None:
-        super().__init__(failure.message)
+        super().__init__(failure.as_dict())
         self.failure = failure
 
 
@@ -165,6 +166,7 @@ class HarnessToolSpec:
     name: str
     description: str
     input_schema: Mapping[str, object] = field(default_factory=dict)
+    read_only: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -177,6 +179,7 @@ class HarnessToolSpec:
             "description": self.description,
             "inputSchema": dict(self.input_schema),
             "name": self.name,
+            "annotations": {"readOnlyHint": self.read_only},
         }
 
 
@@ -275,6 +278,7 @@ class HarnessToolProvider:
                         name=tool.name,
                         description=tool.description,
                         input_schema=tool.input_schema,
+                        read_only=tool.read_only,
                     )
                     for tool in tools
                 )

@@ -22,8 +22,17 @@ fn stamp(text: &str) -> i64 {
 }
 
 #[test]
-fn exact_mixed_and_trade_only_study_plans_never_acquire_unrequested_streams() {
-    for kinds in [vec!["quote", "bars"], vec!["trade"], vec!["quote"]] {
+fn studies_acquire_exact_inputs_and_backtests_add_tick_execution_feeds() {
+    for (shell, kinds) in ["study", "backtest"].into_iter().flat_map(|shell| {
+        [
+            vec!["bars"],
+            vec!["quote", "bars"],
+            vec!["trade"],
+            vec!["quote"],
+        ]
+        .into_iter()
+        .map(move |kinds| (shell, kinds))
+    }) {
         let start = config().start_ns;
         let server = FakeLakeServer::start(FakeLakeConfig {
             read_bodies_by_type: BTreeMap::from([
@@ -50,25 +59,38 @@ fn exact_mixed_and_trade_only_study_plans_never_acquire_unrequested_streams() {
                 interval: (*kind == "bars").then(|| "1min".into()),
             })
             .collect();
+        let mut configuration = config();
+        configuration.shell = shell.into();
+        configuration.data_subscriptions = inputs.clone();
+        configuration.data_subscriptions_declared = true;
         let fixture =
-            lake_fixture_with_subscriptions(&config(), &client(&server), &inputs).unwrap();
-        assert_eq!(fixture.events.len(), kinds.len());
+            lake_fixture_with_subscriptions(&configuration, &client(&server), &inputs).unwrap();
+        let mut acquired = kinds.clone();
+        if shell == "backtest" {
+            acquired.extend(["quote", "trade"]);
+        }
+        acquired.sort();
+        acquired.dedup();
+        assert_eq!(fixture.events.len(), acquired.len());
         let requests = server.requests();
         let ensures: Vec<_> = requests
             .iter()
             .filter(|r| r.path == "/v1/catalog/ensure")
             .collect();
-        assert_eq!(ensures.len(), kinds.len());
+        assert_eq!(ensures.len(), acquired.len());
         for request in ensures {
             let body: serde_json::Value =
                 serde_json::from_slice(request.body.as_ref().unwrap()).unwrap();
-            assert!(kinds.contains(&body["data_type"].as_str().unwrap()));
+            assert!(acquired.contains(&body["data_type"].as_str().unwrap()));
             assert_eq!(body["symbol"], "SPY");
         }
         assert_eq!(
             requests.iter().filter(|r| r.path == "/v1/read").count(),
-            kinds.len()
+            acquired.len()
         );
+        for request in requests.iter().filter(|r| r.path == "/v1/read") {
+            assert!(acquired.contains(&request.query["data_type"].as_str()));
+        }
     }
 }
 

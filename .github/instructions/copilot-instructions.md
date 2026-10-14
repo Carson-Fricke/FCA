@@ -8,18 +8,52 @@ applyTo: "**"
 
 Use Python 3.12 with uv, Ruff, ty, and pytest. Do not use MyPy.
 
-## Remove Superseded Behavior
+## Current Contracts and Data Cutovers
 
-- Remove superseded behavior within the approved scope unless the user explicitly
-  requests preservation. There is no implicit "legacy" compatibility requirement.
-- Old documentation, persisted formats, existing callers, and tests do not authorize
-  preservation. Update affected callers and active documentation instead of adding
-  compatibility adapters, aliases, fallbacks, or migration paths.
-- Tests must verify the approved current contract. Remove or replace tests whose
-  requirements are superseded; do not introduce production interfaces solely to
-  satisfy their setup. Retain coverage of current behavior and genuine regressions.
-- If removal exposes a scope or data-impact decision that needs authorization,
-  surface it to the user rather than silently preserving behavior or deleting data.
+- Maintain one current application-owned contract and implementation. When a
+  contract changes, update its producers, consumers, callers, tests, fixtures,
+  and active documentation together; remove the superseded paths in that change.
+  This applies to persisted documents, workspace artifacts, APIs, configuration,
+  tool results, workflow definitions, and package/public interfaces.
+- Old documentation, stored data, existing callers, and tests do not establish a
+  compatibility requirement. Do not retain historical decoders, retired enum
+  members, aliases, inferred required fields, compatibility facades, dual writes,
+  or version-selected implementations merely to keep them working. Data
+  preservation does not authorize permanent compatibility code.
+- During early development, deletion/reset of affected obsolete data is the
+  default cutover disposition. If preservation is actually required, convert the
+  affected data once during the cutover, then use only the current contract.
+  Conversion is a bounded operational step outside application startup, normal
+  reads, and execution; remove the temporary converter after the cutover. Do not
+  introduce an ongoing migration framework or lazy read-time upgrades.
+- Readers may detect an incompatible format and report that it is outdated.
+  They must not reconstruct missing required facts, reinterpret old data as
+  current, silently upgrade it, or execute it. Use existing version/contract
+  checks where sufficient; do not add a versioning framework just to recognize
+  obsolete data. Never delete data automatically on a read.
+- Version identifiers may record provenance, ABI/cache identity, or contract
+  mismatch. They do not imply support for old schemas or implementations. Each
+  workflow ID has one current implementation; recovery must reject a mismatched
+  durable version rather than select an old implementation or substitute the
+  current definition for it.
+- For a format-changing task, identify the current contract, obsolete paths to
+  remove, affected data/environment, and deletion or exceptional one-time
+  conversion before implementation. Coordinate the cutover so outdated writers
+  cannot repopulate the store; do not assume a mixed-version deployment window.
+  Data operations must stay within the task's authorized environment and scope.
+  If that scope is insufficient, surface the concrete data-impact decision; do
+  not silently retain compatibility or delete unrelated data.
+- Tests verify the current contract. Remove superseded acceptance tests and
+  fixtures in the same change as the obsolete behavior; update current tests
+  without inventing production interfaces to preserve old setup. Retain current
+  behavior coverage, mismatch rejection, genuine recovery guarantees, and
+  mandated guards. Follow
+  `.github/instructions/testing-strategy.instructions.md`.
+- Current-contract recovery, idempotency, fencing, deliberate optional fields,
+  supported provider adapters, inline/chunked storage, and a generic renderer
+  for valid unknown datum types are not historical compatibility. Preserve these
+  where required by the current contract; do not use them to justify old-format
+  inference or a second implementation.
 
 ## Execution Job Contract
 

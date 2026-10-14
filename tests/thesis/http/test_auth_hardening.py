@@ -135,8 +135,8 @@ def _guard_app(store: _MemorySessionStore, clock: _MutableClock) -> FastAPI:
     app = FastAPI()
 
     @app.get("/whoami")
-    async def whoami(request: Request) -> dict[str, str]:
-        principal = await authenticator(request, None)
+    def whoami(request: Request) -> dict[str, str]:
+        principal = authenticator(request, None)
         return {"principal": principal}
 
     return app

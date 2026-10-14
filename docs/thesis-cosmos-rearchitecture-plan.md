@@ -4,6 +4,14 @@ Status: implemented in the worktree. Sections 1-6 and 8-11 landed; remaining
 items are listed under "Implementation Status" below. This document keeps the
 original plan and the record of what landed and what remains.
 
+Current format changes follow
+[Current contracts and data cutovers](../.github/architecture/repository.md#current-contracts-and-data-cutovers).
+The local wipe and measurements recorded below are historical results, not
+authorization to repeat data operations elsewhere. Old data remaining in an
+environment does not justify retaining historical decoders: reject outdated
+records and perform the authorized deletion or necessary one-time conversion at
+cutover. This policy update does not delete data or certify further code cleanup.
+
 ## Implementation Status
 
 Landed:
@@ -97,7 +105,7 @@ Cosmos costs.
 | Streaming | SSE driven by post-commit commit notifications; database sequence is the only cursor |
 | UI feedback | Pending send shown immediately; accepted message merged from the durable receipt |
 | Existing data | Delete all old conversations. No migration, no compatibility reads |
-| Legacy schemas | Delete legacy decode branches and their tests; no old data remains to decode |
+| Legacy schemas | Delete superseded decode branches and acceptance tests in the contract change; reject any obsolete records still encountered |
 | Compatibility window | None. Exactly one live implementation exists at every commit |
 | Execution artifacts | Retain the independent execution store and its revision/CAS semantics |
 | Audit storage | Retain content-addressed chunk storage for provider audits and large payloads |
@@ -143,8 +151,9 @@ catalog. It loses append, counter, and mirroring responsibilities.
 - Projection acknowledgement patches and `reconcile_timeline`.
 - Projection repair scheduling in the HTTP timeline router.
 - The `find_delivered` legacy fallback scan and its tests.
-- Legacy native-role and old delivery-schema decode branches, once no old data
-  exists.
+- Legacy native-role and old delivery-schema decode branches and their
+  superseded acceptance fixtures/tests; remaining old records do not authorize
+  compatibility reads.
 - Separate catalog/timeline physical cleanup paths.
 
 User-facing logical chat deletion remains a product feature. Only the
@@ -324,8 +333,8 @@ Code surfaces that exist only for old data or the mirror:
   `reconcile_timeline`, and `tests/thesis/cosmos/test_persistence_repairs.py`.
 - Projection repair task management in `src/thesis/http/timeline.py`
   (`reconcile`, `repairs`, `retry_at`).
-- Legacy native-role and old delivery-schema decode branches once their
-  fixtures and tests are deleted.
+- Legacy native-role and old delivery-schema decode branches together with
+  their superseded fixtures and tests.
 - Duplicate timeline container cleanup paths.
 
 Deletion rule: delete the data and the compatibility surface first. Where

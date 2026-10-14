@@ -28,9 +28,9 @@ from typing import Literal
 from thesis.activation.consent import ConsentGrant, RevokedGrant, is_active
 from thesis.agent.residency import OperationAuditRecord
 from thesis.artifacts.importer import ImportedArtifactReference
-from thesis.execution.events import ExecutionEvent
 from thesis.knowledge.ingest import is_instruction_like
-from thesis.providers.foundry import RuntimeCapabilityReport
+from thesis_runtime.adapters.providers.foundry import RuntimeCapabilityReport
+from thesis_runtime.execution.events import ExecutionEvent
 
 
 class SecurityError(Exception):

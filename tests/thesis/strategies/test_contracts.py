@@ -6,10 +6,10 @@ from typing import cast
 
 import pytest
 
-from thesis.agent.runtime.schema import validate_arguments
-from thesis.agent.runtime.strategy_tools import AUTHOR_STRATEGY_SCHEMA
+from thesis.extensions.tools.strategy import AUTHOR_STRATEGY_SCHEMA
 from thesis.strategies.bundles import StrategyBundleError
 from thesis.strategies.contracts import STRATEGY_DESIGN_SCHEMA, StrategyDesign
+from thesis_runtime.tools.schema import validate_arguments
 
 
 def _design(**overrides: object) -> dict[str, object]:

@@ -70,10 +70,17 @@ impl NativeBacktestRunner {
 }
 
 impl BacktestRunner for NativeBacktestRunner {
-    fn run(&self, configuration: &ValidatedConfiguration) -> Result<RunOutcome, String> {
+    fn run(
+        &self,
+        configuration: &ValidatedConfiguration,
+        progress: harness_contracts::progress::ProgressReporter,
+    ) -> Result<RunOutcome, String> {
         let mut native = BacktestConfig::from_yaml(&configuration.document.to_string())
             .map_err(|error| error.to_string())?;
-        let client = self.resolved_lake_client()?;
+        let client = self
+            .resolved_lake_client()?
+            .reporting(progress)
+            .map_err(|error| error.to_string())?;
         let directory = match &self.output_root {
             Some(root) => root.join(&native.job_id),
             None => std::env::temp_dir()

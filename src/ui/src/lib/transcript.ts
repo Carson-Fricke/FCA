@@ -1,6 +1,7 @@
+import { groupStudyObservations } from './research/grouping';
 /**
  * Shared root/scoped activity projection. Unified seq is retained throughout;
- * array position/cursor supports historical callers without unified envelopes.
+ * pending local presentation uses an explicit infinite order until acceptance.
  */
 
 import { isWorkflowNodeRole, parseToolResult, type SubAgentTreeNode } from './subagent';
@@ -224,6 +225,11 @@ export type ScopeEntry =
 	| { kind: 'falsification'; id: string; at: string; order: number; data: FalsificationReportData }
 	| { kind: 'variation'; id: string; at: string; order: number; data: VariationReportData };
 
+/** Entries whose rendered tool card starts directly on the activity rail. */
+export function isToolRailEntry(entry: ScopeEntry | undefined): boolean {
+ return entry?.kind === 'tool' || (entry?.kind === 'message' && entry.message.role === 'tool' && !!entry.message.tool_result);
+}
+
 /** The declared context carried by a sub-agent's initial spawn event. */
 export interface SpawnDetails {
 	role: string;
@@ -280,7 +286,7 @@ export function outputText(event: ExecutionEvent): string {
 function spawnAnchor(node: SubAgentTreeNode): { at: string; order: number } {
 	for (const event of node.events) {
 		if (event.eventType === 'sub_agent.spawned') {
-			return { at: event.occurredAt, order: event.seq ?? event.cursor };
+			return { at: event.occurredAt, order: event.seq };
 		}
 	}
 	return { at: '', order: Number.MAX_SAFE_INTEGER };
@@ -309,7 +315,7 @@ export interface BuildNodeEntriesOptions {
 	messages: ChatMessage[];
 	/** Node-scoped execution events (already filtered, global cursors kept). */
 	events: ExecutionEvent[];
-	/** Direct child sub-agents, rendered as drill-in items at their spawn time. */
+	/** Indexed children; helpers render here, phase executors open through workflow cards. */
 	children?: SubAgentTreeNode[];
 	terminal?: boolean;
 }
@@ -317,8 +323,8 @@ export interface BuildNodeEntriesOptions {
 /** Project durable envelopes and runtime starts into activity, retaining assistant bodies. */
 export function projectToolMessages(messages: ChatMessage[], terminal = false): ChatMessage[] {
 	const unique = [...new Map(messages.map((message) => [message.message_id, message])).values()]
-		.sort((a, b) => (a.seq ?? messages.indexOf(a)) - (b.seq ?? messages.indexOf(b)));
-	const order = new Map(unique.map((message, index) => [message.message_id, message.seq ?? index]));
+		.sort((a, b) => (a.seq ?? Infinity) - (b.seq ?? Infinity));
+	const order = new Map(unique.map((message) => [message.message_id, message.seq ?? Infinity]));
 	const calls = new Map<string, { message: ChatMessage; tool: string; arguments: unknown }>();
 	for (const message of unique) {
 		if (message.role === 'tool' && message.data?.toolActivity === 'started' &&
@@ -348,6 +354,7 @@ export function projectToolMessages(messages: ChatMessage[], terminal = false): 
 				projected.push({ ...message, seq: order.get(message.message_id),
 					message_id: `${message.message_id}:datum:${datumIndex}`, role: 'tool',
 					tool_result: { ...card, callId,
+						operation: canonical?.operation as ToolResult['operation'],
 						tool: message.tool_result?.tool ?? correlation?.tool_name ?? call?.tool ?? null,
 						arguments: canonical?.arguments ?? call?.arguments,
 						startedAt: typeof canonical?.startedAt === 'string' ? canonical.startedAt :
@@ -365,7 +372,7 @@ export function projectToolMessages(messages: ChatMessage[], terminal = false): 
 			if (message.role === 'system' && failure && typeof failure === 'object' && !Array.isArray(failure)) {
 				const detail = failure as Record<string, unknown>;
 				projected.push({ ...message, tool_result: message.tool_result ?? {
-					tool: 'runtime', callId: null, ok: false, summary: message.body,
+					datumType: 'runtime_notice', tool: 'runtime', callId: null, ok: false, summary: message.body,
 					structured: detail, text: '', failure: {
 						kind: typeof detail.kind === 'string' ? detail.kind : 'runtime',
 						message: typeof detail.message === 'string' ? detail.message : message.body
@@ -382,6 +389,7 @@ export function projectToolMessages(messages: ChatMessage[], terminal = false): 
 			const startedAt = callId ? calls.get(callId)?.message.data?.startedAt : undefined;
 			result = {
 				...result,
+				operation: (canonical?.operation ?? result.operation) as ToolResult['operation'],
 				callId: callId ?? null,
 				arguments: canonical?.arguments ?? result.arguments ?? (callId ? calls.get(callId)?.arguments : undefined),
 				durationMs: typeof canonical?.durationMs === 'number' ? canonical.durationMs : result.durationMs,
@@ -403,7 +411,7 @@ export function projectToolMessages(messages: ChatMessage[], terminal = false): 
 		const outcome = notice?.data?.status === 'interrupted' ? 'interrupted' : terminal || notice ? 'unknown_outcome' : undefined;
 		projected.push({
 			...call.message, seq: order.get(call.message.message_id), message_id: call.message.role === 'tool' ? call.message.message_id : `pending:${callId}`, role: 'tool', body: '',
-			tool_result: { tool: call.tool, callId, pending: !outcome, outcome, arguments: call.arguments,
+			tool_result: { datumType: 'tool_activity', tool: call.tool, callId, pending: !outcome, outcome, arguments: call.arguments,
 				startedAt: typeof call.message.data?.startedAt === 'string' ? call.message.data.startedAt : undefined,
 				ok: false, summary: '', structured: {}, text: '', failure: outcome ? {
 					kind: outcome,
@@ -411,7 +419,7 @@ export function projectToolMessages(messages: ChatMessage[], terminal = false): 
 				} : null }
 		});
 	}
-	return projected.sort((a, b) => (a.seq ?? order.get(a.message_id) ?? 0) - (b.seq ?? order.get(b.message_id) ?? 0));
+	return projected.sort((a, b) => (a.seq ?? Infinity) - (b.seq ?? Infinity));
 }
 
 /**
@@ -436,7 +444,7 @@ export function buildNodeEntries({
 	const projectedMessages = projectToolMessages(messages, terminal);
 	const eventResults = uniqueEvents.flatMap((event) => {
 		const result = parseToolResult(event);
-		const messageId = field(event, 'messageId') ?? field(event, 'message_id');
+		const messageId = field(event, 'messageId');
 		if (!result || messages.some((message) => message.message_id === messageId) || projectedMessages.some((message) =>
 			(message.tool_result && result.callId && message.tool_result.callId === result.callId &&
 				message.tool_result.ok === result.ok && JSON.stringify(message.tool_result.failure) === JSON.stringify(result.failure) &&
@@ -449,21 +457,21 @@ export function buildNodeEntries({
 	const pendingArguments = new Map(projectedMessages.flatMap((message) => (message.tool_result?.pending || message.tool_result?.outcome) && message.tool_result
 		? [[message.tool_result.callId, message.tool_result.arguments] as const] : []));
 
-	projectedMessages.forEach((message, index) => {
+	projectedMessages.forEach((message) => {
 		if ((message.tool_result?.pending || message.tool_result?.outcome) && eventCallIds.has(message.tool_result.callId!)) return;
 		entries.push({
 			kind: 'message',
 			id: message.message_id,
 			at: message.created_at,
-		order: message.seq ?? index,
+		order: message.seq ?? Infinity,
 			message
 		});
 	});
 
 	for (const event of uniqueEvents) {
-		const messageId = field(event, 'messageId') ?? field(event, 'message_id');
+		const messageId = field(event, 'messageId');
 		if (typeof messageId === 'string' && messages.some((message) => message.message_id === messageId)) continue;
-		const base = { id: event.eventId, at: event.occurredAt, order: event.seq ?? event.cursor } as const;
+		const base = { id: event.eventId, at: event.occurredAt, order: event.seq } as const;
 		if (event.eventType === 'sub_agent.spawned') {
 			if (children.some((child) => child.node.subAgentId === field(event, 'subAgentId'))) continue;
 			entries.push({ kind: 'spawn', ...base, spawn: spawnDetails(event) });
@@ -472,7 +480,7 @@ export function buildNodeEntries({
 		const result = parseToolResult(event);
 		if (result) {
 			if (eventResults.some((item) => item.event === event)) {
-				const answered = messages.some((message) => message.role === 'user' && (message.seq ?? -1) > (event.seq ?? event.cursor));
+				const answered = messages.some((message) => message.role === 'user' && (message.seq ?? -1) > (event.seq));
 				entries.push({ kind: 'tool', ...base, result: {
 					...result,
 					arguments: result.arguments ?? pendingArguments.get(result.callId),
@@ -523,7 +531,7 @@ export function buildNodeEntries({
 	}
 
 	for (const child of children) {
-		if (isWorkflowNodeRole(child.node.role)) continue;
+		if (isWorkflowNodeRole(child.node.role) || child.node.phaseExecutor === true) continue;
 		const anchor = spawnAnchor(child);
 		entries.push({
 			kind: 'sub-agent',
@@ -534,7 +542,7 @@ export function buildNodeEntries({
 		});
 	}
 
-	return entries.sort(compareEntries);
+	return groupStudyObservations(entries.sort(compareEntries));
 }
 
 /** Pending and delivery feedback use the same historical/live activity as rendering. */
@@ -542,14 +550,15 @@ export function threadActivity(messages: ChatMessage[], events: ExecutionEvent[]
 	const entries = buildNodeEntries({ messages, events, terminal });
 	const latest = entries.findLast((entry) => entry.kind === 'assistant' ||
 		(entry.kind === 'message' && (entry.message.role === 'user' ||
-			(entry.message.role === 'assistant' && !!entry.message.body &&
-				!entry.message.data?.sessionMessage?.content.requests?.length))));
+			(entry.message.role === 'assistant' && (entry.message.outputState === 'interrupted' ||
+				(!entry.message.outputState && !!entry.message.body &&
+				!entry.message.data?.sessionMessage?.content.requests?.length))))));
 	const accepted = entries.find((entry) => entry.id === acceptedId);
 	const replied = accepted && entries.some((entry) => entry.order > accepted.order &&
-		(entry.kind === 'assistant' || (entry.kind === 'message' && entry.message.role === 'assistant' &&
+		(entry.kind === 'assistant' || (entry.kind === 'message' && entry.message.role === 'assistant' && !entry.message.outputState &&
 			!!entry.message.body && !entry.message.data?.sessionMessage?.content.requests?.length)));
 	return {
-		pending: !terminal && ((latest?.kind === 'message' && latest.message.role === 'user') ||
+		pending: !terminal && !messages.some((message) => message.outputState === 'streaming') && ((latest?.kind === 'message' && latest.message.role === 'user') ||
 			entries.some((entry) => entry.kind === 'message' && entry.message.tool_result?.pending)),
 		queued: !terminal && !!acceptedId && !replied
 	};

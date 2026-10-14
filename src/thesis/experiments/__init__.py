@@ -60,14 +60,12 @@ from thesis.experiments.ledger import (
 )
 from thesis.experiments.mandate import (
     DataWindowPolicy,
-    LaunchPartition,
     MandateError,
     ResearchMandate,
     datetime_ns,
-    declared_launch_partition,
-    derive_launch_mandate,
     derive_mandate,
     mandate_section,
+    resolve_research_mandate,
     rfc3339_ns,
 )
 
@@ -104,7 +102,6 @@ __all__ = [
     "IntervalKind",
     "IntervalSpan",
     "IntervalWindow",
-    "LaunchPartition",
     "LedgerEntry",
     "LedgerError",
     "LedgerIntegrityError",
@@ -122,9 +119,8 @@ __all__ = [
     "check_grade_transition",
     "classify_influence",
     "datetime_ns",
-    "declared_launch_partition",
     "detect_deviations",
-    "derive_launch_mandate",
+    "resolve_research_mandate",
     "derive_mandate",
     "derive_purge_and_embargo",
     "downgrade",

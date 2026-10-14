@@ -3,9 +3,9 @@
 Binds the real chat surface (T211) and the workspace DATA routes (T231) to a
 single uvicorn process on 127.0.0.1:8000, with the harness-hosted MCP
 boundary and CORS for the Svelte dev server.  The serving stack itself (conversations, control tools, workflow
-runtime, launcher) is composed by :func:`thesis.http.serving.build_serving_stack`
+runtime, launcher) is composed by :func:`thesis.application.composition.build_serving_stack`
 — the same composition `thesis serve` uses — and only the local harness
-transport and logging differ here; see .github/runbooks/thesis-local-stack.md.
+transport, CORS, and embedded worker differ here; see .github/runbooks/thesis-local-stack.md.
 
 Usage:
     uv run python scripts/local/thesis_local_api.py
@@ -35,22 +35,17 @@ from thesis.agent.harness_tools import (  # noqa: E402
     open_harness_mcp_composition,
     open_harness_tool_provider,
 )
-from thesis.agent.runtime.control import ControlToolService  # noqa: E402
-from thesis.chat.workflow_launcher import daemon_thread  # noqa: E402
-from thesis.cosmos.stack import (  # noqa: E402
-    open_cosmos_chat_stack,
-    open_execution_store,
+from thesis.application.composition import (  # noqa: E402
+    build_serving_stack,
+    build_serving_worker,
+    open_serving_model_provider,
 )
+from thesis.application.workflow_launcher import daemon_thread  # noqa: E402
 from thesis.http.application import (  # noqa: E402
     create_app,
-    require_single_worker,
     serving_workspace_store,
 )
 from thesis.http.harness import HarnessDataService  # noqa: E402
-from thesis.http.serving import (  # noqa: E402
-    build_serving_stack,
-    open_serving_model_provider,
-)
 from thesis.http.workspaces import build_local_workspace_data  # noqa: E402
 from thesis.integrations.harness_activation import (  # noqa: E402
     HarnessBoundary,
@@ -60,13 +55,17 @@ from thesis.integrations.mcp import (  # noqa: E402
     HarnessMcpTopology,
     harness_mcp_topology_from_env,
 )
+from thesis.persistence.cosmos_submissions import open_submission_store  # noqa: E402
+from thesis.persistence.investigations import open_investigations  # noqa: E402
 from thesis.workspaces.local import default_workspace_root  # noqa: E402
+from thesis_runtime.adapters.cosmos.stack import (  # noqa: E402
+    open_runtime_persistence,
+)
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
-LOGGER = logging.getLogger("thesis.local_api")
 
 WORKSPACE_ROOT = str(default_workspace_root())
 HARNESS_BASE_URL = "http://127.0.0.1:8001"
@@ -118,68 +117,21 @@ def _harness_composition() -> tuple[HarnessBoundary | None, HarnessToolProvider 
     return composition.boundary, provider
 
 
-class _LoggingControlToolService(ControlToolService):
-    """Control surface that logs operator-input and transition decisions."""
-
-    def request_operator_input(self, workspace_id, sub_agent_id, *, message, reason=""):  # noqa: ANN001, ANN201
-        request = super().request_operator_input(
-            workspace_id, sub_agent_id, message=message, reason=reason
-        )
-        LOGGER.info(
-            "operator.input.request node=%s reason=%s",
-            sub_agent_id,
-            reason or "-",
-        )
-        return request
-
-    def complete_phase(self, workspace_id, sub_agent_id, *, completion):  # noqa: ANN001, ANN201
-        LOGGER.info("transition.request kind=phase node=%s", sub_agent_id)
-        try:
-            record = super().complete_phase(
-                workspace_id, sub_agent_id, completion=completion
-            )
-        except Exception as error:
-            LOGGER.warning(
-                "transition.reject kind=phase node=%s error=%s", sub_agent_id, error
-            )
-            raise
-        LOGGER.info(
-            "transition.accept kind=phase node=%s status=%s",
-            sub_agent_id,
-            record.status.value,
-        )
-        return record
-
-    def complete_sub_agent(self, workspace_id, sub_agent_id, *, result):  # noqa: ANN001, ANN201
-        LOGGER.info("transition.request kind=sub_agent node=%s", sub_agent_id)
-        try:
-            record = super().complete_sub_agent(
-                workspace_id, sub_agent_id, result=result
-            )
-        except Exception as error:
-            LOGGER.warning(
-                "transition.reject kind=sub_agent node=%s error=%s", sub_agent_id, error
-            )
-            raise
-        LOGGER.info(
-            "transition.accept kind=sub_agent node=%s status=%s",
-            sub_agent_id,
-            record.status.value,
-        )
-        return record
-
-
-require_single_worker()
 _harness, _harness_tools = _harness_composition()
 
 # Conversations persist in Cosmos DB (the local emulator by default) and every
 # message/event shares one per-chat timeline served by the unified stream.
-chat_service, timeline = open_cosmos_chat_stack()
+persistence = open_runtime_persistence()
+
+investigations = open_investigations(persistence.chat)
+chat_service, timeline = persistence.chat, persistence.timeline
+submissions = open_submission_store()
 
 workspace_store = serving_workspace_store()
 repositories = getattr(workspace_store, "provider", None)
 workspace_data = build_local_workspace_data(
     workspace_root=WORKSPACE_ROOT,
+    submissions=submissions,
     harness_boundary=_harness,
     harness_base_url=HARNESS_BASE_URL,
     chat_service=chat_service,
@@ -188,23 +140,21 @@ workspace_data = build_local_workspace_data(
 )
 
 # One serving composition owns the conversations service, control tools,
-# workflow runtime, and launcher; the local composition only swaps in the
-# logging control service and the local workspace tree.
+# workflow runtime, and launcher. Local serving uses the same control service
+# as deployment; it only selects the local workspace tree and external adapters.
 model_provider = open_serving_model_provider()
-execution_store = (
-    open_execution_store()
-    if model_provider is not None and _harness_tools is not None
-    else None
-)
+execution_store = persistence.executions
 stack = build_serving_stack(
     chat_service=chat_service,
+    investigations=investigations,
     model_provider=model_provider,
     harness_tools=_harness_tools,
     execution_store=execution_store,
+    work_store=persistence.work,
+    submissions=submissions,
     workspace_root=WORKSPACE_ROOT,
     workspace_repositories=repositories,
     detach=daemon_thread,
-    control_factory=_LoggingControlToolService,
     on_turn_error=lambda error: print(
         f"TURN ERROR: {error[2]!r}", file=sys.stderr, flush=True
     ),
@@ -212,12 +162,13 @@ stack = build_serving_stack(
 
 app = create_app(
     chat_service=stack.chat_service,
+    investigations=investigations,
     workspace_data=workspace_data,
     conversations=stack.conversations,
     workflow_runtime=stack.workflow_runtime,
     workflow_registry=stack.workflow_registry,
     harness_tool_provider=stack.harness_tool_provider,
-    harness_data_service=HarnessDataService(),
+    harness_data_service=HarnessDataService(submissions=submissions),
     operator_policies=stack.operator_policies,
     timeline=timeline,
     in_memory=False,
@@ -236,4 +187,16 @@ app.add_middleware(
 )
 
 if __name__ == "__main__":
+    # Local convenience: an embedded worker uses exactly the durable ownership
+    # boundary; deployed API replicas never start one.
+    from threading import Thread
+
+    worker = build_serving_worker(
+        stack,
+        persistence.work,
+        persistence.ownership,
+        persistence.executions,
+        recovery_records=persistence.executions.identities,
+    )
+    Thread(target=worker.run, name="thesis-local-worker", daemon=True).start()
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")

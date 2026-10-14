@@ -52,6 +52,7 @@ pub fn create_app(state: Arc<LakeApiState>, config: LakeApiConfig) -> Router {
         .route("/v1/catalog/ensure", post(routes::ensure::ensure))
         .route("/v1/jobs/{job_id}", get(routes::ensure::job_status))
         .route("/v1/query", post(routes::query::query))
+        .route("/v1/options/resolve", post(routes::options::resolve))
         .route("/v1/read", get(routes::read::read))
         .route("/v1/raw", get(routes::raw::raw_object))
         .route("/v1/reference/universe", get(routes::reference::universe))

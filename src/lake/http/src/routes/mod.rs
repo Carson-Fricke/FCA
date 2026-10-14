@@ -3,6 +3,7 @@
 pub mod catalog;
 pub mod ensure;
 pub mod health;
+pub mod options;
 pub mod query;
 pub mod raw;
 pub mod read;

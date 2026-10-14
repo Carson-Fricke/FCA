@@ -19,9 +19,11 @@ stage exits 1 with per-stage remediation hints.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 import httpx
@@ -420,7 +422,7 @@ def check_backtest(ctx: StackContext) -> StageResult:
     url = f"{ctx.thesis_url}/v1/workspaces/{ctx.workspace}/backtests/launch"
     payload: dict[str, object] = {
         "bundle_ref": ctx.bundle_ref,
-        "config_path": ctx.config_path,
+        "config": json.loads(Path(ctx.config_path).read_text(encoding="utf-8")),
         "environment": "paper",
     }
     try:

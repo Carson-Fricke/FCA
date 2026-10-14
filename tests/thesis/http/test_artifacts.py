@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
+from typing import cast
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from tests.thesis.workspaces._support import MemoryGitFactory
 
 from thesis.http.artifacts import ArtifactCatalogService, create_artifact_router
 from thesis.persistence.journal import content_hash
-from thesis.strategies import WorkspaceStrategyArtifacts
+from thesis.strategies import StrategyArtifactError, WorkspaceStrategyArtifacts
 from thesis.workspaces.local import LocalWorkspaceProvider
 from thesis.workspaces.manifest import load_workspace_manifest
 from thesis.workspaces.programs import (
@@ -59,19 +62,40 @@ def _design() -> dict[str, object]:
 
 
 @pytest.fixture(scope="module")
-def workspace(
+def published_strategy(
     tmp_path_factory: pytest.TempPathFactory,
-) -> tuple[TestClient, str]:
+) -> tuple[LocalWorkspaceProvider, str, dict[str, object]]:
     tmp_path = tmp_path_factory.mktemp("artifacts")
     provider = LocalWorkspaceProvider(tmp_path / "workspaces")
     manifest = load_workspace_manifest("config/thesis/workspace.yaml")
     provider.create(manifest)
     workspace_id = manifest.workspace_id
+    root = provider.open(workspace_id).root
+    (root / "unrelated.txt").write_text("staged")
+    git(root, "add", "unrelated.txt")
+    (root / "unrelated.txt").write_text("dirty")
     strategy_artifacts = WorkspaceStrategyArtifacts(provider)
-    strategy_artifacts.author(
+    receipt = strategy_artifacts.author(
         workspace_id, "exec-1", _design(), "Momentum", "SPY", "Breakout rework"
     )
-    programs = WorkspacePrograms(provider)
+    return provider, workspace_id, receipt
+
+
+def git(root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=root, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+@pytest.fixture(scope="module")
+def workspace(
+    published_strategy: tuple[LocalWorkspaceProvider, str, dict[str, object]],
+) -> tuple[TestClient, str]:
+    provider, workspace_id, _ = published_strategy
+    strategy_artifacts = WorkspaceStrategyArtifacts(provider)
+    # Strategy publication exercises real Git; program catalog projection
+    # needs only the external Git port's committed documents.
+    programs = WorkspacePrograms(provider, git_factory=MemoryGitFactory())
     programs.author(
         workspace_id, "indicator", "rsi_value", INDICATOR_TEMPLATE, configuration=CONFIG
     )
@@ -91,8 +115,37 @@ def workspace(
     return TestClient(app), workspace_id
 
 
-def test_catalog_projects_durable_artifacts(workspace: tuple[TestClient, str]) -> None:
+def test_publication_restart_receipt_and_http_catalog(
+    workspace: tuple[TestClient, str],
+    published_strategy: tuple[LocalWorkspaceProvider, str, dict[str, object]],
+) -> None:
     client, workspace_id = workspace
+    provider, _, receipt = published_strategy
+    root = provider.open(workspace_id).root
+    assert receipt["bundleSha256"] != receipt["sourceSha256"]
+    assert receipt["sourceSha256"] == content_hash(SOURCE)
+    assert "unrelated.txt" not in git(
+        root, "ls-tree", "-r", "--name-only", cast(str, receipt["gitCommit"])
+    )
+    assert git(root, "show", ":unrelated.txt") == "staged"
+    assert (root / "unrelated.txt").read_text() == "dirty"
+    restarted = WorkspaceStrategyArtifacts(provider)
+    assert (
+        restarted.author(
+            workspace_id, "exec-1", _design(), "Momentum", "SPY", "Breakout rework"
+        )
+        == receipt
+    )
+    assert restarted.verify_completion(workspace_id, "exec-1", receipt) == receipt
+    with pytest.raises(StrategyArtifactError, match="scope"):
+        restarted.verify_completion(workspace_id, "other-exec", receipt)
+    # One mismatch covers whole-receipt equality; the path case separately
+    # exercises lookup of an unpublished artifact.
+    for key in ("bundleSha256", "artifactPath"):
+        with pytest.raises(StrategyArtifactError):
+            restarted.verify_completion(
+                workspace_id, "exec-1", {**receipt, key: "forged"}
+            )
     response = client.get(f"/v1/workspaces/{workspace_id}/artifacts")
     assert response.status_code == 200
     document = response.json()

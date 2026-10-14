@@ -1,13 +1,13 @@
 ---
 id: volume-and-volatility-conditions
 title: Volume and volatility conditions
-version: 1
+version: 2
 created: 2026-10-02
-retrieved: 2026-10-02
+retrieved: 2026-10-13
 source:
   url: https://github.com/Carson-Fricke/FCA
   publisher: FCA Thesis
-  content_hash: b1e82134879c2f3944c24ed2d14e91c1f03647c8705f40061d2c232e9532e83c
+  content_hash: b3b3dd1d72bf84fa345983379625c4f6417c92dc8b652e551ac1312d713b8f19
 tags:
   - volatility
   - volume
@@ -44,9 +44,9 @@ can reveal that structure, and it can also manufacture it.
 ## In brief
 
 - Condition on activity or volatility only when the question asks for it.
-- Split into a few predeclared groups.
+- Explore useful conditions and interactions on development data.
 - Sample sizes shrink fast; report counts.
-- Conditioning after the fact is a hidden search.
+- Record conditioning choices and refinements as part of the search.
 
 ## Why condition
 
@@ -57,8 +57,9 @@ grows quickly.
 
 ## Choosing the split
 
-Decide the variable and the edges first. Terciles on trailing volume or
-realized volatility are common. Use the trailing value at decision time,
+Choose an interpretable starting variable and range, then explore thresholds
+and interactions as training choices. Terciles on trailing volume or realized
+volatility are possible diagnostics, not required strategy settings. Use the trailing value at decision time,
 never a value from the future window. See [Historical timing and
 leakage](historical-timing-and-leakage).
 
@@ -69,11 +70,14 @@ smallest cells may hold too few observations to estimate anything. Report
 counts for every cell and leave thin cells out of the conclusion. A stable
 story should survive a coarser split too.
 
-## Avoid post-hoc conditioning
+## Develop and assess the conditioned policy
 
-Did the effect appear only in high volatility? That was one of many possible
-splits. Unless it was predeclared or has a mechanism, treat it as
-exploratory. See [Exploratory search and multiple
+An effect found in high volatility can motivate a useful training policy.
+Develop that condition in its intended feature interaction and evaluate the
+actual policy after costs. Check neighboring thresholds, support, subperiods
+and suitable null evidence. Preserve all explored splits; a fixed winner's
+null test remains conditional on its selection. Exploratory status permits
+development without establishing generalization. See [Exploratory search and multiple
 attempts](exploratory-search-and-multiple-attempts) and
 [Stability across periods](stability-across-periods).
 

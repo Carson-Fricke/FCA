@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
-	import { fixtureMode, setFixtureMode } from '$lib/api';
+	import { fixtureMode, setBackend } from '$lib/api';
 </script>
 
 <div class="grid-bg flex min-h-screen flex-col items-center justify-center gap-3 p-6 text-center">
@@ -16,7 +16,7 @@
 			<button
 				type="button"
 				class="rounded-lg border border-surface-600 px-3 py-1.5 text-xs text-slate-300 hover:border-accent/40 hover:text-accent"
-				onclick={() => setFixtureMode(true)}
+				onclick={() => setBackend('fixtures')}
 				data-testid="error-use-fixtures"
 			>
 				Continue with fixture data

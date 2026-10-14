@@ -31,7 +31,6 @@ from thesis.auth.workspace_access import (
     identity_account_owner,
     principal_account_id,
 )
-from thesis.chat import ChatService, ChatState
 from thesis.http.backtests import BacktestDataService, BacktestStore
 from thesis.http.dashboards import (
     DashboardDataService,
@@ -55,8 +54,10 @@ from thesis.integrations.harness_activation import (
     HarnessBoundary,
 )
 from thesis.integrations.runtime_status import RuntimeStatusClient
+from thesis.persistence.submissions import SqliteSubmissionStore, SubmissionStore
 from thesis.screening.service import ScreenerService
 from thesis.strategies import WorkspaceStrategyArtifacts
+from thesis_runtime.conversations import ChatService, ChatState
 
 if TYPE_CHECKING:
     from azure.storage.blob import BlobServiceClient
@@ -110,13 +111,21 @@ class WorkspaceStore(Protocol):
 
     def list(self) -> tuple[dict[str, object], ...]: ...
 
-    def get(self, workspace_id: str) -> dict[str, object] | None: ...
+    def get(
+        self, workspace_id: str, *, include_deleted: bool = False
+    ) -> dict[str, object] | None: ...
 
     def add(self, summary: dict[str, object]) -> dict[str, object]: ...
 
     def add_activity(self, item: dict[str, object]) -> dict[str, object]: ...
 
     def activity(self, workspace_id: str) -> tuple[dict[str, object], ...]: ...
+
+    def mark_deleted(self, workspace_id: str, deleted_at: str) -> None: ...
+
+    def is_deleted(self, workspace_id: str) -> bool: ...
+
+    def deleted_workspace_ids(self) -> tuple[str, ...]: ...
 
 
 class WorkspaceCatalogStore:
@@ -125,16 +134,27 @@ class WorkspaceCatalogStore:
     def __init__(self) -> None:
         self._workspaces: dict[str, dict[str, object]] = {}
         self._activity: dict[str, list[dict[str, object]]] = {}
+        self._deletions: dict[str, str] = {}
 
     def list(self) -> tuple[dict[str, object], ...]:
-        return tuple(dict(row) for row in self._workspaces.values())
+        return tuple(
+            dict(row)
+            for key, row in self._workspaces.items()
+            if not self.is_deleted(key)
+        )
 
-    def get(self, workspace_id: str) -> dict[str, object] | None:
+    def get(
+        self, workspace_id: str, *, include_deleted: bool = False
+    ) -> dict[str, object] | None:
+        if not include_deleted and self.is_deleted(workspace_id):
+            return None
         row = self._workspaces.get(workspace_id)
         return dict(row) if row is not None else None
 
     def add(self, summary: dict[str, object]) -> dict[str, object]:
         workspace_id = str(summary["id"])
+        if self.is_deleted(workspace_id):
+            raise ValueError("workspace has been deleted")
         self._workspaces[workspace_id] = dict(summary)
         return dict(summary)
 
@@ -145,6 +165,15 @@ class WorkspaceCatalogStore:
 
     def activity(self, workspace_id: str) -> tuple[dict[str, object], ...]:
         return tuple(dict(item) for item in self._activity.get(workspace_id, ()))
+
+    def mark_deleted(self, workspace_id: str, deleted_at: str) -> None:
+        self._deletions.setdefault(workspace_id, deleted_at)
+
+    def is_deleted(self, workspace_id: str) -> bool:
+        return workspace_id in self._deletions
+
+    def deleted_workspace_ids(self) -> tuple[str, ...]:
+        return tuple(self._deletions)
 
 
 class CreateWorkspaceRequest(BaseModel):
@@ -193,6 +222,21 @@ class WorkspaceDataService:
     def list_workspaces(self) -> tuple[dict[str, object], ...]:
         return self._store.list()
 
+    def delete_workspace(self, workspace_id: str, chats: ChatService) -> None:
+        """Mark the entire storage scope before fencing and purging its chats.
+
+        The retained marker includes every workspace-owned resource, including
+        repository history, blob objects, runtime records and shared-store rows.
+        Repeating this operation repairs interrupted conversation cleanup.
+        """
+        if (
+            not self._store.is_deleted(workspace_id)
+            and self._store.get(workspace_id) is None
+        ):
+            raise KeyError(workspace_id)
+        self._store.mark_deleted(workspace_id, _iso_z(self._clock()))
+        chats.delete_workspace_conversations(workspace_id)
+
     def create_workspace(
         self, name: str, description: str = "", initials: str | None = None
     ) -> dict[str, object]:
@@ -227,10 +271,12 @@ class WorkspaceDataService:
 
     def _unique_id(self, base: str) -> str:
         existing = {str(row.get("id")) for row in self._store.list()}
-        if base not in existing:
+        if base not in existing and not self._store.is_deleted(base):
             return base
         suffix = 2
-        while f"{base}-{suffix}" in existing:
+        while f"{base}-{suffix}" in existing or self._store.is_deleted(
+            f"{base}-{suffix}"
+        ):
             suffix += 1
         return f"{base}-{suffix}"
 
@@ -280,7 +326,7 @@ def manifest_owner_lookup(store: WorkspaceStore) -> WorkspaceOwnerLookup:
     """
 
     def owner_of(workspace_id: str) -> str | None:
-        summary = store.get(workspace_id)
+        summary = store.get(workspace_id, include_deleted=True)
         if summary is not None:
             owner = summary.get("owner")
             if isinstance(owner, Mapping):
@@ -315,11 +361,11 @@ def _workspace_forbidden() -> HTTPException:
 
 
 def require_workspace_access(
-    authenticator: Callable[..., Awaitable[str]],
+    authenticator: Callable[..., str | Awaitable[str]],
     authorizer: WorkspaceAuthorizer,
     *,
     account_owner: AccountOwnerMap = identity_account_owner,
-) -> Callable[..., Awaitable[str]]:
+) -> Callable[..., str | Awaitable[str]]:
     """Build the reusable per-request workspace authorization dependency.
 
     The returned dependency composes with the application authenticator instead
@@ -334,7 +380,7 @@ def require_workspace_access(
 
     principal_dependency = Annotated[str, Depends(authenticator)]
 
-    async def dependency(
+    def dependency(
         request: Request,
         principal: str,
     ) -> str:
@@ -360,7 +406,7 @@ def require_workspace_access(
 
 def create_workspaces_router(
     *,
-    authenticator: Callable[..., Awaitable[str]] | None = None,
+    authenticator: Callable[..., str | Awaitable[str]] | None = None,
     authorizer: WorkspaceAuthorizer | None = None,
     account_owner: AccountOwnerMap | None = None,
 ) -> APIRouter:
@@ -391,13 +437,28 @@ def create_workspaces_router(
         return {"items": list(service.list_workspaces())}
 
     @router.post("/workspaces", status_code=201)
-    async def create_workspace(
+    def create_workspace(
         request: CreateWorkspaceRequest,
         service: Annotated[WorkspaceDataService, Depends(get_workspace_service)],
     ) -> dict[str, object]:
         return service.create_workspace(
             request.name, description=request.description, initials=request.initials
         )
+
+    @router.delete("/workspaces/{workspace_id}", status_code=202)
+    def delete_workspace(
+        request: Request,
+        workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
+        service: Annotated[WorkspaceDataService, Depends(get_workspace_service)],
+    ) -> dict[str, str]:
+        from thesis.http.chat import get_chat_service
+        from thesis.http.errors import service_error
+
+        try:
+            service.delete_workspace(workspace_id, get_chat_service(request))
+        except KeyError as error:
+            raise service_error(error, resource="workspace") from error
+        return {"id": workspace_id, "status": "deletion_pending"}
 
     @router.get("/workspaces/{workspace_id}/snapshot")
     def get_snapshot(
@@ -427,6 +488,15 @@ def create_workspaces_router(
 
             raise service_error(KeyError(workspace_id), resource="workspace")
         return summary
+
+    @router.get("/workspaces/{workspace_id}/submissions")
+    def list_submissions(workspace_id: str, request: Request) -> dict[str, object]:
+        submissions = getattr(request.app.state, "submission_store", None)
+        if submissions is None:
+            raise HTTPException(
+                status_code=503, detail="submission persistence is not configured"
+            )
+        return {"items": list(submissions.list(workspace_id))}
 
     return router
 
@@ -530,7 +600,11 @@ def _workspace_template_path(
         candidate = pathlib.Path(config_root) / "config" / "thesis" / "workspace.yaml"
         if candidate.is_file():
             return candidate
-    repo_root = pathlib.Path(__file__).resolve().parents[3]
+    repo_root = next(
+        parent
+        for parent in pathlib.Path(__file__).resolve().parents
+        if (parent / "pyproject.toml").is_file()
+    )
     return repo_root / "config" / "thesis" / "workspace.yaml"
 
 
@@ -575,6 +649,7 @@ def build_local_workspace_data(
     *,
     workspace_root: str | pathlib.Path | None = None,
     workspace_template: str | pathlib.Path | None = None,
+    submissions: SubmissionStore | None = None,
     harness_transport: HarnessApiTransport | None = None,
     harness_base_url: str = "http://127.0.0.1:8777",
     harness_boundary: HarnessBoundary | None = None,
@@ -607,6 +682,10 @@ def build_local_workspace_data(
     ``workspace_store`` injects an alternative catalog (for example the Azure
     blob-container store) and takes precedence over ``workspace_root``.
     """
+    if submissions is None and workspace_root is not None:
+        submissions = SqliteSubmissionStore(
+            pathlib.Path(workspace_root) / ".submissions.sqlite"
+        )
     resolved_clock = clock if clock is not None else _utc_now
     ids = id_factory if id_factory is not None else _counting_id_factory()
     # Local composition speaks only to the harness-hosted MCP boundary; there
@@ -641,7 +720,7 @@ def build_local_workspace_data(
     if repositories is not None:
         from thesis.workspaces.programs import WorkspacePrograms
 
-        programs = WorkspacePrograms(repositories)
+        programs = WorkspacePrograms(repositories, submissions=submissions)
     strategies = StrategyDataService(
         clock=resolved_clock, id_factory=ids, artifacts=strategy_artifacts
     )
@@ -651,10 +730,11 @@ def build_local_workspace_data(
     screener_provider: ScreeningToolProvider | None = screener_tools
     if screener_provider is None and harness is not None:
         screener_provider = getattr(harness, "client", None)
-    screeners = ScreenerService(tools=screener_provider)
+    screeners = ScreenerService(tools=screener_provider, submissions=submissions)
 
     backtests = BacktestDataService(
         backtest_store,
+        submissions=submissions,
         harness=harness,
         importer=artifact_importer,
         clock=resolved_clock,

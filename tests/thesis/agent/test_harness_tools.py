@@ -97,6 +97,7 @@ def test_identical_validation_always_calls_server_and_preserves_result(
             "reused": reused,
             "cacheable": True,
             "deterministicCompilerDiagnostic": is_error,
+            "executionCertainty": "observed_failure",
             "diagnostics": [{"message": "server diagnostic", "line": 3}],
             "validationIdentity": "compiler-owned-identity",
         }
@@ -151,7 +152,9 @@ def test_invalidation_and_refresh_only_affect_catalog() -> None:
 @pytest.mark.parametrize("flag", [None, False, True, "true", 1, {}])
 def test_compiler_classification_uses_only_structured_boolean(flag: object) -> None:
     transport = Transport()
-    structured = {} if flag is None else {"deterministicCompilerDiagnostic": flag}
+    structured = {"executionCertainty": "observed_failure"}
+    if flag is not None:
+        structured["deterministicCompilerDiagnostic"] = flag
     transport.result = {
         "isError": True,
         "structuredContent": structured,

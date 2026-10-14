@@ -15,6 +15,15 @@ use lake_storage::ReadableBlobStore;
 
 /// The clock provider used to classify currently open sessions.
 pub type ApiClock = Arc<dyn Fn() -> DateTime + Send + Sync>;
+pub type OptionResolver = Arc<
+    dyn Fn(
+            lake_contracts::OptionSelector,
+        ) -> futures_util::future::BoxFuture<
+            'static,
+            Result<lake_contracts::ResolvedOption, lake_contracts::DataError>,
+        > + Send
+        + Sync,
+>;
 
 /// Injected repositories and seams the routes compose over.
 ///
@@ -32,6 +41,8 @@ pub struct LakeApiState {
     pub contracts: Option<Arc<dyn ContractRepository>>,
     /// Optional date-specific option front-set membership.
     pub front_sets: Option<Arc<dyn DailyFrontSetRepository>>,
+    /// Resolve a strike or delta selector at its explicit historical timestamp.
+    pub option_resolver: Option<OptionResolver>,
     /// Optional read-URL issuer for file and raw queries.
     pub sas_issuer: Option<Arc<dyn FileUrlIssuer>>,
     /// Optional blob-read seam backing the streaming read and reference routes.

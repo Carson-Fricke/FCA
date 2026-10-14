@@ -1,38 +1,43 @@
 {
-  "workspace_id": "workspace",
-  "created_at": "2026-01-01T00:00:00Z",
-  "created_by": "operator",
-  "schema_version": 1,
-  "content_hash": "450393fea1510d978857ca4ca5c3e8c1093b0d01ce84fe5ce94c44ca2ec3ffd3",
-  "message_id": "message-8ae7fb593ac4452bab67f0d77e9b2d06",
-  "chat_id": "chat-e30ccded1367440ab449081293bd9aef",
-  "conversation_id": "chat-e30ccded1367440ab449081293bd9aef",
-  "root_conversation_id": "chat-e30ccded1367440ab449081293bd9aef",
-  "parent_conversation_id": null,
-  "actor_id": "operator",
-  "role": "tool",
-  "body": "Outcome",
-  "reasoning": null,
-  "tool_result": {
-    "failure": { "kind": "compiler" },
-    "ok": false,
-    "structured": { "diagnostic": "repair" },
-    "summary": null,
-    "text": "Failed",
-    "callId": "call",
-    "tool": "validate_strategy"
-  },
-  "kind": "message",
-  "data": {
-    "subAgentId": null,
-    "invocationId": null,
-    "activityKind": "model_output"
-  },
-  "state": "accepted",
-  "attachment_ids": [],
-  "investigation_ids": [],
-  "execution_id": null,
-  "intent_epoch": 0,
-  "input_position": 0,
-  "updated_at": "2026-01-01T00:00:00Z"
+	"workspace_id": "workspace",
+	"created_at": "2026-01-01T00:00:00Z",
+	"created_by": "operator",
+	"schema_version": 1,
+	"content_hash": "edab471fa1997de937cc7241b2315d28b81f290a91aca80f5f2ed4093c5e5780",
+	"chat_id": "chat-e30ccded1367440ab449081293bd9aef",
+	"conversation_id": "chat-e30ccded1367440ab449081293bd9aef",
+	"root_conversation_id": "chat-e30ccded1367440ab449081293bd9aef",
+	"parent_conversation_id": null,
+	"message_id": "message-8ae7fb593ac4452bab67f0d77e9b2d06",
+	"actor_id": "operator",
+	"role": "tool",
+	"body": "Outcome",
+	"reasoning": null,
+	"tool_result": {
+		"failure": {
+			"kind": "compiler"
+		},
+		"ok": false,
+		"structured": {
+			"diagnostic": "repair"
+		},
+		"summary": null,
+		"text": "Failed",
+		"callId": "call",
+		"tool": "validate_strategy",
+		"datumType": "validation_report"
+	},
+	"kind": "message",
+	"data": {
+		"subAgentId": null,
+		"invocationId": null,
+		"activityKind": "model_output"
+	},
+	"state": "accepted",
+	"attachment_ids": [],
+	"references": {},
+	"execution_id": null,
+	"intent_epoch": 0,
+	"input_position": 0,
+	"updated_at": "2026-01-01T00:00:00Z"
 }

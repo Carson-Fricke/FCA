@@ -117,8 +117,24 @@ milliseconds, and MUST assert input-to-output, not call order.
 ## Migration Discipline
 
 - Classify before deleting. Every removed test names the behavior test that
-  replaces it or the allow-list category it failed to meet.
+  replaces it, the allow-list category it failed to meet, or the superseded
+  contract that is being removed. Removing obsolete acceptance behavior does
+  not require a replacement test that accepts the same legacy format.
 - Remove superseded tests in the same change as the behavior they covered; do
-  not leave skipped or `xfail` tests behind.
+  not leave skipped or `xfail` tests behind. Update current fixtures and callers
+  to supply required fields instead of retaining production defaults for their
+  old setup. Mandated guards and current behavior coverage remain required.
+- Follow "Current Contracts and Data Cutovers" in
+  `.github/instructions/copilot-instructions.md`. Verify the current contract
+  through its practical boundary, including rejection of outdated formats or
+  missing required metadata before execution or mutation. Do not maintain an
+  acceptance matrix of historical formats or one compatibility suite per old
+  version. A deliberate optional field in the current contract is distinct from
+  inferring a missing required field in an obsolete record.
+- If a cutover requires one-time conversion, validate the affected data and its
+  current-contract reads as part of that operation. Do not retain the temporary
+  converter or its legacy-acceptance tests after the cutover.
+- Do not rewrite historical verification records to match later policies or
+  test counts. Update active guidance and current tests instead.
 - Do not add production interfaces, injection points, or adapters solely to
   make a unit test possible.

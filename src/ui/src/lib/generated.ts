@@ -3,9 +3,10 @@ export type ActorScope = 'user' | 'assistant' | 'system' | 'tool' | 'workflow';
 /**
  * The discriminator carried by one conversation item.
  */
-export type TranscriptItemKind = 'message' | 'tool' | 'workflow' | 'sub_agent' | 'gate' | 'artifact';
+export type TranscriptItemKind = 'message' | 'tool' | 'sub_agent' | 'artifact';
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
 export type MessageState = 'draft' | 'accepted' | 'streaming' | 'completed' | 'failed' | 'deleted';
+export type ToolOperation = 'read' | 'write' | 'execute' | 'interact';
 export type ChatState = 'active' | 'archived' | 'deleted';
 export type CompletionMode = 'complete_on_text' | 'explicit_completion';
 /**
@@ -44,7 +45,7 @@ export type ExecutionEventType =
 export type OperatorActorKind = 'human_operator' | 'parent_agent' | 'agent';
 export type RuntimeActivityWire = ExternalInput | ModelOutput | RuntimeTool | Delivery;
 export type WorkflowExecutionState = 'queued' | 'running' | 'stopped' | 'cancelled' | 'completed' | 'failed';
-export type TimelineItemWire = TimelineMessageWire | TimelineEventWire | TimelineExecutionWire;
+export type TimelineItemWire = TimelineMessageWire | TimelineEventWire | TimelineExecutionWire | TimelineOutputWire;
 
 export interface WireTypes {
 	ActorRequest: ActorRequest;
@@ -80,6 +81,9 @@ export interface WireTypes {
 	MessageState: MessageState;
 	MessageStateRequest: MessageStateRequest;
 	ModelOutput: ModelOutput;
+	ModelOutputDeltaWire: ModelOutputDeltaWire;
+	ModelOutputInterruptedWire: ModelOutputInterruptedWire;
+	ModelOutputStartedWire: ModelOutputStartedWire;
 	NodeInputReceiptWire: NodeInputReceiptWire;
 	OperatorActorKind: OperatorActorKind;
 	OperatorPolicyDecisionWire: OperatorPolicyDecisionWire;
@@ -102,8 +106,10 @@ export interface WireTypes {
 	TimelineExecutionWire: TimelineExecutionWire;
 	TimelineItemWire: TimelineItemWire;
 	TimelineMessageWire: TimelineMessageWire;
+	TimelineOutputWire: TimelineOutputWire;
 	TimelinePageWire: TimelinePageWire;
 	ToolCorrelation: ToolCorrelation;
+	ToolOperation: ToolOperation;
 	ToolRequest: ToolRequest;
 	ToolResultRequest: ToolResultRequest;
 	ToolResultWire: ToolResultWire;
@@ -112,6 +118,7 @@ export interface WireTypes {
 	WorkflowDefinitionWire: WorkflowDefinitionWire;
 	WorkflowExecutionState: WorkflowExecutionState;
 	WorkflowExecutionWire: WorkflowExecutionWire;
+	WorkflowSplitWire: WorkflowSplitWire;
 }
 export interface ActorRequest {
 	actor_id: string;
@@ -128,7 +135,7 @@ export interface ChatMessageWire {
 	body: string;
 	chat_id: string;
 	content_hash: string;
-	conversation_id: string | null;
+	conversation_id: string;
 	created_at: string;
 	created_by: string;
 	data:
@@ -146,13 +153,15 @@ export interface ChatMessageWire {
 	execution_id: string | null;
 	input_position: number;
 	intent_epoch: number;
-	investigation_ids: string[];
 	kind: TranscriptItemKind;
 	message_id: string;
 	parent_conversation_id: string | null;
 	reasoning: string | null;
+	references: {
+		[k: string]: string[];
+	};
 	role: MessageRole;
-	root_conversation_id: string | null;
+	root_conversation_id: string;
 	schema_version: number;
 	state: MessageState;
 	tool_result: ToolResultWire | DeliveredDatumWire | null;
@@ -234,11 +243,12 @@ export interface ToolRequest {
 }
 export interface ToolResultWire {
 	callId: string | null;
-	datumType?: string | null;
+	datumType: string;
 	failure: {
 		[k: string]: unknown;
 	} | null;
 	ok: boolean;
+	operation?: ToolOperation | null;
 	structured: {
 		[k: string]: unknown;
 	};
@@ -273,6 +283,7 @@ export interface DeliveredDatumWire {
  */
 export interface ChatSubAgentMessageRequest {
 	body: string;
+	message_id?: string | null;
 }
 /**
  * Canonical tree response used by the projection and HTTP schema export.
@@ -321,33 +332,32 @@ export interface ChatThreadListWire {
 export interface ChatThreadWire {
 	chat_id: string;
 	content_hash: string;
-	conversation_id: string | null;
+	conversation_id: string;
 	created_at: string;
 	created_by: string;
 	input_consumed_positions: {
 		[k: string]: number;
 	};
-	links: RecordLinks;
+	/**
+	 * Explicit links shared by conversation and execution records.
+	 */
+	links: {
+		chat_ids?: string[];
+		job_ids?: string[];
+		references?: {
+			[k: string]: string[];
+		};
+		workflow_execution_ids?: string[];
+		[k: string]: unknown;
+	};
 	owner_actor_id: string;
 	parent_conversation_id: string | null;
-	root_conversation_id: string | null;
+	root_conversation_id: string;
 	schema_version: number;
 	state: ChatState;
 	title: string;
 	updated_at: string | null;
 	workspace_id: string;
-}
-/**
- * Explicit links shared by chat, investigation, and execution records.
- */
-export interface RecordLinks {
-	chat_ids?: string[];
-	experiment_ids?: string[];
-	investigation_ids?: string[];
-	job_ids?: string[];
-	strategy_ids?: string[];
-	workflow_execution_ids?: string[];
-	[k: string]: unknown;
 }
 export interface CreateAttachmentRequest {
 	actor_id: string;
@@ -378,6 +388,7 @@ export interface CreateMessageRequest {
 	execution_id?: string | null;
 	intent_epoch?: number;
 	investigation_ids?: string[];
+	message_id?: string | null;
 	role?: 'user' | 'assistant' | 'system' | 'tool';
 	steering_intent?: string | null;
 	targets_execution_id?: string | null;
@@ -388,7 +399,7 @@ export interface CreateMessageResponseWire {
 	body: string;
 	chat_id: string;
 	content_hash: string;
-	conversation_id: string | null;
+	conversation_id: string;
 	created_at: string;
 	created_by: string;
 	data:
@@ -406,13 +417,15 @@ export interface CreateMessageResponseWire {
 	execution_id: string | null;
 	input_position: number;
 	intent_epoch: number;
-	investigation_ids: string[];
 	kind: TranscriptItemKind;
 	message_id: string;
 	parent_conversation_id: string | null;
 	reasoning: string | null;
+	references: {
+		[k: string]: string[];
+	};
 	role: MessageRole;
-	root_conversation_id: string | null;
+	root_conversation_id: string;
 	schema_version: number;
 	state: MessageState;
 	steering?: SteeringPercolationWire | null;
@@ -492,7 +505,9 @@ export interface ExecutionEventWire {
  */
 export interface LaunchBacktestRequest {
 	bundle_ref: string;
-	config_path: string;
+	config: {
+		[k: string]: unknown;
+	};
 	environment?: 'paper' | 'shadow' | 'live';
 	name?: string | null;
 	strategy_id?: string | null;
@@ -501,11 +516,38 @@ export interface LaunchBacktestRequest {
  * The canonical launch body accepted by ``POST /v1/backtests/jobs``.
  */
 export interface LaunchHarnessBacktestRequest {
-	config_path: string;
+	config: {
+		[k: string]: unknown;
+	};
 	workspace?: string | null;
 }
 export interface MessageStateRequest {
 	state: MessageState;
+}
+export interface ModelOutputDeltaWire {
+	actorId: string;
+	channel: 'reasoning' | 'text';
+	invocationId: string;
+	messageId: string;
+	offset: number;
+	state: 'delta';
+	text: string;
+}
+export interface ModelOutputInterruptedWire {
+	actorId: string;
+	failure: {
+		[k: string]: unknown;
+	};
+	invocationId: string;
+	messageId: string;
+	state: 'interrupted';
+}
+export interface ModelOutputStartedWire {
+	actorId: string;
+	invocationId: string;
+	messageId: string;
+	startedAt: string;
+	state: 'started';
 }
 /**
  * Node-answer HTTP receipt: durable message plus admission provenance.
@@ -516,7 +558,7 @@ export interface NodeInputReceiptWire {
 	body: string;
 	chat_id: string;
 	content_hash: string;
-	conversation_id: string | null;
+	conversation_id: string;
 	created_at: string;
 	created_by: string;
 	data:
@@ -534,14 +576,16 @@ export interface NodeInputReceiptWire {
 	execution_id: string | null;
 	input_position: number;
 	intent_epoch: number;
-	investigation_ids: string[];
 	kind: TranscriptItemKind;
 	message_id: string;
 	operatorPolicy: OperatorPolicyDecisionWire;
 	parent_conversation_id: string | null;
 	reasoning: string | null;
+	references: {
+		[k: string]: string[];
+	};
 	role: MessageRole;
-	root_conversation_id: string | null;
+	root_conversation_id: string;
 	schema_version: number;
 	state: MessageState;
 	subAgentId: string;
@@ -560,6 +604,18 @@ export interface OperatorPolicyDecisionWire {
 	nodeId: string | null;
 	policy: 'human_only' | 'custom';
 	role: string;
+}
+/**
+ * Explicit links shared by conversation and execution records.
+ */
+export interface RecordLinks {
+	chat_ids?: string[];
+	job_ids?: string[];
+	references?: {
+		[k: string]: string[];
+	};
+	workflow_execution_ids?: string[];
+	[k: string]: unknown;
 }
 /**
  * Request boundary for one screening run of a saved definition.
@@ -631,25 +687,26 @@ export interface TimelineExecutionWire {
  * Complete serialized workflow execution record.
  */
 export interface WorkflowExecutionWire {
+	active_phases: string[];
 	chat_id: string;
 	content_hash: string;
-	conversation_id: string | null;
+	control_sequence: number;
+	conversation_id: string;
 	created_at: string;
 	created_by: string;
 	execution_id: string;
-	experiment_ids: string[];
 	finished_at: string | null;
 	intent_epoch: number;
-	investigation_id: string | null;
 	job_ids: string[];
 	parent_conversation_id: string | null;
-	phase: string | null;
+	references: {
+		[k: string]: string[];
+	};
 	requested_by: string;
-	root_conversation_id: string | null;
+	root_conversation_id: string;
 	schema_version: number;
 	state: WorkflowExecutionState;
 	steering_message_ids: string[];
-	strategy_ids: string[];
 	trigger_message_id: string;
 	updated_at: string | null;
 	workflow_id: string;
@@ -662,6 +719,17 @@ export interface TimelineMessageWire {
 	id: string;
 	kind: 'message';
 	payload: ChatMessageWire;
+	seq: number;
+	threadId?: string | null;
+	ts: string;
+	workspaceId: string;
+}
+export interface TimelineOutputWire {
+	chatId: string;
+	executionId?: string | null;
+	id: string;
+	kind: 'output';
+	payload: ModelOutputStartedWire | ModelOutputDeltaWire | ModelOutputInterruptedWire;
 	seq: number;
 	threadId?: string | null;
 	ts: string;
@@ -687,6 +755,9 @@ export interface UploadAttachmentRequest {
 }
 export interface WorkflowDefinitionWire {
 	phases: string[];
+	splits: {
+		[k: string]: WorkflowSplitWire;
+	};
 	terminal_phases: string[];
 	title: string;
 	transitions: {
@@ -694,4 +765,10 @@ export interface WorkflowDefinitionWire {
 	};
 	version: string;
 	workflow_id: string;
+}
+export interface WorkflowSplitWire {
+	branches: {
+		[k: string]: string;
+	};
+	join: string;
 }

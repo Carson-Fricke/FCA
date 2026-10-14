@@ -40,6 +40,12 @@ pub struct OutputEvent {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StudyOutput {
+    /// Semantic description of one output, independent of an exhibit.
+    DatasetSemantics {
+        semantics: crate::research::DatasetSemantics,
+    },
+    /// A declarative exhibit referencing other outputs in this program instance.
+    ResearchView { view: crate::research::ResearchView },
     /// Frozen fitted state for separately authored inference, with provenance.
     FittedState {
         /// Explicit supported fitting method.
@@ -84,6 +90,8 @@ impl StudyOutput {
     /// observations, duplicate columns, nested cells, and ragged tables.
     pub fn validate(&self) -> Result<(), String> {
         match self {
+            Self::ResearchView { view } => view.validate()?,
+            Self::DatasetSemantics { semantics } => semantics.validate()?,
             Self::FittedState {
                 method,
                 training_start_ns,

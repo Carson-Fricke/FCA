@@ -17,7 +17,7 @@ describe('WorkflowCard phase transition graph', () => {
 		workflow_version: '1.0.0',
 		requested_by: 'user-alex',
 		state: 'running',
-		phase: 'falsification_trials',
+		control_sequence: 0, active_phases: ['falsification_trials'],
 		intent_epoch: 1,
 		steering_message_ids: [],
 		created_at: '2026-01-01T00:00:00Z'
@@ -126,32 +126,10 @@ describe('WorkflowCard phase transition graph', () => {
 		expect(creationNode).toHaveAttribute('data-attention', 'true');
 	});
 
-	it('labels retired hypothesis_creation payloads as model_creation', () => {
-		const legacyPhases: WorkflowPhase[] = [
-			{ name: 'hypothesis_creation', status: 'done', attempts: 1 },
-			{ name: 'falsification_trials', status: 'active', attempts: 1 }
-		];
-		const { container } = render(WorkflowCard, {
-			props: {
-				execution: { ...execution, phase: 'hypothesis_creation' },
-				phases: legacyPhases,
-				status: 'running',
-				attentionPhases: ['hypothesis_creation']
-			}
-		});
-
-		const creationNode = getPhaseNode(container, 'model_creation');
-		expect(creationNode).toHaveAttribute('data-status', 'done');
-		expect(creationNode).toHaveAttribute('data-attention', 'true');
-		expect(container.querySelector('[data-phase="hypothesis_creation"]')).toBeNull();
-		expect(screen.getByTestId('workflow-card-needs-input')).toHaveTextContent(
-			'Input needed for model_creation'
-		);
-	});
-
 	it('fetches definition phases and title instead of inventing a hypothesis topology', async () => {
 		vi.mocked(getWorkflowDefinition).mockResolvedValueOnce({
 			workflow_id: execution.workflow_id, version: execution.workflow_version, title: 'Versioned backend workflow',
+			splits: {},
 			phases: ['discovery', 'new_backend_phase', 'completed'], terminal_phases: ['completed'],
 			transitions: { discovery: ['new_backend_phase'], new_backend_phase: ['completed'], completed: [] }
 		});
@@ -166,8 +144,8 @@ describe('WorkflowCard phase transition graph', () => {
 
 	it('keeps persisted phases readable but refuses current topology for an older version', async () => {
 		vi.mocked(getWorkflowDefinition).mockResolvedValueOnce({ workflow_id: execution.workflow_id, version: '2.0.0',
-			title: 'New workflow', phases: ['replacement'], terminal_phases: [], transitions: { replacement: [] } });
-		render(WorkflowCard, { props: { execution, phases: [{ name: 'hypothesis_creation', status: 'done' }] } });
+			title: 'New workflow', phases: ['replacement'], terminal_phases: [], splits: {}, transitions: { replacement: [] } });
+		render(WorkflowCard, { props: { execution, phases: [{ name: 'model_creation', status: 'done' }] } });
 		await waitFor(() => expect(screen.getByTestId('workflow-definition-error')).toHaveTextContent('recorded version 1.0.0'));
 		expect(screen.getAllByTestId('phase-step').map((node) => node.dataset.phase)).toEqual(['model_creation']);
 	});

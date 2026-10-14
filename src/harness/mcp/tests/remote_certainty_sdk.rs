@@ -123,6 +123,22 @@ fn initialize_metadata_is_fresh_and_sdk_catalog_reads_serving_validator() {
     let mut context = HarnessToolsContext::new(Boundary::Local, Arc::new(Token));
     context.study_validator = Some(Arc::new(Validator(AtomicUsize::new(0))));
     let server = mcp::create_server(context).unwrap();
+    let catalog = server
+        .handle(&json!({"jsonrpc": "2.0", "id": 99, "method": "tools/list"}))
+        .unwrap();
+    for tool in catalog["result"]["tools"].as_array().unwrap() {
+        let expected = matches!(
+            tool["name"].as_str().unwrap(),
+            "read_sdk_reference"
+                | "backtest_config_template"
+                | "screener_config_template"
+                | "get_job_status"
+                | "get_job_result"
+                | "list_artifacts"
+                | "read_artifact"
+        );
+        assert_eq!(tool["annotations"]["readOnlyHint"], expected);
+    }
     for index in 0..2 {
         let response = server
             .handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize"}))

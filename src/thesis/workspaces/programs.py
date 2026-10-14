@@ -20,6 +20,7 @@ from thesis.persistence.git import (
     GitMaterializationError,
     GitPublicationError,
 )
+from thesis.persistence.submissions import SqliteSubmissionStore, SubmissionStore
 from thesis.research.evidence import parameter_digest
 from thesis.research.models import (
     MARKET_SUBSCRIPTIONS_SCHEMA,
@@ -31,6 +32,7 @@ from thesis.workspaces.exploration import output_page
 from thesis.workspaces.local import WorkspaceRepositoryError
 from thesis.workspaces.repository import WorkspaceGit, WorkspaceRepositoryProvider
 from thesis.workspaces.sketches import WorkspaceSketches
+from thesis_runtime.storage.ownership import assert_owned
 
 ProgramKind = Literal["study", "strategy", "indicator"]
 
@@ -50,6 +52,7 @@ _RESERVED_IDS = {"con", "prn", "aux", "nul"} | {
     f"{prefix}{i}" for prefix in ("com", "lpt") for i in range(1, 10)
 }
 PROGRAM_ID_PATTERN = r"^[a-z][a-z0-9_-]{0,63}$"
+INDICATOR_ID_PATTERN = r"^(?!(?:self|super|crate)$)[a-z][a-z0-9_]{0,63}$"
 MAX_READ_CHARS = 16000
 MAX_LIST_RESULTS = 200
 MAX_NULL_BLOCK_SIZE = 10_000
@@ -146,11 +149,15 @@ _SDK_TOPICS = {
     "consumer": "strategy-sdk/src/consumer.rs",
     "program": "strategy-sdk/src/program.rs",
     "indicator_api": "strategy-sdk/src/indicator.rs",
+    "wavelet": "strategy-sdk/src/wavelet.rs",
     "events": "strategy-sdk/src/events.rs",
     "exports": "strategy-sdk/src/export.rs",
     "decimal": "num/src/decimal.rs",
     "building_blocks": "strategy-sdk/src/building_blocks.rs",
     "outputs": "strategy-sdk/src/outputs.rs",
+    "research_views": "strategy-sdk/src/research/view.rs",
+    "research_publishing": "strategy-sdk/src/research/publishing.rs",
+    "research_recipes": "strategy-sdk/src/research/recipes.rs",
 }
 
 
@@ -314,13 +321,26 @@ class WorkspacePrograms:
         harness: ProgramHarness | None = None,
         *,
         sdk_root: Path | None = None,
+        submissions: SubmissionStore | None = None,
         git_factory: Callable[[Path], WorkspaceGit] = _default_git_factory,
     ) -> None:
+        self.submissions = (
+            submissions
+            if submissions is not None
+            else SqliteSubmissionStore(repositories.root / ".submissions.sqlite")
+        )
         self.repositories = repositories
         self.sketches = WorkspaceSketches(repositories, git_factory=git_factory)
         self.harness = harness
-        self.sdk_root = (
-            sdk_root or Path(__file__).resolve().parents[2] / "harness" / "strategy-sdk"
+        self.sdk_root = sdk_root or (
+            next(
+                parent
+                for parent in Path(__file__).resolve().parents
+                if (parent / "pyproject.toml").is_file()
+            )
+            / "src"
+            / "harness"
+            / "strategy-sdk"
         )
         self._git_factory = git_factory
         self._catalog_cache: dict[
@@ -335,7 +355,11 @@ class WorkspacePrograms:
     ) -> dict[str, object]:
         """Resolve an immutable accepted sketch from this workspace's Git history."""
         sketch = self.sketches.verify(workspace_id, reference)
-        for node in cast(list[dict[str, object]], sketch["representations"]):
+        components = cast(list[dict[str, object]], sketch["representations"])
+        prototype = sketch.get("prototype")
+        if isinstance(prototype, Mapping):
+            components = [*components, {"componentReference": prototype["strategy"]}]
+        for node in components:
             component = node.get("componentReference")
             if isinstance(component, Mapping):
                 snapshot = self.load(
@@ -367,7 +391,10 @@ class WorkspacePrograms:
             )
         ):
             raise ProgramArtifactError(
-                "kind and program_id must be safe program identifiers"
+                "indicator program_id must use lowercase letters, digits and underscores, "
+                "start with a letter and not be a reserved identifier; hyphens are invalid"
+                if kind == "indicator"
+                else "kind and program_id must be safe program identifiers"
             )
         relative = f"{_DIRECTORIES[kind]}/{program_id}"
         if root is None:
@@ -659,7 +686,44 @@ class WorkspacePrograms:
         start_line: int = 1,
         end_line: int | None = None,
         max_chars: int = MAX_READ_CHARS,
+        job_id: str | None = None,
     ) -> dict[str, object]:
+        if job_id is not None:
+            result = self.job_result(job_id)
+            accepted = result.get("accepted_input")
+            if (
+                kind not in ("study", "strategy")
+                or result.get("job_id") != job_id
+                or not isinstance(accepted, Mapping)
+                or accepted.get("job_id") != job_id
+                or accepted.get("shell") != ("study" if kind == "study" else "backtest")
+            ):
+                raise ProgramArtifactError(
+                    "job does not identify an accepted input of this program kind"
+                )
+            instances = accepted.get("strategy_instances", [])
+            matches = [
+                item
+                for item in instances
+                if isinstance(item, Mapping) and item.get("instance_id") == program_id
+            ]
+            if len(matches) != 1:
+                raise ProgramArtifactError(
+                    "job does not identify this program instance"
+                )
+            parameters = matches[0].get("parameters")
+            source = (
+                parameters.get("source") if isinstance(parameters, Mapping) else None
+            )
+            if not isinstance(source, str):
+                raise ProgramArtifactError("accepted program source is unavailable")
+            return {
+                "programId": program_id,
+                "jobId": job_id,
+                "bundleHash": matches[0].get("bundle_hash"),
+                "sourceSha256": _hash(source.encode()),
+                **self._range(source, start_line, end_line, max_chars),
+            }
         git = self._git(self.repositories.open(workspace_id).root)
         head = self._head(git)
         snapshot = self._snapshot(workspace_id, kind, program_id, head)
@@ -1180,41 +1244,41 @@ class WorkspacePrograms:
         if self.harness is None:
             raise ProgramArtifactError("harness is not configured")
         settle: JobSettlement | None = None
-        if retain is not None:
-            try:
-                settle = retain(
-                    job_id,
-                    tool,
-                    self._retention_attribution(
-                        kind,
-                        program_id,
-                        snapshot,
-                        head,
-                        assignment,
-                        configuration,
-                        batch_id=batch_id,
-                        batch_kind=batch_kind,
-                        null_transform=null_transform,
-                        null_plan=null_plan,
-                    ),
-                )
-            except Exception as error:  # noqa: BLE001 - fail closed, never dispatch
-                message = f"Job retention failed before dispatch: {error}"
-                receipt.update(
-                    {
-                        "ok": False,
-                        "job_id": job_id,
-                        "parameterAssignment": assignment,
-                        "error": message,
-                        "message": message,
-                        "executionCertainty": "not_started",
-                        "retryGuidance": (
-                            "Resolve the tracking failure and explicitly retry; "
-                            "execution did not start."
-                        ),
-                    }
-                )
-                return receipt
+        try:
+            attribution = self._retention_attribution(
+                kind,
+                program_id,
+                snapshot,
+                head,
+                assignment,
+                configuration,
+                batch_id=batch_id,
+                batch_kind=batch_kind,
+                null_transform=null_transform,
+                null_plan=null_plan,
+            )
+            self.submissions.retain(
+                workspace_id,
+                job_id,
+                tool,
+                {"config": configuration, "attribution": attribution},
+            )
+            if retain is not None:
+                settle = retain(job_id, tool, attribution)
+        except Exception as error:  # noqa: BLE001 - fail closed, never dispatch
+            message = f"Job retention failed before dispatch: {error}"
+            receipt.update(
+                {
+                    "ok": False,
+                    "job_id": job_id,
+                    "parameterAssignment": assignment,
+                    "error": message,
+                    "message": message,
+                    "executionCertainty": "not_started",
+                    "retryGuidance": "Resolve the tracking failure and explicitly retry; execution did not start.",
+                }
+            )
+            return receipt
         # Past retention a dispatch may already have reached the harness, so every
         # failure from here on is an unknown outcome, never a not-started claim.
         try:
@@ -1813,7 +1877,16 @@ impl Default for AuthoredIndicator {
     def _sdk_identity(self) -> str:
         try:
             metadata = self._sdk_metadata(self.sdk_root)
-            canonical = Path(__file__).resolve().parents[2] / "harness" / "strategy-sdk"
+            canonical = (
+                next(
+                    parent
+                    for parent in Path(__file__).resolve().parents
+                    if (parent / "pyproject.toml").is_file()
+                )
+                / "src"
+                / "harness"
+                / "strategy-sdk"
+            )
             if metadata != self._sdk_metadata(canonical):
                 raise ProgramArtifactError(
                     "SDK reference/templates do not match the packaged SDK"
@@ -1827,8 +1900,10 @@ impl Default for AuthoredIndicator {
                 sources[f"{name}/Cargo.toml"] = _hash(
                     (crate / "Cargo.toml").read_bytes()
                 )
-                for path in sorted((crate / "src").glob("*.rs")):
-                    sources[f"{name}/src/{path.name}"] = _hash(path.read_bytes())
+                for path in sorted((crate / "src").rglob("*.rs")):
+                    sources[f"{name}/{path.relative_to(crate).as_posix()}"] = _hash(
+                        path.read_bytes()
+                    )
         except ProgramArtifactError:
             raise
         except (OSError, ValueError, KeyError, TypeError) as error:
@@ -2514,6 +2589,7 @@ export_study_program!(IndicatorValidation);
     def _call(self, name: str, arguments: Mapping[str, object]) -> McpToolResult:
         if self.harness is None:
             raise ProgramArtifactError("harness is not configured")
+        assert_owned()
         result = self.harness.call_tool(name, arguments)
         structured = dict(result.structured)
         # Both public injection boundaries share this result surface. Provider

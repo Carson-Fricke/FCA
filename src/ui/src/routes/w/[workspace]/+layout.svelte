@@ -5,6 +5,7 @@
 	import CommandPalette from '$lib/components/shell/CommandPalette.svelte';
 	import CopilotPanel from '$lib/components/shell/CopilotPanel.svelte';
 	import CreateWorkspaceDialog from '$lib/components/shell/CreateWorkspaceDialog.svelte';
+	import DeleteWorkspaceDialog from '$lib/components/shell/DeleteWorkspaceDialog.svelte';
 	import Sidebar from '$lib/components/shell/Sidebar.svelte';
 	import TopBar from '$lib/components/shell/TopBar.svelte';
 import ToastStack from '$lib/components/common/ToastStack.svelte';
@@ -19,7 +20,7 @@ import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
 		setLastWorkspace,
 		ui
 	} from '$lib/workspace.svelte';
-	import type { Strategy, WidgetDefinition } from '$lib/types';
+	import type { Strategy, WidgetDefinition, WorkspaceSummary } from '$lib/types';
 	import type { LayoutData } from './$types';
 
 	let { data, children }: { data: LayoutData; children: any } = $props();
@@ -48,6 +49,7 @@ import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
 
 	let paletteOpen = $state(false);
 	let createOpen = $state(false);
+	let deletingWorkspace = $state<WorkspaceSummary | null>(null);
 	let settingsOpen = $state(false);
 	let strategies = $state<Strategy[]>([]);
 	let widgets = $state<WidgetDefinition[]>([]);
@@ -189,6 +191,7 @@ import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
 		onSearch={() => (paletteOpen = true)}
 		onSwitch={switchWorkspace}
 		onCreateWorkspace={() => (createOpen = true)}
+		onDeleteWorkspace={(workspace) => (deletingWorkspace = workspace)}
 		onSettings={() => (settingsOpen = true)}
 		canConfigureBackend={isLocalHosting}
 	/>
@@ -269,6 +272,12 @@ import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
 
 {#if settingsOpen}
 	<BackendSettingsDialog onClose={() => (settingsOpen = false)} />
+{/if}
+
+{#if deletingWorkspace}
+	<DeleteWorkspaceDialog workspace={deletingWorkspace}
+		onClose={() => (deletingWorkspace = null)}
+		onDeleted={() => { deletingWorkspace = null; void goto('/w', { replaceState: true }); }} />
 {/if}
 
 <DataModeBadge />

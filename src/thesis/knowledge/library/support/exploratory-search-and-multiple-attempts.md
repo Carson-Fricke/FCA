@@ -1,13 +1,13 @@
 ---
 id: exploratory-search-and-multiple-attempts
 title: Exploratory search and multiple attempts
-version: 1
+version: 2
 created: 2026-10-02
-retrieved: 2026-10-02
+retrieved: 2026-10-13
 source:
   url: https://github.com/Carson-Fricke/FCA
   publisher: FCA Thesis
-  content_hash: dcaa2067bbd2479c459a7272254d78d4fd94b4371a1094ed378db276af37737a
+  content_hash: b8818e41447292474da2b032bd7971ad114a63d4c0c5925b537ef27d18708bfc
 tags:
   - multiple-testing
   - data-snooping
@@ -54,69 +54,24 @@ trust:
 ---
 # Exploratory search and multiple attempts
 
-The best result from many tries is overstated by construction. This is the
-single most common reason a backtest looks better than the live strategy
-ever will.
+Parameter search belongs in discovery. The selected training result is optimistic
+because selection uses the same outcomes; this calls for transparent inference and
+later validation, not a prohibition on fitting or a requirement that defaults work.
 
-## In brief
+Retain every execution ID before dispatch: candidates, ablations, null replicates,
+failures and technical repairs. In the scientific account also record design choices,
+parameter vectors, objectives, ranges, refinements and discarded variants. One
+batch is many candidate trials. One compiler/output repair uses resources but is not
+a new scientific hypothesis unless its policy changes.
 
-- The best result from many tries is overstated by construction.
-- Count every attempt, including failed and discarded ones.
-- Predeclare the study before running it.
-- Exploratory findings need independent confirmation.
+A winner's fixed-policy permutation asks about that fixed rule, conditional on
+selection. It does not measure how often searching the same family produces a winner
+under the null. A search-aware test repeats the entire stated search/selection
+procedure per null, including adaptive decisions if the claim includes them.
+Neither running many null seeds on one winner nor correcting only the final few
+reported variants reconstructs the full search.
 
-## Why the best of many is overstated
-
-If a single test has a 1 in 20 chance of looking good when nothing is there,
-then 20 independent tests give about a 2 in 3 chance that at least one looks
-good:
-
-\[
-1 - (1 - 0.05)^{20} \approx 0.64
-\]
-
-The winner of that search is not a discovery. It is the luckiest of the
-attempts. The more variants tried, the stronger the winner looks and the
-less it means.
-
-## Count attempts
-
-Every bucket, lag, threshold, period, and conditioning choice is an attempt.
-The study log should record the total number tried, not only the ones
-reported. When the count is unknown, say so. An uncounted search cannot be
-corrected later.
-
-## Predeclare before running
-
-Write the question, the measurement, and the variants in advance. This fixes
-the number of attempts before the results are known. A small predeclared
-study with an honest count is worth more than a large search with a
-flattering winner. See [Discovery study design](discovery-study-design).
-
-## What to do with exploration
-
-Exploration is allowed and useful. Label it exploratory, keep the log, and
-confirm any candidate on data that was untouched during the search. See
-[Discovery versus validation
-data](discovery-versus-validation-data), [Signal size
-buckets](signal-size-buckets), and [Tradability, break-even, and
-out-of-sample](tradability-break-even-and-oos).
-
-Legitimate exploratory directions include event-time segmentation with
-[Directional change events](directional-change-events) and path-shape
-summarization with [Perceptually important
-points](perceptually-important-points); label them exploratory and count the
-thresholds, windows, and parameters tried.
-
-## Related
-
-- [Discovery study design](discovery-study-design)
-- [Return continuation and reversal](return-continuation-and-reversal)
-- [Signal size buckets](signal-size-buckets)
-- [Time-of-day breakdown](time-of-day-breakdown)
-- [Volume and volatility conditions](volume-and-volatility-conditions)
-- [Stability across periods](stability-across-periods)
-- [Discovery versus validation data](discovery-versus-validation-data)
-- [Tradability, break-even, and out-of-sample](tradability-break-even-and-oos)
-- [Directional change events](directional-change-events)
-- [Perceptually important points](perceptually-important-points)
+Training robustness, independent generalization and formal validation are different
+claims. Report what ran and what remains unresolved. Do not present a small searched
+p-value as proof, or a non-significant default as feature refutation.
+See [Testing a searched candidate against a null](testing-a-searched-candidate-against-a-null).

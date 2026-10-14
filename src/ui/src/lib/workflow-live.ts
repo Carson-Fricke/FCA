@@ -1,6 +1,5 @@
 /** Pure, execution-indexed presentation of the single canonical chat timeline. */
 import { derivePhases, isWorkflowPhase, projectExecution, type SubAgentTreeNode } from './subagent';
-import { canonicalPhaseName } from './workflow-graph';
 import type { ChatMessage, ExecutionEvent, WorkflowExecutionRecord, WorkflowPhase } from './types';
 
 export interface WorkflowLiveState {
@@ -11,14 +10,14 @@ export interface WorkflowLiveState {
 }
 
 function workflowAnchor(message: ChatMessage, data: Record<string, unknown>): WorkflowExecutionRecord | null {
-	const id = data.executionId ?? data.execution_id ?? message.execution_id;
+	const id = data.executionId;
 	if (typeof id !== 'string' || !id) return null;
 	return {
 		execution_id: id, chat_id: message.chat_id, trigger_message_id: message.message_id,
-		workflow_id: String(data.workflowId ?? data.workflow_id ?? ''),
-		workflow_version: String(data.version ?? data.workflowVersion ?? data.workflow_version ?? ''),
-		requested_by: message.actor_id, state: (data.state ?? data.status ?? 'running') as WorkflowExecutionRecord['state'],
-		phase: data.currentPhase == null && data.phase == null ? null : String(data.currentPhase ?? data.phase),
+		workflow_id: String(data.workflowId ?? ''),
+		workflow_version: String(data.version ?? ''),
+		requested_by: message.actor_id, state: (data.state ?? 'running') as WorkflowExecutionRecord['state'],
+		active_phases: Array.isArray(data.activePhases) ? data.activePhases.filter((name): name is string => typeof name === 'string') : [],
 		intent_epoch: message.intent_epoch, steering_message_ids: [], created_at: message.created_at
 	};
 }
@@ -30,8 +29,7 @@ export function deriveWorkflowLive(
 	const anchors = new Map<string, { execution: WorkflowExecutionRecord; phases: WorkflowPhase[] }>();
 	for (const message of messages) {
 		const datums = message.data?.sessionMessage?.content.result?.datums;
-		const sources = message.kind === 'workflow' ? [message.data ?? {}] :
-			Array.isArray(datums) ? datums.flatMap((datum) => datum && typeof datum === 'object' && datum.datumType === 'workflow_execution' ? [datum.structured] : []) :
+		const sources = Array.isArray(datums) ? datums.flatMap((datum) => datum && typeof datum === 'object' && datum.datumType === 'workflow_execution' ? [datum.structured] : []) :
 			message.tool_result?.datumType === 'workflow_execution' ? [message.tool_result.structured] : [];
 		for (const data of sources) {
 			if (!data || typeof data !== 'object' || Array.isArray(data)) continue;
@@ -54,17 +52,26 @@ export function deriveWorkflowLive(
 		const events = eventsByExecution.get(id) ?? [];
 		// First-save snapshots may arrive late; every lifecycle event remains evidence.
 		const projected = projectExecution(execution, events);
-		const phases = new Map((anchor?.phases ?? []).filter((phase) => isWorkflowPhase(phase.name)).map((phase) => [canonicalPhaseName(phase.name), { ...phase }]));
+		const phases = new Map((anchor?.phases ?? []).filter((phase) => isWorkflowPhase(phase.name)).map((phase) => [phase.name, { ...phase }]));
 		const phaseEvents = events.filter((event) => event.eventType !== 'sub_agent.spawned' ||
-			(event.payload.phaseExecutor === true || event.payload.phase_executor === true));
-		for (const phase of derivePhases(phaseEvents)) if (isWorkflowPhase(phase.name)) phases.set(canonicalPhaseName(phase.name), phase);
-		if (projected.phase) {
-			for (const [key, phase] of phases) {
-				if (phase.status === 'active' && key !== canonicalPhaseName(projected.phase)) phase.status = 'done';
-			}
-			const key = canonicalPhaseName(projected.phase);
-			phases.set(key, { ...phases.get(key), name: projected.phase, status: 'active' });
-		}
+			event.payload.phaseExecutor === true);
+		for (const phase of derivePhases(phaseEvents)) if (isWorkflowPhase(phase.name)) phases.set(phase.name, phase);
+        for (const name of projected.active_phases) {
+            if (isWorkflowPhase(name)) phases.set(name, { ...phases.get(name), name, status: 'active' });
+        }
+        const graphEvent = events.filter((event) => event.eventType === 'workflow.phase' && typeof event.payload.controlSequence === 'number')
+            .sort((a, b) => Number(b.payload.controlSequence) - Number(a.payload.controlSequence))[0];
+        const joins = graphEvent?.payload.controlSequence === projected.control_sequence ? graphEvent.payload.joins : null;
+        if (joins && typeof joins === 'object' && !Array.isArray(joins)) {
+            for (const [name, raw] of Object.entries(joins)) {
+                if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+                const join = raw as { required?: unknown; arrived?: unknown };
+                if (!Array.isArray(join.required) || !Array.isArray(join.arrived)) continue;
+                const arrived = join.arrived;
+                phases.set(name, { ...phases.get(name), name, status: 'pending',
+                    waitingFor: join.required.filter((branch): branch is string => typeof branch === 'string' && !arrived.includes(branch)) });
+            }
+        }
 		if (projected.state === 'completed') for (const phase of phases.values()) phase.status = 'done';
 		result.set(id, { execution: projected, phases: [...phases.values()], attentionPhases: [], anchored: !!anchor });
 	}
@@ -80,9 +87,9 @@ export function withWorkflowNodes(workflows: Map<string, WorkflowLiveState>, tre
 			const { workflowExecutionId: id, phase, status } = item.node;
 			if (id && isWorkflowPhase(phase) && item.node.phaseExecutor === true) {
 				const bucket = nodes.get(id) ?? new Map();
-				const key = canonicalPhaseName(phase);
+				const key = phase;
 				const spawn = item.events.find((event) => event.eventType === 'sub_agent.spawned');
-				const order = spawn?.seq ?? spawn?.cursor ?? Number.MAX_SAFE_INTEGER;
+				const order = spawn?.seq ?? Number.MAX_SAFE_INTEGER;
 				if (!bucket.has(key) || order < bucket.get(key)!.order) bucket.set(key, { item, order });
 				nodes.set(id, bucket);
 				if (status === 'needs_input') {
@@ -97,12 +104,12 @@ export function withWorkflowNodes(workflows: Map<string, WorkflowLiveState>, tre
 	visit(tree);
 	const result = new Map<string, WorkflowLiveState>();
 	for (const [id, live] of workflows) {
-		const phases = new Map(live.phases.map((phase) => [canonicalPhaseName(phase.name), phase]));
+		const phases = new Map(live.phases.map((phase) => [phase.name, phase]));
 		for (const [key, { item }] of nodes.get(id) ?? []) {
 			if (!item.node.phase) continue;
 			const previous = phases.get(key);
 			phases.set(key, { name: previous?.name ?? item.node.phase,
-				status: live.execution.state === 'completed' || item.node.status === 'completed' ? 'done' : 'active', attempts: previous?.attempts });
+				status: item.node.status === 'completed' && !live.execution.control_sequence ? 'done' : live.execution.active_phases.includes(key) && !isTerminalWorkflow(live.execution) ? 'active' : item.node.status === 'completed' || previous?.status === 'done' ? 'done' : 'pending', attempts: previous?.attempts });
 		}
 		result.set(id, { ...live, phases: [...phases.values()], attentionPhases: [...attention.get(id) ?? []] });
 	}

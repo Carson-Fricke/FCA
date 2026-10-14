@@ -675,6 +675,10 @@ fn run_background_study_inner(
             return;
         }
     };
+    let client = client.with_progress(mcp::store::progress_reporter(
+        job_store.clone(),
+        job_id.clone(),
+    ));
     let mut actual_data_start = None;
     let mut actual_data_end = None;
     if !configuration.symbols.is_empty() {
@@ -775,6 +779,10 @@ fn run_background_backtest_inner(
             return;
         }
     };
+    let client = client.with_progress(mcp::store::progress_reporter(
+        job_store.clone(),
+        job_id.clone(),
+    ));
     match harness_strategy_jit::run_backtest_configuration(
         &configuration,
         &EngineOptions::default(),

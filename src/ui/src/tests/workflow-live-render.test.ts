@@ -20,7 +20,8 @@ const fixture = vi.hoisted(() => ({
 		updated_at: null,
 		execution_id: 'exec-1',
 		intent_epoch: 0,
-		kind: 'workflow',
+		kind: 'message',
+        tool_result: { datumType: 'workflow_execution', ok: true, summary: 'Hypothesis development', text: '', failure: null, structured: { executionId: 'exec-1', workflowId: 'hypothesis-development', version: '2.0.0', activePhases: ['ideation'], state: 'running' } },
 		data: {
 			currentPhase: 'ideation',
 			executionId: 'exec-1',
@@ -124,7 +125,7 @@ describe('durable tool activity', () => {
 		else render(ScopeTranscript, { props: { workspaceId: 'ws-1', entries } });
 		expect(screen.getAllByTestId('tool-result-card')).toHaveLength(2);
 		expect(screen.getAllByTestId('tool-result-card').map((card) => card.dataset.datumType)).toEqual(['study_evidence', 'validation_report']);
-		expect(screen.getAllByTestId('tool-result-status').map((card) => card.textContent?.trim())).toEqual(['ok', 'failed']);
+		expect(screen.getAllByTestId('tool-result-status').map((card) => card.textContent?.trim())).toEqual(['completed', 'failed']);
 		expect(screen.getByText('Retained measurements')).toBeInTheDocument();
 		expect(screen.getByText('Retained compiler diagnostics')).toBeInTheDocument();
 		expect(screen.getAllByText('duration: 42 ms')).toHaveLength(2);
@@ -150,20 +151,20 @@ describe('durable tool activity', () => {
 			'read_sdk_reference', 'read_artifact'
 		]);
 	});
-	const envelope: ChatMessage = { ...anchor, kind: 'message', role: 'assistant',
-		message_id: 'envelope', body: 'Checking the study now.', data: { startedAt: '2026-01-01T00:00:01Z',
+	const envelope: ChatMessage = { ...anchor, tool_result: null, kind: 'message', role: 'assistant',
+		seq: 1, message_id: 'envelope', body: 'Checking the study now.', data: { startedAt: '2026-01-01T00:00:01Z',
 			sessionMessage: { message_id: 'envelope', direction: 'outgoing', position: 0,
 				content: { text: 'Checking the study now.', source: 'agent', requests: [
 					{ id: 'validate-1', name: 'validate_study', arguments: '{"study":"one"}' },
 					{ id: 'run-1', name: 'run_study', arguments: '{"study":"one"}' }
 				], correlation: null, result: null } } } };
-	const result: ChatMessage = { ...envelope, role: 'tool', message_id: 'result', body: 'validated',
+	const result: ChatMessage = { ...envelope, role: 'tool', seq: 2, message_id: 'result', body: 'validated',
 		created_at: '2026-01-01T00:00:02Z',
 		data: { sessionMessage: { message_id: 'result', direction: 'incoming', position: 1,
 			content: { text: 'validated', source: 'tool_result', requests: [],
 				correlation: { request_message_id: 'envelope', request_id: 'validate-1', tool_name: 'validate_study' },
 				result: { durationMs: 42 } } } },
-		tool_result: { tool: 'validate_study', callId: 'validate-1', ok: true, summary: 'validated',
+		tool_result: { datumType: 'validation_report', tool: 'validate_study', callId: 'validate-1', ok: true, summary: 'validated',
 			structured: {}, text: '', failure: null } };
 
 	it.each(['root', 'scoped'])('renders pending -> final once in the %s transcript, retaining assistant text', async (scope) => {
@@ -177,7 +178,7 @@ describe('durable tool activity', () => {
 		await view.rerender(scope === 'root' ? { ...props, messages } :
 			{ workspaceId: 'ws-1', entries: buildNodeEntries({ messages, events: [] }) });
 		expect(screen.getAllByTestId('tool-result-card')).toHaveLength(2);
-		expect(screen.getAllByTestId('tool-result-status').map((card) => card.textContent?.trim()).sort()).toEqual(['ok', 'pending']);
+		expect(screen.getAllByTestId('tool-result-status').map((card) => card.textContent?.trim()).sort()).toEqual(['completed', 'pending']);
 		expect(screen.getByText('duration: 42 ms')).toBeInTheDocument();
 		expect(screen.getAllByText('arguments')).toHaveLength(2);
 	});
@@ -227,7 +228,7 @@ describe('durable tool activity', () => {
 		const question = { ...result, tool_result: { ...result.tool_result!, datumType: 'operator_question',
 			summary: 'Approve this study?', structured: { question: 'Approve this study?' } } };
 		const messages = state === 'answered' ? [question, { ...envelope, role: 'user' as const,
-			created_at: '2026-01-01T00:00:03Z', data: {} }] : [question];
+			seq: 3, created_at: '2026-01-01T00:00:03Z', data: {} }] : [question];
 		const projected = projectToolMessages(messages, state === 'resolved');
 		render(ToolResultCard, { props: { workspaceId: 'ws-1', result: projected[0].tool_result! } });
 		expect(screen.getByTestId('operator-question-waiting')).toHaveTextContent(state);
@@ -237,7 +238,7 @@ describe('durable tool activity', () => {
 	it.each(['root', 'scoped'])('keeps failure results and system runtime notices visible in the %s transcript', (scope) => {
 		const failed = { ...result, tool_result: { ...result.tool_result!, ok: false,
 			failure: { kind: 'transport', message: 'Study dispatch failed' } } };
-		const notice: ChatMessage = { ...envelope, message_id: 'notice', role: 'system',
+		const notice: ChatMessage = { ...envelope, message_id: 'notice', seq: 3, role: 'system',
 			body: 'Reply interrupted: provider unavailable', data: { status: 'interrupted',
 				failure: { kind: 'provider', message: 'provider unavailable', certainty: 'not_started' } } };
 		const messages = [envelope, failed, notice];
@@ -260,7 +261,7 @@ describe('durable tool activity', () => {
 		expect(screen.getByText('validated')).toBeInTheDocument();
 		expect(screen.getByText('Second datum evidence')).toBeInTheDocument();
 		expect(screen.getByText('Additional measurements')).toBeInTheDocument();
-		expect(screen.getAllByTestId('tool-result-status').map((card) => card.textContent?.trim())).toEqual(['pending', 'ok', 'ok']);
+		expect(screen.getAllByTestId('tool-result-status').map((card) => card.textContent?.trim())).toEqual(['pending', 'completed', 'completed']);
 	});
 
 	it('preserves distinct event datums sharing a call ID', () => {
@@ -283,7 +284,7 @@ describe('durable tool activity', () => {
 		if (scope === 'root') render(ChatTranscript, { props: { workspaceId: 'ws-1', messages, events } });
 		else render(ScopeTranscript, { props: { workspaceId: 'ws-1', entries: buildNodeEntries({ messages, events }) } });
 		expect(screen.getAllByTestId('tool-result-card')).toHaveLength(3);
-		expect(screen.getAllByTestId('tool-result-status').map((node) => node.textContent?.trim())).toEqual(['pending', 'ok', 'ok']);
+		expect(screen.getAllByTestId('tool-result-status').map((node) => node.textContent?.trim())).toEqual(['pending', 'completed', 'completed']);
 		expect(screen.getAllByText('validated')).toHaveLength(1);
 		expect(screen.getByText('Distinct evidence datum')).toBeInTheDocument();
 	});
@@ -334,19 +335,19 @@ describe('durable tool activity', () => {
 		const messages = [...props.messages, result];
 		await view.rerender(scope === 'root' ? { ...props, messages } :
 			{ workspaceId: 'ws-1', entries: buildNodeEntries({ messages, events: [] }) });
-		expect(screen.getAllByTestId('tool-result-status').map((card) => card.textContent?.trim())).toEqual(['interrupted', 'ok']);
+		expect(screen.getAllByTestId('tool-result-status').map((card) => card.textContent?.trim())).toEqual(['interrupted', 'completed']);
 		expect(screen.getAllByTestId('tool-result-card')).toHaveLength(2);
 	});
 });
 
 describe('runtime validation activity', () => {
-	const outer: ChatMessage = { ...anchor, kind: 'message', role: 'assistant', message_id: 'outer-envelope',
+	const outer: ChatMessage = { ...anchor, seq: 1, tool_result: null, kind: 'message', role: 'assistant', message_id: 'outer-envelope',
 		body: 'Requesting phase completion.', created_at: '2026-01-01T00:00:01Z',
 		data: { sessionMessage: { message_id: 'outer-envelope', direction: 'outgoing', position: 0,
 			content: { text: 'Requesting phase completion.', source: 'agent', requests: [
 				{ id: 'outer-completion', name: 'request_phase_completion', arguments: '{}' }
 			], correlation: null, result: null } } } };
-	const start: ChatMessage = { ...anchor, kind: 'message', role: 'tool', message_id: 'runtime-start',
+	const start: ChatMessage = { ...anchor, seq: 2, tool_result: null, kind: 'message', role: 'tool', message_id: 'runtime-start',
 		conversation_id: 'node-1', parent_conversation_id: 'chat-1',
 		body: 'Internal study validation started', created_at: '2026-01-01T00:00:02Z', data: {
 			toolActivity: 'started', tool: 'validate_study', toolCallId: 'runtime-validation-1',
@@ -374,20 +375,20 @@ describe('runtime validation activity', () => {
 		const view = scope === 'root' ? render(ChatTranscript, { props: { workspaceId: 'ws-1', messages: initial } }) :
 			render(ScopeTranscript, { props: { workspaceId: 'ws-1', entries: buildNodeEntries({ messages: initial, events: [] }) } });
 		expect(screen.getAllByTestId('tool-result-card').map((card) => card.dataset.tool)).toEqual(['request_phase_completion', 'validate_study']);
-		const finished: ChatMessage = { ...start, message_id: 'runtime-finish', created_at: '2026-01-01T00:00:03Z',
+		const finished: ChatMessage = { ...start, seq: 3, message_id: 'runtime-finish', created_at: '2026-01-01T00:00:03Z',
 			data: { subAgentId: 'node-1', activityKind: 'delivery',
 				sessionMessage: { message_id: 'runtime-finish', direction: 'incoming', position: 1,
 					content: { text: ok ? 'Validation reused' : 'Validation failed', source: 'runtime',
 						requests: [], correlation: null,
 						result: { durationMs: 12, toolCallId: 'runtime-validation-1' } } } },
-			tool_result: { tool: 'validate_study', callId: 'runtime-validation-1', ok: Boolean(ok),
+			tool_result: { datumType: 'validation_report', tool: 'validate_study', callId: 'runtime-validation-1', ok: Boolean(ok),
 				summary: ok ? 'Validation reused' : 'Validation failed', structured: { reused: ok }, text: '',
 				failure: ok ? null : { kind: 'compile', message: 'Invalid study source' } } };
 		const messages = [outer, start, finished, { ...start }, { ...finished }];
 		await view.rerender(scope === 'root' ? { workspaceId: 'ws-1', messages } :
 			{ workspaceId: 'ws-1', entries: buildNodeEntries({ messages, events: [] }) });
 		expect(screen.getAllByTestId('tool-result-card').map((card) => card.dataset.tool)).toEqual(['request_phase_completion', 'validate_study']);
-		expect(screen.getAllByTestId('tool-result-status').map((card) => card.textContent?.trim())).toEqual(['pending', ok ? 'ok' : 'failed']);
+		expect(screen.getAllByTestId('tool-result-status').map((card) => card.textContent?.trim())).toEqual(['pending', ok ? 'completed' : 'failed']);
 		expect(screen.getByText(`reused: ${ok}`)).toBeInTheDocument();
 		expect(screen.getByText('duration: 12 ms')).toBeInTheDocument();
 		expect(screen.getByText(/internal-study/)).toBeInTheDocument();
@@ -423,8 +424,11 @@ describe('root mid-turn composer', () => {
 				content: { text: 'Agent is working', source: 'agent',
 					requests: [{ id: 'root-tool', name: 'run_study', arguments: '{}' }],
 					correlation: null, result: null } } } : {} };
-		render(ChatSurface, { props: { workspaceId: 'ws-1', chatId: 'chat-1', timeline: timelineFixture([message]), onSend,
-			streaming: { active: activity === 'streaming', text: 'Still working', reasoning: '' } } });
+        const timeline = timelineFixture([message]);
+        if (activity === 'streaming') timeline.append({ id: 'streaming-root', seq: 100, kind: 'output',
+            chatId: 'chat-1', workspaceId: 'ws-1', threadId: 'root', ts: anchor.created_at,
+            payload: { state: 'started', invocationId: 'model', messageId: 'model-output', actorId: 'agent', startedAt: anchor.created_at } });
+        render(ChatSurface, { props: { workspaceId: 'ws-1', chatId: 'chat-1', timeline, onSend } });
 		const input = screen.getByTestId('composer-input');
 		await fireEvent.input(input, { target: { value: 'feedback mid-turn' } });
 		const send = screen.getByTestId('composer-send');
@@ -496,7 +500,7 @@ describe('Copilot live timeline rendering', () => {
 		vi.mocked(postMessage).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
 		render(CopilotPanel, { props: { workspaceId: 'ws-1', onExpand: vi.fn(), onClose: vi.fn() } });
 		await waitFor(() => expect(fixture.subscribers.length).toBeGreaterThan(0));
-		const envelope: ChatMessage = { ...anchor, kind: 'message', role: 'assistant', data: { sessionMessage: {
+		const envelope: ChatMessage = { ...anchor, tool_result: null, kind: 'message', role: 'assistant', data: { sessionMessage: {
 			message_id: anchor.message_id, direction: 'outgoing', position: 0,
 			content: { text: '', source: 'agent',
 				requests: [{ id: 'working', name: 'run_study', arguments: '{}' }], correlation: null, result: null } } } };
@@ -512,7 +516,7 @@ describe('Copilot live timeline rendering', () => {
 		finish({ message: envelope, percolated: [] });
 		await waitFor(() => expect(input).toHaveValue(''));
 		await fireEvent.input(input, { target: { value: 'another thought' } });
-		expect(send).not.toBeDisabled();
+		await waitFor(() => expect(send).not.toBeDisabled());
 		expect(screen.getByTestId('tool-result-status')).toHaveTextContent('pending');
 	});
 
@@ -529,7 +533,7 @@ describe('Copilot live timeline rendering', () => {
 	it('renders a root assistant envelope immediately, then one final tool result on replay', async () => {
 		render(CopilotPanel, { props: { workspaceId: 'ws-1', onExpand: vi.fn(), onClose: vi.fn() } });
 		await waitFor(() => expect(fixture.subscribers.length).toBeGreaterThan(0));
-		const envelope: ChatMessage = { ...anchor, message_id: 'root-envelope', kind: 'message', role: 'assistant',
+		const envelope: ChatMessage = { ...anchor, tool_result: null, message_id: 'root-envelope', kind: 'message', role: 'assistant',
 			body: '', data: { sessionMessage: { message_id: 'root-envelope', direction: 'outgoing', position: 0,
 				content: { text: '', source: 'agent',
 					requests: [{ id: 'root-call', name: 'run_study', arguments: '{}' }], correlation: null, result: null } } } };
@@ -541,11 +545,11 @@ describe('Copilot live timeline rendering', () => {
 				content: { text: 'Study complete', source: 'tool_result', requests: [],
 					correlation: { request_message_id: 'root-envelope', request_id: 'root-call', tool_name: 'run_study' },
 					result: {} } } },
-			tool_result: { tool: 'run_study', callId: 'root-call', ok: true, summary: 'Study complete',
+			tool_result: { datumType: 'study_evidence', tool: 'run_study', callId: 'root-call', ok: true, summary: 'Study complete',
 				structured: {}, text: '', failure: null } };
 		deliver(timelineMessageItem(result, 2));
 		deliver(timelineMessageItem(result, 2));
-		await waitFor(() => expect(screen.getByTestId('tool-result-status')).toHaveTextContent('ok'));
+		await waitFor(() => expect(screen.getByTestId('tool-result-status')).toHaveTextContent('completed'));
 		expect(screen.getAllByTestId('tool-result-card')).toHaveLength(1);
 	});
 	it('renders a workflow card pushed over the unified timeline stream', async () => {
@@ -569,6 +573,7 @@ describe('Copilot live timeline rendering', () => {
 		const previous = {
 			...anchor,
 			message_id: 'old-message',
+            tool_result: null,
 			kind: 'message' as const,
 			role: 'assistant' as const,
 			body: 'old conversation text'

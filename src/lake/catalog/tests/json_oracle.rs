@@ -89,3 +89,18 @@ fn rewriting_the_oracle_catalog_is_byte_identical() {
     assert_eq!(rewritten, ORACLE);
     assert!(rewritten.ends_with('\n'));
 }
+
+#[test]
+fn outdated_terminal_bars_without_provenance_are_rejected() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("catalog.json");
+    let mut document: serde_json::Value = serde_json::from_str(ORACLE).expect("JSON");
+    document["coverage"][0]["data_type"] = "bars".into();
+    document["coverage"][0]["interval"] = "1min".into();
+    std::fs::write(&path, serde_json::to_vec(&document).expect("encode")).expect("write");
+    let error = match JsonCatalogStore::open(&path) {
+        Ok(_) => panic!("outdated catalog accepted"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("provenance is required"));
+}

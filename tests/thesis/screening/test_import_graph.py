@@ -11,7 +11,16 @@ import ast
 import pathlib
 
 _FORBIDDEN_ROOTS = frozenset({"lake", "lakeclient", "harness"})
-_PACKAGE = pathlib.Path(__file__).resolve().parents[3] / "src" / "thesis" / "screening"
+_PACKAGE = (
+    next(
+        parent
+        for parent in pathlib.Path(__file__).resolve().parents
+        if (parent / "pyproject.toml").is_file()
+    )
+    / "src"
+    / "thesis"
+    / "screening"
+)
 
 
 def _imported_modules(path: pathlib.Path) -> list[str]:

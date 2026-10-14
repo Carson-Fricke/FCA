@@ -52,7 +52,7 @@ describe('one job identity across the fixture contract', () => {
 	it('launches a backtest with one job id and a locked terminal state', async () => {
 		const outcome = await launchBacktest('alpha-lab', {
 			bundleRef: 'ui-run',
-			configPath: 'config/harness/backtest.yaml'
+			config: { shell: 'backtest' }
 		});
 		expect(outcome.job_id).toMatch(/^job-/);
 		expect(outcome.state).toBe('succeeded');

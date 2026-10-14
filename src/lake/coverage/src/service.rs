@@ -306,7 +306,10 @@ pub fn sessions_for(
     as_of: DateTime,
 ) -> Result<Vec<CoverageSession>, CoverageRequestError> {
     validate_date_range(start_date, end_date)?;
-    if !matches!(asset_class, AssetClass::Equity | AssetClass::Crypto) {
+    if !matches!(
+        asset_class,
+        AssetClass::Equity | AssetClass::Crypto | AssetClass::Option
+    ) {
         return Err(CoverageRequestError::new(
             "unsupported_asset_class",
             "coverage planning supports equity and crypto only",
@@ -354,20 +357,31 @@ pub fn calculate_coverage(
     let normalized_data_types = normalize_data_types(data_types)?;
     let sessions = sessions_for(asset_class, start_date, end_date, as_of)?;
 
-    // The query intentionally does not filter by interval: a bars request
-    // still needs the session's trade rows (their checksum is the derived-bars
-    // revision), and the keyed lookup below already selects the requested
-    // interval for bars rows.
-    let records = catalog
-        .list(&CoverageQuery {
-            asset_class: Some(asset_class),
-            data_type: None,
-            symbol: None,
-            interval: None,
-            start: Some(start_date),
-            end: Some(end_date),
-        })
-        .map_err(CoverageRequestError::from)?;
+    let mut datasets = normalized_data_types.clone();
+    if datasets.contains(&DataType::Bars) && !datasets.contains(&DataType::Trade) {
+        datasets.push(DataType::Trade);
+    }
+    let mut records = Vec::new();
+    for symbol in &normalized_symbols {
+        for data_type in &datasets {
+            records.extend(
+                catalog
+                    .list(&CoverageQuery {
+                        asset_class: Some(asset_class),
+                        data_type: Some(*data_type),
+                        symbol: Some(symbol.clone()),
+                        interval: if *data_type == DataType::Bars {
+                            interval.map(str::to_owned)
+                        } else {
+                            None
+                        },
+                        start: Some(start_date),
+                        end: Some(end_date),
+                    })
+                    .map_err(CoverageRequestError::from)?,
+            );
+        }
+    }
     let mut records_by_key: BTreeMap<(DataType, Option<&str>, &str, Date), &CoverageRecord> =
         BTreeMap::new();
     for record in &records {
@@ -452,7 +466,7 @@ pub fn calculate_coverage(
 /// matches the current trade partition revision. A mismatch means a trade
 /// repair replaced the derivation input, so the row is reclassified `partial`
 /// and re-derived or replaced by provider bars on the next ensure. Provider
-/// bars and legacy rows without provenance are trusted as written.
+/// bars retain their recorded response revision; persisted terminal bars require provenance.
 fn coverage_state(
     record: Option<&CoverageRecord>,
     session: &CoverageSession,

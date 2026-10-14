@@ -66,7 +66,7 @@ def create_screener_router() -> APIRouter:
     router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["screeners"])
 
     @router.get("/screeners")
-    async def list_screeners(
+    def list_screeners(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[ScreenerService, Depends(get_screener_service)],
     ) -> dict[str, object]:
@@ -78,7 +78,7 @@ def create_screener_router() -> APIRouter:
         }
 
     @router.post("/screeners", status_code=201)
-    async def save_screener(
+    def save_screener(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: SaveScreenerRequest,
         service: Annotated[ScreenerService, Depends(get_screener_service)],
@@ -98,14 +98,14 @@ def create_screener_router() -> APIRouter:
         saved = service.save_definition(workspace_id, definition)
         return saved.document()
 
-    @router.post("/screeners/run")
-    async def run_screener(
+    @router.post("/screeners/run", status_code=202)
+    def run_screener(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: RunScreenerRequest,
         service: Annotated[ScreenerService, Depends(get_screener_service)],
     ) -> dict[str, object]:
         try:
-            record = service.run(
+            accepted = service.submit(
                 workspace_id, request.definition_id, as_of=request.as_of
             )
         except KeyError as error:
@@ -132,10 +132,32 @@ def create_screener_router() -> APIRouter:
             raise HTTPException(status_code=502, detail=detail) from error
         except ScreenerDefinitionError as error:
             raise _validation_error(error) from error
-        return record.document()
+        return accepted
+
+    @router.post("/screeners/jobs/{job_id}/materialize")
+    def materialize_screener(
+        workspace_id: str,
+        job_id: str,
+        service: Annotated[ScreenerService, Depends(get_screener_service)],
+    ) -> dict[str, object]:
+        from thesis.http.errors import service_error
+
+        try:
+            return service.materialize(workspace_id, job_id).document()
+        except ScreeningRunError as error:
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "code": "screener_run_failed",
+                    "message": str(error),
+                    "job_id": job_id,
+                },
+            ) from error
+        except Exception as error:
+            raise service_error(error) from error
 
     @router.get("/screeners/results/{result_id}")
-    async def get_screener_result(
+    def get_screener_result(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         result_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[ScreenerService, Depends(get_screener_service)],

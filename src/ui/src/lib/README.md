@@ -12,24 +12,27 @@ claims don't belong here.
 | `generated.ts` | Generated backend wire types and schema-name-to-type registry. Don't edit manually. |
 | `wire-schema.json` | Generated JSON Schema registry consumed by the production decoder. |
 | `types.ts` | UI projections derived from generated chat, execution, timeline, tool, and node types; unrelated product mirrors remain scoped separately. |
-| `chat-host.svelte.ts` | Shared conversation list, draft/create/post/delete, percolation, and timeline lifecycle controller used by both hosts. |
+| `chat-host.svelte.ts` | Shared conversation lifecycle, immediate send projections, stable failed-send retry identities, and percolation used by both hosts. |
 | `chat-navigation.ts` | Conversation URL adapter; clears scope and hash on conversation changes. |
-| `timeline.svelte.ts` | One ordered timeline owner: history snapshot first, then cursor-only SSE, backward pagination, identity deduplication, and thread/execution indexes. |
+| `model-output.ts` | Provisional output projection with UTF-8 offsets, gap handling, scoped identities and canonical-completion suppression. |
+| `timeline.svelte.ts` | One ordered timeline owner: history then cursor-only SSE, pagination, indexes, and local pending messages reconciled with POST/SSE by identity without advancing cursors. |
 | `fixture-timeline.ts` | In-memory offline timeline seeded from messages, events, and execution fixtures; mutations publish to subscribers. |
 | `sse.ts` | Sole `TimelineStream` SSE client, with frame parsing, timeline URL construction, and reconnect cursors. |
-| `workflow-live.ts` | Pure execution-indexed live workflow map; all lifecycle events replay against first-save snapshots, with explicit phase-executor projection, attention, and active/terminal selectors. |
-| `workflow-scope.svelte.ts` | Execution-scoped phase navigation and event selection, node capability snapshots, history selection, and node submission. |
+| `workflow-live.ts` | Pure execution-indexed live workflow map; sequence-ordered active frontiers, waiting joins, explicit phase-executor projection, attention, and active/terminal selectors. |
+| `workflow-scope.svelte.ts` | Execution-scoped phase navigation, node capability snapshots, history selection, and immediate node sends with stable explicit-retry identities. |
 | `scope.svelte.ts` | Scope path serialization, storage, and navigation stack. |
-| `subagent.ts` | Workflow and sub-agent event projections, including attempt freshness. |
-| `transcript.ts` | UI transcript ordering, tool call/result matching, pending state, neutral wire-delivery presentation, and accepted research report decoding. |
-| `workflow-graph.ts` | Workflow topology and display projection. |
-| `workspace.svelte.ts` | Workspace-scoped view state and toasts. |
+| `subagent.ts` | Workflow and sub-agent event projections, including attempt freshness and phase recovery diagnostics. |
+| `transcript.ts` | UI transcript ordering, tool call/result matching, pending state, neutral wire-delivery presentation, rail-entry classification, and accepted research report decoding. Standalone child cards show helpers; workflow phase executors remain accessible through their workflow card. |
+| `workflow-graph.ts` | Backend-declared topology display, including nested fixed parallel branch layout. |
+| `workspace.svelte.ts` | Workspace-scoped view state, browser cleanup after workspace deletion, and toasts. |
 | `workspace-context.svelte.ts` | Workspace shell context: render-gate summary plus snapshot detail loaded after render. |
 | `markdown.ts` | Sanitized Markdown rendering. |
 | `format.ts` | Display formatting. |
 
 `components/` contains presentation, `fixtures/` contains offline sample records,
 and `data/` contains chart and graph demo data.
+`research/` owns registered evidence panels, bounded immutable artifact loading,
+saved compositions and shared observational polling for chat and workspace views.
 
 Full chat and copilot use one timeline stream per attached conversation. Live
 cards select their own execution ID from the workflow map, not a singleton

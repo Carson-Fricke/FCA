@@ -105,6 +105,7 @@ dependencies = [
  "chrono",
  "clap",
  "config",
+ "harness-contracts",
  "harness-lakeclient",
  "harness-strategy-jit",
  "hex",
@@ -896,6 +897,7 @@ name = "harness-contracts"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "lake-contracts",
  "serde",
  "serde_json",
  "sha2",
@@ -906,10 +908,12 @@ name = "harness-lakeclient"
 version = "0.1.0"
 dependencies = [
  "arrow-array",
+ "arrow-buffer",
  "arrow-ipc",
  "arrow-schema",
  "axum",
  "futures-util",
+ "harness-contracts",
  "harness-lakeclient",
  "reqwest",
  "serde",
@@ -925,6 +929,7 @@ dependencies = [
  "arrow-array",
  "backtest",
  "chrono",
+ "harness-contracts",
  "harness-lakeclient",
  "harness-strategy-sdk",
  "libloading",
@@ -1414,6 +1419,7 @@ version = "0.1.0"
 dependencies = [
  "backtest",
  "chrono",
+ "harness-contracts",
  "hex",
  "percent-encoding",
  "serde",

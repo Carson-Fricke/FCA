@@ -128,7 +128,11 @@ struct StubRunner {
 }
 
 impl BacktestRunner for StubRunner {
-    fn run(&self, configuration: &ValidatedConfiguration) -> Result<RunOutcome, String> {
+    fn run(
+        &self,
+        configuration: &ValidatedConfiguration,
+        _progress: harness_contracts::progress::ProgressReporter,
+    ) -> Result<RunOutcome, String> {
         if self.fail {
             return Err("StrategyLoadError: MissingStrategy".to_string());
         }
@@ -842,7 +846,11 @@ async fn launch_failure_publishes_failed_metadata_without_artifacts() {
 struct EmptyRunner;
 
 impl BacktestRunner for EmptyRunner {
-    fn run(&self, _configuration: &ValidatedConfiguration) -> Result<RunOutcome, String> {
+    fn run(
+        &self,
+        _configuration: &ValidatedConfiguration,
+        _progress: harness_contracts::progress::ProgressReporter,
+    ) -> Result<RunOutcome, String> {
         Ok(RunOutcome {
             completed: true,
             artifacts: BTreeMap::new(),
@@ -883,6 +891,15 @@ struct FaultingPutResultStore {
 }
 
 impl JobStore for FaultingPutResultStore {
+    fn update_progress(
+        &self,
+        job_id: &str,
+        snapshot: harness_contracts::progress::ExecutionProgress,
+        now: chrono::DateTime<Utc>,
+    ) -> Result<JobRecord, StoreError> {
+        self.inner.update_progress(job_id, snapshot, now)
+    }
+
     fn mark_running(
         &self,
         job_id: &str,
@@ -982,7 +999,11 @@ async fn memory_artifact_publication_fault_cannot_publish_success() {
 struct PartialArtifactRunner;
 
 impl BacktestRunner for PartialArtifactRunner {
-    fn run(&self, _configuration: &ValidatedConfiguration) -> Result<RunOutcome, String> {
+    fn run(
+        &self,
+        _configuration: &ValidatedConfiguration,
+        _progress: harness_contracts::progress::ProgressReporter,
+    ) -> Result<RunOutcome, String> {
         Ok(RunOutcome {
             completed: true,
             artifacts: BTreeMap::from([
@@ -1838,7 +1859,11 @@ fn nested_and_shorthand_contracts_reject_contradictions_before_lake() {
 struct IncompleteRunner;
 
 impl BacktestRunner for IncompleteRunner {
-    fn run(&self, _configuration: &ValidatedConfiguration) -> Result<RunOutcome, String> {
+    fn run(
+        &self,
+        _configuration: &ValidatedConfiguration,
+        _progress: harness_contracts::progress::ProgressReporter,
+    ) -> Result<RunOutcome, String> {
         let mut artifacts = BTreeMap::new();
         artifacts.insert(
             "backtest.json".to_string(),
@@ -1856,7 +1881,11 @@ struct CountingRunner {
 }
 
 impl BacktestRunner for CountingRunner {
-    fn run(&self, _configuration: &ValidatedConfiguration) -> Result<RunOutcome, String> {
+    fn run(
+        &self,
+        _configuration: &ValidatedConfiguration,
+        _progress: harness_contracts::progress::ProgressReporter,
+    ) -> Result<RunOutcome, String> {
         self.runs.fetch_add(1, Ordering::SeqCst);
         let mut artifacts = BTreeMap::new();
         artifacts.insert("backtest.json".to_string(), b"{}".to_vec());
@@ -1970,6 +1999,16 @@ fn admission_and_result_publication_rules_are_atomic() {
 struct FailingAdmitStore;
 
 impl JobStore for FailingAdmitStore {
+    fn update_progress(
+        &self,
+        job_id: &str,
+        snapshot: harness_contracts::progress::ExecutionProgress,
+        now: chrono::DateTime<Utc>,
+    ) -> Result<JobRecord, StoreError> {
+        let _ = (job_id, snapshot, now);
+        Err(StoreError::Io("disk offline".to_string()))
+    }
+
     fn mark_running(
         &self,
         _job_id: &str,
@@ -2029,4 +2068,83 @@ async fn admission_store_failure_is_not_reported_as_accepted() {
     .await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(json_body(&body)["error"]["code"], "store_error");
+}
+
+/// The execution port reports the same telemetry for direct HTTP launches and workflow callers.
+struct ProgressThenFailure;
+impl BacktestRunner for ProgressThenFailure {
+    fn run(
+        &self,
+        _configuration: &ValidatedConfiguration,
+        progress: harness_contracts::progress::ProgressReporter,
+    ) -> Result<RunOutcome, String> {
+        use harness_contracts::progress::{ExecutionProgress, ExecutionStage};
+        let mut acquisition = ExecutionProgress::stage(ExecutionStage::PreparingData);
+        acquisition.symbol = Some("MSFT".into());
+        acquisition.data_type = Some("quote".into());
+        acquisition.sessions_total = Some(137);
+        acquisition.sessions_ready = Some(40);
+        acquisition.sessions_cached = Some(40);
+        progress(acquisition.clone())?;
+        acquisition.sessions_ready = Some(137);
+        acquisition.rows = 54_782_541;
+        acquisition.completed = true;
+        progress(acquisition)?;
+        let mut reading = ExecutionProgress::stage(ExecutionStage::ReadingData);
+        reading.symbol = Some("MSFT".into());
+        reading.data_type = Some("quote".into());
+        reading.bytes = 123456;
+        reading.request_timeout_seconds = Some(60);
+        progress(reading)?;
+        Err("reading MSFT quote after 123456 bytes: idle read timed out after 60 seconds".into())
+    }
+}
+
+#[tokio::test]
+async fn direct_launch_status_retains_progress_and_error_without_a_workflow() {
+    use harness_contracts::progress::{ExecutionProgress, ExecutionStage};
+    let app = app_with(Some(BEARER), Arc::new(ProgressThenFailure));
+    let original = backtest_document("job-progress");
+    let _ = app
+        .router
+        .clone()
+        .oneshot(post_json(
+            "/v1/backtests/jobs",
+            Some(BEARER),
+            original.clone(),
+        ))
+        .await
+        .unwrap();
+    let (status, _, bytes) = send(&app.router, get_auth("/v1/jobs/job-progress", BEARER)).await;
+    assert_eq!(status, StatusCode::OK);
+    let body = json_body(&bytes);
+    assert_eq!(body["job_id"], "job-progress");
+    assert_eq!(body["state"], "failed");
+    assert_eq!(body["progress"][0]["sessions_cached"], 40);
+    assert_eq!(body["progress"][0]["sessions_ready"], 137);
+    assert_eq!(body["progress"][0]["rows"], 54_782_541);
+    assert_eq!(body["progress"][1]["bytes"], 123456);
+    assert!(body["progress"][1]["finished_at"].is_string());
+    assert!(body["error_message"]
+        .as_str()
+        .unwrap()
+        .contains("idle read timed out"));
+    let before = app.store.get("job-progress").unwrap();
+    assert!(matches!(
+        app.store.update_progress(
+            "job-progress",
+            ExecutionProgress::stage(ExecutionStage::RunningBacktest),
+            Utc::now()
+        ),
+        Err(StoreError::Terminal(_))
+    ));
+    assert_eq!(app.store.get("job-progress").unwrap(), before);
+    // Joining a terminal execution does not dispatch it or replace its evidence.
+    let _ = app
+        .router
+        .clone()
+        .oneshot(post_json("/v1/backtests/jobs", Some(BEARER), original))
+        .await
+        .unwrap();
+    assert_eq!(app.store.get("job-progress").unwrap(), before);
 }

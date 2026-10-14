@@ -10,6 +10,9 @@ from typing import cast
 
 import pytest
 
+from thesis.extensions.workflows.hypothesis_development.contracts.validation import (
+    hypothesis_payload_errors,
+)
 from thesis.research.models import (
     ResearchModel,
     ResearchModelError,
@@ -19,9 +22,6 @@ from thesis.research.models import (
 from thesis.strategies.bundles import StrategyBundleError
 from thesis.strategies.contracts import StrategyDesign
 from thesis.workflows.backtests import BacktestRunRequest, BacktestRunResult
-from thesis.workflows.registry.hypothesis_development.contracts.validation import (
-    hypothesis_payload_errors,
-)
 from thesis.workflows.research_models import (
     BacktestResearchModelRunner,
     ResearchModelRunRequest,
@@ -57,7 +57,7 @@ _WINDOW = {"start": "2026-09-21T13:30:00Z", "end": "2026-09-28T13:30:00Z"}
 def _model(subscriptions: object) -> ResearchModel:
     return ResearchModel(
         model_id="market-study",
-        version="1.0.0",
+        version="a" * 64,
         description="Exact market inputs",
         source=_SOURCE,
         outputs=("data_ok",),
@@ -284,7 +284,7 @@ def test_persisted_bar_model_round_trips_its_subscriptions(tmp_path: Path) -> No
     with pytest.raises(ResearchModelError, match="subscriptions"):
         ResearchModel(
             "interval-only",
-            "1.0.0",
+            "a" * 64,
             "Interval only",
             _SOURCE,
             ("data_ok",),

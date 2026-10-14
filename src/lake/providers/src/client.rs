@@ -281,10 +281,12 @@ impl AlpacaClient {
         end: DateTime,
     ) -> Result<Vec<NormalizedBar>, ProviderError> {
         let symbol = match asset_class {
-            AssetClass::Equity => normalize_symbols(std::slice::from_ref(&symbol))?
-                .into_iter()
-                .next()
-                .expect("one normalized symbol"),
+            AssetClass::Equity | AssetClass::Option => {
+                normalize_symbols(std::slice::from_ref(&symbol))?
+                    .into_iter()
+                    .next()
+                    .expect("one normalized symbol")
+            }
             AssetClass::Crypto => normalize_crypto_pairs(std::slice::from_ref(&symbol))?
                 .into_iter()
                 .next()
@@ -298,6 +300,7 @@ impl AlpacaClient {
         };
         let path = match asset_class {
             AssetClass::Equity => format!("/v2/stocks/{symbol}/bars"),
+            AssetClass::Option => "/v1beta1/options/bars".to_string(),
             _ => "/v1beta3/crypto/us/bars".to_string(),
         };
         let base_params = match asset_class {
@@ -354,6 +357,98 @@ impl AlpacaClient {
         }
         records.sort_by_key(Timestamped::timestamp);
         Ok(records)
+    }
+
+    /// Fetch the complete contract master in an explicit expiry window.
+    /// Both active and inactive contracts are included; historical quote
+    /// evidence, rather than today's active status, establishes eligibility.
+    pub async fn fetch_option_contracts(
+        &self,
+        trading_base_url: &str,
+        underlying: &str,
+        start: lake_contracts::Date,
+        end: lake_contracts::Date,
+    ) -> Result<Vec<ContractRecord>, ProviderError> {
+        let mut contracts = std::collections::BTreeMap::new();
+        let url = format!(
+            "{}/v2/options/contracts",
+            trading_base_url.trim_end_matches('/')
+        );
+        for status in ["active", "inactive"] {
+            let mut token: Option<String> = None;
+            let mut seen = HashSet::new();
+            loop {
+                let mut params = vec![
+                    ("underlying_symbols".into(), underlying.to_string()),
+                    ("expiration_date_gte".into(), start.isoformat()),
+                    ("expiration_date_lte".into(), end.isoformat()),
+                    ("status".into(), status.into()),
+                    ("limit".into(), "1000".into()),
+                ];
+                if let Some(token) = &token {
+                    params.push(("page_token".into(), token.clone()));
+                }
+                let response = self.request_url(&url, &params).await?;
+                let rows = response
+                    .body
+                    .get("option_contracts")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| {
+                        ProviderError::Protocol("missing option_contracts array".into())
+                    })?;
+                for row in rows {
+                    let text = |key: &str| {
+                        row.get(key).and_then(Value::as_str).ok_or_else(|| {
+                            ProviderError::Protocol(format!("missing contract {key}"))
+                        })
+                    };
+                    let expiration = lake_contracts::Date::parse(text("expiration_date")?)
+                        .ok_or_else(|| {
+                            ProviderError::Protocol("invalid contract expiration".into())
+                        })?;
+                    let right = match text("type")? {
+                        "call" => lake_catalog::OptionType::Call,
+                        "put" => lake_catalog::OptionType::Put,
+                        _ => return Err(ProviderError::Protocol("invalid contract right".into())),
+                    };
+                    let multiplier = text("size")?.parse::<u32>().map_err(|_| {
+                        ProviderError::Protocol("invalid contract multiplier".into())
+                    })?;
+                    let record = ContractRecord::new(
+                        text("symbol")?,
+                        text("underlying_symbol")?,
+                        expiration,
+                        text("strike_price")?
+                            .parse()
+                            .map_err(|_| ProviderError::Protocol("invalid strike".into()))?,
+                        right,
+                        multiplier,
+                        None,
+                        None,
+                    )
+                    .map_err(|e| ProviderError::Protocol(e.to_string()))?;
+                    if record.underlying != underlying || expiration < start || expiration > end {
+                        return Err(ProviderError::Protocol(
+                            "contract outside requested universe".into(),
+                        ));
+                    }
+                    contracts.insert(record.symbol.clone(), record);
+                }
+                token = match response.body.get("next_page_token") {
+                    None | Some(Value::Null) => None,
+                    Some(Value::String(s)) if s.is_empty() => None,
+                    Some(Value::String(s)) => Some(s.clone()),
+                    _ => return Err(ProviderError::Protocol("invalid contract cursor".into())),
+                };
+                let Some(next) = &token else {
+                    break;
+                };
+                if !seen.insert(next.clone()) {
+                    return Err(ProviderError::Protocol("repeated contract cursor".into()));
+                }
+            }
+        }
+        Ok(contracts.into_values().collect())
     }
 
     /// Fetch historical OPRA trades for selected option contracts.
@@ -796,11 +891,19 @@ impl AlpacaClient {
         params: &[(String, String)],
     ) -> Result<TransportResponse, ProviderError> {
         let url = format!("{}{}", self.config.base_url, path);
+        self.request_url(&url, params).await
+    }
+
+    async fn request_url(
+        &self,
+        url: &str,
+        params: &[(String, String)],
+    ) -> Result<TransportResponse, ProviderError> {
         for attempt in 1..=self.config.max_attempts {
             self.governor.acquire().await;
             let permit = self.lane.acquire().await;
             let started = std::time::Instant::now();
-            let outcome = self.transport.get(&url, params, &self.headers).await;
+            let outcome = self.transport.get(url, params, &self.headers).await;
             let elapsed = started.elapsed();
             drop(permit);
             match outcome {
@@ -813,7 +916,10 @@ impl AlpacaClient {
                     if !RETRYABLE_STATUS_CODES.contains(&status)
                         || attempt == self.config.max_attempts
                     {
-                        return Err(ProviderError::Http { status, url });
+                        return Err(ProviderError::Http {
+                            status,
+                            url: url.to_string(),
+                        });
                     }
                     tokio::time::sleep(self.retry_delay(&response, attempt)).await;
                 }

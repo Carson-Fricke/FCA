@@ -26,7 +26,11 @@ const BEARER: &str = "test-secret";
 struct StubRunner;
 
 impl BacktestRunner for StubRunner {
-    fn run(&self, _configuration: &ValidatedConfiguration) -> Result<RunOutcome, String> {
+    fn run(
+        &self,
+        _configuration: &ValidatedConfiguration,
+        _progress: harness_contracts::progress::ProgressReporter,
+    ) -> Result<RunOutcome, String> {
         let mut artifacts = BTreeMap::new();
         artifacts.insert(
             "backtest.json".to_string(),

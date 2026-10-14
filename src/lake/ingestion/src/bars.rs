@@ -224,7 +224,10 @@ impl BarsIngestTransaction {
         interval: BarInterval,
         sessions: &[CoverageSession],
     ) -> Result<BarsIngestResult, DataError> {
-        if !matches!(asset_class, AssetClass::Equity | AssetClass::Crypto) {
+        if !matches!(
+            asset_class,
+            AssetClass::Equity | AssetClass::Crypto | AssetClass::Option
+        ) {
             return Err(DataError::value(format!(
                 "bars ingest supports equity and crypto only, not {asset_class}"
             )));
@@ -272,7 +275,9 @@ impl BarsIngestTransaction {
                 }
             }
             for (session, bars) in sessions.iter().zip(grouped) {
-                if !bars.is_empty() {
+                if !bars.is_empty()
+                    || (asset_class == AssetClass::Option && provider_failure.is_none())
+                {
                     match self.stage_provider(asset_class, &symbol, interval, session, &bars) {
                         Ok((metadata, rows, revision)) => {
                             coverage.push(bar_coverage(
@@ -402,6 +407,11 @@ impl BarsIngestTransaction {
         interval: BarInterval,
         session: &CoverageSession,
     ) -> Result<Option<(ParquetMetadata, u64, String)>, DataError> {
+        // An empty option bars response is a valid empty session. Options do
+        // not borrow stock trade schemas or fetch an unrequested trade feed.
+        if asset_class == AssetClass::Option {
+            return Ok(None);
+        }
         let Some(partition) = self
             .reader
             .read(asset_class, symbol, session.session_date)

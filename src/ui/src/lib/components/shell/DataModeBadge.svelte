@@ -4,7 +4,7 @@
 		canUseRemoteApi,
 		fixtureMode,
 		isLocalHosting,
-		setFixtureMode
+		setBackend
 	} from '$lib/api';
 
 	/** Shows the active data mode and offers a quick switch back and forth. */
@@ -21,7 +21,7 @@
 		<button
 			type="button"
 			class="ml-1 rounded border border-surface-600 px-1.5 py-0.5 text-[10px] text-slate-500 hover:border-accent/40 hover:text-accent"
-			onclick={() => setFixtureMode(false)}
+			onclick={() => setBackend(isLocalHosting ? 'local' : canUseRemoteApi ? 'azure' : 'local')}
 			title="Load data from the configured backend"
 			data-testid="mode-use-api"
 		>
@@ -31,7 +31,7 @@
 		<button
 			type="button"
 			class="ml-1 rounded border border-surface-600 px-1.5 py-0.5 text-[10px] text-slate-500 hover:border-accent/40 hover:text-accent"
-			onclick={() => setFixtureMode(true)}
+			onclick={() => setBackend('fixtures')}
 			title="Render from bundled fixtures when the backend is unreachable"
 			data-testid="mode-use-fixtures"
 		>

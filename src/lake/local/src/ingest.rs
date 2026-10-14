@@ -637,13 +637,16 @@ pub struct LocalBarsBackfillOptions {
 pub async fn run_local_bars_backfill(
     options: LocalBarsBackfillOptions,
 ) -> Result<BackfillResult, LocalIngestError> {
-    if !matches!(options.asset_class, AssetClass::Equity | AssetClass::Crypto) {
+    if !matches!(
+        options.asset_class,
+        AssetClass::Equity | AssetClass::Crypto | AssetClass::Option
+    ) {
         return Err(LocalIngestError::new(
             "bars backfill supports equity and crypto only",
         ));
     }
     let symbols = match options.asset_class {
-        AssetClass::Equity => normalize_symbols(&options.symbols)?,
+        AssetClass::Equity | AssetClass::Option => normalize_symbols(&options.symbols)?,
         AssetClass::Crypto => normalize_pairs(&options.symbols)?,
         _ => unreachable!("asset class validated above"),
     };
@@ -1275,7 +1278,7 @@ fn bars_provider(
 }
 
 /// Map the loaded provider settings onto the client configuration.
-fn provider_config(settings: &LakeSettings) -> ProviderConfig {
+pub(crate) fn provider_config(settings: &LakeSettings) -> ProviderConfig {
     let mut config = ProviderConfig::new(
         "https://data.alpaca.markets",
         settings.provider.api_key.clone(),
@@ -1290,7 +1293,7 @@ fn provider_config(settings: &LakeSettings) -> ProviderConfig {
 }
 
 /// The process-wide request-budget governor every production client shares.
-fn shared_governor(settings: &LakeSettings) -> Arc<RequestGovernor> {
+pub(crate) fn shared_governor(settings: &LakeSettings) -> Arc<RequestGovernor> {
     static GOVERNOR: OnceLock<Arc<RequestGovernor>> = OnceLock::new();
     Arc::clone(
         GOVERNOR

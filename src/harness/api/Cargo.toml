@@ -30,6 +30,7 @@ name = "mcp"
 path = "src/bin/mcp.rs"
 
 [dependencies]
+harness-contracts = { path = "../contracts" }
 config = { path = "../config" }
 axum = "0.8"
 chrono = { version = "0.4", features = ["serde"] }

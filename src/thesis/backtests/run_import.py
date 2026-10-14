@@ -360,7 +360,9 @@ def _trade_log(
         return (), "metrics_unavailable"
     rows = _mapping(metrics.get("trades")).get("rows")
     if not isinstance(rows, list):
-        return (), "legacy_artifact"
+        raise BacktestRunError(
+            "outdated metrics artifact: canonical trades.rows is required"
+        )
     return tuple(_trade_record(row) for row in rows), None
 
 

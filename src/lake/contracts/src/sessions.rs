@@ -56,7 +56,7 @@ pub fn sessions_for(
     end: Date,
 ) -> Result<Vec<ExchangeSession>, DataError> {
     match asset_class {
-        AssetClass::Equity => xnys_sessions(start, end),
+        AssetClass::Equity | AssetClass::Option => xnys_sessions(start, end),
         AssetClass::Crypto => crypto_sessions(start, end),
         other => Err(DataError::value(format!(
             "coverage planning supports equity and crypto only, not {other}"

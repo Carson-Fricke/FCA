@@ -1,10 +1,10 @@
 <script lang="ts">
+	import HarnessExecutionCard from './HarnessExecutionCard.svelte';
 	import { page } from '$app/state';
 	import type { WorkflowDefinition, WorkflowExecutionRecord, WorkflowPhase } from '$lib/types';
 	import { getWorkflowDefinition } from '$lib/api';
 	import {
 		computeWorkflowGraph,
-		canonicalPhaseName,
 		NODE_WIDTH,
 		NODE_HEIGHT,
 		type GraphNode,
@@ -25,6 +25,7 @@
 		phases = [],
 		status = 'running',
 		summary = '',
+        jobIds = [],
 		attentionPhases = [],
 		onEnterPhase = () => {}
 	}: {
@@ -32,6 +33,7 @@
 		phases?: WorkflowPhase[];
 		status?: string;
 		summary?: string;
+        jobIds?: string[];
 		/** Phases whose governing agent is blocked waiting on operator input. */
 		attentionPhases?: string[];
 		onEnterPhase?: (phase: string, options: { readOnly: boolean }) => void;
@@ -49,16 +51,16 @@
 	};
 
 	const currentPhase = $derived(
-		canonicalPhaseName(
+
 			phases.find((phase) => phase.status === 'active')?.name ??
 				execution?.phase ??
 				[...phases].reverse().find((phase) => phase.status === 'done')?.name ??
 				'orchestrator'
-		)
+
 	);
 
 	/** Attention phases on their canonical names, so retired wire values still label. */
-	const attentionPhaseNames = $derived(attentionPhases.map(canonicalPhaseName));
+	const attentionPhaseNames = $derived(attentionPhases);
 
 	let definition = $state<WorkflowDefinition | null>(null);
 	let definitionError = $state('');
@@ -215,8 +217,8 @@
 		const canvasX = (e.clientX - rect.left - panX) / zoom;
 		const canvasY = (e.clientY - rect.top - panY) / zoom;
 		const node = findNodeAt(canvasX, canvasY);
-		if (node && node.status !== 'pending') {
-			onEnterPhase(node.name, { readOnly: node.status === 'done' });
+		if (node && (node.status !== 'pending' || !!node.waitingFor?.length)) {
+			onEnterPhase(node.name, { readOnly: node.status === 'done' || !!node.waitingFor?.length });
 		}
 	}
 
@@ -604,7 +606,7 @@
 				</span>
 				{#if execution}
 					<span class="font-mono text-xs text-slate-500">
-						phase {canonicalPhaseName(execution.phase ?? '—')} · {execution.execution_id}
+						phase {execution.phase ?? '—'} · {execution.execution_id}
 					</span>
 				{/if}
 			</header>
@@ -625,6 +627,10 @@
 		</div>
 		<span class="mt-1 text-sm text-slate-400 font-bold transition hover:text-slate-600" aria-hidden="true">›</span>
 	</button>
+
+    {#each jobIds as jobId (jobId)}
+        <div class="px-4 pb-3"><HarnessExecutionCard {jobId} /></div>
+    {/each}
 
 	<!-- Directed Phase Graph Area with HTML5 Canvas Pan & Zoom -->
 	{#if definitionError}
@@ -692,14 +698,14 @@
 							type="button"
 							style="position: absolute; left: {node.x}px; top: {node.y}px; width: {node.width}px; height: {node.height}px;"
 							class="pointer-events-auto rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent transition disabled:cursor-not-allowed opacity-0 hover:opacity-10 focus-visible:opacity-100 bg-surface-900/10"
-							disabled={isPending}
-							onclick={() => handleNodeClick(node.name, isDone)}
+							disabled={isPending && !node.waitingFor?.length}
+							onclick={() => handleNodeClick(node.name, isDone || !!node.waitingFor?.length)}
 							onpointerdown={handlePointerDown}
 							data-testid="phase-step"
 							data-phase={node.name}
 							data-status={node.status}
 							data-attention={isAttention ? 'true' : 'false'}
-							title={isAttention
+							title={node.waitingFor?.length ? `Waiting for ${node.waitingFor.join(', ')}` : isAttention
 								? `Input needed — enter the ${node.name} agent to answer`
 								: isDone
 									? `View finished ${node.name} orchestrator (read-only)`

@@ -28,6 +28,7 @@ MANIFEST_PATH = "repository/.thesis/workspace.yaml"
 REPOSITORY_PATH = "catalog/repository.json"
 PROVISION_PATH = "catalog/provision.json"
 ACTIVITY_PATH = "repository/.catalog/activity.json"
+DELETION_PATH = "catalog/deletion.json"
 DEFAULT_CONTAINER_PREFIX = "thesis-ws-"
 
 ActivityEntry = dict[str, object]
@@ -147,6 +148,8 @@ class AzureWorkspaceCatalogStore:
             workspace_id = name[len(self._prefix) :]
             if not workspace_id:
                 continue
+            if self.is_deleted(workspace_id):
+                continue
             manifest = self._read_manifest(
                 self._blob_service.get_container_client(name)
             )
@@ -166,7 +169,16 @@ class AzureWorkspaceCatalogStore:
         summaries.sort(key=lambda summary: str(summary["id"]))
         return tuple(summaries)
 
-    def get(self, workspace_id: str) -> dict[str, object] | None:
+    def get(
+        self, workspace_id: str, *, include_deleted: bool = False
+    ) -> dict[str, object] | None:
+        if self.is_deleted(workspace_id):
+            if not include_deleted:
+                return None
+            content = (
+                self._container(workspace_id).download_blob(DELETION_PATH).readall()
+            )
+            return json.loads(content.decode("utf-8"))["workspace"]
         if self._repositories is not None:
             try:
                 manifest = self._repositories.open(workspace_id).manifest
@@ -179,7 +191,10 @@ class AzureWorkspaceCatalogStore:
         container = self._container(workspace_id)
         manifest = self._read_manifest(container)
         if manifest is not None:
-            return summary_from_manifest(manifest)
+            return {
+                **summary_from_manifest(manifest),
+                "owner_id": manifest.owner.owner_id,
+            }
         if not self._container_exists(container):
             return None
         return self._synthetic_summary(workspace_id)
@@ -187,6 +202,8 @@ class AzureWorkspaceCatalogStore:
     def add(self, summary: dict[str, object]) -> dict[str, object]:
         """Provision the workspace container, manifest, and return its summary."""
         workspace_id = str(summary["id"])
+        if self.is_deleted(workspace_id):
+            raise ValueError("workspace has been deleted")
         container = self._container(workspace_id)
         try:
             container.create_container()
@@ -242,6 +259,46 @@ class AzureWorkspaceCatalogStore:
                 overwrite=True,
             )
         return {**summary_from_manifest(manifest), "owner_id": manifest.owner.owner_id}
+
+    def mark_deleted(self, workspace_id: str, deleted_at: str) -> None:
+        """Retain a create-only marker covering Blob, Git and runtime storage."""
+        if self.is_deleted(workspace_id):
+            return
+        summary = self.get(workspace_id)
+        if summary is None:
+            raise KeyError(workspace_id)
+        try:
+            self._container(workspace_id).upload_blob(
+                DELETION_PATH,
+                json.dumps(
+                    {
+                        "workspace_id": workspace_id,
+                        "status": "deletion_pending",
+                        "scope": "all_workspace_data",
+                        "deleted_at": deleted_at,
+                        "workspace": summary,
+                    }
+                ),
+                overwrite=False,
+            )
+        except ResourceExistsError:
+            pass
+
+    def is_deleted(self, workspace_id: str) -> bool:
+        try:
+            self._container(workspace_id).download_blob(DELETION_PATH).readall()
+        except ResourceNotFoundError:
+            return False
+        return True
+
+    def deleted_workspace_ids(self) -> tuple[str, ...]:
+        return tuple(
+            properties.name[len(self._prefix) :]
+            for properties in self._blob_service.list_containers(
+                name_starts_with=self._prefix
+            )
+            if self.is_deleted(properties.name[len(self._prefix) :])
+        )
 
     def add_activity(self, item: dict[str, object]) -> dict[str, object]:
         workspace_id = str(item["workspace_id"])

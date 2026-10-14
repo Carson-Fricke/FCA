@@ -1,10 +1,10 @@
 <script lang="ts">
+	import { derivePhaseAttempts } from '$lib/subagent';
 	import ConsentCard from './ConsentCard.svelte';
 	import ScopeTranscript from './ScopeTranscript.svelte';
-	import WorkflowCard from './WorkflowCard.svelte';
 	import { setWorkflowLiveView } from './workflow-live-view';
 	import { deriveWorkflowLive, isTerminalWorkflow, type WorkflowLiveState } from '$lib/workflow-live';
-	import { buildNodeEntries } from '$lib/transcript';
+	import { buildNodeEntries, isToolRailEntry } from '$lib/transcript';
 	import type { ChatMessage, ConsentConfirmation, ConsentProposal, ExecutionEvent, SteeringPercolationTarget } from '$lib/types';
 
 	let { messages, terminal = false, events = [], workspaceId, percolations = {}, proposal = null,
@@ -17,7 +17,8 @@
 		onEnterPhase?: (executionId: string, phase: string, options: { readOnly: boolean }) => void;
 	} = $props();
 
-	const entries = $derived(buildNodeEntries({ messages: messages.filter((message) => message.kind !== 'sub_agent'), events, terminal }));
+	// Execution metadata updates workflow cards; only meaningful activity renders in the root.
+	const entries = $derived(buildNodeEntries({ messages: messages.filter((message) => message.kind !== 'sub_agent'), events, terminal }).filter((entry) => entry.kind !== 'event'));
 	const liveWorkflows = $derived.by(() => {
 		if (workflows) return workflows;
 		const byExecution = new Map<string, ExecutionEvent[]>();
@@ -30,23 +31,14 @@
 	});
 	setWorkflowLiveView((id) => {
 		const live = liveWorkflows.get(id);
-		return live ? { ...live, onEnterPhase: (phase, options) => onEnterPhase(id, phase,
+		return live ? { ...live, jobIds: derivePhaseAttempts(events.filter(event => event.executionId === id), live.execution.phase ?? "").slice(-1)[0]?.jobs ?? [], onEnterPhase: (phase, options) => onEnterPhase(id, phase,
 			{ readOnly: options.readOnly || isTerminalWorkflow(live.execution) }) } : null;
 	});
 </script>
 
 <div class="space-y-3" data-testid="chat-transcript">
-	{#each entries as entry (entry.id)}
-		{#if entry.kind === 'message' && entry.message.kind === 'workflow'}
-			{@const id = String(entry.message.data?.executionId ?? entry.message.data?.execution_id ?? entry.message.execution_id ?? '')}
-			{@const live = liveWorkflows.get(id)}
-			<WorkflowCard execution={live?.execution} phases={live?.phases ?? []} status={live?.execution.state ?? 'running'}
-				summary={live?.execution.phase ? `Current phase ${live.execution.phase}` : String(entry.message.data?.title ?? 'Workflow launched')}
-				attentionPhases={live?.attentionPhases ?? []} onEnterPhase={(phase, options) => onEnterPhase(id, phase,
-					{ readOnly: options.readOnly || isTerminalWorkflow(live?.execution) })} />
-		{:else}
-			<ScopeTranscript entries={[entry]} {workspaceId} {percolations} />
-		{/if}
+	{#each entries as entry, index (entry.id)}
+        <ScopeTranscript entries={[entry]} {workspaceId} {percolations} connectRail={isToolRailEntry(entry)&&isToolRailEntry(entries[index-1])} />
 	{/each}
 	{#if proposal && onConfirmConsent}
 		<ConsentCard {proposal} onConfirm={onConfirmConsent} onReject={onRejectConsent} busy={consentBusy} />

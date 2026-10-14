@@ -1,5 +1,63 @@
 # Local Market Lake
 
+## Individual option inputs
+
+The Rust local and hosted APIs support option quotes, trades, and `1min`/`1d`
+bars through the same catalog, ensure, read, and query interfaces as equities.
+Resolve the contract first with authenticated `POST /v1/options/resolve`:
+
+```json
+{"underlying":"SPY","right":"call","as_of":"2025-01-23T21:00:00Z","expiration":"2025-02-21","strike":"600"}
+```
+
+Or choose a target expiry and absolute delta:
+
+```json
+{"underlying":"SPY","right":"put","as_of":"2025-01-23T21:00:00Z","days_to_expiration":30,"delta":"0.50"}
+```
+
+Use the returned OSI `symbol` with `asset_class: "option"` for data requests;
+bars also require `interval`. Local contract metadata survives API restart in
+`state/option-contracts.json`. Selection needs Alpaca market-data and contract
+API access (`data.alpaca.markets` and `api.alpaca.markets`) and OPRA entitlement.
+The existing `local ingest` CLI remains the bounded equity ingestion command;
+option ingestion is acquired on demand through the API.
+
+Thesis-submitted harness configurations map aliases to these same selectors:
+
+```yaml
+data:
+  snapshot_id: option-study
+  fingerprint: ""
+  symbols: [ATM]
+  options:
+    ATM:
+      underlying: SPY
+      right: call
+      as_of: "2025-01-23T21:00:00Z"
+      days_to_expiration: 30
+      delta: "0.50"
+  subscriptions:
+    - {data_type: quote, symbols: [ATM]}
+    - {data_type: trade, symbols: [ATM]}
+    - {data_type: bars, symbols: [ATM], interval: 1min}
+```
+
+The program declares matching subscriptions to `ATM`, and receives the normal
+quote/trade/bar callbacks under that alias. The actual contract and selection
+evidence remain in acquisition provenance. `as_of` must end in `Z` and be no
+later than replay start. Selection resolves once, without automatically rolling.
+Expiry and strike can also be combined with delta or DTE respectively.
+
+Defaults are `dte_tolerance: 7` calendar days, `delta_tolerance: "0.10"`, and
+`max_quote_age_seconds: 3600`. Delta is inferred from historical option and
+underlying quote midpoints using European Black-Scholes, with explicit annual
+continuous `risk_free_rate` and `dividend_yield` (both default `"0"`). Future,
+stale, crossed, zero-sided, and unpriceable quotes cannot select a contract;
+no eligible match returns 404. Automatic selectors support standard unadjusted
+100-share contracts. Full chains, open interest, exercise/assignment, margin,
+and option-specific portfolio accounting are outside this market-data interface.
+
 <!-- markdownlint-disable MD013 -->
 
 Local mode is the supported developer path for running the market-lake API and

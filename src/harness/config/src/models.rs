@@ -590,6 +590,28 @@ fn build_data_snapshot(value: YamlValue) -> Result<Value, ConfigError> {
         sha256(&fingerprint, "fingerprint")?;
     }
     let symbols = symbols(take(&mut map, "symbols")?, "symbols")?;
+    let options = match take_opt(&mut map, "options") {
+        None => None,
+        Some(value) => {
+            let values: BTreeMap<String, harness_contracts::OptionSelector> =
+                serde_json::from_value(config_value(&value)?)
+                    .map_err(|e| ConfigError(format!("data.options: {e}")))?;
+            for (alias, selector) in &values {
+                if !symbols
+                    .as_array()
+                    .is_some_and(|items| items.iter().any(|s| s.as_str() == Some(alias)))
+                {
+                    return Err(ConfigError(
+                        "data.options alias must be a data symbol".into(),
+                    ));
+                }
+                selector
+                    .validate()
+                    .map_err(|e| ConfigError(e.to_string()))?;
+            }
+            Some(serde_json::to_value(values).map_err(|e| ConfigError(e.to_string()))?)
+        }
+    };
     if take_opt(&mut map, "bar_interval").is_some() {
         return Err(ConfigError(
             "data.bar_interval is not accepted; declare data.subscriptions".to_string(),
@@ -619,6 +641,9 @@ fn build_data_snapshot(value: YamlValue) -> Result<Value, ConfigError> {
         "symbols": symbols,
         "subscriptions": subscriptions,
     });
+    if let Some(options) = options {
+        data["options"] = options;
+    }
     if let Some(interval) = interval {
         data["bar_interval"] = json!(interval);
     }

@@ -109,7 +109,7 @@ Whether a falsifier can see the claimed regularity at all. A trend claim tested 
 | The relationship changed partway through | [Structural breaks and regime tests](structural-breaks-and-regime-tests) | A long clean series covering both candidate regimes |
 | Too many variants were tried | [Overfitting and selection discipline](overfitting-and-selection-discipline) | The full attempt log and an untouched holdout window |
 | The data may not be what it claims to be | [Point-in-time data validity](point-in-time-data-validity) | As-of snapshots, membership history, action handling |
-| Implied versus realized volatility | [Variance risk premium and options measures](variance-risk-premium-and-options-measures) | Options quotes; intake is roadmap, not supported yet |
+| Implied versus realized volatility | [Variance risk premium and options measures](variance-risk-premium-and-options-measures) | Individual option quotes supported; full chains and open interest unavailable |
 
 ## Required data
 

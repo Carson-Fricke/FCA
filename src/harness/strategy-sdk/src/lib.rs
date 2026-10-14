@@ -42,6 +42,9 @@ pub mod export;
 mod indicator;
 mod outputs;
 mod program;
+/// Versioned evidence descriptors, exhibit specifications and publication helpers.
+pub mod research;
+mod wavelet;
 
 pub use abi::{
     CBarEvent, CBarFrame, CDecimal, CFill, CMarketOrder, CMetricSink, COrderSink, CQuoteEvent,
@@ -68,6 +71,7 @@ pub use program::{
     ScreeningProgram, Side, StrategyProgram, StudyProgram, SubmitError, SubmittedOrder,
     TimeInForce, RESERVED_METRIC_NAMES,
 };
+pub use wavelet::{WaveletIndicator, WaveletScale, WaveletSnapshot};
 
 /// The SDK crate version, compiled into every authored artifact manifest.
 pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");

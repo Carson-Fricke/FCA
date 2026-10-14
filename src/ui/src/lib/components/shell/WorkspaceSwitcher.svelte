@@ -6,12 +6,14 @@
 		workspaces,
 		currentId,
 		onSwitch,
-		onCreate
+		onCreate,
+		onDelete
 	}: {
 		workspaces: WorkspaceSummary[];
 		currentId: string;
 		onSwitch: (id: string) => void;
 		onCreate: () => void;
+		onDelete?: (workspace: WorkspaceSummary) => void;
 	} = $props();
 
 	let open = $state(false);
@@ -96,6 +98,13 @@
 				<span aria-hidden="true">＋</span>
 				<span class="text-sm">Create workspace</span>
 			</button>
+			{#if current && onDelete}
+				<button type="button"
+					class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-loss transition hover:bg-loss/10"
+					onclick={() => { open = false; onDelete?.(current); }} data-testid="delete-workspace-trigger">
+					Delete workspace…
+				</button>
+			{/if}
 		</div>
 	{/if}
 </div>

@@ -1,7 +1,6 @@
 # Source distribution payload for the packaged SDK references. The pure-Python
 # packages are discovered by setuptools; the canonical Rust crate sources and
 # manifests travel with the sdist so a wheel can be rebuilt from it.
-include setup.py
 include src/harness/Cargo.toml
 include src/harness/Cargo.lock
 include src/harness/rust-toolchain.toml

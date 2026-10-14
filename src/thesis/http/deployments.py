@@ -186,21 +186,21 @@ def create_deployment_router() -> APIRouter:
     router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["deployments"])
 
     @router.get("/deployments")
-    async def list_deployments(
+    def list_deployments(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[DeploymentDataService, Depends(get_deployment_service)],
     ) -> dict[str, object]:
         return {"items": list(service.list_deployments(workspace_id))}
 
     @router.get("/deployments/orders")
-    async def list_orders(
+    def list_orders(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[DeploymentDataService, Depends(get_deployment_service)],
     ) -> dict[str, object]:
         return {"items": list(service.list_orders(workspace_id))}
 
     @router.get("/deployments/portfolio")
-    async def get_portfolio(
+    def get_portfolio(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[DeploymentDataService, Depends(get_deployment_service)],
     ) -> dict[str, object]:
@@ -211,7 +211,7 @@ def create_deployment_router() -> APIRouter:
             raise _service_error(error) from error
 
     @router.get("/deployments/risk-decisions")
-    async def get_risk_decisions(
+    def get_risk_decisions(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         request_ref: Annotated[str, Query(min_length=1, max_length=128)],
         service: Annotated[DeploymentDataService, Depends(get_deployment_service)],

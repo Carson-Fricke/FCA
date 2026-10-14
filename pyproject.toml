@@ -18,12 +18,14 @@ dependencies = [
     "fastapi>=0.115",
     "hdbscan>=0.8.44",
     "httpx>=0.27",
+    "jsonschema>=4.23",
     "numpy>=2.0",
     "onnxruntime>=1.20",
     "orjson>=3.10",
     "pyarrow>=17",
     "pydantic-settings>=2.5",
     "pyjwt[crypto]>=2.9",
+    "referencing>=0.37",
     "tokenizers>=0.21",
     "typer>=0.16",
     "uvicorn>=0.30",
@@ -52,13 +54,14 @@ exclude = ["*.target*", "*.tests*", "*.src", "*.src.*"]
 
 [tool.setuptools.package-data]
 "thesis.knowledge" = ["library/**/*.md", "library/*.md"]
-"harness.strategy-sdk" = ["Cargo.toml", "src/*.rs"]
+"harness.strategy-sdk" = ["Cargo.toml", "src/*.rs", "src/research/*.rs"]
 "harness.contracts" = ["Cargo.toml", "src/*.rs"]
 "harness.num" = ["Cargo.toml", "src/*.rs"]
 
 [tool.pytest.ini_options]
 addopts = ["--strict-config", "--strict-markers", "--import-mode=importlib", "-ra"]
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = [
     "slow: correct but expensive; excluded from focused runs",
     "e2e: requires the running local stack",

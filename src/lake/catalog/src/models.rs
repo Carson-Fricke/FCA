@@ -271,7 +271,7 @@ pub struct CoverageRecord {
     /// Canonical bar interval token for bars partitions; `None` otherwise.
     pub interval: Option<String>,
     /// How a bars partition was produced; `None` for every non-bars row and
-    /// for legacy bars rows written before provenance existed.
+    /// for nonterminal bars that have not produced a partition yet.
     pub bar_source: Option<BarSource>,
     /// The revision the bars partition was built from: the provider response
     /// revision for fetched bars and the trade partition revision for derived
@@ -338,8 +338,7 @@ impl CoverageRecord {
     /// Only bars rows carry a source, and a source always names the revision
     /// it was built from: `provider` rows record the fetched partition
     /// revision and `derived` rows record the trade partition revision, so a
-    /// later trade repair can be detected as a revision mismatch. Rows without
-    /// provenance stay byte-identical to the legacy serialization.
+    /// later trade repair can be detected as a revision mismatch. Terminal bars require provenance when decoded from persistence.
     pub fn with_bar_provenance(
         mut self,
         source: BarSource,
@@ -486,6 +485,11 @@ pub(crate) fn coverage_from_value(value: &Value) -> Result<CoverageRecord, DataE
             record.with_bar_provenance(source, revision)
         }
         None => {
+            if record.data_type == DataType::Bars && record.is_terminal() {
+                return Err(DataError::value(
+                    "outdated bars coverage: provenance is required",
+                ));
+            }
             if source_revision.is_some() {
                 return Err(DataError::value(
                     "coverage source_revision requires a bar_source",

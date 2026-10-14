@@ -309,3 +309,49 @@ fn accepted_input_is_immutable_through_admission_and_result_publication() {
     check(&store);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn progress_survives_restart_and_terminal_publication_from_an_older_snapshot() {
+    use harness_contracts::progress::{ExecutionProgress, ExecutionStage};
+    let root = temp_root("progress");
+    let store = FileSystemJobStore::new(&root);
+    let accepted = record("job-progress", JobState::Queued);
+    store.admit(accepted.clone()).unwrap();
+    store.mark_running("job-progress", Utc::now()).unwrap();
+    let first = ExecutionProgress::stage(ExecutionStage::ReadingData);
+    let initial = store
+        .update_progress("job-progress", first.clone(), Utc::now())
+        .unwrap();
+    let mut next = first;
+    next.bytes = 4516000;
+    next.rows = 54782;
+    store
+        .update_progress("job-progress", next, Utc::now())
+        .unwrap();
+    let reopened = FileSystemJobStore::new(&root);
+    let restored = reopened.get("job-progress").unwrap();
+    assert_eq!(restored.accepted_input, accepted.accepted_input);
+    assert_eq!(restored.input_digest, accepted.input_digest);
+    assert_eq!(restored.progress.len(), 1);
+    assert_eq!(
+        restored.progress[0].started_at,
+        initial.progress[0].started_at
+    );
+    assert_eq!(restored.progress[0].snapshot.bytes, 4516000);
+    let mut failed = initial;
+    failed.state = JobState::Failed;
+    failed.updated_at = Utc::now();
+    failed.error_message = Some("connection reset during quote read".into());
+    let failed = reopened.put_result(failed, BTreeMap::new()).unwrap();
+    assert_eq!(failed.progress[0].snapshot.bytes, 4516000);
+    assert!(failed.progress[0].finished_at.is_some());
+    assert!(matches!(
+        reopened.update_progress(
+            "job-progress",
+            ExecutionProgress::stage(ExecutionStage::RunningStudy),
+            Utc::now()
+        ),
+        Err(StoreError::Terminal(_))
+    ));
+    std::fs::remove_dir_all(root).unwrap();
+}

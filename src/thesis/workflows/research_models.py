@@ -18,7 +18,6 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Protocol, cast
 
-from thesis.agent.runtime.schema import render_violations, violations
 from thesis.research.models import (
     FittedModelRef,
     InMemoryResearchModelStore,
@@ -35,6 +34,7 @@ from thesis.workflows.backtests import (
     BacktestRunResult,
 )
 from thesis.workspaces.programs import PROGRAM_ID_PATTERN, ProgramKind
+from thesis_runtime.tools.schema import render_violations, violations
 
 PROGRAM_REFERENCE_SCHEMA: dict[str, object] = {
     "type": "object",

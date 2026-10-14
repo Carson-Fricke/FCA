@@ -133,14 +133,17 @@ export type ChatMessage = Pick<ChatMessageWire,
 >> & {
 	seq?: number;
 	threadId?: string | null;
+	deliveryState?: 'sending' | 'failed';
+	outputState?: 'streaming' | 'interrupted';
+	outputFailure?: string;
 	tool_result?: ToolResult | null;
 };
 
 /** Thread kind and flattened links are presentation projections of the durable record. */
 export type ChatThread = ChatThreadWire & {
 	kind: 'chat' | 'investigation';
-	investigation_ids: NonNullable<ChatThreadWire['links']['investigation_ids']>;
-	strategy_ids: NonNullable<ChatThreadWire['links']['strategy_ids']>;
+	investigation_ids: string[];
+	strategy_ids: string[];
 };
 
 /** The percolation result returned by POST .../chats/{chat}/messages. */
@@ -159,7 +162,7 @@ export type ExecutionEventType = ExecutionEventWire['eventType'];
 
 /** Durable execution event; `as_dict()` camelCase serialization. */
 export type ExecutionEvent = ExecutionEventWire & {
-	seq?: number;
+	seq: number;
 	threadId?: string | null;
 };
 
@@ -173,29 +176,18 @@ export type TimelineItem = TimelineItemWire;
 /** Cards can project handles before the complete execution record is loaded. */
 export type WorkflowExecutionRecord = Pick<WorkflowExecutionWire,
 	'execution_id' | 'chat_id' | 'trigger_message_id' | 'workflow_id' | 'workflow_version' |
-	'requested_by' | 'state' | 'phase' | 'intent_epoch' | 'steering_message_ids' | 'created_at'
+	'requested_by' | 'state' | 'active_phases' | 'intent_epoch' | 'steering_message_ids' | 'created_at'
 > & Partial<Omit<WorkflowExecutionWire,
 	'execution_id' | 'chat_id' | 'trigger_message_id' | 'workflow_id' | 'workflow_version' |
-	'requested_by' | 'state' | 'phase' | 'intent_epoch' | 'steering_message_ids' | 'created_at'
->>;
+	'requested_by' | 'state' | 'active_phases' | 'intent_epoch' | 'steering_message_ids' | 'created_at'
+>> & { phase?: string | null };
+
+// A nullable single-node label is presentation only, derived from active_phases.
 
 /** Read-only topology returned by GET /v1/workflows/{workflow_id}. */
 export type WorkflowDefinition = WorkflowDefinitionWire;
 
 // ---------- Nested sub-agents and transcript items ----------
-
-/**
- * Discriminator for chat transcript items. Every renderable entry carries a
- * `kind` plus a `data` payload so the transcript can route to the right card
- * without inspecting message bodies.
- */
-export type TranscriptItemKind = ChatMessageWire['kind'];
-
-export interface TranscriptItem {
-	id: string;
-	kind: TranscriptItemKind;
-	data: Record<string, unknown>;
-}
 
 export type SubAgentStatus = SubAgentNodeWire['status'] | 'spawned' | 'progress';
 
@@ -229,6 +221,7 @@ export type SubAgentNode = Pick<SubAgentNodeWire,
 export interface WorkflowPhase {
 	name: string;
 	status: 'done' | 'active' | 'pending';
+	waitingFor?: string[];
 	attempts?: number;
 }
 
@@ -243,6 +236,10 @@ export interface ExecutionNodeRef {
 export type ToolResultFailure = NonNullable<ToolResultWire['failure']>;
 
 export type ToolResult = ToolResultWire & {
+	/** Read-only presentation group; never persisted as another result. */
+	observations?: ToolResult[];
+	/** Previous displayed sketch revision in this scope, for a local visual diff. */
+	previousSketch?: Record<string, unknown>;
 	pending?: boolean;
 	outcome?: 'unknown_outcome' | 'interrupted';
 	requestState?: 'waiting' | 'answered' | 'resolved';
@@ -429,8 +426,8 @@ export interface BacktestDetail {
 export interface LaunchBacktestInput {
 	/** Content-addressed strategy bundle reference. */
 	bundleRef: string;
-	/** Harness configuration path, e.g. `config/harness/backtest.yaml`. */
-	configPath: string;
+	/** Frozen inline configuration retained before submission. */
+	config: Record<string, unknown>;
 	/** Activation environment; the API defaults to `paper`. */
 	environment?: 'paper' | 'shadow' | 'live';
 	/** Optional strategy attribution. */
@@ -479,8 +476,28 @@ export interface HarnessStatus {
 	error: string | null;
 }
 
+/** Observed harness telemetry; counters belong to the named dataset. */
+export interface HarnessJobProgress {
+    completed: boolean;
+    finished_at: string | null;
+    stage: 'compiling' | 'preparing_data' | 'reading_data' | 'running_study' | 'running_backtest' | 'writing_artifacts';
+    symbol: string | null;
+    data_type: string | null;
+    start_date: string | null;
+    end_date: string | null;
+    sessions_ready: number | null;
+    sessions_total: number | null;
+    sessions_cached: number | null;
+    rows: number;
+    bytes: number;
+    request_timeout_seconds: number | null;
+    started_at: string;
+    updated_at: string;
+}
+
 /** One harness job row from `GET /v1/jobs/{job_id}`. */
 export interface HarnessJobStatus {
+    progress?: HarnessJobProgress[];
 	job_id: string;
 	state: string;
 	created_at?: string | null;

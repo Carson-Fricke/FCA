@@ -15,7 +15,7 @@ one neutral session inbox, one canonical incoming writer, and one pure provider
 projection shared by live execution and replay. Provider-native roles MUST NOT
 become session message types or independent delivery paths.
 `Conversations.deliver_session_message` and handle delegation converge on
-`runtime/incoming.py::write_incoming`; tool results use the injected inbox
+`thesis_runtime/conversations/incoming.py::write_incoming`; tool results use the injected inbox
 persistence port, not a native-history append.
 
 The root reference loads this contract for agents reading `AGENTS.md`; the
@@ -24,7 +24,7 @@ The `@` reference depends on loader support; unsupported loaders MUST read the
 referenced file directly. Instructions cannot guarantee obedience or honesty by
 every LLM or instruction loader.
 The integration owner MUST retain and run executable architecture and behavior tests,
-including `tests/thesis/agent/runtime/test_delivery_architecture.py`, and MUST
+including `tests/thesis_runtime/test_delivery_architecture.py`, and MUST
 NOT treat prompts or documentation as proof of implementation compliance.
 The source guard is mandatory and MUST fail for missing required modules, with
 no hidden optional bypass. `REQ-DEL` in the runtime architecture names the
@@ -56,6 +56,17 @@ Instructions and prompts are not proof of compliance: the integration owner
 MUST retain and run interruption, acknowledgement-mismatch, and
 duplicate-admission behavior tests.
 
+## Current Contract Policy
+
+Follow "Current Contracts and Data Cutovers" in
+`.github/instructions/copilot-instructions.md` for every contract change. Keep
+one current contract and implementation, updating producers, consumers, tests,
+fixtures, and active documentation together. Obsolete development data is deleted
+by default within the authorized scope; necessary preservation uses a bounded
+one-time conversion outside the runtime, with the converter removed afterward.
+Readers may reject outdated data, never infer or upgrade it. Old data, callers,
+and tests do not authorize compatibility branches or version-selected behavior.
+
 ## FCA Execution Policy
 
 - Never assign the same file to concurrent agents. Treat shared entrypoints,
@@ -67,12 +78,8 @@ duplicate-admission behavior tests.
   the first integration run. If a suite hangs or times out, isolate the test
   with a hard timeout instead of rerunning the unchanged suite.
 - Do not start work beyond the scope the user approved.
-- Treat superseded behavior as something to remove, not preserve, unless the
-  user explicitly requests preservation. Do not infer a compatibility requirement
-  from old documents, persisted formats, existing callers, or tests. Within the
-  approved scope, remove obsolete paths and update affected callers, tests, and
-  active documentation; do not invent adapters, aliases, fallbacks, migrations,
-  or interfaces solely to keep superseded behavior or an outdated test working.
+- Remove superseded behavior within the approved scope under the Current
+  Contract Policy above; do not infer preservation requirements.
 - Do not rewrite historical verification records solely because later tasks
   change the repository-wide test count.
 - Use `ruff` for all lint and format checks and `ty` for all type checks. Do not

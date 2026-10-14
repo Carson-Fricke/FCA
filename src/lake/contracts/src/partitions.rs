@@ -151,6 +151,7 @@ pub const SUPPORTED_DATASETS: &[Dataset] = &[
     (AssetClass::Crypto, DataType::Trade),
     (AssetClass::Crypto, DataType::Quote),
     (AssetClass::Equity, DataType::Bars),
+    (AssetClass::Option, DataType::Bars),
     (AssetClass::Crypto, DataType::Bars),
 ];
 

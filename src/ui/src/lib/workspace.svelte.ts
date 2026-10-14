@@ -69,6 +69,23 @@ export function setLastWorkspace(workspaceId: string): void {
 	if (typeof localStorage !== 'undefined') localStorage.setItem('thesis.workspace', workspaceId);
 }
 
+/** Remove browser state owned by a deleted workspace. */
+export function forgetWorkspace(workspaceId: string): void {
+    delete ui.pinnedWidgets[workspaceId];
+    persistPins(ui.pinnedWidgets);
+    if (ui.lastWorkspace === workspaceId) {
+        ui.lastWorkspace = '';
+        if (typeof localStorage !== 'undefined') localStorage.removeItem('thesis.workspace');
+    }
+    if (typeof localStorage !== 'undefined') {
+        const prefixes = [`thesis.scope.${workspaceId}.`, `thesis.subagent.expanded.${workspaceId}.`];
+        const keys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index));
+        for (const key of keys) {
+            if (key && prefixes.some((prefix) => key.startsWith(prefix))) localStorage.removeItem(key);
+        }
+    }
+}
+
 let toastSeq = 0;
 
 export function notify(message: string, error = false): void {

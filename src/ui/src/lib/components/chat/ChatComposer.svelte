@@ -25,12 +25,13 @@
 		if (!canSend) return;
 		const draft = body;
 		const steering = anyActiveWorkflow && isSteering(body) ? body.trim() : null;
+		body = '';
 		submitting = true;
 		error = '';
 		try {
 			await onSubmit({ body: draft.trim(), attachmentIds: [], steeringIntent: steering });
-			if (body === draft) body = '';
 		} catch (failure) {
+			if (!body) body = draft;
 			error = failure instanceof Error ? `Message could not be sent: ${failure.message}` : 'Message could not be sent.';
 		} finally {
 			submitting = false;

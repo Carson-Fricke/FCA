@@ -42,7 +42,7 @@ describe('timeline page transport', () => {
 		try {
 			const known = await realApi.listChatSubAgents('alpha-lab', 'chat');
 			const old: ExecutionEvent = { eventId: 'completed', eventType: 'sub_agent.completed', executionId: 'exec',
-				workspaceId: 'alpha-lab', cursor: 3, occurredAt: '2026-01-01T00:00:03Z', actorId: 'agent', actorScope: 'assistant',
+				workspaceId: 'alpha-lab', cursor: 3, seq: 3, occurredAt: '2026-01-01T00:00:03Z', actorId: 'agent', actorScope: 'assistant',
 				correlationId: 'old', intentEpoch: 0, lateResult: false, payload: { subAgentId: 'node', phaseAttemptId: 'attempt-a' } };
 			const projected = deriveSubAgentTree([old], known)[0].node;
 			expect(projected).toMatchObject({ status: 'running', acceptsInput: true, phaseAttemptId: 'attempt-b',
@@ -69,7 +69,7 @@ describe('timeline page transport', () => {
 		} finally { fetch.mockRestore(); }
 	});
 	it('validates list/create thread records and projects nested links without dropping consumed positions', async () => {
-		const raw = { ...backendThread, links: { ...backendThread.links, investigation_ids: ['investigation'] }, input_consumed_positions: { root: 3 } };
+		const raw = { ...backendThread, links: { ...backendThread.links, references: { 'fca.investigation': ['investigation'] } }, input_consumed_positions: { root: 3 } };
 		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ items: [raw] })))
 			.mockResolvedValueOnce(new Response(JSON.stringify(raw)));
 		try {

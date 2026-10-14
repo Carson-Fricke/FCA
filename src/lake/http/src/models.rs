@@ -11,9 +11,8 @@ use std::collections::BTreeMap;
 use crate::error::ApiError;
 use crate::validate::{
     optional_bool, optional_string, optional_string_list, parse_asset_class, parse_data_type,
-    parse_date, parse_interval, reject_option_data_type, reject_unknown, required_string,
-    validate_date_range, validate_optional_symbol, validate_optional_symbol_list,
-    validate_symbol_field,
+    parse_date, parse_interval, reject_unknown, required_string, validate_date_range,
+    validate_optional_symbol, validate_optional_symbol_list, validate_symbol_field,
 };
 
 /// Serialize a [`Date`] as `YYYY-MM-DD`.
@@ -340,9 +339,6 @@ impl ReadQuery {
                 "Input should be 'trade', 'quote' or 'bars'",
             ));
         }
-        if asset_class == AssetClass::Option {
-            reject_option_data_type(data_type)?;
-        }
         let interval = parse_interval(data_type, raw.interval)?;
         let Some(symbol) = validate_optional_symbol(raw.symbol, "symbol")? else {
             return Err(ApiError::validation_error(
@@ -440,9 +436,6 @@ pub(crate) struct CoverageQueryRaw {
     /// Explicitly selected OSI contracts.
     #[serde(default)]
     pub contract_symbols: Option<Vec<String>>,
-    /// Alias for `contract_symbols`.
-    #[serde(default)]
-    pub contracts: Option<Vec<String>>,
     /// Requested bars interval token.
     #[serde(default)]
     pub interval: Option<String>,
@@ -469,8 +462,6 @@ pub(crate) struct CoverageQuery {
     pub underlying: Option<String>,
     /// Explicitly selected OSI contracts.
     pub contract_symbols: Option<Vec<String>>,
-    /// Alias for `contract_symbols`.
-    pub contracts: Option<Vec<String>>,
     /// Inclusive first session date.
     pub start_date: Date,
     /// Inclusive last session date.
@@ -484,9 +475,6 @@ impl CoverageQuery {
     pub(crate) fn parse(raw: CoverageQueryRaw) -> Result<Self, ApiError> {
         let asset_class = parse_asset_class(&raw.asset_class)?;
         let data_type = parse_data_type(&raw.data_type)?;
-        if asset_class == AssetClass::Option {
-            reject_option_data_type(data_type)?;
-        }
         let interval = parse_interval(data_type, raw.interval)?;
         let start_date = parse_date(&raw.start_date, "start_date")?;
         let end_date = parse_date(&raw.end_date, "end_date")?;
@@ -495,7 +483,6 @@ impl CoverageQuery {
         let underlying = validate_optional_symbol(raw.underlying, "underlying")?;
         let contract_symbols =
             validate_optional_symbol_list(raw.contract_symbols, "contract_symbols")?;
-        let contracts = validate_optional_symbol_list(raw.contracts, "contracts")?;
 
         if asset_class != AssetClass::Option && symbol.is_none() {
             return Err(ApiError::validation_error(
@@ -503,8 +490,7 @@ impl CoverageQuery {
                 "Value error, symbol is required for equity and crypto coverage",
             ));
         }
-        if (contract_symbols.is_some() || contracts.is_some()) && asset_class != AssetClass::Option
-        {
+        if (contract_symbols.is_some()) && asset_class != AssetClass::Option {
             return Err(ApiError::validation_error(
                 "contract_symbols",
                 "Value error, contract_symbols are supported for options only",
@@ -520,7 +506,6 @@ impl CoverageQuery {
             && symbol.is_none()
             && underlying.is_none()
             && contract_symbols.is_none()
-            && contracts.is_none()
         {
             return Err(ApiError::validation_error(
                 "underlying",
@@ -534,7 +519,6 @@ impl CoverageQuery {
             symbol,
             underlying,
             contract_symbols,
-            contracts,
             start_date,
             end_date,
             interval,
@@ -564,14 +548,13 @@ pub(crate) struct EquityEnsureRequest {
 pub(crate) struct OptionEnsureRequest {
     /// Requested data type.
     pub data_type: DataType,
+    pub interval: Option<String>,
     /// Legacy single-symbol selector.
     pub symbol: Option<String>,
     /// Requested underlying.
     pub underlying: Option<String>,
     /// Explicitly selected OSI contracts.
     pub contract_symbols: Option<Vec<String>>,
-    /// Alias for `contract_symbols`.
-    pub contracts: Option<Vec<String>>,
     /// Inclusive first session date.
     pub start_date: Date,
     /// Inclusive last session date.
@@ -643,13 +626,13 @@ fn parse_option_ensure(
             "symbol",
             "underlying",
             "contract_symbols",
-            "contracts",
             "start_date",
             "end_date",
+            "interval",
         ],
     )?;
     let data_type = parse_data_type(&required_string(object, "data_type")?)?;
-    reject_option_data_type(data_type)?;
+    let interval = parse_interval(data_type, optional_string(object, "interval")?)?;
     let symbol = validate_optional_symbol(optional_string(object, "symbol")?, "symbol")?;
     let underlying =
         validate_optional_symbol(optional_string(object, "underlying")?, "underlying")?;
@@ -657,20 +640,11 @@ fn parse_option_ensure(
         optional_string_list(object, "contract_symbols")?,
         "contract_symbols",
     )?;
-    let contracts =
-        validate_optional_symbol_list(optional_string_list(object, "contracts")?, "contracts")?;
     let start_date = parse_date(&required_string(object, "start_date")?, "start_date")?;
     let end_date = parse_date(&required_string(object, "end_date")?, "end_date")?;
     validate_date_range(start_date, end_date)?;
 
-    if contract_symbols.is_some() && contracts.is_some() {
-        return Err(ApiError::validation_error(
-            "contracts",
-            "Value error, use only one of contract_symbols or contracts",
-        ));
-    }
-    if symbol.is_none() && underlying.is_none() && contract_symbols.is_none() && contracts.is_none()
-    {
+    if symbol.is_none() && underlying.is_none() && contract_symbols.is_none() {
         return Err(ApiError::validation_error(
             "underlying",
             "Value error, an option underlying or selected contract is required",
@@ -678,10 +652,10 @@ fn parse_option_ensure(
     }
     Ok(OptionEnsureRequest {
         data_type,
+        interval,
         symbol,
         underlying,
         contract_symbols,
-        contracts,
         start_date,
         end_date,
     })
@@ -700,8 +674,6 @@ pub(crate) struct FileQueryBody {
     pub underlying: Option<String>,
     /// Explicitly selected OSI contracts.
     pub contract_symbols: Option<Vec<String>>,
-    /// Alias for `contract_symbols`.
-    pub contracts: Option<Vec<String>>,
     /// Inclusive first session date.
     pub start_date: Date,
     /// Inclusive last session date.
@@ -734,8 +706,6 @@ pub(crate) struct SqlQueryBody {
     pub underlying: Option<String>,
     /// Explicitly selected OSI contracts.
     pub contract_symbols: Option<Vec<String>>,
-    /// Alias for `contract_symbols`.
-    pub contracts: Option<Vec<String>>,
     /// Inclusive first session date.
     pub start_date: Date,
     /// Inclusive last session date.
@@ -787,7 +757,6 @@ fn parse_file_query(
             "symbol",
             "underlying",
             "contract_symbols",
-            "contracts",
             "start_date",
             "end_date",
             "ensure",
@@ -802,7 +771,6 @@ fn parse_file_query(
         symbol: body.symbol,
         underlying: body.underlying,
         contract_symbols: body.contract_symbols,
-        contracts: body.contracts,
         start_date: body.start_date,
         end_date: body.end_date,
         ensure,
@@ -822,7 +790,6 @@ fn parse_sql_query(
             "symbol",
             "underlying",
             "contract_symbols",
-            "contracts",
             "start_date",
             "end_date",
             "ensure",
@@ -860,7 +827,6 @@ fn parse_sql_query(
         symbol: body.symbol,
         underlying: body.underlying,
         contract_symbols: body.contract_symbols,
-        contracts: body.contracts,
         start_date: body.start_date,
         end_date: body.end_date,
         ensure,
@@ -878,7 +844,6 @@ struct QuerySelection {
     symbol: Option<String>,
     underlying: Option<String>,
     contract_symbols: Option<Vec<String>>,
-    contracts: Option<Vec<String>>,
     start_date: Date,
     end_date: Date,
     interval: Option<String>,
@@ -889,9 +854,6 @@ fn parse_query_selection(
 ) -> Result<QuerySelection, ApiError> {
     let asset_class = parse_asset_class(&required_string(object, "asset_class")?)?;
     let data_type = parse_data_type(&required_string(object, "data_type")?)?;
-    if asset_class == AssetClass::Option {
-        reject_option_data_type(data_type)?;
-    }
     let interval = parse_interval(data_type, optional_string(object, "interval")?)?;
     let symbol = validate_optional_symbol(optional_string(object, "symbol")?, "symbol")?;
     let underlying =
@@ -900,8 +862,6 @@ fn parse_query_selection(
         optional_string_list(object, "contract_symbols")?,
         "contract_symbols",
     )?;
-    let contracts =
-        validate_optional_symbol_list(optional_string_list(object, "contracts")?, "contracts")?;
     let start_date = parse_date(&required_string(object, "start_date")?, "start_date")?;
     let end_date = parse_date(&required_string(object, "end_date")?, "end_date")?;
     validate_date_range(start_date, end_date)?;
@@ -913,24 +873,14 @@ fn parse_query_selection(
                 "Value error, symbol is required for equity and crypto queries",
             ));
         }
-        if underlying.is_some() || contract_symbols.is_some() || contracts.is_some() {
+        if underlying.is_some() || contract_symbols.is_some() {
             return Err(ApiError::validation_error(
                 "underlying",
                 "Value error, option selection fields are supported for options only",
             ));
         }
     } else {
-        if contract_symbols.is_some() && contracts.is_some() {
-            return Err(ApiError::validation_error(
-                "contracts",
-                "Value error, use only one of contract_symbols or contracts",
-            ));
-        }
-        if symbol.is_none()
-            && underlying.is_none()
-            && contract_symbols.is_none()
-            && contracts.is_none()
-        {
+        if symbol.is_none() && underlying.is_none() && contract_symbols.is_none() {
             return Err(ApiError::validation_error(
                 "underlying",
                 "Value error, an option underlying or selected contract is required",
@@ -944,7 +894,6 @@ fn parse_query_selection(
         symbol,
         underlying,
         contract_symbols,
-        contracts,
         start_date,
         end_date,
         interval,

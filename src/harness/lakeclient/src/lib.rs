@@ -12,6 +12,8 @@
 //! `LAKE_API__BEARER_TOKEN`. The bearer token travels only in the
 //! `Authorization` header; it is never placed in a URL, body, or log line, and
 //! the debug rendering of the client redacts it.
+//! Without a URL override, the client uses the Azure development lake.
+//! Set `LAKE_API_URL=http://127.0.0.1:8002` to select the local lake.
 //!
 //! [`LakeClient::read_arrow`] maps a `404 no_data` response to an empty batch
 //! list: a window without ensured data is a normal empty read, not an error.

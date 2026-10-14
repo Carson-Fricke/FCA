@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from thesis.chat import ChatService, WorkflowDefinition, WorkflowExecution
 from thesis.http.application import create_app
+from thesis_runtime.conversations import (
+    ChatService,
+    WorkflowDefinition,
+    WorkflowExecution,
+)
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 WORKFLOW = WorkflowDefinition(
@@ -20,6 +26,19 @@ WORKFLOW = WorkflowDefinition(
 )
 WORKSPACE = "workspace-a"
 BEARER_TOKEN = "thesis-test-token"
+
+
+@pytest.fixture(scope="session")
+def _exported_wire_schema() -> dict[str, Any]:
+    from thesis.http.schema import export_schema
+
+    return export_schema()
+
+
+@pytest.fixture
+def wire_schema(_exported_wire_schema: dict[str, Any]) -> dict[str, Any]:
+    """Generate once; each test gets its own mutable schema document."""
+    return deepcopy(_exported_wire_schema)
 
 
 async def _no_sleeper(seconds: float) -> None:

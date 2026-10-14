@@ -264,6 +264,11 @@ pub fn coverage_from_entity(entity: &TableEntity) -> Result<CoverageRecord, Data
             record.with_bar_provenance(source, revision)
         }
         None => {
+            if record.data_type == DataType::Bars && record.is_terminal() {
+                return Err(DataError::value(
+                    "outdated bars coverage: provenance is required",
+                ));
+            }
             if optional_string(entity, "SourceRevision").is_some() {
                 return Err(DataError::value(
                     "coverage SourceRevision requires a BarSource",

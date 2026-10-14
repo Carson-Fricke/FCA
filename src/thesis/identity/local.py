@@ -55,7 +55,11 @@ def default_local_identity_root() -> Path:
     ``.local/thesis/identity``.  An explicit path always overrides this
     default, which is what tests pass over ``tmp_path``.
     """
-    repository_root = Path(__file__).resolve().parents[3]
+    repository_root = next(
+        parent
+        for parent in Path(__file__).resolve().parents
+        if (parent / "pyproject.toml").is_file()
+    )
     return repository_root.joinpath(*_LOCAL_IDENTITY_PARTS)
 
 

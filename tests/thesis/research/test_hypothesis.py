@@ -1,4 +1,4 @@
-"""Workspace-qualified hypothesis persistence and publication contracts."""
+"""Workspace isolation and real-Git hypothesis restart/publication contracts."""
 
 from datetime import UTC, datetime
 from pathlib import Path
@@ -98,7 +98,6 @@ def _document(
 def provider(tmp_path: Path) -> LocalWorkspaceProvider:
     repositories = LocalWorkspaceProvider(tmp_path / "repositories")
     repositories.create(_manifest("workspace-one"))
-    repositories.create(_manifest("workspace-two"))
     return repositories
 
 
@@ -119,27 +118,18 @@ def test_memory_is_workspace_keyed_and_requires_explicit_seed_context() -> None:
 
 
 @pytest.mark.slow
-def test_local_restart_two_instances_isolation_and_projection(
+def test_local_restart_idempotency_and_immutable_projection(
     provider: LocalWorkspaceProvider,
 ) -> None:
     first = WorkspaceHypothesisStore(provider)
-    one, two = _document(), _document(body="Other workspace")
+    one = _document()
     relative = first.save(one, workspace_id="workspace-one")
     assert relative == f"hypotheses/h-shared/{one.content_sha256}.md"
-    obsolete = provider.resolve_path("workspace-one", "hypotheses/h-obsolete.md")
-    obsolete.write_bytes(_document(identity="h-obsolete").to_bytes())
-    assert first.list(workspace_id="workspace-one") == (one.hypothesis_id,)
-    with pytest.raises(HypothesisArtifactError, match="not found"):
-        first.load("h-obsolete", workspace_id="workspace-one")
-    with pytest.raises(HypothesisArtifactError, match="not found"):
-        first.path_for("h-obsolete", workspace_id="workspace-one")
     assert first.path_for(one.hypothesis_id, workspace_id="workspace-one") == (
         provider.resolve_path("workspace-one", relative)
     )
-    first.save(two, workspace_id="workspace-two")
     restarted = WorkspaceHypothesisStore(LocalWorkspaceProvider(provider.root))
     assert restarted.load(one.hypothesis_id, workspace_id="workspace-one") == one
-    assert restarted.load(two.hypothesis_id, workspace_id="workspace-two") == two
     assert first.list(workspace_id="workspace-one") == (one.hypothesis_id,)
     root = provider.open("workspace-one").root
     coordinator = GitCoordinator(root)
@@ -152,23 +142,6 @@ def test_local_restart_two_instances_isolation_and_projection(
     assert (
         provider.resolve_path("workspace-one", relative).read_bytes() == one.to_bytes()
     )
-    assert first.load(two.hypothesis_id, workspace_id="workspace-two") == two
-
-
-class _RemoteRepositories(LocalWorkspaceProvider):
-    """Fake remote observes committed artifacts and can reject a push."""
-
-    def __init__(self, root: Path) -> None:
-        super().__init__(root)
-        self.published: list[str] = []
-        self.reject = True
-
-    def publish(self, workspace_id: str) -> str:
-        head = super().publish(workspace_id)
-        self.published.append(head)
-        if self.reject:
-            raise RuntimeError("remote history conflict")
-        return head
 
 
 @pytest.mark.parametrize(

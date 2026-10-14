@@ -13,6 +13,8 @@ crate-type = ["rlib"]
 test-support = ["dep:axum", "dep:arrow-schema"]
 
 [dependencies]
+harness-contracts = { path = "../contracts" }
+arrow-buffer = "59"
 arrow-array = "59"
 arrow-ipc = "59"
 arrow-schema = { version = "59", optional = true }

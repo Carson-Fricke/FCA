@@ -220,36 +220,13 @@ def test_trade_log_ignores_fills_that_would_publish_other_trades() -> None:
     assert _stats(record)["net_pnl"] == -2.4
 
 
-def test_legacy_artifact_without_trades_is_not_rebuilt_from_fills() -> None:
-    # The ledger holds a closed round trip; it must not be rebuilt into a trade.
-    record = _case("legacy_no_trades")
-    stats = _stats(record)
-    assert record.trade_log == ()
-    assert record.trades is None
-    assert record.win_rate is None
-    assert stats["trades_unavailable_reason"] == "legacy_artifact"
-    for key in (
-        "trade_count",
-        "win_count",
-        "loss_count",
-        "hit_rate",
-        "net_pnl",
-        "gross_pnl",
-        "fees",
-        "gross_profit",
-        "gross_loss",
-        "net_profit",
-        "net_loss",
-        "profit_factor",
-        "average_net_win",
-        "average_net_loss",
-        "largest_net_win",
-        "largest_net_loss",
-    ):
-        assert stats[key] is None, key
-    # The equity block is published independently of the trades block.
-    assert record.total_return == 0.002
-    assert stats["sharpe_per_sample_reason"] == "fewer_than_three_returns"
+def test_outdated_artifact_without_trades_is_rejected() -> None:
+    source = _fixture("closed_trades.metrics.json")
+    assert source is not None
+    document = json.loads(source)
+    del document["trades"]
+    with pytest.raises(BacktestRunError, match="outdated metrics artifact"):
+        _run(json.dumps(document).encode())
 
 
 def test_undefined_profit_factor_is_null_with_its_reason() -> None:
@@ -305,13 +282,6 @@ def test_capital_change_is_derived_from_the_published_end_capital() -> None:
     assert record.initial_capital == 1000.0
     assert record.final_capital == 997.6
     assert record.detail()["capital_change"] == -2.4
-
-
-def test_capital_change_stays_undefined_without_a_published_end_capital() -> None:
-    record = _case("legacy_no_trades")
-    assert record.initial_capital == 1000.0
-    assert record.final_capital is None
-    assert record.detail()["capital_change"] is None
 
 
 def test_marked_net_pnl_remains_distinct_from_closed_trade_pnl() -> None:

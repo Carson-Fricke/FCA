@@ -21,6 +21,7 @@
 	let strategyFilter = $state('all');
 	let onlySplit = $state(false);
 	let launching = $state(false);
+	let configuration = $state('{}');
 
 	$effect(() => {
 		let cancelled = false;
@@ -54,7 +55,7 @@
 		try {
 			const outcome = await launchBacktest(workspaceId, {
 				bundleRef: 'ui-run',
-				configPath: 'config/harness/backtest.yaml',
+				config: JSON.parse(configuration),
 				environment: 'paper'
 			});
 			const settled = outcome.job_id ? await pollHarnessJob(outcome.job_id) : null;
@@ -96,6 +97,10 @@
 <svelte:head><title>Backtests — Thesis</title></svelte:head>
 
 <div class="mx-auto max-w-6xl space-y-4">
+	<label class="block text-sm text-slate-600">
+		Backtest configuration (JSON)
+		<textarea class="mt-1 block w-full rounded border p-2 font-mono" rows="5" bind:value={configuration} aria-label="Backtest configuration"></textarea>
+	</label>
 	<header class="flex flex-wrap items-center gap-3">
 		<div>
 			<h1 class="text-xl font-semibold text-slate-800">Backtests</h1>

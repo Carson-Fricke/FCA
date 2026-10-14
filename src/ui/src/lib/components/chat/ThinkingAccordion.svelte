@@ -9,15 +9,16 @@
 	let {
 		text,
 		testId = 'thinking-accordion',
-		initiallyOpen = false
-	}: { text: string; testId?: string; initiallyOpen?: boolean } = $props();
+		initiallyOpen = false,
+		outputState = 'completed'
+	}: { text: string; testId?: string; initiallyOpen?: boolean; outputState?: 'streaming' | 'interrupted' | 'completed' } = $props();
 
 	// The initial open state is intentionally captured once per mounted accordion.
 	// svelte-ignore state_referenced_locally
 	let open = $state(initiallyOpen);
 </script>
 
-{#if text}
+{#if text || outputState !== 'completed'}
 	<div class="mb-1" data-testid={testId}>
 		<button
 			type="button"
@@ -38,7 +39,7 @@
 			>
 				<path d="M4.5 2.5 8 6l-3.5 3.5" />
 			</svg>
-			<span>Thinking</span>
+			<span>{outputState === 'streaming' ? 'Thinking…' : outputState === 'interrupted' ? 'Thinking interrupted' : 'Thinking'}</span>
 		</button>
 		{#if open}
 			<div class="mt-1 pl-4" data-testid="{testId}-body">

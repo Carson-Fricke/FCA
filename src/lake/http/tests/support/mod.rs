@@ -49,6 +49,7 @@ pub fn base_state(catalog: Arc<dyn CatalogRepository>) -> LakeApiState {
         listings: None,
         contracts: None,
         front_sets: None,
+        option_resolver: None,
         sas_issuer: None,
         read_store: None,
         ensure_launcher: None,

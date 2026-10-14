@@ -253,6 +253,8 @@ pub struct BacktestConfig {
     pub data_subscriptions: Vec<MarketSubscription>,
     /// Distinguishes an absent echo from an explicitly empty echo.
     pub data_subscriptions_declared: bool,
+    /// Stable input names mapped to point-in-time individual option selectors.
+    pub option_selectors: BTreeMap<String, harness_contracts::OptionSelector>,
     /// Configured symbols.
     pub symbols: Vec<String>,
     /// Fee policy.
@@ -308,6 +310,7 @@ impl BacktestConfig {
             data_source_bar_interval: "1min".to_string(),
             data_subscriptions: Vec::new(),
             data_subscriptions_declared: false,
+            option_selectors: BTreeMap::new(),
             symbols: vec!["SPY".to_string()],
             fees: FeeConfig::default(),
             risk_pipeline: RiskPipelineConfig::default(),
@@ -495,6 +498,18 @@ impl BacktestConfig {
                 subscriptions_json(&self.data_subscriptions),
             );
         }
+        if !self.option_selectors.is_empty() {
+            data.insert(
+                "options",
+                yaml_to_json(
+                    &canonical_to_engine_yaml(
+                        &serde_json::to_value(&self.option_selectors)
+                            .expect("option selector JSON"),
+                    )
+                    .expect("option selector values"),
+                ),
+            );
+        }
         JsonValue::object(data)
     }
 
@@ -561,6 +576,21 @@ impl BacktestConfig {
             config.initial_cash = py_decimal_fixed(cash);
         }
         if let Some(data) = root.get("data").and_then(YamlValue::as_mapping) {
+            if let Some(options) = data.get("options") {
+                config.option_selectors =
+                    serde_json::from_value(yaml_to_json(options).to_serde_value())
+                        .map_err(|e| BacktestError::Configuration(format!("data.options: {e}")))?;
+                for selector in config.option_selectors.values() {
+                    let as_of = selector
+                        .validate()
+                        .map_err(|e| BacktestError::Configuration(e.to_string()))?;
+                    if as_of.to_nanos_i64() > config.start_ns {
+                        return Err(BacktestError::Configuration(
+                            "option selection as_of must not follow replay start".into(),
+                        ));
+                    }
+                }
+            }
             if let Some(value) = data.get("subscriptions") {
                 config.data_subscriptions_declared = true;
                 let items = value.as_sequence().ok_or_else(|| {

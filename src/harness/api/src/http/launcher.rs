@@ -43,7 +43,11 @@ pub trait BacktestRunner: Send + Sync {
     /// # Errors
     ///
     /// Returns a reason string when the engine cannot complete the run.
-    fn run(&self, configuration: &ValidatedConfiguration) -> Result<RunOutcome, String>;
+    fn run(
+        &self,
+        configuration: &ValidatedConfiguration,
+        progress: harness_contracts::progress::ProgressReporter,
+    ) -> Result<RunOutcome, String>;
 }
 
 /// Default runner used until the Rust backtest engine is ported.
@@ -51,7 +55,11 @@ pub trait BacktestRunner: Send + Sync {
 pub struct UnportedBacktestRunner;
 
 impl BacktestRunner for UnportedBacktestRunner {
-    fn run(&self, _configuration: &ValidatedConfiguration) -> Result<RunOutcome, String> {
+    fn run(
+        &self,
+        _configuration: &ValidatedConfiguration,
+        _progress: harness_contracts::progress::ProgressReporter,
+    ) -> Result<RunOutcome, String> {
         Err(
             "the Rust backtest engine is not yet ported; the Python harness remains authoritative"
                 .to_string(),
@@ -230,9 +238,13 @@ impl InProcessLauncher {
 
 impl BacktestLauncher for InProcessLauncher {
     fn launch(&self, job: &LaunchJob) -> Result<(), LaunchError> {
+        self.jobs.mark_running(&job.job_id, self.clock.now())?;
         let outcome = self
             .runner
-            .run(&job.configuration)
+            .run(
+                &job.configuration,
+                super::store::progress_reporter(self.jobs.clone(), job.job_id.clone()),
+            )
             .map_err(LaunchError::Engine)?;
         let artifacts = outcome.artifacts;
         let mut record = self

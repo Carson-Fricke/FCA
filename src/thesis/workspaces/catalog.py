@@ -11,15 +11,14 @@ truth and the summary rows are derived from it.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from thesis.identity.owner import DEFAULT_WORKSPACE_OWNER_ID
 from thesis.workspaces.local import (
     LocalWorkspaceProvider,
     WorkspaceNotFoundError,
@@ -110,6 +109,8 @@ class LocalWorkspaceCatalogStore:
                 continue
             if not (child / _MANIFEST_RELATIVE).is_file():
                 continue
+            if self.is_deleted(child.name):
+                continue
             try:
                 summaries.append(
                     summary_from_manifest(self._provider.open(child.name).manifest)
@@ -119,7 +120,15 @@ class LocalWorkspaceCatalogStore:
                 continue
         return tuple(summaries)
 
-    def get(self, workspace_id: str) -> dict[str, object] | None:
+    def get(
+        self, workspace_id: str, *, include_deleted: bool = False
+    ) -> dict[str, object] | None:
+        if self.is_deleted(workspace_id):
+            if not include_deleted:
+                return None
+            return json.loads(
+                self._deletion_path(workspace_id).read_text(encoding="utf-8")
+            )["workspace"]
         try:
             workspace = self._provider.open(workspace_id)
         except WorkspaceNotFoundError:
@@ -130,9 +139,60 @@ class LocalWorkspaceCatalogStore:
 
     def add(self, summary: dict[str, object]) -> dict[str, object]:
         """Provision the workspace directory and return its summary."""
+        if self.is_deleted(str(summary["id"])):
+            raise ValueError("workspace has been deleted")
         manifest = manifest_for_summary(self._template, summary)
         workspace = self._provider.create(manifest)
         return summary_from_manifest(workspace.manifest)
+
+    def _deletion_path(self, workspace_id: str) -> Path:
+        digest = hashlib.sha256(workspace_id.encode()).hexdigest()
+        return (
+            self._provider.root / _ACTIVITY_DIRECTORY / "deletions" / f"{digest}.json"
+        )
+
+    def mark_deleted(self, workspace_id: str, deleted_at: str) -> None:
+        """Durably mark all storage owned by this ID for later removal."""
+        path = self._deletion_path(workspace_id)
+        if path.exists():
+            return
+        workspace = self._provider.open(workspace_id)
+        summary = {
+            **summary_from_manifest(workspace.manifest),
+            "owner_id": workspace.manifest.owner.owner_id,
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False
+        )
+        try:
+            with handle:
+                json.dump(
+                    {
+                        "workspace_id": workspace_id,
+                        "status": "deletion_pending",
+                        "scope": "all_workspace_data",
+                        "deleted_at": deleted_at,
+                        "workspace": summary,
+                    },
+                    handle,
+                )
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(handle.name, path)
+        finally:
+            if os.path.exists(handle.name):
+                os.unlink(handle.name)
+
+    def is_deleted(self, workspace_id: str) -> bool:
+        return self._deletion_path(workspace_id).exists()
+
+    def deleted_workspace_ids(self) -> tuple[str, ...]:
+        directory = self._provider.root / _ACTIVITY_DIRECTORY / "deletions"
+        return tuple(
+            str(json.loads(path.read_text(encoding="utf-8"))["workspace_id"])
+            for path in sorted(directory.glob("*.json"))
+        )
 
     def replace_manifest(self, workspace_id: str, manifest: WorkspaceManifest) -> None:
         """Atomically replace one workspace's manifest without touching content.
@@ -217,104 +277,8 @@ class LocalWorkspaceCatalogStore:
             raise
 
 
-@dataclass(frozen=True, slots=True)
-class OwnershipMigrationEntry:
-    """One workspace whose owner changes (or would change) in a migration."""
-
-    workspace_id: str
-    old_owner_id: str
-    new_owner_id: str
-
-
-@dataclass(frozen=True, slots=True)
-class OwnershipMigrationReport:
-    """Outcome of one ownership migration pass over a workspace catalog.
-
-    ``scanned`` is the number of workspaces the pass opened; ``entries`` holds
-    one row per workspace that was (or, for a dry run, would be) re-owned, so
-    ``changed`` is the number of workspaces actually rewritten.  A dry run
-    reports the same rows without writing anything.
-    """
-
-    dry_run: bool
-    scanned: int
-    entries: tuple[OwnershipMigrationEntry, ...]
-
-    @property
-    def changed(self) -> int:
-        """Number of workspaces re-owned (or that a dry run would re-own)."""
-        return len(self.entries)
-
-    @property
-    def workspace_ids(self) -> tuple[str, ...]:
-        """Ids of the affected workspaces, in catalog order."""
-        return tuple(entry.workspace_id for entry in self.entries)
-
-
-def migrate_workspace_ownership(
-    store: LocalWorkspaceCatalogStore,
-    *,
-    owner_account_id: str,
-    default_owner_id: str = DEFAULT_WORKSPACE_OWNER_ID,
-    dry_run: bool = False,
-) -> OwnershipMigrationReport:
-    """Re-own default-owner workspaces to the seeded owner account.
-
-    Every workspace whose manifest ``owner.owner_id`` equals
-    ``default_owner_id`` (``local-operator`` by default) is rewritten to
-    ``owner_account_id``; workspaces owned by anyone else are skipped so a
-    migration never steals another owner's workspace.  Only the owner field
-    changes: the manifest is re-validated and written through the store's
-    atomic :meth:`LocalWorkspaceCatalogStore.replace_manifest` path, leaving
-    every other workspace file untouched.
-
-    The pass is idempotent.  Once a workspace carries ``owner_account_id`` it
-    no longer matches ``default_owner_id``, so a second run reports zero
-    changes and writes nothing.  With ``dry_run=True`` the report lists the
-    workspaces that would change and no manifest is written.
-
-    Raises:
-        ValueError: when ``owner_account_id`` or ``default_owner_id`` is empty.
-    """
-    if not owner_account_id:
-        raise ValueError("owner_account_id must be non-empty")
-    if not default_owner_id:
-        raise ValueError("default_owner_id must be non-empty")
-
-    entries: list[OwnershipMigrationEntry] = []
-    scanned = 0
-    for summary in store.list():
-        workspace_id = str(summary["id"])
-        workspace = store.provider.open(workspace_id)
-        scanned += 1
-        owner = workspace.manifest.owner
-        if owner.owner_id != default_owner_id:
-            continue
-        if owner.owner_id == owner_account_id:
-            continue
-        entries.append(
-            OwnershipMigrationEntry(
-                workspace_id=workspace_id,
-                old_owner_id=owner.owner_id,
-                new_owner_id=owner_account_id,
-            )
-        )
-        if not dry_run:
-            values = workspace.manifest.model_dump(mode="json")
-            values["owner"]["owner_id"] = owner_account_id
-            store.replace_manifest(
-                workspace_id, WorkspaceManifest.model_validate(values)
-            )
-    return OwnershipMigrationReport(
-        dry_run=dry_run, scanned=scanned, entries=tuple(entries)
-    )
-
-
 __all__ = [
     "LocalWorkspaceCatalogStore",
-    "OwnershipMigrationEntry",
-    "OwnershipMigrationReport",
     "manifest_for_summary",
-    "migrate_workspace_ownership",
     "summary_from_manifest",
 ]

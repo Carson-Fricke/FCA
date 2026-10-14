@@ -51,10 +51,10 @@ describe.each([false, true])('chat scrolling (sub-agent: %s)', (scoped) => {
 		props.timeline.merge(timelineFixture([...messages, message('tool output', 'tool', scoped)]).items);
 		await view.rerender(props);
 		expect(scroll.scrollTop).toBe(200);
-		await view.rerender({
-			...props,
-			streaming: { active: true, text: 'Streaming reply', reasoning: '' }
-		});
+        props.timeline.append({ id: 'progress', seq: 100, kind: 'output', chatId: 'chat-1', workspaceId: 'ws-1',
+            threadId: scoped ? 'node-1' : 'root', ts: '2026-01-01T00:00:01Z',
+            payload: { invocationId: 'invocation', messageId: 'streaming', actorId: 'agent', state: 'started', startedAt: '2026-01-01T00:00:01Z' } });
+        await view.rerender(props);
 		expect(scroll.scrollTop).toBe(200);
 	});
 });

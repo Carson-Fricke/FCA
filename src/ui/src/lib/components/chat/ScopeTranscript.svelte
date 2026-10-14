@@ -6,6 +6,7 @@
 	import VariationReportCard from './VariationReportCard.svelte';
 	import TypingDots from '$lib/components/common/TypingDots.svelte';
 	import type { ScopeEntry } from '$lib/transcript';
+ import { isToolRailEntry } from '$lib/transcript';
 	import type { ExecutionEvent, SteeringPercolationTarget, SubAgentNode } from '$lib/types';
 
 	/**
@@ -23,6 +24,7 @@
 		busy = false,
 		readOnly = false,
 		pending = false,
+  connectRail = false,
 		percolations = {},
 		onEnterSubAgent = () => {}
 	}: {
@@ -32,6 +34,7 @@
 		readOnly?: boolean;
 		/** The agent is mid-turn; show a typing indicator. */
 		pending?: boolean;
+  connectRail?: boolean;
 		percolations?: Record<string, SteeringPercolationTarget[]>;
 		onEnterSubAgent?: (node: SubAgentNode) => void;
 	} = $props();
@@ -64,7 +67,7 @@
 </script>
 
 <div class="space-y-3" data-testid="scope-transcript">
-	{#each entries as entry (entry.id)}
+	{#each entries as entry, index (entry.id)}
 		{#if entry.kind === 'message'}
 			{#if entry.message.role === 'tool'}
 				<div
@@ -75,7 +78,7 @@
 				>
 					<div class="w-full">
 						{#if entry.message.tool_result}
-							<ToolResultCard result={entry.message.tool_result} {workspaceId} />
+							<ToolResultCard result={entry.message.tool_result} {workspaceId} connectRail={index===0?connectRail:isToolRailEntry(entries[index-1])} />
 						{:else}
 							<p class="text-sm whitespace-pre-wrap text-slate-800">{entry.message.body}</p>
 						{/if}
@@ -106,12 +109,19 @@
 								<span class="font-mono text-warn/70">epoch {entry.message.intent_epoch}</span>
 							{/if}
 							<time class="font-mono text-slate-500">{entry.message.created_at.slice(11, 19)}</time>
+							{#if entry.message.deliveryState}
+								<span role="status" class="text-slate-500">{entry.message.deliveryState === 'sending' ? 'Sending…' : 'Send not confirmed'}</span>
+							{/if}
 						</header>
-						{#if entry.message.reasoning}
+						{#if entry.message.reasoning || entry.message.outputState}
 							<ThinkingAccordion
-								text={entry.message.reasoning}
+								text={entry.message.reasoning ?? ''}
+								outputState={entry.message.outputState ?? 'completed'}
 								testId="thinking-{entry.message.message_id}"
 							/>
+						{/if}
+						{#if entry.message.outputState === 'interrupted'}
+							<p role="status" class="text-xs text-warn">{entry.message.outputFailure}</p>
 						{/if}
 						{#if isUser(entry.message.role)}
 							<p class="text-sm whitespace-pre-wrap text-slate-800">{entry.message.body}</p>
@@ -148,7 +158,7 @@
 		{:else if entry.kind === 'tool'}
 			<div class="flex justify-start" data-testid="scope-tool">
 				<div class="w-full">
-					<ToolResultCard result={entry.result} {workspaceId} />
+					<ToolResultCard result={entry.result} {workspaceId} connectRail={index===0?connectRail:isToolRailEntry(entries[index-1])} />
 				</div>
 			</div>
 		{:else if entry.kind === 'spawn'}

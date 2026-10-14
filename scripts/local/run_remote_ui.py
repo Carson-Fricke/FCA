@@ -91,7 +91,13 @@ def main() -> int:
             str(arguments.port),
             "--strictPort",
         ],
-        cwd=Path(__file__).resolve().parents[2] / "src" / "ui",
+        cwd=next(
+            parent
+            for parent in Path(__file__).resolve().parents
+            if (parent / "pyproject.toml").is_file()
+        )
+        / "src"
+        / "ui",
         env=environment,
     )
 

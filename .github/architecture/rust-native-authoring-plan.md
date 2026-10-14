@@ -259,10 +259,11 @@ the current SDK API and ABI v4.
 
 Studies ensure/read exactly their effective requirements through lake routes.
 Bars are provider-first, with derivation from already stored trades otherwise;
-a bars ensure never fetches undeclared trades. Backtests additionally acquire
-quote/trade execution feeds. The manifest records `effective_subscriptions`,
-`execution_subscriptions`, and their deduplicated `acquired_subscriptions` union.
-Execution feeds neither enlarge consumer callbacks nor belong in the config echo.
+a bars ensure never fetches undeclared trades. Backtests always acquire quote
+and trade execution feeds for every input symbol. The manifest records
+`effective_subscriptions`, `execution_subscriptions`, and their normalized
+`acquired_subscriptions` source union. Execution feeds do not expand consumer
+callbacks or the configuration echo; bars themselves never fill orders.
 Mixed replay uses one causal availability queue: ticks precede completed frames,
 then generated execution events at equal time. `on_bar` receives atomic frames
 at interval end, never raw single bars or bar-start lookahead. Bar subscriptions

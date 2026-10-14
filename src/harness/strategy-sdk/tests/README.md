@@ -12,3 +12,10 @@ in the neighboring strategy-jit and backtest crates.
   missing states, and per-symbol history.
 - `exploratory_outputs.rs` checks numeric feature warm-up, directional confirmation,
   trailing shape/scale math, frozen fitting, and structured evidence validation.
+- `wavelet.rs` verifies dependency-routed multi-timeframe availability boundaries,
+  symbol isolation, missing/warm-up resets, prefix/future-perturbation invariance
+  and immutable historical snapshot lookup.
+- `research_views.rs` checks complete-publication references and field semantics,
+  explicit identities, causal timing, family compositions and actual Haar history.
+  Standalone semantic descriptors are checked without an exhibit, including
+  duplicate grain, invalid roles, strict decoding and conflicting view bindings.

@@ -1,24 +1,22 @@
 {
-  "workspace_id": "workspace",
-  "created_at": "2026-01-01T00:00:00Z",
-  "created_by": "operator",
-  "schema_version": 1,
-  "content_hash": "994690937d63fb7d8aaa0a07e9f342928b5add63420a18adbfefe36752c1b626",
-  "chat_id": "chat-d8a1dd21370448969c3734d59ad7eab7",
-  "conversation_id": "chat-d8a1dd21370448969c3734d59ad7eab7",
-  "root_conversation_id": "chat-d8a1dd21370448969c3734d59ad7eab7",
-  "parent_conversation_id": null,
-  "title": "Final wire capture",
-  "owner_actor_id": "operator",
-  "state": "active",
-  "links": {
-    "chat_ids": [],
-    "investigation_ids": [],
-    "strategy_ids": [],
-    "experiment_ids": [],
-    "workflow_execution_ids": [],
-    "job_ids": []
-  },
-  "updated_at": "2026-01-01T00:00:00Z",
-  "input_consumed_positions": {}
+	"workspace_id": "workspace",
+	"created_at": "2026-01-01T00:00:00Z",
+	"created_by": "operator",
+	"schema_version": 1,
+	"content_hash": "994690937d63fb7d8aaa0a07e9f342928b5add63420a18adbfefe36752c1b626",
+	"chat_id": "chat-d8a1dd21370448969c3734d59ad7eab7",
+	"conversation_id": "chat-d8a1dd21370448969c3734d59ad7eab7",
+	"root_conversation_id": "chat-d8a1dd21370448969c3734d59ad7eab7",
+	"parent_conversation_id": null,
+	"title": "Final wire capture",
+	"owner_actor_id": "operator",
+	"state": "active",
+	"links": {
+		"chat_ids": [],
+		"workflow_execution_ids": [],
+		"job_ids": [],
+		"references": {}
+	},
+	"updated_at": "2026-01-01T00:00:00Z",
+	"input_consumed_positions": {}
 }

@@ -9,10 +9,13 @@ fail-closed behavior when no token is configured.
 
 from __future__ import annotations
 
+import asyncio
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from functools import cache
 from pathlib import Path
 from secrets import compare_digest
 from typing import TYPE_CHECKING, Annotated
@@ -31,13 +34,9 @@ from thesis.agent.harness_tools import (
     HarnessToolResult,
     open_harness_tool_provider,
 )
-from thesis.agent.runtime import reconcile_stranded_sub_agents
-from thesis.agent.runtime.conversation import Conversations
-from thesis.agent.runtime.policy import OperatorPolicyRegistry
+from thesis.application.prompts import FCA_REPLY_SYSTEM_PROMPT
 from thesis.auth.session import OperatorSessionService
 from thesis.auth.workspace_access import WorkspaceAuthorizer
-from thesis.chat import ChatService
-from thesis.chat.responder import ToolResultChunk, ToolResultObserver
 from thesis.http.artifacts import ArtifactCatalogService, create_artifact_router
 from thesis.http.auth import (
     CsrfTokenGuard,
@@ -66,18 +65,25 @@ from thesis.http.workspaces import (
     require_workspace_access,
 )
 from thesis.identity.ports import AccountStore, SessionStore
-from thesis.providers.openrouter import OpenRouterProvider
-from thesis.providers.transports import DEFAULT_SYSTEM_PROMPT
+from thesis.persistence.cosmos_submissions import open_submission_store
+from thesis.persistence.investigations import open_investigations
+from thesis.research.investigations import Investigations, MemoryInvestigationStore
 from thesis.screening.service import ScreenerService
+from thesis_runtime.adapters.providers.openrouter import OpenRouterProvider
+from thesis_runtime.adapters.providers.session_adapter import NativeSessionAdapter
+from thesis_runtime.contracts.reply import ToolResultChunk, ToolResultObserver
+from thesis_runtime.conversations import ChatService
+from thesis_runtime.conversations.conversation import Conversations
+from thesis_runtime.conversations.timeline import Timeline
+from thesis_runtime.subagents.policy import OperatorPolicyRegistry
 
 if TYPE_CHECKING:
+    from thesis.application.workflows import WorkflowRuntime
     from thesis.backtests import BacktestRunCoordinator
-    from thesis.cosmos.timeline import CosmosTimeline
     from thesis.http.workspaces import WorkspaceStore
     from thesis.integrations.mcp import HarnessMcpClient
-    from thesis.workflows.core.registry import WorkflowRegistry
-    from thesis.workflows.runtime import WorkflowRuntime
     from thesis.workspaces.repository import WorkspaceRepositoryProvider
+    from thesis_runtime.workflows.registry import WorkflowRegistry
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -203,7 +209,7 @@ class CombinedAuthenticator:
         if self.expected_token is not None and not self.expected_token.strip():
             raise ValueError("bearer token must be a non-empty string")
 
-    async def __call__(
+    def __call__(
         self,
         request: Request,
         credentials: Annotated[
@@ -315,10 +321,35 @@ class ThesisApplication(FastAPI):
         return self.openapi_schema
 
 
+@cache
+def _stateless_routers() -> tuple[APIRouter, ...]:
+    """Reuse service-independent declarations; FastAPI binds copies per app.
+
+    These endpoints resolve services from the request's application state.
+    Authentication, workflow registration and streaming settings remain
+    application-owned and are never cached here.
+    """
+    return (
+        create_chat_router(),
+        create_chat_sub_agent_router(),
+        create_workspaces_router(),
+        create_backtest_router(),
+        create_harness_router(),
+        create_deployment_router(),
+        create_dashboard_router(),
+        create_workspace_state_router(),
+        create_strategy_router(),
+        create_artifact_router(),
+        create_screener_router(),
+        create_knowledge_router(),
+    )
+
+
 def create_app(
     *,
     bearer_token: str | None = None,
     chat_service: ChatService | None = None,
+    investigations: Investigations | None = None,
     conversations: Conversations | None = None,
     entra_tenant_id: str | None = None,
     entra_audience: str | None = None,
@@ -340,7 +371,7 @@ def create_app(
     session_store: SessionStore | None = None,
     session_workspace_id: str | None = None,
     session_clock: Callable[[], datetime] | None = None,
-    timeline: CosmosTimeline | None = None,
+    timeline: Timeline | None = None,
     operator_policies: OperatorPolicyRegistry | None = None,
     in_memory: bool | None = None,
 ) -> FastAPI:
@@ -386,10 +417,16 @@ def create_app(
         raise ValueError("conversations must share the injected chat service")
     if chat_service is None and in_memory:
         chat_service = ChatService()
+    if chat_service is not None and timeline is not None:
+        chat_service.timeline = timeline
+    if investigations is None and in_memory and chat_service is not None:
+        investigations = Investigations(chat_service, MemoryInvestigationStore())
     if workspace_data is None and in_memory:
         from thesis.http.workspaces import build_local_workspace_data
 
         workspace_data = build_local_workspace_data(chat_service=chat_service)
+    if workspace_data is not None and chat_service is not None:
+        chat_service.bind_workspace_deletion(workspace_data.workspaces.store.is_deleted)
     if harness_data_service is None and in_memory:
         harness_data_service = HarnessDataService()
     if harness_tool_provider is None and harness_client is not None:
@@ -455,9 +492,26 @@ def create_app(
             workspace_id=session_workspace_id,
             clock=resolved_session_clock,
         )
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        try:
+            if workspace_data is not None and chat_service is not None:
+                for (
+                    workspace_id
+                ) in workspace_data.workspaces.store.deleted_workspace_ids():
+                    await asyncio.to_thread(
+                        chat_service.delete_workspace_conversations, workspace_id
+                    )
+            yield
+        finally:
+            if timeline is not None:
+                await asyncio.to_thread(timeline.commits.close)
+
     application = ThesisApplication(
         title="Thesis API",
         version="0.1.0",
+        lifespan=lifespan,
         responses={
             code: {"model": ErrorResponse, "description": "request failed"}
             for code in (400, 401, 403, 404, 409, 422, 500, 502, 503)
@@ -486,6 +540,7 @@ def create_app(
     )
     if chat_service is not None:
         application.state.chat_service = chat_service
+    application.state.investigations = investigations
     if conversations is not None:
         application.state.conversations = conversations
         if (
@@ -496,13 +551,15 @@ def create_app(
     if conversations is None and model_provider is not None and chat_service is None:
         raise ValueError("model_provider requires a configured chat service")
     if conversations is None and chat_service is not None:
-        from thesis.agent.runtime.session import SessionToolRegistry
+        from thesis_runtime.tools.registry import SessionToolRegistry
 
         application.state.conversations = Conversations(
             chat=chat_service,
-            provider=model_provider,
+            provider=None
+            if model_provider is None
+            else NativeSessionAdapter(model_provider),
             registry_factory=lambda context: SessionToolRegistry(),
-            root_system_prompt=DEFAULT_SYSTEM_PROMPT,
+            root_system_prompt=FCA_REPLY_SYSTEM_PROMPT,
             tool_result_observer=tool_result_observer,
             read_consumed_input=chat_service.read_consumed_input,
             acknowledge_input=chat_service.acknowledge_input,
@@ -510,6 +567,7 @@ def create_app(
     if workspace_data is not None:
         application.state.workspace_service = workspace_data.workspaces
         application.state.backtest_service = workspace_data.backtests
+        application.state.submission_store = workspace_data.backtests.submissions
         application.state.deployment_service = workspace_data.deployments
         application.state.dashboard_service = workspace_data.dashboards
         application.state.workspace_state_service = workspace_data.state
@@ -527,23 +585,14 @@ def create_app(
             # whenever the serving composition has a harness tool boundary, even
             # when the workspace bundle was built without one.
             screener_service = ScreenerService(
-                tools=harness_tool_provider.client, store=screener_service.store
+                tools=harness_tool_provider.client,
+                store=screener_service.store,
+                submissions=screener_service.submissions,
             )
         if screener_service is not None:
             application.state.screener_service = screener_service
         if workspace_data.harness is not None:
             application.state.harness_boundary = workspace_data.harness
-        if chat_service is not None:
-            for workspace in workspace_data.workspaces.list_workspaces():
-                workspace_id = workspace.get("id")
-                if isinstance(workspace_id, str) and workspace_id:
-                    # Stop stranded executions, then reconcile the durable
-                    # sub-agent records that were waiting on them: a restart
-                    # has no worker for either, so both must reach a terminal
-                    # state before the process serves requests.
-                    chat_service.stop_active_executions(workspace_id)
-                    reconcile_stranded_sub_agents(chat_service, workspace_id)
-                    chat_service.resume_conversation_cleanup(workspace_id)
     if workflow_runtime is not None:
         application.state.workflow_runtime = workflow_runtime
     if harness_data_service is not None:
@@ -635,28 +684,36 @@ def create_app(
         return {"status": "ok"}
 
     routers = (
-        create_chat_router(),
-        create_chat_sub_agent_router(),
+        *_stateless_routers(),
         create_timeline_router(
             recovery_interval_seconds=stream_recovery_interval_seconds,
             sleeper=stream_sleeper,
             max_poll_cycles=stream_max_poll_cycles,
         ),
-        create_workspaces_router(),
-        create_backtest_router(),
-        create_harness_router(),
-        create_deployment_router(),
-        create_dashboard_router(),
-        create_workspace_state_router(),
-        create_strategy_router(),
-        create_artifact_router(),
-        create_screener_router(),
-        create_knowledge_router(),
         create_workflow_router(workflow_registry),
     )
     auth_dependency = [Depends(primary_authenticator)]
     if csrf_guard is not None:
         auth_dependency.append(Depends(csrf_guard))
+    if workspace_data is not None:
+
+        def require_live_workspace(request: Request) -> None:
+            workspace_id = request.path_params.get("workspace_id")
+            # DELETE remains retryable after a partial deletion. Every other
+            # route, including chat, file and stream routes, shares this fence.
+            deleting = request.method == "DELETE" and request.url.path.rstrip(
+                "/"
+            ).endswith("/workspaces/" + str(workspace_id))
+            if (
+                workspace_id
+                and not deleting
+                and workspace_data.workspaces.store.is_deleted(workspace_id)
+            ):
+                raise HTTPException(
+                    status_code=404, detail="workspace has been deleted"
+                )
+
+        auth_dependency.append(Depends(require_live_workspace))
     # In the invite-only public mode (sessions + accounts configured), every
     # route is additionally workspace-authorized: a session's account id is
     # mapped to the workspace owner and cross-workspace access fails closed.
@@ -761,10 +818,9 @@ def serving_app_from_environment() -> FastAPI:
 
     The serving stack composes the conversations service, control tools, and
     workflow runtime when ``OPENROUTER_API_KEY`` and ``HARNESS_MCP_URL`` are
-    configured (see :mod:`thesis.http.serving`); the execution store then
+    configured (see :mod:`thesis.application.composition`); the execution store then
     shares the same Cosmos database as the chat surface.
     """
-    require_single_worker()
     bearer_token = _environment_value("THESIS_API__BEARER_TOKEN")
     tenant_id = _environment_value("THESIS_API__ENTRA_TENANT_ID")
     audience = _environment_value("THESIS_API__ENTRA_AUDIENCE")
@@ -779,21 +835,25 @@ def serving_app_from_environment() -> FastAPI:
             "authentication is not configured; set THESIS_API__BEARER_TOKEN "
             "or both THESIS_API__ENTRA_TENANT_ID and THESIS_API__ENTRA_AUDIENCE"
         )
-    from thesis.chat.workflow_launcher import daemon_thread
-    from thesis.cosmos.stack import open_cosmos_chat_stack, open_execution_store
-    from thesis.http.serving import (
+    from thesis.application.composition import (
         build_serving_stack,
         open_serving_harness_tools,
         open_serving_model_provider,
     )
+    from thesis.application.workflow_launcher import daemon_thread
     from thesis.http.workspaces import build_local_workspace_data
+    from thesis_runtime.adapters.cosmos.stack import open_runtime_persistence
 
-    chat_service, timeline = open_cosmos_chat_stack()
+    persistence = open_runtime_persistence()
+    investigations = open_investigations(persistence.chat)
+    chat_service, timeline = persistence.chat, persistence.timeline
+    submissions = open_submission_store()
     workspace_store = serving_workspace_store()
     repositories = getattr(workspace_store, "provider", None)
     from thesis.workspaces.local import default_workspace_root
 
     workspace_data = build_local_workspace_data(
+        submissions=submissions,
         chat_service=chat_service,
         workspace_store=workspace_store,
         workspace_root=default_workspace_root() if workspace_store is None else None,
@@ -806,47 +866,43 @@ def serving_app_from_environment() -> FastAPI:
     model_provider = open_serving_model_provider()
     harness_tools = open_serving_harness_tools() if model_provider is not None else None
     stack = build_serving_stack(
+        submissions=submissions,
         chat_service=chat_service,
+        investigations=investigations,
         model_provider=model_provider,
         harness_tools=harness_tools,
-        execution_store=(open_execution_store() if harness_tools is not None else None),
+        execution_store=persistence.executions,
+        work_store=persistence.work,
         detach=daemon_thread,
         workspace_repositories=repositories,
     )
-    return create_app(
+    application = create_app(
         bearer_token=bearer_token,
         entra_tenant_id=tenant_id,
         entra_audience=audience,
         entra_role=role,
         chat_service=stack.chat_service,
+        investigations=investigations,
         workspace_data=workspace_data,
         conversations=stack.conversations,
         workflow_runtime=stack.workflow_runtime,
         workflow_registry=stack.workflow_registry,
         harness_tool_provider=stack.harness_tool_provider,
-        harness_data_service=HarnessDataService(),
+        harness_data_service=HarnessDataService(submissions=submissions),
         operator_policies=stack.operator_policies,
         timeline=timeline,
         in_memory=False,
     )
+    from thesis.application.composition import build_serving_worker
 
-
-def require_single_worker() -> None:
-    """Reject Uvicorn's WEB_CONCURRENCY setting above one.
-
-    Conversation scheduling and timeline wake channels are process-local. Serve entrypoints
-    support one Uvicorn worker only; this is not a distributed ownership mechanism.
-    Uvicorn's programmatic workers argument must also remain one at the launcher.
-    """
-    value = os.environ.get("WEB_CONCURRENCY", "1")
-    try:
-        workers = int(value)
-    except ValueError as error:
-        raise ValueError("WEB_CONCURRENCY must be 1 for Thesis serving") from error
-    if workers != 1:
-        raise ValueError(
-            "Thesis serving supports one worker only; WEB_CONCURRENCY must be 1"
-        )
+    application.state.durable_worker = build_serving_worker(
+        stack,
+        persistence.work,
+        persistence.ownership,
+        persistence.executions,
+        recovery_records=persistence.executions.identities,
+    )
+    return application
 
 
 __all__ = [

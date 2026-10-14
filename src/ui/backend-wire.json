@@ -73,15 +73,8 @@
             "type": "string"
           },
           "conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conversation Id"
+            "title": "Conversation Id",
+            "type": "string"
           },
           "created_at": {
             "title": "Created At",
@@ -172,13 +165,6 @@
             "title": "Intent Epoch",
             "type": "integer"
           },
-          "investigation_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Investigation Ids",
-            "type": "array"
-          },
           "kind": {
             "$ref": "#/components/schemas/TranscriptItemKind"
           },
@@ -208,19 +194,22 @@
             ],
             "title": "Reasoning"
           },
+          "references": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "References",
+            "type": "object"
+          },
           "role": {
             "$ref": "#/components/schemas/MessageRole"
           },
           "root_conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Root Conversation Id"
+            "title": "Root Conversation Id",
+            "type": "string"
           },
           "schema_version": {
             "title": "Schema Version",
@@ -278,7 +267,7 @@
           "data",
           "state",
           "attachment_ids",
-          "investigation_ids",
+          "references",
           "execution_id",
           "intent_epoch",
           "input_position",
@@ -305,6 +294,19 @@
             "minLength": 1,
             "title": "Body",
             "type": "string"
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id"
           }
         },
         "required": [
@@ -374,15 +376,8 @@
             "type": "string"
           },
           "conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conversation Id"
+            "title": "Conversation Id",
+            "type": "string"
           },
           "created_at": {
             "title": "Created At",
@@ -400,7 +395,45 @@
             "type": "object"
           },
           "links": {
-            "$ref": "#/components/schemas/RecordLinks"
+            "description": "Explicit links shared by conversation and execution records.",
+            "properties": {
+              "chat_ids": {
+                "default": [],
+                "items": {
+                  "type": "string"
+                },
+                "title": "Chat Ids",
+                "type": "array"
+              },
+              "job_ids": {
+                "default": [],
+                "items": {
+                  "type": "string"
+                },
+                "title": "Job Ids",
+                "type": "array"
+              },
+              "references": {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "title": "References",
+                "type": "object"
+              },
+              "workflow_execution_ids": {
+                "default": [],
+                "items": {
+                  "type": "string"
+                },
+                "title": "Workflow Execution Ids",
+                "type": "array"
+              }
+            },
+            "title": "RecordLinks",
+            "type": "object"
           },
           "owner_actor_id": {
             "title": "Owner Actor Id",
@@ -418,15 +451,8 @@
             "title": "Parent Conversation Id"
           },
           "root_conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Root Conversation Id"
+            "title": "Root Conversation Id",
+            "type": "string"
           },
           "schema_version": {
             "title": "Schema Version",
@@ -675,6 +701,19 @@
             "title": "Investigation Ids",
             "type": "array"
           },
+          "message_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id"
+          },
           "role": {
             "$ref": "#/components/schemas/MessageRole",
             "default": "user"
@@ -737,15 +776,8 @@
             "type": "string"
           },
           "conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conversation Id"
+            "title": "Conversation Id",
+            "type": "string"
           },
           "created_at": {
             "title": "Created At",
@@ -836,13 +868,6 @@
             "title": "Intent Epoch",
             "type": "integer"
           },
-          "investigation_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Investigation Ids",
-            "type": "array"
-          },
           "kind": {
             "$ref": "#/components/schemas/TranscriptItemKind"
           },
@@ -872,19 +897,22 @@
             ],
             "title": "Reasoning"
           },
+          "references": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "References",
+            "type": "object"
+          },
           "role": {
             "$ref": "#/components/schemas/MessageRole"
           },
           "root_conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Root Conversation Id"
+            "title": "Root Conversation Id",
+            "type": "string"
           },
           "schema_version": {
             "title": "Schema Version",
@@ -952,7 +980,7 @@
           "data",
           "state",
           "attachment_ids",
-          "investigation_ids",
+          "references",
           "execution_id",
           "intent_epoch",
           "input_position",
@@ -1408,11 +1436,11 @@
             "title": "Bundle Ref",
             "type": "string"
           },
-          "config_path": {
-            "maxLength": 2048,
-            "minLength": 1,
-            "title": "Config Path",
-            "type": "string"
+          "config": {
+            "additionalProperties": true,
+            "minProperties": 1,
+            "title": "Config",
+            "type": "object"
           },
           "environment": {
             "default": "paper",
@@ -1451,7 +1479,7 @@
         },
         "required": [
           "bundle_ref",
-          "config_path"
+          "config"
         ],
         "title": "LaunchBacktestRequest",
         "type": "object"
@@ -1460,11 +1488,11 @@
         "additionalProperties": false,
         "description": "The canonical launch body accepted by ``POST /v1/backtests/jobs``.",
         "properties": {
-          "config_path": {
-            "maxLength": 2048,
-            "minLength": 1,
-            "title": "Config Path",
-            "type": "string"
+          "config": {
+            "additionalProperties": true,
+            "minProperties": 1,
+            "title": "Config",
+            "type": "object"
           },
           "workspace": {
             "anyOf": [
@@ -1480,7 +1508,7 @@
           }
         },
         "required": [
-          "config_path"
+          "config"
         ],
         "title": "LaunchHarnessBacktestRequest",
         "type": "object"
@@ -1612,6 +1640,127 @@
         "title": "ModelOutput",
         "type": "object"
       },
+      "ModelOutputDeltaWire": {
+        "additionalProperties": false,
+        "properties": {
+          "actorId": {
+            "title": "Actorid",
+            "type": "string"
+          },
+          "channel": {
+            "enum": [
+              "reasoning",
+              "text"
+            ],
+            "title": "Channel",
+            "type": "string"
+          },
+          "invocationId": {
+            "title": "Invocationid",
+            "type": "string"
+          },
+          "messageId": {
+            "title": "Messageid",
+            "type": "string"
+          },
+          "offset": {
+            "minimum": 0.0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "state": {
+            "const": "delta",
+            "title": "State",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "invocationId",
+          "messageId",
+          "actorId",
+          "state",
+          "channel",
+          "offset",
+          "text"
+        ],
+        "title": "ModelOutputDeltaWire",
+        "type": "object"
+      },
+      "ModelOutputInterruptedWire": {
+        "additionalProperties": false,
+        "properties": {
+          "actorId": {
+            "title": "Actorid",
+            "type": "string"
+          },
+          "failure": {
+            "additionalProperties": true,
+            "title": "Failure",
+            "type": "object"
+          },
+          "invocationId": {
+            "title": "Invocationid",
+            "type": "string"
+          },
+          "messageId": {
+            "title": "Messageid",
+            "type": "string"
+          },
+          "state": {
+            "const": "interrupted",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "invocationId",
+          "messageId",
+          "actorId",
+          "state",
+          "failure"
+        ],
+        "title": "ModelOutputInterruptedWire",
+        "type": "object"
+      },
+      "ModelOutputStartedWire": {
+        "additionalProperties": false,
+        "properties": {
+          "actorId": {
+            "title": "Actorid",
+            "type": "string"
+          },
+          "invocationId": {
+            "title": "Invocationid",
+            "type": "string"
+          },
+          "messageId": {
+            "title": "Messageid",
+            "type": "string"
+          },
+          "startedAt": {
+            "title": "Startedat",
+            "type": "string"
+          },
+          "state": {
+            "const": "started",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "invocationId",
+          "messageId",
+          "actorId",
+          "state",
+          "startedAt"
+        ],
+        "title": "ModelOutputStartedWire",
+        "type": "object"
+      },
       "NodeInputReceiptWire": {
         "additionalProperties": false,
         "description": "Node-answer HTTP receipt: durable message plus admission provenance.",
@@ -1640,15 +1789,8 @@
             "type": "string"
           },
           "conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conversation Id"
+            "title": "Conversation Id",
+            "type": "string"
           },
           "created_at": {
             "title": "Created At",
@@ -1739,13 +1881,6 @@
             "title": "Intent Epoch",
             "type": "integer"
           },
-          "investigation_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Investigation Ids",
-            "type": "array"
-          },
           "kind": {
             "$ref": "#/components/schemas/TranscriptItemKind"
           },
@@ -1778,19 +1913,22 @@
             ],
             "title": "Reasoning"
           },
+          "references": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "References",
+            "type": "object"
+          },
           "role": {
             "$ref": "#/components/schemas/MessageRole"
           },
           "root_conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Root Conversation Id"
+            "title": "Root Conversation Id",
+            "type": "string"
           },
           "schema_version": {
             "title": "Schema Version",
@@ -1852,7 +1990,7 @@
           "data",
           "state",
           "attachment_ids",
-          "investigation_ids",
+          "references",
           "execution_id",
           "intent_epoch",
           "input_position",
@@ -1932,7 +2070,7 @@
         "type": "object"
       },
       "RecordLinks": {
-        "description": "Explicit links shared by chat, investigation, and execution records.",
+        "description": "Explicit links shared by conversation and execution records.",
         "properties": {
           "chat_ids": {
             "default": [],
@@ -1940,22 +2078,6 @@
               "type": "string"
             },
             "title": "Chat Ids",
-            "type": "array"
-          },
-          "experiment_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Experiment Ids",
-            "type": "array"
-          },
-          "investigation_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Investigation Ids",
             "type": "array"
           },
           "job_ids": {
@@ -1966,13 +2088,15 @@
             "title": "Job Ids",
             "type": "array"
           },
-          "strategy_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
+          "references": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             },
-            "title": "Strategy Ids",
-            "type": "array"
+            "title": "References",
+            "type": "object"
           },
           "workflow_execution_ids": {
             "default": [],
@@ -2756,7 +2880,8 @@
           "mapping": {
             "event": "#/components/schemas/TimelineEventWire",
             "execution": "#/components/schemas/TimelineExecutionWire",
-            "message": "#/components/schemas/TimelineMessageWire"
+            "message": "#/components/schemas/TimelineMessageWire",
+            "output": "#/components/schemas/TimelineOutputWire"
           },
           "propertyName": "kind"
         },
@@ -2769,6 +2894,9 @@
           },
           {
             "$ref": "#/components/schemas/TimelineExecutionWire"
+          },
+          {
+            "$ref": "#/components/schemas/TimelineOutputWire"
           }
         ]
       },
@@ -2839,6 +2967,92 @@
         "title": "TimelineMessageWire",
         "type": "object"
       },
+      "TimelineOutputWire": {
+        "additionalProperties": false,
+        "properties": {
+          "chatId": {
+            "title": "Chatid",
+            "type": "string"
+          },
+          "executionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executionid"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "output",
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "discriminator": {
+              "mapping": {
+                "delta": "#/components/schemas/ModelOutputDeltaWire",
+                "interrupted": "#/components/schemas/ModelOutputInterruptedWire",
+                "started": "#/components/schemas/ModelOutputStartedWire"
+              },
+              "propertyName": "state"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ModelOutputStartedWire"
+              },
+              {
+                "$ref": "#/components/schemas/ModelOutputDeltaWire"
+              },
+              {
+                "$ref": "#/components/schemas/ModelOutputInterruptedWire"
+              }
+            ],
+            "title": "Payload"
+          },
+          "seq": {
+            "minimum": 1.0,
+            "title": "Seq",
+            "type": "integer"
+          },
+          "threadId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threadid"
+          },
+          "ts": {
+            "title": "Ts",
+            "type": "string"
+          },
+          "workspaceId": {
+            "title": "Workspaceid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "chatId",
+          "workspaceId",
+          "seq",
+          "ts",
+          "kind",
+          "payload"
+        ],
+        "title": "TimelineOutputWire",
+        "type": "object"
+      },
       "TimelinePageWire": {
         "additionalProperties": false,
         "properties": {
@@ -2898,6 +3112,15 @@
         ],
         "title": "ToolCorrelation",
         "type": "object"
+      },
+      "ToolOperation": {
+        "enum": [
+          "read",
+          "write",
+          "execute",
+          "interact"
+        ],
+        "type": "string"
       },
       "ToolRequest": {
         "additionalProperties": false,
@@ -2998,16 +3221,8 @@
             "title": "Callid"
           },
           "datumType": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Datumtype"
+            "title": "Datumtype",
+            "type": "string"
           },
           "failure": {
             "anyOf": [
@@ -3024,6 +3239,17 @@
           "ok": {
             "title": "Ok",
             "type": "boolean"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolOperation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "structured": {
             "additionalProperties": true,
@@ -3063,6 +3289,7 @@
           "structured",
           "summary",
           "text",
+          "datumType",
           "callId",
           "tool"
         ],
@@ -3074,9 +3301,7 @@
         "enum": [
           "message",
           "tool",
-          "workflow",
           "sub_agent",
-          "gate",
           "artifact"
         ],
         "title": "TranscriptItemKind",
@@ -3114,6 +3339,13 @@
             "title": "Phases",
             "type": "array"
           },
+          "splits": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/WorkflowSplitWire"
+            },
+            "title": "Splits",
+            "type": "object"
+          },
           "terminal_phases": {
             "items": {
               "type": "string"
@@ -3150,7 +3382,8 @@
           "title",
           "phases",
           "terminal_phases",
-          "transitions"
+          "transitions",
+          "splits"
         ],
         "title": "WorkflowDefinitionWire",
         "type": "object"
@@ -3171,6 +3404,13 @@
         "additionalProperties": false,
         "description": "Complete serialized workflow execution record.",
         "properties": {
+          "active_phases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Active Phases",
+            "type": "array"
+          },
           "chat_id": {
             "title": "Chat Id",
             "type": "string"
@@ -3179,16 +3419,13 @@
             "title": "Content Hash",
             "type": "string"
           },
+          "control_sequence": {
+            "title": "Control Sequence",
+            "type": "integer"
+          },
           "conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conversation Id"
+            "title": "Conversation Id",
+            "type": "string"
           },
           "created_at": {
             "title": "Created At",
@@ -3201,13 +3438,6 @@
           "execution_id": {
             "title": "Execution Id",
             "type": "string"
-          },
-          "experiment_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Experiment Ids",
-            "type": "array"
           },
           "finished_at": {
             "anyOf": [
@@ -3223,17 +3453,6 @@
           "intent_epoch": {
             "title": "Intent Epoch",
             "type": "integer"
-          },
-          "investigation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Investigation Id"
           },
           "job_ids": {
             "items": {
@@ -3253,31 +3472,23 @@
             ],
             "title": "Parent Conversation Id"
           },
-          "phase": {
-            "anyOf": [
-              {
+          "references": {
+            "additionalProperties": {
+              "items": {
                 "type": "string"
               },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Phase"
+              "type": "array"
+            },
+            "title": "References",
+            "type": "object"
           },
           "requested_by": {
             "title": "Requested By",
             "type": "string"
           },
           "root_conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Root Conversation Id"
+            "title": "Root Conversation Id",
+            "type": "string"
           },
           "schema_version": {
             "title": "Schema Version",
@@ -3291,13 +3502,6 @@
               "type": "string"
             },
             "title": "Steering Message Ids",
-            "type": "array"
-          },
-          "strategy_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Strategy Ids",
             "type": "array"
           },
           "trigger_message_id": {
@@ -3343,18 +3547,39 @@
           "workflow_id",
           "workflow_version",
           "requested_by",
-          "investigation_id",
-          "strategy_ids",
-          "experiment_ids",
+          "references",
           "job_ids",
           "state",
-          "phase",
+          "active_phases",
+          "control_sequence",
           "intent_epoch",
           "steering_message_ids",
           "updated_at",
           "finished_at"
         ],
         "title": "WorkflowExecutionWire",
+        "type": "object"
+      },
+      "WorkflowSplitWire": {
+        "additionalProperties": false,
+        "properties": {
+          "branches": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Branches",
+            "type": "object"
+          },
+          "join": {
+            "title": "Join",
+            "type": "string"
+          }
+        },
+        "required": [
+          "branches",
+          "join"
+        ],
+        "title": "WorkflowSplitWire",
         "type": "object"
       }
     },
@@ -3623,7 +3848,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
@@ -4434,6 +4659,137 @@
         ]
       }
     },
+    "/api/v1/jobs/{job_id}/research-recommendations": {
+      "post": {
+        "operationId": "research_recommendations_api_v1_jobs__job_id__research_recommendations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Research Recommendations Api V1 Jobs  Job Id  Research Recommendations Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Research Recommendations",
+        "tags": [
+          "harness"
+        ]
+      }
+    },
     "/api/v1/jobs/{job_id}/result": {
       "get": {
         "operationId": "backtest_job_result_api_v1_jobs__job_id__result_get",
@@ -5085,6 +5441,137 @@
       }
     },
     "/api/v1/workspaces/{workspace_id}": {
+      "delete": {
+        "operationId": "delete_workspace_api_v1_workspaces__workspace_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Delete Workspace Api V1 Workspaces  Workspace Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Workspace",
+        "tags": [
+          "workspaces"
+        ]
+      },
       "get": {
         "description": "Return one workspace summary for the render gate.\n\nCounts and activity are loaded by the separate snapshot request after\nthe workspace shell renders.",
         "operationId": "get_workspace_api_v1_workspaces__workspace_id__get",
@@ -6139,7 +6626,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
@@ -12154,6 +12641,144 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/screeners/jobs/{job_id}/materialize": {
+      "post": {
+        "operationId": "materialize_screener_api_v1_workspaces__workspace_id__screeners_jobs__job_id__materialize_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Materialize Screener Api V1 Workspaces  Workspace Id  Screeners Jobs  Job Id  Materialize Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Materialize Screener",
+        "tags": [
+          "screeners"
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/screeners/results/{result_id}": {
       "get": {
         "operationId": "get_screener_result_api_v1_workspaces__workspace_id__screeners_results__result_id__get",
@@ -12323,7 +12948,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
@@ -13280,6 +13905,135 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/submissions": {
+      "get": {
+        "operationId": "list_submissions_api_v1_workspaces__workspace_id__submissions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Submissions Api V1 Workspaces  Workspace Id  Submissions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Submissions",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/tool-jobs/{job_id}/result": {
       "post": {
         "operationId": "record_tool_result_api_v1_workspaces__workspace_id__tool_jobs__job_id__result_post",
@@ -13835,7 +14589,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
@@ -14646,6 +15400,137 @@
         ]
       }
     },
+    "/v1/jobs/{job_id}/research-recommendations": {
+      "post": {
+        "operationId": "research_recommendations_v1_jobs__job_id__research_recommendations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Research Recommendations V1 Jobs  Job Id  Research Recommendations Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Research Recommendations",
+        "tags": [
+          "harness"
+        ]
+      }
+    },
     "/v1/jobs/{job_id}/result": {
       "get": {
         "operationId": "backtest_job_result_v1_jobs__job_id__result_get",
@@ -15297,6 +16182,137 @@
       }
     },
     "/v1/workspaces/{workspace_id}": {
+      "delete": {
+        "operationId": "delete_workspace_v1_workspaces__workspace_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Delete Workspace V1 Workspaces  Workspace Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Workspace",
+        "tags": [
+          "workspaces"
+        ]
+      },
       "get": {
         "description": "Return one workspace summary for the render gate.\n\nCounts and activity are loaded by the separate snapshot request after\nthe workspace shell renders.",
         "operationId": "get_workspace_v1_workspaces__workspace_id__get",
@@ -16351,7 +17367,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
@@ -22366,6 +23382,144 @@
         ]
       }
     },
+    "/v1/workspaces/{workspace_id}/screeners/jobs/{job_id}/materialize": {
+      "post": {
+        "operationId": "materialize_screener_v1_workspaces__workspace_id__screeners_jobs__job_id__materialize_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Materialize Screener V1 Workspaces  Workspace Id  Screeners Jobs  Job Id  Materialize Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Materialize Screener",
+        "tags": [
+          "screeners"
+        ]
+      }
+    },
     "/v1/workspaces/{workspace_id}/screeners/results/{result_id}": {
       "get": {
         "operationId": "get_screener_result_v1_workspaces__workspace_id__screeners_results__result_id__get",
@@ -22535,7 +23689,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "content": {
               "application/json": {
                 "schema": {
@@ -23489,6 +24643,135 @@
         "summary": "Create Strategy",
         "tags": [
           "strategies"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/submissions": {
+      "get": {
+        "operationId": "list_submissions_v1_workspaces__workspace_id__submissions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Submissions V1 Workspaces  Workspace Id  Submissions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Submissions",
+        "tags": [
+          "workspaces"
         ]
       }
     },

@@ -26,9 +26,6 @@ pub struct OptionQueueHandler {
     front_sets: Option<Arc<dyn DailyFrontSetRepository>>,
 }
 
-/// Alias kept for parity with the Python `OptionWorker` spelling.
-pub type OptionWorker = OptionQueueHandler;
-
 impl OptionQueueHandler {
     /// Build a handler over a transaction and optional front-set repository.
     pub fn new(

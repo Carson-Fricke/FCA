@@ -30,7 +30,7 @@ import { WorkflowScopeController } from '$lib/workflow-scope.svelte';
 const execution: WorkflowExecutionRecord = {
 	execution_id: 'exec-1', chat_id: 'chat-1', trigger_message_id: 'msg-1', workflow_id: 'hypothesis-development',
 	conversation_id: 'chat-1', root_conversation_id: 'chat-1', parent_conversation_id: null,
-	workflow_version: 'v1', requested_by: 'operator', state: 'running', phase: 'model_creation', intent_epoch: 0,
+	workflow_version: 'v1', requested_by: 'operator', state: 'running', control_sequence: 0, active_phases: ['model_creation'], intent_epoch: 0,
 	steering_message_ids: [], created_at: '2026-01-01T00:00:00Z'
 };
 function message(id: string, role: ChatMessage['role'] = 'user'): ChatMessage {
@@ -183,7 +183,7 @@ describe('node input and canonical history', () => {
 		await fireEvent.input(input, { target: { value: 'revise the model' } });
 		await fireEvent.click(screen.getByTestId('sub-agent-composer-send'));
 		expect(await screen.findByTestId('node-send-error')).toHaveTextContent('no longer accepts input');
-		expect(input).toHaveValue('revise the model');
+		await waitFor(() => expect(input).toHaveValue('revise the model'));
 		await waitFor(() => expect(listChatSubAgents).toHaveBeenCalledTimes(2));
 		await fireEvent.click(screen.getByTestId('scope-back'));
 		await fireEvent.click(screen.getByTitle('Enter active model_creation orchestrator'));

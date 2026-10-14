@@ -22,9 +22,6 @@ from thesis.paths import InvalidRelativePath, confined_relative_path
 from thesis.research.grammar import (
     IDENTIFIER as _IDENTIFIER,
 )
-from thesis.research.grammar import (
-    VERSION as _VERSION,
-)
 
 
 class WorkspacePathProvider(Protocol):
@@ -229,13 +226,8 @@ class ResearchModel:
             or _IDENTIFIER.fullmatch(self.model_id) is None
         ):
             raise ResearchModelError("model_id must be a safe identifier")
-        if not isinstance(self.version, str) or (
-            _VERSION.fullmatch(self.version) is None
-            and _DIGEST.fullmatch(self.version) is None
-        ):
-            raise ResearchModelError(
-                "model version must be a content hash or historical semantic version"
-            )
+        if not isinstance(self.version, str) or _DIGEST.fullmatch(self.version) is None:
+            raise ResearchModelError("model version must be a content hash")
         if not isinstance(self.description, str) or not self.description.strip():
             raise ResearchModelError("model description must be non-empty")
         if not isinstance(self.source, str) or not self.source.strip():

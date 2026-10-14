@@ -1,6 +1,6 @@
 use harness_strategy_sdk::building_blocks::{
-    perceptually_important_points, trailing_haar, Atr, CrossoverAge, DirectionalChange, Ema,
-    FittedNormalization, RollingMoments, Rsi, Vwap,
+    perceptually_important_points, Atr, CrossoverAge, DirectionalChange, Ema, FittedNormalization,
+    RollingMoments, Rsi, Vwap,
 };
 use harness_strategy_sdk::{OutputPoint, StudyOutput};
 
@@ -25,10 +25,6 @@ fn segmentation_and_shape_preserve_confirmation_and_trailing_support() {
         perceptually_important_points(&[0.0, 4.0, 0.0, 0.0], 3).unwrap(),
         vec![0, 1, 3]
     );
-    let levels = trailing_haar(&[1.0, 1.0, 3.0, 3.0]).unwrap();
-    assert_eq!(levels[0].details, vec![0.0, 0.0]);
-    assert!((levels[1].details[0] + 2.0).abs() < 1e-12);
-    assert!(trailing_haar(&[1.0, 2.0, 3.0]).is_err());
     let mut moments = RollingMoments::new(2).unwrap();
     assert_eq!(moments.observe(1.0).unwrap(), None);
     assert_eq!(moments.observe(3.0).unwrap(), Some((2.0, 1.0)));

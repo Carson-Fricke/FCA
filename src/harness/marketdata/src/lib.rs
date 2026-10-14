@@ -37,7 +37,7 @@ pub mod time;
 pub mod universe_view;
 pub mod ws;
 
-pub use bars::{build_bars, interval_delta, Bar, BarAggregator, BarBuilder, Ohlcv, OhlcvBar};
+pub use bars::{build_bars, interval_delta, BarAggregator, OhlcvBar};
 pub use catalog::{
     ContractRecord, ContractsCatalogPort, DailyFrontSet, DelistingType, ListingRecord, ListingType,
     ListingsCatalogPort, MemoryContractsCatalog, MemoryListingsCatalog, OptionType,

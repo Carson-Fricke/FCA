@@ -587,7 +587,7 @@ fn mixed_replay_routes_each_consumer_and_never_dispatches_future_frames_ahead_of
             ]
         );
         assert_eq!(outcome.bar_frame_count, 1);
-        assert!(outcome.manifest.effective_subscriptions.is_some());
+        assert!(!outcome.manifest.effective_subscriptions.is_empty());
         assert_eq!(outcome.order_count, 0);
     }
 }
@@ -708,7 +708,9 @@ fn frame_orders_execute_only_in_backtests_and_never_fill_from_bars() {
         );
         assert_eq!(outcome.is_ok(), succeeds);
         if succeeds {
-            assert_eq!(outcome.unwrap().fills.len(), fills);
+            let outcome = outcome.unwrap();
+            assert_eq!(outcome.fills.len(), fills);
+            assert_eq!(outcome.manifest.execution_subscriptions.len(), 2);
         }
     }
 }
@@ -862,24 +864,8 @@ fn same_time_ticks_precede_frames_and_generated_fills_use_current_quotes() {
             .collect::<Vec<_>>(),
         [num::Decimal::from_i128(21), num::Decimal::from_i128(31)]
     );
-    assert_eq!(
-        outcome
-            .manifest
-            .execution_subscriptions
-            .as_ref()
-            .unwrap()
-            .len(),
-        2
-    );
-    assert_eq!(
-        outcome
-            .manifest
-            .acquired_subscriptions
-            .as_ref()
-            .unwrap()
-            .len(),
-        3
-    );
+    assert_eq!(outcome.manifest.execution_subscriptions.len(), 2);
+    assert_eq!(outcome.manifest.acquired_subscriptions.len(), 3);
 }
 
 #[test]
@@ -1127,8 +1113,6 @@ fn multi_timeframe_replay_aggregates_completed_windows_from_one_source() {
         outcome
             .manifest
             .acquired_subscriptions
-            .as_ref()
-            .unwrap()
             .iter()
             .filter(|s| s.data_type == "bars")
             .count(),

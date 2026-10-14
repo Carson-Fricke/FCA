@@ -97,7 +97,7 @@ def create_invites_router(
     router = APIRouter(prefix="/v1/invites", tags=["invites"])
 
     @router.post("", status_code=status.HTTP_201_CREATED)
-    async def create_invite(
+    def create_invite(
         payload: CreateInviteRequest, request: Request
     ) -> dict[str, object]:
         try:
@@ -128,7 +128,7 @@ def create_invites_router(
         }
 
     @router.get("")
-    async def list_invites() -> dict[str, object]:
+    def list_invites() -> dict[str, object]:
         try:
             invites = service.list_invites()
         except InviteListingUnavailableError as error:
@@ -144,7 +144,7 @@ def create_invites_router(
         return {"items": [_invite_payload(invite) for invite in invites]}
 
     @router.post("/{invite_id}/revoke")
-    async def revoke_invite(invite_id: str) -> dict[str, str]:
+    def revoke_invite(invite_id: str) -> dict[str, str]:
         if not service.revoke_invite(invite_id, at=now()):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

@@ -9,13 +9,20 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from thesis.agent.messages import SessionMessage, from_record
-from thesis.agent.runtime.conversation import Conversations
-from thesis.chat import ChatMessage, ChatService, MessageRole, TranscriptItemKind
 from thesis.http.application import create_app
 from thesis.http.chat_sub_agents import authenticated_actor_id
-from thesis.providers.invocations import ChatMessage as ProviderChatMessage
-from thesis.providers.invocations import ModelCompletion, Role
+from thesis_runtime.adapters.providers.invocations import (
+    ChatMessage as ProviderChatMessage,
+)
+from thesis_runtime.adapters.providers.invocations import ModelCompletion, Role
+from thesis_runtime.adapters.providers.session_adapter import NativeSessionAdapter
+from thesis_runtime.contracts.messages import from_record
+from thesis_runtime.conversations import (
+    ChatMessage,
+    ChatService,
+    MessageRole,
+)
+from thesis_runtime.conversations.conversation import Conversations
 
 WORKSPACE = "workspace-a"
 
@@ -33,7 +40,7 @@ def test_root_intake_uses_one_canonical_writer_and_trusted_actor(
         WORKSPACE, title="Canonical", owner_actor_id="operator"
     )
     execution = launch(thread.chat_id)
-    seed = service.create_message(
+    seed = service.send_message(
         WORKSPACE, thread.chat_id, actor_id="operator", body="Attachment seed"
     )
     attachment = service.create_attachment(
@@ -46,11 +53,11 @@ def test_root_intake_uses_one_canonical_writer_and_trusted_actor(
         size_bytes=0,
     )
     conversations = Conversations(chat=service)
-    accepted: list[SessionMessage] = []
+    accepted: list[ChatMessage] = []
     scheduled: list[ChatMessage] = []
     writer = conversations.deliver_session_message
 
-    def deliver(*args: Any, **kwargs: Any) -> SessionMessage:
+    def deliver(*args: Any, **kwargs: Any) -> ChatMessage:
         canonical = writer(*args, **kwargs)
         accepted.append(canonical)
         return canonical
@@ -76,14 +83,15 @@ def test_root_intake_uses_one_canonical_writer_and_trusted_actor(
     assert response.status_code == 200
     record = service.get_message(WORKSPACE, response.json()["message_id"])
     assert len(service.list_messages(WORKSPACE, thread.chat_id)) == before + 1
-    assert accepted == [from_record(record)]
+    assert accepted == [record]
     assert [message.message_id for message in scheduled] == [record.message_id]
     assert record.actor_id == authenticated_actor_id("token")
     assert record.attachment_ids == (attachment.attachment_id,)
-    assert accepted[0].direction == "incoming"
-    assert accepted[0].content.source == "user"
-    assert accepted[0].content.text == payload["body"]
-    assert accepted[0].position == record.input_position > 0
+    incoming = from_record(accepted[0])
+    assert incoming.direction == "incoming"
+    assert incoming.content.source == "user"
+    assert incoming.content.text == payload["body"]
+    assert incoming.position == record.input_position > 0
     assert bool(response.json().get("steering")) is steering
 
 
@@ -103,6 +111,13 @@ def test_steering_effects_precede_first_provider_dispatch(
     observed: list[int] = []
 
     class Provider:
+        def stream(self, *, message_id=None, **kwargs):
+            from tests.thesis_runtime.provider_fakes import completion_frames
+
+            yield from completion_frames(self.complete(**kwargs), message_id)
+
+        streaming = True
+
         def complete(
             self,
             *,
@@ -134,7 +149,9 @@ def test_steering_effects_precede_first_provider_dispatch(
                 completion_tokens=0,
             )
 
-    conversations = Conversations(chat=service, provider=Provider())
+    conversations = Conversations(
+        chat=service, provider=NativeSessionAdapter(Provider())
+    )
     # Run the real queued worker inline so premature scheduling is observable.
     monkeypatch.setattr(conversations._workers, "_spawn_thread", lambda work: work())
     scheduled: list[str] = []
@@ -549,7 +566,7 @@ def test_delete_chat_removes_thread_and_cascades(
     assert listing["items"] == []
 
 
-def test_messages_endpoint_round_trips_workflow_anchor(
+def test_messages_endpoint_round_trips_workflow_launch_datum(
     client: TestClient, service: ChatService, launch: Any
 ) -> None:
     headers = {"Authorization": "Bearer thesis-test-token"}
@@ -559,31 +576,36 @@ def test_messages_endpoint_round_trips_workflow_anchor(
         json={"title": "Research", "owner_actor_id": "operator"},
     ).json()
     execution = launch(chat["chat_id"])
-    anchor = service.create_message(
+    datum = {
+        "datumType": "workflow_execution",
+        "ok": True,
+        "summary": "Launched",
+        "text": "",
+        "failure": None,
+        "structured": {
+            "executionId": execution.execution_id,
+            "phase": execution.phase,
+            "workflowId": execution.workflow_id,
+            "version": execution.workflow_version,
+            "state": execution.state.value,
+        },
+    }
+    delivered = service.send_message(
         WORKSPACE,
         chat["chat_id"],
         actor_id="thesis-workflow",
         body="Hypothesis development",
-        role=MessageRole.SYSTEM,
-        kind=TranscriptItemKind.WORKFLOW,
-        data={
-            "currentPhase": execution.phase,
-            "executionId": execution.execution_id,
-            "status": execution.state.value,
-            "title": execution.workflow_id,
-        },
+        role=MessageRole.TOOL,
+        tool_result=datum,
         execution_id=execution.execution_id,
     )
-
     items = client.get(
-        f"/v1/workspaces/{WORKSPACE}/chats/{chat['chat_id']}/messages",
-        headers=headers,
+        f"/v1/workspaces/{WORKSPACE}/chats/{chat['chat_id']}/messages", headers=headers
     ).json()["items"]
-    match = next(item for item in items if item["message_id"] == anchor.message_id)
-    assert match["kind"] == "workflow"
-    assert match["role"] == "system"
-    assert match["execution_id"] == execution.execution_id
-    assert match["data"]["executionId"] == execution.execution_id
+    match = next(item for item in items if item["message_id"] == delivered.message_id)
+    assert match["kind"] == "message"
+    assert match["tool_result"] == datum
+    assert match["data"]["activityKind"] == "delivery"
 
 
 def test_chat_routes_require_bearer_token(make_client, service: ChatService) -> None:

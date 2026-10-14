@@ -14,15 +14,18 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
-from thesis.agent.messages import SESSION_MESSAGE_ADAPTER
-from thesis.agent.runtime.activity import chat_message_schema, runtime_activity_schema
-from thesis.agent.runtime.datum import (
+from thesis.http.application import create_app
+from thesis.http.wire import TimelineItemWire
+from thesis_runtime.contracts.activity import (
+    chat_message_schema,
+    runtime_activity_schema,
+)
+from thesis_runtime.contracts.datum import (
     DeliveredDatumWire,
     datum_schema,
     tool_result_schema,
 )
-from thesis.http.application import create_app
-from thesis.http.wire import TimelineItemWire
+from thesis_runtime.contracts.messages import SESSION_MESSAGE_ADAPTER
 
 
 def _components(schema: dict[str, Any], name: str, fragment: dict[str, Any]) -> None:

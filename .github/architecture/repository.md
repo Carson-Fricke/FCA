@@ -1,8 +1,100 @@
 # Repository Architecture
 
-<!-- markdownlint-disable MD013 -->
+## Runtime and FCA extension boundary
+
+`src/thesis_runtime/` owns the generic host for conversations, tool dispatch,
+subagents, workflow execution and durable workers. `src/thesis/application/`
+selects providers, persistence and FCA policy. Concrete tools and workflows live
+under `src/thesis/extensions/`; research, workspace and harness submission
+services remain FCA-owned. Dependencies point from FCA into the runtime.
+
+Workflow extensions cross a versioned JSON endpoint. Recovery requires the
+durable workflow version to match the current registration; version tags do not
+require retention of historical implementations. Tools receive trusted context
+separately from model arguments. Runtime records retain opaque namespaced
+references instead of fixed FCA fields. API replicas accept durable work; fenced workers own execution
+independently of replica count. The current implementation remains Python with
+local FCA extensions; Rust service and MCP tool hosting remain future deployment
+work. The package tree, protocols, invariants and executable verification paths
+are specified in [Runtime architecture](thesis-agent-workflow-runtime.md#runtime-and-fca-extension-boundary).
+
+## Current contracts and data cutovers
+
+The governing policy is "Current Contracts and Data Cutovers" in
+[Copilot instructions](../instructions/copilot-instructions.md#current-contracts-and-data-cutovers).
+Application-owned formats and interfaces have one current contract. A change
+updates producers, consumers, callers, tests, fixtures, and active documentation
+together and removes superseded paths. Existing data and tests do not justify
+historical decoders, aliases, inferred required fields, compatibility facades,
+dual writes, or multiple implementations selected by version.
+
+During early development, delete/reset affected obsolete data in the authorized
+environment by default. Necessary preservation is a bounded one-time conversion
+at cutover, outside application reads, startup, and execution; remove the
+temporary converter afterward. Readers may report incompatible data as outdated
+and must not upgrade, reinterpret, execute, or delete it. Coordinate producers
+at cutover so outdated writers cannot recreate obsolete records. Version tags
+remain useful for provenance, ABI/cache identity, and mismatch rejection.
+
+The runtime now requires explicit conversation ownership, complete durable record
+fields, tagged activity, reference-only invocation snapshots, and positive
+positions for accepted input. Workflow registration holds one current implementation
+per ID and rejects a mismatched durable version. The UI uses declared datum types,
+canonical event fields, and execution-specific phase links; retired workflow
+message cards and phase aliases are removed. Artifact readers require current
+manifest fields and canonical trade rows. Lake bars coverage requires provenance;
+backtest manifests always publish effective, acquired, and execution plans.
+Obsolete provider facades, ownership migration helpers, authoring skills, Rust
+parity aliases, and lake request/config aliases are removed.
+
+Current recovery, fencing, idempotency, supported provider adapters, deliberately
+optional fields, inline/chunked storage, and generic rendering of valid unknown
+datum types remain current behavior. Historical verification records remain
+immutable evidence; active plans do not override this policy.
+
+## Individual option market data
+
+`lake-contracts::OptionSelector` is the shared wire contract re-exported by
+`harness-contracts`; that crate depends on lake value contracts, never provider
+or ingestion implementations. `POST /v1/options/resolve` accepts an underlying,
+call/put right, explicit UTC `as_of`, expiration or target days-to-expiration,
+and strike or absolute target delta. Automatic selectors cover standard
+unadjusted 100-share contracts. Resolution uses the active/inactive Alpaca
+contract master plus historical quotes to establish point-in-time eligibility.
+Local metadata persists in `state/option-contracts.json`; hosted metadata uses
+the contract partition of the existing coverage Azure Table.
+
+Delta is estimated by implied-volatility inversion of historical option quote
+midpoints and contemporaneous underlying quotes using a European Black-Scholes
+model. The explicit continuous annual rate/yield inputs default to zero. Quotes
+after `as_of`, stale quotes, crossed/zero-sided quotes, and unpriceable candidates
+are excluded. The nearest eligible expiry is chosen before delta distance, with
+deterministic tie-breaking. Defaults allow seven calendar days of DTE tolerance,
+0.10 absolute delta tolerance, and one hour of quote age. This is a recorded
+selection estimate for US options, not a provider Greek or a rolling subscription.
+
+The lake serves option quotes, trades, and provider minute/day OHLCV bars through
+the existing ensure/catalog/read/query routes and XNYS session partitions.
+Empty provider option bars become terminal empty coverage; option bars are not
+derived from trades. Provider failures remain failures. Harness `data.options`
+maps program input aliases to selectors, resolves each contract once at or before
+replay start, acquires all declared streams by OSI symbol, and remaps callbacks
+to the alias. The actual contract, multiplier, timestamps, model method, and
+selector assumptions remain in input provenance. Existing quote/trade/bar SDK
+callbacks and Thesis execution submission carry these inputs unchanged.
+
+This boundary supplies market data. Full chains, open interest, rolling,
+exercise/assignment, option margin, and option-specific execution accounting
+are not supplied by this interface.
 
 ## Status
+
+SDK `strategy-sdk/src/research/` owns declarative exhibit contracts, typed
+publication helpers and reusable compositions. JIT validates complete output
+bindings at stop. UI `lib/research/` owns bounded immutable evidence loading and
+registered panel rendering shared by chat cards and workspace inspection.
+The synthetic gallery is generated from SDK output through the production
+Python paging projection; it is not a second research execution path.
 
 Workspace strategy sketches live in `workspaces/sketch_contract.py` (pure
 contracts) and `workspaces/sketches.py` (Git revisions). Runtime sketch and
@@ -24,14 +116,18 @@ SDK ABI v5 exposes compiled subscription unions before acquisition. Nested
 program-owned indicators contribute requirements and update dependency-first;
 each consumer receives only its subscribed symbols/types. Studies/indicators
 use observation-only contexts; strategies receive an order sink. Bars retain
-atomic multi-symbol frames and interval-end availability. A run supports one
-bar interval (`1min` or `1d`); incompatible intervals fail before lake traffic.
+atomic multi-symbol frames and interval-end availability. Runs retain each declared bar interval and route completed frames by availability.
 
 Thesis authors `harnessConfiguration.subscriptions`, validates the echo against
 compiled source and indicator dependencies through `validate_study`, and passes
 it unchanged to the study configuration. Tick-only studies require no global
-interval. Studies ensure/read exactly the declared union; backtests additionally
-acquire quote/trade execution feeds, recorded separately in the manifest.
+interval. Studies ensure/read exactly the declared union. Backtests always add
+quotes and trades for every input symbol for `simple_touch` execution, recorded
+separately in the manifest without expanding consumer callbacks or the echo.
+The local harness defaults to the Azure development lake; `LAKE_API_URL`, then
+`LAKE_API_BASE_URL`, override the endpoint, including the loopback lake on port
+8002. The stack launcher loads the Azure bearer from Key Vault into the harness
+child only; the local lake retains its separate loopback bearer.
 Mixed ticks and completed frames use one causal availability-ordered queue.
 The older native built-in indicator registry remains separate; the shared
 interface applies to authored SDK indicators composed into programs.
@@ -44,19 +140,19 @@ the injected inbox persistence port and canonical incoming writer.
 the legacy executor path are removed; model-only composition uses the same
 session with an empty tool registry. Durable completion mode, return anchor, and
 phase-executor authority are independent of input kind. Runtime activity is a
-discriminated contract with one historical metadata decoder. Per-conversation
+discriminated contract that rejects untagged historical metadata. Per-conversation
 input positions and `ChatThread.input_consumed_positions` fence delayed wakes;
 bounded recent-ID memory and durable high-water callbacks allow idle worker
-retirement. Scheduling is single-process, not a distributed lease; serving
-requires `WEB_CONCURRENCY=1`. Nested input uses anchored admission. Model adapters
+retirement. Production scheduling uses durable runnable references and renewable fenced
+worker claims; API replicas hold no execution authority. Nested input uses anchored admission. Model adapters
 normalize concrete HTTP/SSL errors.
 
 Option 1's modules exist and remain the REQUIRED delivery boundary:
-`thesis.agent.messages` owns neutral `SessionMessage`/`MessageContent` contracts,
-`thesis.agent.runtime.inbox` owns the singular `SessionInbox`, and
-`thesis.providers.session_adapter` owns pure live/replay projection.
+`thesis_runtime.contracts.messages` owns neutral `SessionMessage`/`MessageContent` contracts,
+`thesis_runtime.conversations.inbox` owns the singular `SessionInbox`, and
+`thesis_runtime.adapters.providers.session_adapter` owns pure live/replay projection.
 `Conversations.deliver_session_message` and its handle delegate converge on
-`thesis.agent.runtime.incoming.write_incoming` for every incoming producer.
+`thesis_runtime.conversations.incoming.write_incoming` for every incoming producer.
 `DeliveryService` wrappers use that same writer; live tool results enter
 `SessionInbox.deliver` through the injected persistence port. Directions are
 `incoming`, `outgoing`, and trusted-runtime-only `instruction`, not native roles.
@@ -72,9 +168,10 @@ messages, exact tool catalog/options/version, hashes, and reference-only
 `request_messages` in a `STARTED` invocation before execution, preserving them on
 terminal updates. Ordered references contain only `message_id`, `direction`, and
 `position`; canonical bodies remain in the neutral transcript. Historical full
-canonical audits remain readable. Cosmos forces the actual opaque request into
-workspace-scoped immutable content-addressed chunks before saving the invocation
-manifest, then verifies and hydrates the complete request on reads. Chunk/audit
+canonical audit formats are rejected; audit references have one exact shape. Cosmos forces the
+actual opaque request into workspace-scoped immutable content-addressed chunks
+before saving the invocation manifest, then verifies and hydrates the complete
+request on reads. Chunk/audit
 write failure prevents provider execution. Native audit fields permit inspection,
 not runtime role mapping
 or another message path. Exact scoped correlation never scans prose.
@@ -91,21 +188,22 @@ guard and behavior verification. Missing modules MUST fail without optional
 bypasses; instructions do not guarantee LLM compliance/honesty, and module
 presence does not prove complete recovery coverage.
 
-The current hypothesis-development topology is version `3.0.0`: discovery,
+The current hypothesis-development topology is runtime contract version `5.0.0`: discovery,
 model creation, deterministic falsification trials, verdict, and the
 strategy/backtest/RCA/optimization/null-testing/variation/forward-validation
 chain, with one-shot agent strategy backtesting, a deterministic
 signal-destruction transform in the harness, and executor-free terminal outcomes.
 Unsupported historical topology is explicitly unavailable, not replaced with
-today's edges. Retired persisted phase values remain decodable.
+today's edges. Retired persisted phase values are outside the current contract
+and must be rejected, not mapped to current phases.
 
-Workflow session policy lives behind typed ports in `workflows/runtime.py` and
+Workflow session policy lives behind FCA ports in `thesis/extensions/workflows/bindings.py` and
 the concrete `hypothesis_development/session_services.py`, not serving. Spec-only
 bindings remain available without the harness, but deny phase completion without
 an execution runtime. One phase declaration derives topology, policy, and pipes;
-live/replay transitions share the pure `fold_transition` reducer and apply each
-pipe once. Acceptance checks epoch and current executor/attempt, commits with
-execution-store revision CAS, projects the phase, and closes its executor under
+domain live/replay transitions share the pure `fold_transition` reducer and apply
+each pipe once. Generic control is reconstructed by `graph/control.py`. Acceptance checks epoch and current executor/attempt, commits with
+execution-store revision CAS, projects the active frontier, and closes its executor under
 the shared steering/cancellation/job guard. Events and successor entry run outside
 that guard. Deterministic executor failures fail the workflow.
 Harness submissions allocate one `job_id` that is durably registered with
@@ -189,7 +287,8 @@ snapshots require no `.git` directory in the deployed image.
 | `market-lake` | `src/lake` | The lake service (Rust workspace) and the retained Python library surface: provider ingestion, stable lake schemas, storage and catalog access, coverage planning, and the lake API/client surface. |
 | `quant-harness` | `src/harness` | Deterministic simulation, OMS and portfolio behavior, results, paper and shadow runtimes, and capability-gated live execution. |
 | `lakeclient` | `src/lakeclient` | Consumer-facing authenticated ensure, polling, file-query, and Parquet access without provider or Azure credentials. |
-| `thesis` | `src/thesis` | Workspace-scoped research, coordination, persistence, authorization, and model-provider boundaries. |
+| `thesis` | `src/thesis` | FCA research, workspace services, concrete tools/workflows, HTTP transport and application composition. |
+| `thesis_runtime` | `src/thesis_runtime` | Generic host for sessions, conversations, tools, workflows, subagents and durable execution, without FCA imports. |
 | Authored programs | `config/harness/*.rs` and inline `parameters.source` | User-authored Rust strategies, indicators, studies, and screening programs compiled against the authoring SDK. |
 
 Dependency direction is from the harness and strategies toward published
@@ -341,11 +440,21 @@ src/harness/
   coverage, job status, streaming Arrow IPC reads, and the reference
   universe/facts views over the published lake routes. It replaces the
   retired `LakeEnsureClient`; there is no local lake path or data directory.
-  `ensure_many`/`read_many` issue a symbol set's requests concurrently under a
-  fixed fetch bound, preserving spec order; the study and tick job paths use
-  them so a multi-symbol window fetches every symbol at once instead of one
-  symbol at a time. The lake's shared per-key provider lane remains the rate
-  limit.
+  `ensure_many` acquires symbol windows concurrently under a fixed fetch
+  bound; the lake's provider lane remains the rate limit. Study and tick jobs
+  then consume `visit_arrow` batches one window at a time, releasing Arrow
+  batches after conversion to replay events. Replay events remain in memory.
+  Arrow transfers have a 60-second connect/read inactivity limit, without a
+  whole-response buffer or overall transfer deadline. `read_arrow` and
+  `read_many` collect batches only for callers requiring a batch list.
+- `contracts::progress` defines harness execution stages and observed dataset
+  counters with a caller-injected reporting port. The shared MCP job store
+  retains the latest stage/dataset snapshots, timestamps and errors under the
+  admitted `job_id`, including on failure and after restart. Terminal jobs
+  reject late telemetry. HTTP and local MCP study/backtest runners inject the
+  same persistence adapter. Thesis's existing job-status passthrough exposes
+  these observations; workflow orchestration does not own telemetry or acquire
+  another submission or polling service.
 - `config` owns the non-executable YAML/JSON document parser, shell models,
   replay validation, and exact decimal/time normalization used by API, MCP,
   CLI, and engine projection. `backtest` projects those validated documents into
@@ -363,8 +472,8 @@ src/harness/
   and session calendars, so the harness and the lake share one value layer;
   the duplicated harness holiday tables were deleted and the harness honors
   the lake's ad-hoc closures and early closes. `backtest` backs the flipped
-  `backtest-job` and replays exact consumer requirements for `study` shells,
-  adding quote/trade execution feeds for backtests; `live` provides the
+  `backtest-job` and acquires exact consumer requirements for studies, adding
+  quote/trade execution feeds for backtests; `live` provides the
   deterministic live core and the supervision runner the `trader` binary drives.
 
 The workspace is gated by `cargo fmt --all --check`, `cargo clippy --workspace
@@ -426,7 +535,7 @@ The implemented contract is:
   `MarketConsumer`: `subscriptions(&self) -> Vec<Subscription>` declares only
   that consumer's inputs, and `indicators(&mut self) -> Vec<&mut dyn Indicator>`
   returns references to owned dependencies, including nested indicators.
-  `Subscription::Bars { symbols, interval }` accepts `1min` or `1d`;
+  `Subscription::Bars { symbols, interval }` accepts canonical `1d`, `Nmin` or `Nh`;
   `Subscription::Quote { symbols }` and `Subscription::Trade { symbols }` have
   no interval. Common callbacks are `on_quote`, `on_trade`, and
   `on_bar(&BarFrame, &mut Self::Context)`, with `&mut self`.
@@ -476,10 +585,11 @@ The implemented contract is:
   echo. A study (`shell: study`) ensures and reads exactly that union through
   lake routes. Bars ensures fetch provider bars or derive from already stored
   trades, never trigger undeclared trade acquisition. Backtests additionally
-  acquire quote/trade execution feeds. The manifest distinguishes
-  `effective_subscriptions`, `execution_subscriptions`, and their deduplicated
-  `acquired_subscriptions` union; execution feeds do not expand consumer routing
-  or the configuration echo. Only one distinct bar interval is supported across
+  acquire quotes and trades for every input symbol. The manifest distinguishes
+  `effective_subscriptions`, `execution_subscriptions`, and their normalized
+  `acquired_subscriptions` source union. Execution feeds do not expand consumer
+  routing or the configuration echo; `simple_touch` never fills from bars.
+  Only one distinct bar interval is supported across
   a run, including dependencies and instances; conflicts fail before lake
    ensure/read. Tick-only inputs need no interval. Interval-only configuration
    documents are rejected before any acquisition; authored source uses
@@ -582,7 +692,7 @@ Thesis remains a peer product. `thesis.workspaces` owns isolated workspace
 identity, repository scaffolds, and committed Rust program operations;
 `thesis.persistence` journals accepted commands and fences
 Git publication; `thesis.auth` binds operator sessions to workspaces;
-`thesis.chat`, `thesis.execution`, and `thesis.http` define the UI-facing
+`thesis_runtime.conversations`, `thesis_runtime.execution`, and `thesis.http` define the UI-facing
 workflow boundary; `thesis.agent` owns policy-driven model context and
 provenance; `thesis.integrations` owns the harness HTTP and MCP adapters;
 `thesis.identity` owns durable accounts, one-time invite links, and
@@ -598,7 +708,7 @@ wave. `thesis.strategies` owns
 content-addressed strategy bundles and `WorkspaceStrategyArtifacts`, which
 authors pure Rust workspace files and projects published versions for the
 Strategies HTTP view. `strategies/contracts.py` owns the shared design schema;
-the context-bound `agent/runtime/strategy_tools.py` adapter accepts no
+the context-bound `thesis/extensions/tools/strategy.py` adapter accepts no
 model-supplied workspace or execution authority. Generic workflow `phase_tools`
 grants remain independent of the concrete strategy capability. Fenced Git
 publication commits exact accepted artifact bytes through a temporary index,
@@ -610,13 +720,13 @@ completed harness jobs into workspace backtest records (equity, trades, stats)
 linked to the originating chat and workflow execution; `thesis.screening` owns
 content-addressed screener definitions and imports harness screening runs as
 workspace results — it launches `run_screener` through the harness MCP and
-never reads market data; and `thesis.providers`
+never reads market data; and `thesis_runtime.adapters.providers`
 keeps model credentials behind backend-only protocols.
 Workspace identity remains `.thesis/workspace.yaml`; publication state is
 written separately to `.thesis/publication.json`.
 
 The current program-bound workflow uses
-`thesis.workspaces.programs.WorkspacePrograms` and `agent/runtime/program_tools.py`:
+`thesis.workspaces.programs.WorkspacePrograms` and `thesis/extensions/tools/program.py`:
 `studies/<program_id>/`, `strategies/<program_id>/`, and `indicators/<program_id>/`
 contain `program.rs`, `manifest.json`, and a committed `validation.json` receipt
 after validation. Latest committed source/configuration is authoritative for
@@ -662,22 +772,25 @@ The implemented runtime modules and facades are:
 
 | Surface | Responsibility |
 | --- | --- |
-| `thesis.agent.messages` | Immutable neutral session/content/request/correlation contracts and canonical-only transcript decoding. No execution or provider projection. |
-| `thesis.agent.runtime` | Public conversation, child, session, lifecycle, control, delivery, and store facade. `conversation.py` composes admission, execution, and outgoing persistence; `incoming.py` is the singular incoming writer; `inbox.py` owns injected delivery and success-bound consumption; `turns.py` owns locked worker intake. `session_reply.py` is removed. |
-| `thesis.agent.runtime.activity` | Immutable discriminated runtime activity (anchor, stage, timing, delivery key), generated metadata/message schemas, and canonical activity decoding. Tool requests and correlations live only in the canonical session message. |
-| `thesis.providers.session_adapter` | Pure `project_native_messages` and versioned `NativeSessionAdapter.request_snapshot` shared by live/replay; completion calls only injected `provider.complete` and returns neutral output. |
+| `thesis_runtime.contracts.messages` | Immutable neutral session/content/request/correlation contracts and canonical-only transcript decoding. No execution or provider projection. |
+| `thesis_runtime` | Public conversation, child, session, lifecycle, control, delivery, and store facade. `conversation.py` composes admission, execution, and outgoing persistence; `incoming.py` is the singular incoming writer; `inbox.py` owns injected delivery and success-bound consumption; `turns.py` owns locked worker intake. `session_reply.py` is removed. |
+| `thesis_runtime.contracts.activity` | Immutable discriminated runtime activity (anchor, stage, timing, delivery key), generated metadata/message schemas, and canonical activity decoding. Tool requests and correlations live only in the canonical session message. |
+| `thesis_runtime.adapters.providers.session_adapter` | Pure `project_native_messages` and versioned `NativeSessionAdapter.request_snapshot` shared by live/replay; completion calls only injected `provider.complete` and returns neutral output. |
 | `thesis.http.schema`, `wire`, `errors` | Source-derived OpenAPI/runtime schemas, typed response envelopes, and explicit error/service-resolution boundaries. |
-| `thesis.workflows.runtime` | Composition plus exported `WorkflowSessionServices`, `WorkflowSessionBindings`, `RuntimeToolActivity`, and `bind_workflow_session_services` ports. |
-| `thesis.workflows.registry.hypothesis_development` | Concrete workflow facade over spec/doctrine, phases, contracts, prompts, services, artifacts, piping, and state/rebuild; exports `fold_transition` and `rebuild_state`. |
+| `thesis.application.workflows` | FCA workflow composition and session binding. |
+| `thesis.extensions.workflows.bindings` | FCA `WorkflowSessionServices`, `WorkflowSessionBindings` and `RuntimeToolActivity` contracts. |
+| `thesis.extensions.workflows.session_services` | Routes FCA workflow capabilities by durable execution identity and grants discovery a scoped child launcher/reader. |
+| `thesis.extensions.workflows.research_investigation` | Model-backed proposal, critique, adjudication and constructive training investigation branches, concurrent discovery delegation, retained child jobs and canonical asynchronous findings. Uses the generic host without importing another concrete workflow. |
+| `thesis.extensions.workflows.hypothesis_development` | Concrete workflow facade over spec/doctrine, phases, contracts, prompts, services, artifacts, piping, and state/rebuild; exports `fold_transition` and `rebuild_state`. |
 | `hypothesis_development/session_services.py` | Role policy, scoped schema/knowledge/authoring bindings, completion validation/application, and workflow failure callback. |
 | `hypothesis_development/exposure.py`, `design.py`, `provenance.py` | Submission-time exposure ledger (one durable record per job, before dispatch), the frozen research design derived from accepted development evidence, and completion provenance checks that bind each reported job to its executing run. |
 | `thesis.workspaces.programs` | Committed program source/manifests, content/dependency versions, harness validation receipts, ID-based execution, pinned loads, and matching SDK references/templates. The workspace facade exports `WorkspacePrograms`, `ProgramArtifactError`, and `ProgramPublicationError`. |
-| `thesis.agent.runtime.program_tools` | Trusted-context program author/update/read/validate/run and SDK-reference bindings on the existing session registry. |
+| `thesis.extensions.tools.program` | Trusted-context program author/update/read/validate/run and SDK-reference bindings on the existing session registry. |
 | `thesis.workflows.research_models` | `ProgramSnapshots` port and accepted study-reference resolution for deterministic research execution. |
 | `thesis.knowledge` | Read/search facade; `service.py` owns source isolation and hybrid operations, `embeddings.py` owns pinned/checksummed semantic loading and coherent operation-level fallback, `library/` contains shipped data. |
-| `thesis.cosmos` | One authoritative workspace-scoped conversation store: records, messages, events, per-chat sequence counters, atomic sequence commits, root tombstones, and bounded background conversation cleanup. |
-| `thesis.cosmos.chunks` | Immutable bounded JSON leaves/reference pages in existing containers, content/digest-verified hydration, and forced opaque provider-request storage before invocation persistence. Unreferenced chunks are retained; no automatic collector. |
-| `thesis.cosmos.stack` | Single-store chat/timeline and execution-store composition; both openers retain `ensure_database` bootstrap, creating the database and catalog/executions containers if absent. Opening is not side-effect-free. |
+| `thesis_runtime.adapters.cosmos` | One authoritative workspace-scoped conversation store: records, messages, events, per-chat sequence counters, atomic sequence commits, root tombstones, and bounded background conversation cleanup. |
+| `thesis_runtime.adapters.cosmos.chunks` | Immutable bounded JSON leaves/reference pages in existing containers, content/digest-verified hydration, and forced opaque provider-request storage before invocation persistence. Unreferenced chunks are retained; no automatic collector. |
+| `thesis_runtime.adapters.cosmos.stack` | Single-store chat/timeline and execution-store composition; both openers retain `ensure_database` bootstrap, creating the database and catalog container if absent. Opening is not side-effect-free. |
 | `src/ui/src/lib/timeline.svelte.ts` | Single chat history/live owner with ID merge, `seq` ordering, and thread indexes. |
 | `src/ui/src/lib/workflow-scope.svelte.ts` | View navigation, expansion, durable capabilities, and anchored operator submission over the injected timeline. |
 | `src/ui/src/lib/chat-host.svelte.ts`, `chat-navigation.ts` | Shared chat lifecycle and URL navigation for full chat and copilot hosts. |
@@ -702,8 +815,8 @@ dirty files. `WorkspaceHypothesisStore` now uses this provider with an explicit
 workspace ID for every operation. Canonical Markdown bytes publish immutably at
 `hypotheses/<slug>/<sha256>.md`; `.thesis/hypotheses/<slug>.json` selects the
 accepted version. The workspace journal and fenced Git publication commit exact
-bytes, and loads verify hash, identity, and committed content. Legacy
-`hypotheses/<slug>.md` is read only inside the selected workspace; there is no
+bytes, and loads verify hash, identity, and committed content. Loads require the
+publication manifest; legacy `hypotheses/<slug>.md` has no compatibility read or
 guessed migration from a shared provider root. Automatic publication of every
 other artifact writer is not implied by this boundary.
 
@@ -839,3 +952,49 @@ calculation, while closed-trade figures and profit factor retain their meaning.
 The backtest results package owns financial statistics. The unused native metrics copy is removed; exact decimal primitives remain in the native kernel.
 
 Research migration cleanup removes the retired trait-driven engine/result model, unused lineage package, dormant HTTP workflow adapter, typed tool argument wrappers, obsolete scanner, and inert workflow dependencies. Product composition supplies an explicit MCP-backed runner. Imported report statistics use one snake_case projection; UI headlines read the canonical harness quantities and undefined reasons.
+
+
+Thesis runtime ownership ports live in `thesis_runtime/storage/ownership.py`; immutable
+submission journaling lives in `persistence/submissions.py`. `thesis_runtime/execution/worker.py`
+owns durable work execution policy. Cosmos ownership, work, submissions, execution
+and chat adapters share the workspace-partitioned catalog. `thesis worker` runs
+separately from stateless HTTP intake; `infra/modules/thesis.bicep` provisions its
+warm execution capacity. See the runtime architecture's stateless ownership and
+immutable submission sections for fencing, recovery, and deployment cutover.
+
+### Managed wavelet research features
+
+`strategy-sdk/src/wavelet.rs` owns the native `WaveletIndicator`, private trailing
+completed-bar state and immutable `WaveletSnapshot` observations. Programs expose it
+through MarketConsumer dependencies. Availability-bounded historical lookup and
+retained snapshots prevent later observations from relabeling earlier decisions on
+this supported path. Exact-decimal scale energies/coarse share and signed half-window
+trend have explicit missing/warm-up behavior. The `wavelet` SDK reference is served
+through strategy-jit validation and the existing MCP catalog. The Haar batch kernel
+is internal to evidence publication, not the author-facing trading feature API.
+Arbitrary authored Rust remains capable of computing other features or inventing
+rows; the snapshot guarantee is not a general scientific sandbox.
+
+## Fixed parallel workflow regions
+
+The runtime supports structured fixed split/join graphs through `SplitPhase` and
+existing deterministic phases. `thesis_runtime/workflows/graph/` contains only
+pure topology validation and accepted-history control reconstruction; the workflow
+host still owns acceptance and dispatch through its existing ports. No second
+scheduler or graph store is introduced. Ordinary decisions move one position;
+splits open fixed disjoint branches and joins restore one parent position.
+
+Execution records project `active_phases` and `control_sequence`; transition
+history retains explicit attempt and executor identities. Journal acceptance,
+CAS and ownership remain authoritative. JSON extension protocol 2 supplies each
+node's causal path, and paired joins receive fixed named accepted products.
+Recovery preserves arrivals, reconciles accepted terminals and missing dispatch,
+and may recompute only pure paired joins after interruption. Side-effecting work
+keeps its retained-ID/no-auto-replay policy. Incoming messages continue through
+Option 1's canonical writer and provider projection.
+
+This capability does not activate parallelism in either current concrete workflow.
+Hypothesis development 5.0.0 and research investigation 2.0.0 retain their existing
+phase flows, prompts and tool policies; research still has one critic. Old runtime
+records are rejected rather than inferred or upgraded. See
+[the bounded implementation contract](thesis-fixed-workflow-graph-plan.md).

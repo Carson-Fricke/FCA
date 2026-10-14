@@ -35,6 +35,8 @@ from thesis.integrations.mcp import (
     harness_mcp_topology_from_env,
     open_harness_mcp_client,
 )
+from thesis.persistence.submissions import SubmissionStore, retain_submission
+from thesis.research.presentation import PresentationService
 from thesis.workspaces.exploration import output_page
 
 ClientFactory = Callable[[], HarnessMcpClient]
@@ -45,7 +47,7 @@ class LaunchHarnessBacktestRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    config_path: str = Field(min_length=1, max_length=2_048)
+    config: dict[str, object] = Field(min_length=1)
     workspace: str | None = Field(default=None, max_length=128)
 
 
@@ -64,7 +66,13 @@ class HarnessDataService:
         topology: HarnessMcpTopology | None = None,
         *,
         factory: ClientFactory | None = None,
+        submissions: SubmissionStore | None = None,
+        presentation: PresentationService | None = None,
     ) -> None:
+        self.submissions = submissions
+        self._presentation = (
+            presentation if presentation is not None else PresentationService()
+        )
         self._topology = (
             topology if topology is not None else harness_mcp_topology_from_env()
         )
@@ -102,7 +110,12 @@ class HarnessDataService:
             tools = client.list_tools()
             document["server"] = dict(client.server_info)
             document["tools"] = [
-                {"name": tool.name, "description": tool.description} for tool in tools
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "annotations": {"readOnlyHint": tool.read_only},
+                }
+                for tool in tools
             ]
             document["reachable"] = True
             health = _probe_health(client)
@@ -123,13 +136,21 @@ class HarnessDataService:
         every failure path, so an unknown outcome is inspectable by its
         original id and is never replayed under another one.
         """
-        config_path = request.config_path
+        config = dict(request.config)
         workspace = request.workspace
         job_id = f"job-{uuid4().hex}"
+        config["job_id"] = job_id
+        retain_submission(
+            self.submissions,
+            workspace or "_harness",
+            job_id,
+            "run_backtest",
+            {**request.model_dump(mode="json"), "config": config},
+        )
         try:
             result = self._tool_result(
                 lambda client: client.run_backtest(
-                    config_path=config_path, workspace=workspace, job_id=job_id
+                    config=config, workspace=workspace, job_id=job_id
                 )
             )
         except HarnessMcpError as error:
@@ -148,7 +169,7 @@ class HarnessDataService:
         return {
             "action": "backtest",
             "kind": "backtest",
-            "config_path": config_path,
+            "config": config,
             "workspace": workspace,
             "boundary": _text(payload.get("boundary")),
             "job_id": job_id,
@@ -176,14 +197,7 @@ class HarnessDataService:
         limit: int = 100,
     ) -> dict[str, object]:
         """Project bounded pages from the job's authoritative exploratory artifact."""
-        result = self._tool_result(
-            lambda client: client.read_artifact(
-                job_id=job_id, name="exploratory_outputs.json"
-            )
-        )
-        content = result.structured.get("content")
-        if not isinstance(content, str):
-            raise ValueError("exploratory output artifact is not UTF-8 JSON")
+        content = self.exploratory_content(job_id)
         return output_page(
             job_id,
             content,
@@ -192,6 +206,22 @@ class HarnessDataService:
             offset=offset,
             limit=limit,
         )
+
+    def exploratory_content(self, job_id: str) -> str:
+        """Read complete evidence for both paging and presentation profiling."""
+        result = self._tool_result(
+            lambda client: client.read_artifact(
+                job_id=job_id, name="exploratory_outputs.json"
+            )
+        )
+        content = result.structured.get("content")
+        if not isinstance(content, str):
+            raise ValueError("exploratory output artifact is not UTF-8 JSON")
+        return content
+
+    def research_recommendations(self, job_id: str) -> dict[str, object]:
+        """Rank presentation plans without executing or mutating study evidence."""
+        return self._presentation.recommend(job_id, self.exploratory_content(job_id))
 
     def artifact(self, job_id: str, name: str) -> bytes:
         """Read complete artifact bytes through the same harness artifact authority."""
@@ -316,13 +346,13 @@ def create_harness_router() -> APIRouter:
     router = APIRouter(tags=["harness"])
 
     @router.get("/v1/harness/status")
-    async def harness_status(
+    def harness_status(
         service: Annotated[HarnessDataService, Depends(get_harness_service)],
     ) -> dict[str, object]:
         return service.status()
 
-    @router.post("/v1/backtests/jobs")
-    async def launch_backtest(
+    @router.post("/v1/backtests/jobs", status_code=202)
+    def launch_backtest(
         request: LaunchHarnessBacktestRequest,
         service: Annotated[HarnessDataService, Depends(get_harness_service)],
     ) -> dict[str, object]:
@@ -332,7 +362,7 @@ def create_harness_router() -> APIRouter:
             raise _service_error(error) from error
 
     @router.get("/v1/jobs/{job_id}")
-    async def backtest_job_status(
+    def backtest_job_status(
         job_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[HarnessDataService, Depends(get_harness_service)],
     ) -> dict[str, object]:
@@ -342,7 +372,7 @@ def create_harness_router() -> APIRouter:
             raise _service_error(error) from error
 
     @router.get("/v1/jobs/{job_id}/result")
-    async def backtest_job_result(
+    def backtest_job_result(
         job_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[HarnessDataService, Depends(get_harness_service)],
     ) -> dict[str, object]:
@@ -352,7 +382,7 @@ def create_harness_router() -> APIRouter:
             raise _service_error(error) from error
 
     @router.get("/v1/jobs/{job_id}/artifacts")
-    async def backtest_job_artifacts(
+    def backtest_job_artifacts(
         job_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[HarnessDataService, Depends(get_harness_service)],
     ) -> dict[str, object]:
@@ -362,7 +392,7 @@ def create_harness_router() -> APIRouter:
             raise _service_error(error) from error
 
     @router.get("/v1/jobs/{job_id}/exploratory-outputs")
-    async def exploratory_outputs(
+    def exploratory_outputs(
         job_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[HarnessDataService, Depends(get_harness_service)],
         instance_id: str | None = None,
@@ -377,8 +407,18 @@ def create_harness_router() -> APIRouter:
         except Exception as error:
             raise _service_error(error) from error
 
+    @router.post("/v1/jobs/{job_id}/research-recommendations")
+    def research_recommendations(
+        job_id: Annotated[str, Path(min_length=1, max_length=128)],
+        service: Annotated[HarnessDataService, Depends(get_harness_service)],
+    ) -> dict[str, object]:
+        try:
+            return service.research_recommendations(job_id)
+        except Exception as error:
+            raise _service_error(error) from error
+
     @router.get("/v1/jobs/{job_id}/artifacts/{name}")
-    async def download_artifact(
+    def download_artifact(
         job_id: str,
         name: str,
         service: Annotated[HarnessDataService, Depends(get_harness_service)],

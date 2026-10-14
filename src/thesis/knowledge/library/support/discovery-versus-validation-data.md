@@ -1,13 +1,13 @@
 ---
 id: discovery-versus-validation-data
 title: Discovery versus validation data
-version: 1
+version: 2
 created: 2026-10-02
-retrieved: 2026-10-02
+retrieved: 2026-10-13
 source:
   url: https://github.com/Carson-Fricke/FCA
   publisher: FCA Thesis
-  content_hash: 36946220091c18a75c647e7a13105b6aa6bf31a7bca90228a0bb6e0fb7fb40dc
+  content_hash: 77131df906bc77dcbe5eea6751a89310e61b5b0dbc964f3fc33a673d486f0ff3
 tags:
   - in-sample
   - out-of-sample
@@ -42,14 +42,16 @@ trust:
 ---
 # Discovery versus validation data
 
-Searching and confirming cannot use the same data without inflating the
-result. The split that makes confirmation meaningful has to be chosen before
-the search begins.
+Discovery uses development data to construct strategies, fit parameters,
+explore feature interactions and assess training robustness. These activities
+are authorized parts of discovery. Sealed forward data later evaluates the
+frozen policy on observations that did not guide its construction.
 
 ## In brief
 
 - Choose the split before looking at any result.
-- Discovery data is for searching; validation data is for one test.
+- Development data supports candidate construction, search and training tests.
+- Forward data evaluates a frozen plan, including its declared comparisons.
 - Once validation data is seen, it is no longer untouched.
 - If the sample is too small to split, say so.
 
@@ -67,6 +69,12 @@ After choosing the split, check that both parts contain the instruments,
 sessions, and activity the study needs. Record the split dates in the study
 log before running anything. The split is itself a design choice and should
 not move afterward.
+
+An in-sample robustness test is allowed on development data. Its claim must
+match what ran: a fixed selected-policy null is conditional on selection;
+search-aware evidence requires a procedure that accounts for that selection.
+Neither claim establishes independent forward generalization. See
+[Testing a searched candidate against a null](testing-a-searched-candidate-against-a-null).
 
 ## Once seen, it is spent
 

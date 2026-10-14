@@ -165,6 +165,15 @@ pub fn run_study_configuration(
     output_dir: Option<&Path>,
     client: &BlockingLakeClient,
 ) -> Result<(BacktestOutcome, PathBuf), ConfigurationRunError> {
+    client
+        .report_progress(harness_contracts::progress::ExecutionProgress::stage(
+            harness_contracts::progress::ExecutionStage::Compiling,
+        ))
+        .map_err(|error| {
+            ConfigurationRunError::Job(backtest::backtest::job::BacktestJobError::Io(
+                error.to_string(),
+            ))
+        })?;
     let workspace = ManagedWorkspace::open_default()?;
     let programs = build_instances(configuration, &workspace)?;
     Ok(run_native_study_job_with_lake_client(
@@ -190,6 +199,15 @@ pub fn run_backtest_configuration(
     output_dir: Option<&Path>,
     client: &BlockingLakeClient,
 ) -> Result<(BacktestOutcome, PathBuf), ConfigurationRunError> {
+    client
+        .report_progress(harness_contracts::progress::ExecutionProgress::stage(
+            harness_contracts::progress::ExecutionStage::Compiling,
+        ))
+        .map_err(|error| {
+            ConfigurationRunError::Job(backtest::backtest::job::BacktestJobError::Io(
+                error.to_string(),
+            ))
+        })?;
     let workspace = ManagedWorkspace::open_default()?;
     let strategies = build_instances(configuration, &workspace)?;
     Ok(run_native_job_with_lake_client(

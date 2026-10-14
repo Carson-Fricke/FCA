@@ -594,3 +594,45 @@ output costEnvelope object = {
     ingestionOnly: true
   }
 }
+
+// Separate durable execution capacity; API replicas only accept and read state.
+resource thesisWorkerApp 'Microsoft.App/containerApps@2025-07-01' = {
+  name: '${thesisApiAppName}-worker'
+  location: location
+  tags: tags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: { '${thesisIdentityResourceId}': {} }
+  }
+  properties: {
+    environmentId: containerAppsEnvironmentResourceId
+    configuration: {
+      activeRevisionsMode: 'Single'
+      registries: [{
+        server: registryLoginServer
+        identity: thesisIdentityResourceId
+      }]
+      secrets: thesisSecrets
+    }
+    template: {
+      containers: [{
+        name: 'thesis-worker'
+        image: thesisImageReference
+        args: thesisGiteaConfigured && !thesisGiteaEnabled ? [
+          'worker'
+          '--gitea-requires-url-organization-and-token-secret-name'
+        ] : ['worker']
+        env: thesisApiEnvironment
+        resources: {
+          cpu: json(thesisContainerCpu)
+          memory: thesisContainerMemory
+        }
+      }]
+      scale: {
+        minReplicas: 1
+        maxReplicas: 2
+      }
+    }
+  }
+  dependsOn: [thesisSecretAccess]
+}

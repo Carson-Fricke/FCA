@@ -115,3 +115,45 @@ fn empty_batches_issue_no_requests() {
     assert!(client.read_many(&[]).is_empty());
     assert!(server.requests().is_empty());
 }
+
+#[test]
+fn environment_url_overrides_route_authenticated_requests() {
+    // Each process has its own environment; parallel tests never mutate one
+    // another's configuration and these checks cannot reach the real lake.
+    const CHILD: &str = "FCA_LAKE_ENV_TEST_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        let client = BlockingLakeClient::from_env().expect("environment client");
+        client.ensure(&ensure_spec("SPY", "bars")).unwrap();
+        return;
+    }
+    let server = FakeLakeServer::start(satisfied_ensure_config());
+    for (primary, secondary) in [
+        (server.base_url(), "http://127.0.0.1:1"),
+        (" ", server.base_url()),
+    ] {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "environment_url_overrides_route_authenticated_requests",
+            ])
+            .env(CHILD, "1")
+            .env("LAKE_API_URL", primary)
+            .env("LAKE_API_BASE_URL", secondary)
+            .env("LAKE_API__BEARER_TOKEN", TOKEN)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+    assert_eq!(
+        server
+            .requests()
+            .iter()
+            .filter(|r| r.path == "/v1/catalog/ensure")
+            .count(),
+        2
+    );
+}

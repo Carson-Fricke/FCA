@@ -1,13 +1,13 @@
 """Discovery startup delivery must match the schema consumed by the live UI."""
 
 from datetime import UTC, datetime
+from typing import Any
 
-from thesis.agent.messages import SESSION_MESSAGE_ADAPTER, from_record
-from thesis.agent.runtime.conversation import Conversations
-from thesis.agent.runtime.datum import Datum, ToolResultWire
-from thesis.agent.runtime.delivery import Anchor, DeliveryService
-from thesis.chat import ChatService, MessageRole
-from thesis.http.schema import export_schema
+from thesis_runtime.contracts.datum import Datum, ToolResultWire
+from thesis_runtime.contracts.messages import SESSION_MESSAGE_ADAPTER, from_record
+from thesis_runtime.conversations import ChatService, MessageRole
+from thesis_runtime.conversations.conversation import Conversations
+from thesis_runtime.conversations.delivery import Anchor, DeliveryService
 
 
 def test_discovery_seed_separates_datum_result_from_delivery_metadata() -> None:
@@ -35,10 +35,10 @@ def test_discovery_seed_separates_datum_result_from_delivery_metadata() -> None:
     SESSION_MESSAGE_ADAPTER.validate_python(message.data["sessionMessage"])
 
 
-def test_schema_preserves_persisted_delivery_shape_without_opening_tool_results() -> (
-    None
-):
-    components = export_schema()["components"]["schemas"]
+def test_schema_preserves_persisted_delivery_shape_without_opening_tool_results(
+    wire_schema: dict[str, Any],
+) -> None:
+    components = wire_schema["components"]["schemas"]
     variants = components["ChatMessageWire"]["properties"]["tool_result"]["anyOf"]
     assert {"$ref": "#/components/schemas/DeliveredDatumWire"} in variants
     assert components["DeliveredDatumWire"]["additionalProperties"] is True
@@ -47,10 +47,10 @@ def test_schema_preserves_persisted_delivery_shape_without_opening_tool_results(
     assert "callId" in components["ToolResultWire"]["required"]
 
 
-def test_canonical_metadata_schema_types_session_and_datums_without_requiring_them() -> (
-    None
-):
-    components = export_schema()["components"]["schemas"]
+def test_canonical_metadata_schema_types_session_and_datums_without_requiring_them(
+    wire_schema: dict[str, Any],
+) -> None:
+    components = wire_schema["components"]["schemas"]
     assert components["SessionMessageWire"]["properties"]["direction"]["enum"] == [
         "incoming",
         "outgoing",
@@ -77,8 +77,12 @@ def test_canonical_metadata_schema_types_session_and_datums_without_requiring_th
 def test_multiple_datums_preserve_one_canonical_message_and_strict_main_result() -> (
     None
 ):
-    from thesis.agent.messages import MessageContent, SessionMessage, ToolCorrelation
-    from thesis.agent.runtime.datum import DatumWire
+    from thesis_runtime.contracts.datum import DatumWire
+    from thesis_runtime.contracts.messages import (
+        MessageContent,
+        SessionMessage,
+        ToolCorrelation,
+    )
 
     chat = ChatService()
     thread = chat.create_chat("workspace", title="Datums", owner_actor_id="operator")
@@ -114,5 +118,5 @@ def test_multiple_datums_preserve_one_canonical_message_and_strict_main_result()
         DatumWire.model_validate(datum)
     main = ToolResultWire.model_validate(message.tool_result)
     assert main.call_id == "call" and main.tool == "validate_study"
-    assert from_record(message) == canonical
-    assert canonical.content.correlation == correlation
+    assert message == canonical
+    assert from_record(canonical).content.correlation == correlation

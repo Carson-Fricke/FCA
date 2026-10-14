@@ -19,9 +19,10 @@ every selected listener presents a new process and answers its health
 endpoint, so a calling shell or agent tool returns as soon as the restart
 completes instead of waiting on long-running servers.
 
-The Cosmos DB emulator runs from the vNext image with a named data volume
-mounted at /data so conversations survive restarts (the legacy emulator image
-does not persist data).  It is recreated on every start while the data volume
+The Cosmos DB emulator runs from pinned vNext EN20260907 over loopback HTTP,
+bypassing that release's TLS buffering defect. A named data volume is mounted
+at /data so conversations survive restarts (the legacy emulator image does not
+persist data). It is recreated on every start while the data volume
 is retained, because a stale database socket lock in the container's writable
 layer otherwise survives a plain `docker start`.  Docker Desktop is started
 automatically when the daemon is not running.
@@ -29,8 +30,8 @@ automatically when the daemon is not running.
 .PARAMETER Servers
 Subset of cosmos, lake, harness, thesis, ui to launch. Defaults to all five. The
 Cosmos emulator is a dependency of the Thesis API's conversation store, so it
-is normally left in the default set. The market-lake API serves the harness's
-on-demand data ensure calls, so it is normally left in the default set too.
+is normally left in the default set. The harness uses the Azure market lake by
+default. The local lake is available when LAKE_API_URL selects port 8002.
 
 .PARAMETER Rotate
 Mint fresh managed tokens instead of reusing the values already in .env.
@@ -292,8 +293,8 @@ function Stop-ListeningServer {
     if ($remaining.Count -gt 0) { throw "Port $Port did not free after stopping the previous server" }
 }
 
-# The vNext Cosmos DB emulator persists to /data; the legacy image does not.
-$cosmosImage = 'mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-latest'
+# EN20261008 cannot query our retained catalog. HTTP bypasses EN20260907's TLS bug.
+$cosmosImage = 'mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-EN20260907'
 $cosmosContainer = 'cosmos-emulator'
 $cosmosVolume = 'cosmos-emulator-data'
 $cosmosReadyUrl = 'http://127.0.0.1:8080/ready'
@@ -348,8 +349,8 @@ function Ensure-CosmosEmulator {
     docker volume create $cosmosVolume | Out-Null
     docker run --rm --entrypoint /bin/sh -v "${cosmosVolume}:/data" $cosmosImage -c 'rm -f /data/db/postmaster.pid' | Out-Null
     docker run -d --name $cosmosContainer `
-        -p 8081:8081 -p 8080:8080 -p 1234:1234 `
-        -e PROTOCOL=https `
+        -p 127.0.0.1:8081:8081 -p 127.0.0.1:8080:8080 -p 127.0.0.1:1234:1234 `
+        -e PROTOCOL=http `
         -v "${cosmosVolume}:/data" `
         $cosmosImage | Out-Null
 
@@ -398,6 +399,32 @@ if ($Servers -contains 'ui') { $requiredTokens += 'PUBLIC_THESIS_API_BEARER_TOKE
 $missingTokens = @($requiredTokens | Where-Object { -not [Environment]::GetEnvironmentVariable($_) })
 if ($missingTokens.Count -gt 0) {
     throw ('the environment is missing required bearer tokens: ' + ($missingTokens -join ', '))
+}
+
+# The local lake keeps its generated loopback token. Only the harness child
+# receives the Azure lake credential, fetched into memory rather than .env.
+# A custom URL uses its configured LAKE_API__BEARER_TOKEN unless a Key Vault
+# secret URI is explicitly supplied. Resolve before stopping any old server.
+$harnessLakeBearer = $env:LAKE_API__BEARER_TOKEN
+if ($Servers -contains 'harness') {
+    $lakeUrl = if (-not [string]::IsNullOrWhiteSpace($env:LAKE_API_URL)) {
+        $env:LAKE_API_URL.Trim()
+    } elseif (-not [string]::IsNullOrWhiteSpace($env:LAKE_API_BASE_URL)) {
+        $env:LAKE_API_BASE_URL.Trim()
+    } else { $null }
+    $secretUri = $env:HARNESS_LAKE_BEARER_SECRET_URI
+    if (-not $secretUri -and (-not $lakeUrl -or
+            ([uri]$lakeUrl).Host -eq 'fca-ml-dev-api.lemonhill-3b437822.westus2.azurecontainerapps.io')) {
+        $secretUri = 'https://fca-ml-dev-kv-obj3kww.vault.azure.net/secrets/api-bearer-token'
+    }
+    if ($secretUri) {
+        Write-Host '==> Loading the harness lake credential from Key Vault (memory only)'
+        $harnessLakeBearer = & az keyvault secret show --id $secretUri --query value -o tsv --only-show-errors
+        if ($LASTEXITCODE -ne 0 -or -not $harnessLakeBearer) {
+            throw 'Could not read the harness lake bearer; sign in with az login and verify Key Vault access'
+        }
+        $harnessLakeBearer = $harnessLakeBearer.Trim()
+    }
 }
 
 # The harness and lake products are native Rust binaries launched from their
@@ -453,7 +480,13 @@ foreach ($name in $Servers) {
     $out = Join-Path $logDir ("{0}-{1}.out.log" -f $spec.Name, $stamp)
     $err = Join-Path $logDir ("{0}-{1}.err.log" -f $spec.Name, $stamp)
     Write-Host "==> Starting $($spec.Name) on port $($spec.Port)"
-    $proc = Start-Process -FilePath $spec.FilePath -ArgumentList $spec.Arguments -WorkingDirectory $repo -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+    $localLakeBearer = $env:LAKE_API__BEARER_TOKEN
+    try {
+        if ($name -eq 'harness') { $env:LAKE_API__BEARER_TOKEN = $harnessLakeBearer }
+        $proc = Start-Process -FilePath $spec.FilePath -ArgumentList $spec.Arguments -WorkingDirectory $repo -RedirectStandardOutput $out -RedirectStandardError $err -WindowStyle Hidden -PassThru
+    } finally {
+        $env:LAKE_API__BEARER_TOKEN = $localLakeBearer
+    }
     $started += [pscustomobject]@{
         Server = $spec.Name; Port = $spec.Port; LauncherPid = $proc.Id; Out = $out; Err = $err
     }

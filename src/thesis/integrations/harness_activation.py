@@ -120,10 +120,14 @@ class HarnessActivationRequest:
     action: ActivationAction
     environment: ActivationEnvironment = "paper"
     job_id: str | None = None
+    config: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "bundle_ref", _text(self.bundle_ref, "bundle_ref"))
-        object.__setattr__(self, "config_path", _text(self.config_path, "config_path"))
+        if self.config is None:
+            object.__setattr__(
+                self, "config_path", _text(self.config_path, "config_path")
+            )
         if self.action not in ("backtest", "trader"):
             raise ValueError(
                 f"activation action must be 'backtest' or 'trader', got {self.action!r}"
@@ -145,6 +149,9 @@ class HarnessActivationRequest:
             "action": self.action,
             "config_path": self.config_path,
         }
+        if self.config is not None:
+            payload.pop("config_path", None)
+            payload["config"] = dict(self.config)
         if self.job_id is not None:
             payload["job_id"] = self.job_id
         return payload

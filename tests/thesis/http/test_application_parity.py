@@ -1,17 +1,40 @@
 """Root and prefixed routes share injected state and error contracts."""
 
+from typing import Any
+
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from thesis.agent.runtime.conversation import Conversations
-from thesis.chat import ChatService
 from thesis.http.application import create_app
 from thesis.http.chat import create_chat_router
 from thesis.http.workspaces import build_local_workspace_data
-from thesis.workflows.core.registry import WorkflowRegistry
+from thesis_runtime.conversations import ChatService
+from thesis_runtime.conversations.conversation import Conversations
+from thesis_runtime.workflows.registry import WorkflowRegistry
 
 HEADERS = {"Authorization": "Bearer test-token"}
+
+
+def test_multiple_applications_keep_authentication_and_conversations_isolated() -> None:
+    first = TestClient(create_app(bearer_token="first"))
+    second = TestClient(create_app(bearer_token="second"))
+    first_headers = {"Authorization": "Bearer first"}
+    second_headers = {"Authorization": "Bearer second"}
+    path = "/v1/workspaces/workspace/chats"
+    response = first.post(
+        path,
+        headers=first_headers,
+        json={"title": "Private", "owner_actor_id": "operator"},
+    )
+    assert response.status_code == 200
+    for prefix in ("", "/api"):
+        assert first.get(prefix + path, headers=first_headers).json()["items"] == [
+            response.json()
+        ]
+        assert second.get(prefix + path, headers=second_headers).json()["items"] == []
+        assert second.get(prefix + path, headers=first_headers).status_code == 401
+        assert first.get(prefix + path, headers=second_headers).status_code == 401
 
 
 def test_injected_container_is_shared_by_both_surfaces() -> None:
@@ -78,13 +101,13 @@ def test_missing_chat_never_creates_a_thread_through_conversations() -> None:
     client = TestClient(app)
     for prefix in ("", "/api"):
         response = client.post(
-            prefix + "/v1/workspaces/w/chats/missing/messages",
+            prefix + "/v1/workspaces/workspace-a/chats/missing/messages",
             headers=HEADERS,
             json={"actor_id": "operator", "body": "hello"},
         )
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "record_not_found"
-    assert chat.list_chats("w") == ()
+    assert chat.list_chats("workspace-a") == ()
 
 
 def test_router_alone_never_manufactures_chat_service() -> None:
@@ -94,9 +117,10 @@ def test_router_alone_never_manufactures_chat_service() -> None:
     assert not hasattr(app.state, "chat_service")
 
 
-def test_openapi_exports_generated_request_and_error_contracts() -> None:
-    app = create_app(in_memory=False, workflow_registry=WorkflowRegistry())
-    schema = app.openapi()
+def test_openapi_exports_generated_request_and_error_contracts(
+    wire_schema: dict[str, Any],
+) -> None:
+    schema = wire_schema
     models = schema["components"]["schemas"]
     assert "CreateMessageRequest" in models
     assert "ErrorResponse" in models

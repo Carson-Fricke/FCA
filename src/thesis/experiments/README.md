@@ -11,12 +11,12 @@ choose trading strategies or schedule agents.
 | `grades.py` | Evidence grades and one-way exposure downgrades. |
 | `intervals.py` | Declared dependency windows and deterministic overlap audits. |
 | `ledger.py` | Durable experiment exposure records. |
-| `mandate.py` | Launch-frozen research partitions and enforcement of phase data windows. |
+| `mandate.py` | Explicit workflow-owned dataset windows and enforcement of phase data access. |
 
-Hypothesis-development launches declare history and forward lengths explicitly.
-Their conservative information and position horizons derive the purge gap;
-liquidation duration derives the embargo. The durable launch retains the source
-declarations and derived partition. Resume never selects a default partition.
+Hypothesis-development starts from the operator's idea. Discovery declares
+explicit development and sealed forward windows before empirical work. The
+execution's `research_window` artifact freezes those dates; resume reads it
+unchanged. Signal lookbacks, warm-up, label purges and close-out exclusions belong
+to the research design inside the windows, rather than moving dataset boundaries.
 Each partition execution starts with clean strategy/account state and admits no
-preboundary inputs or carried positions. Declared horizons constrain research;
-they do not statically prove every authored strategy obeys its declared horizon.
+preboundary inputs or carried positions.

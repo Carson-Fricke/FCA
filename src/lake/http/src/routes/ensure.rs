@@ -111,10 +111,10 @@ async fn ensure_option(
     let front_sets = context.state.front_sets.as_deref();
     let like = OptionRequestLike {
         data_type: request.data_type,
+        interval: request.interval.as_deref(),
         symbol: request.symbol.as_deref(),
         underlying: request.underlying.as_deref(),
         contract_symbols: request.contract_symbols.as_deref(),
-        contracts: request.contracts.as_deref(),
         start_date: request.start_date,
         end_date: request.end_date,
     };
@@ -161,7 +161,7 @@ async fn ensure_option(
         symbol: String::new(),
         start_date: request.start_date,
         end_date: request.end_date,
-        interval: None,
+        interval: request.interval.clone(),
     };
     let task_job_id = job_id.clone();
     let handle = tokio::spawn(async move {
@@ -222,6 +222,9 @@ async fn ensure_option(
 /// Return the stable identifier for one option ensure membership.
 fn option_job_id(request: &OptionEnsureRequest, symbols: &[String]) -> String {
     let mut payload = serde_json::Map::new();
+    if let Some(interval) = &request.interval {
+        payload.insert("interval".to_string(), json!(interval));
+    }
     payload.insert("asset_class".to_string(), json!("option"));
     payload.insert("data_type".to_string(), json!(request.data_type.value()));
     payload.insert(

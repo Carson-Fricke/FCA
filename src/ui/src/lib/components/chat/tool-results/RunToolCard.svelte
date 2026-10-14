@@ -1,4 +1,5 @@
 <script lang="ts">
+    import HarnessExecutionCard from "../HarnessExecutionCard.svelte";
 	import type { ToolResult } from '$lib/types';
 	import { formatValue, isRecord, readNumber, readRecord, readString } from './safe';
 
@@ -35,3 +36,5 @@
 		</div>
 	{/if}
 </div>
+
+{#if jobId}<HarnessExecutionCard {jobId} />{/if}

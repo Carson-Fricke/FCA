@@ -234,12 +234,12 @@ pub struct BacktestManifest {
     pub risk_pipeline_fingerprint: String,
     /// Strategy identities.
     pub strategies: Vec<StrategyIdentity>,
-    /// Effective consumer plan, absent for legacy runs.
-    pub effective_subscriptions: Option<Vec<super::engine_core::MarketSubscription>>,
-    /// Consumer union plus execution inputs planned for acquisition; absent for legacy runs.
-    pub acquired_subscriptions: Option<Vec<super::engine_core::MarketSubscription>>,
-    /// Separate quote/trade execution plan; empty for studies, absent for legacy runs.
-    pub execution_subscriptions: Option<Vec<super::engine_core::MarketSubscription>>,
+    /// Effective consumer plan.
+    pub effective_subscriptions: Vec<super::engine_core::MarketSubscription>,
+    /// Consumer union plus execution inputs planned for acquisition.
+    pub acquired_subscriptions: Vec<super::engine_core::MarketSubscription>,
+    /// Separate quote/trade execution plan; empty for studies.
+    pub execution_subscriptions: Vec<super::engine_core::MarketSubscription>,
 }
 
 impl BacktestManifest {
@@ -329,22 +329,13 @@ impl BacktestManifest {
                 ),
             ),
         ]);
-        if let (Some(plan), JsonValue::Object(entries)) =
-            (&self.effective_subscriptions, &mut value)
-        {
-            entries.insert(
-                "effective_subscriptions".into(),
-                super::config::subscriptions_json(plan),
-            );
-        }
         if let JsonValue::Object(entries) = &mut value {
             for (name, plan) in [
+                ("effective_subscriptions", &self.effective_subscriptions),
                 ("acquired_subscriptions", &self.acquired_subscriptions),
                 ("execution_subscriptions", &self.execution_subscriptions),
             ] {
-                if let Some(plan) = plan {
-                    entries.insert(name.into(), super::config::subscriptions_json(plan));
-                }
+                entries.insert(name.into(), super::config::subscriptions_json(plan));
             }
         }
         value
@@ -404,9 +395,9 @@ pub fn build_manifest(
         fee_fingerprint: configuration_hash(fee_identity),
         risk_pipeline_fingerprint: configuration_hash(risk_pipeline_identity),
         strategies: strategy_identities,
-        effective_subscriptions: None,
-        acquired_subscriptions: None,
-        execution_subscriptions: None,
+        effective_subscriptions: Vec::new(),
+        acquired_subscriptions: Vec::new(),
+        execution_subscriptions: Vec::new(),
     })
 }
 

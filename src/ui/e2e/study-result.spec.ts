@@ -1,0 +1,127 @@
+import { expect, test } from '@playwright/test';
+
+test('profile-backed recommendations become inline tabs and returned data permits arbitrary mappings and explicit buckets',async({page})=>{
+ await page.goto('/demo/study-result');const card=page.getByTestId('study-tool-card');
+ await page.getByRole('combobox',{name:'Study example'}).selectOption('parameters');
+ await page.getByRole('button',{name:'Suggested views',exact:true}).click();
+ await expect(card.getByTestId('recommendation-status')).toContainText('Deterministic suggestions');
+ await expect(card.getByRole('tab',{name:/Heatmap ·/}).first()).toBeVisible();
+ await expect(card.getByRole('tab',{name:/Scatter ·/}).first()).toBeVisible();
+ await expect(card.locator('[data-testid="research-plot"]:visible')).toBeVisible();
+ await card.getByRole('tab',{name:'Returned data',exact:true}).click();
+ await card.getByRole('combobox',{name:'Data',exact:true}).selectOption(JSON.stringify(['parameters','experiments']));
+ await card.getByText('Field meanings & distributions · complete output',{exact:true}).click();
+ await expect(card.getByText(/distinct ·/).first()).toBeVisible();
+ await card.getByRole('combobox',{name:'View',exact:true}).selectOption('scatter');
+ await card.getByRole('combobox',{name:'X field',exact:true}).selectOption('id');
+ await card.getByRole('combobox',{name:'Y field',exact:true}).selectOption('id');
+ await expect(card.locator('[data-testid="research-plot"]:visible')).toBeVisible();
+ await card.getByRole('combobox',{name:'Color field',exact:true}).selectOption('horizon');
+ await expect(card.locator('[data-testid="research-plot"]:visible')).toBeVisible();
+ await card.getByRole('combobox',{name:'View',exact:true}).selectOption('heatmap');
+ await card.getByRole('combobox',{name:'X field',exact:true}).selectOption('horizon');
+ await expect(card.getByRole('status')).toContainText('Multiple observations occupy');
+ await card.getByRole('combobox',{name:'Cell aggregation',exact:true}).selectOption('mean');
+ await expect(card.locator('[data-testid="research-plot"]:visible')).toBeVisible();
+ await card.getByRole('combobox',{name:'X buckets',exact:true}).selectOption('5');
+ await expect(card.locator('[data-testid="research-plot"]:visible')).toBeVisible();
+ await expect(card.getByText('Exploratory display:',{exact:false})).toContainText('mean');
+ await card.getByRole('combobox',{name:'View',exact:true}).selectOption('table');
+ await expect(card.getByRole('table')).toBeVisible();
+ await expect(card.getByRole('columnheader',{name:'horizon',exact:true})).toBeVisible();
+});
+
+test('one production study surface transitions from running to research and handles failure and cancellation',async({page})=>{
+ await page.goto('/demo/study-result');const card=page.getByTestId('study-tool-card');
+ await expect(card.getByRole('tab',{name:'Time × scale energy',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Running',exact:true}).click();
+ await expect(card.getByText('Running',{exact:true})).toBeVisible();
+ await expect(card.getByRole('status')).toContainText('Research views will appear');
+ await expect(page.getByTestId('harness-execution-card')).toHaveCount(0);
+ await page.getByRole('button',{name:'Finish preview',exact:true}).click();
+ await expect(card.getByText('Completed',{exact:true})).toBeVisible();
+ await expect(card.locator('[data-testid="research-plot"]:visible')).toBeVisible();
+ await expect(card).toHaveCount(1);
+ await page.getByRole('button',{name:'Failed',exact:true}).click();
+ await expect(card.getByText('Failed',{exact:true})).toBeVisible();
+ await expect(card.getByText('Demonstration output publication failed',{exact:true})).toBeVisible();
+ await expect(card.locator('[data-testid="research-plot"]:visible')).toBeVisible();
+ await page.getByRole('button',{name:'Cancelled',exact:true}).click();
+ await expect(card.getByText('Cancelled',{exact:true})).toBeVisible();
+ await expect(card.getByText('Execution was cancelled.',{exact:false})).toBeVisible();
+});
+
+test('shared heatmap tabs link evidence and manual mappings allow all fields',async({page})=>{
+ await page.goto('/demo/study-result');const card=page.getByTestId('study-tool-card');
+ await card.locator('[data-testid="research-plot"]:visible').getByRole('button').first().click();
+ await expect(card.getByTestId('selected-evidence')).toContainText('observation_id');
+ await card.getByRole('button',{name:'Inspect source row',exact:false}).click();
+ await expect(card.getByText('1–1 of 1 rows',{exact:true})).toBeVisible();
+ await card.getByRole('textbox',{name:'Filter returned data'}).fill('');
+ await card.getByRole('combobox',{name:'View',exact:true}).selectOption('recommended');
+ await expect(card.locator('[data-kind="heatmap"]')).toBeVisible();
+ await card.getByRole('combobox',{name:'View',exact:true}).selectOption('heatmap');
+ await expect(card.getByRole('combobox',{name:'X field',exact:true}).locator('option[value="observation_id"]')).toHaveCount(1);
+ await expect(card.getByRole('combobox',{name:'Color measure',exact:true}).locator('option[value="energy"]')).toHaveText('Mean squared detail coefficient');
+ await card.getByRole('combobox',{name:'Data',exact:true}).selectOption(JSON.stringify(['wavelets','coefficients']));
+ await expect(card.locator('[data-testid="research-plot"]:visible')).toBeVisible();
+ await expect(card.getByRole('combobox',{name:'View',exact:true}).locator('option[value="heatmap"]')).toHaveJSProperty('disabled',false);
+ await card.getByRole('tab',{name:'Price context',exact:true}).click();
+ await expect(card.locator('[data-panel="line"]')).toBeVisible();
+ await card.getByRole('tab',{name:'Scale composition',exact:true}).click();
+ await expect(card.locator('[data-panel="composition"]')).toBeVisible();
+ await page.setViewportSize({width:390,height:844});
+ await expect(page.locator('main')).toHaveJSProperty('scrollWidth',390);
+ expect((await card.locator('[data-testid="research-plot"]:visible').boundingBox())!.width).toBeLessThan(390);
+});
+
+test('uncomposed outputs stay inspectable and metadata-backed outputs retain recommended plots',async({page})=>{
+ await page.goto('/demo/study-result');const card=page.getByTestId('study-tool-card');
+ await page.getByRole('combobox',{name:'Study example'}).selectOption('snapshot');
+ await expect(card.getByText('No research views were published.',{exact:false})).toBeVisible();
+ await expect(card.locator('[data-testid="research-plot"]:visible')).toBeVisible();
+ await card.getByRole('combobox',{name:'Data',exact:true}).selectOption('receipt:0');
+ await expect(card.getByText('1–6 of 41 metrics',{exact:true})).toBeVisible();
+ await card.getByRole('textbox',{name:'Filter returned data'}).fill('trend_drift');
+ await expect(card.getByText('1–3 of 3 metrics',{exact:true})).toBeVisible();
+ await page.getByRole('combobox',{name:'Study example'}).selectOption('predictive_signals');
+ await page.getByRole('button',{name:'Returned data only',exact:true}).click();
+ await expect(card.getByRole('tab',{name:'Signal and outcome',exact:true})).toHaveCount(0);
+ await card.getByRole('combobox',{name:'Data',exact:true}).selectOption(JSON.stringify(['predictive_signals','observations']));
+ await expect(card.locator('[data-kind="scatter"]')).toBeVisible();
+ await card.getByRole('combobox',{name:'View',exact:true}).selectOption('scatter');
+ await expect(card.getByRole('combobox',{name:'X field',exact:true}).locator('option[value="id"]')).toHaveCount(1);
+ await expect(card.getByRole('combobox',{name:'Y field',exact:true}).locator('option[value="signal"]')).toHaveJSProperty('disabled',false);
+});
+
+
+test('ambiguous heatmap cells need an explicit dimension slice and large filters remain preview-scoped',async({page})=>{
+ await page.goto('/demo/study-result');const card=page.getByTestId('study-tool-card');
+ await page.getByRole('combobox',{name:'Study example'}).selectOption('parameters');
+ await card.getByRole('tab',{name:'Returned data',exact:true}).click();
+ await card.getByRole('combobox',{name:'View',exact:true}).selectOption('heatmap');
+ await card.getByRole('combobox',{name:'X field',exact:true}).selectOption('horizon');
+ await expect(card.getByRole('status')).toContainText('Multiple observations occupy the same heatmap cell');
+ await expect(card.locator('[data-testid="research-plot"]:visible')).toHaveCount(0);
+ await card.getByText('Filter dimensions',{exact:true}).click();
+ await card.getByRole('combobox',{name:'Filter parameter_x',exact:true}).selectOption('0');
+ await expect(card.locator('[data-testid="research-plot"]:visible')).toBeVisible();
+ await expect(card.getByText('3 matching loaded observations',{exact:false})).toBeVisible();
+ await card.getByRole('tab',{name:'Joint experiment landscape',exact:true}).click();
+ await card.getByRole('tab',{name:'Returned data',exact:true}).click();
+ await expect(card.getByRole('combobox',{name:'X field',exact:true})).toHaveValue('horizon');
+ await expect(card.getByText('3 matching loaded observations',{exact:false})).toBeVisible();
+ await page.getByRole('combobox',{name:'Study example'}).selectOption('long_preview');
+ await expect(card.getByText('5000 loaded of 5100 observations',{exact:false})).toBeVisible();
+ await expect(card.getByText('filters and mapping checks cover this preview only',{exact:false})).toBeVisible();
+ await expect(card.getByText('1 observations have missing mapped values.',{exact:false})).toBeVisible();
+ await card.getByText('Filter dimensions',{exact:true}).click();
+ await card.getByRole('combobox',{name:'Filter group',exact:true}).selectOption('null');
+ await expect(card.getByText('295 matching loaded observations',{exact:false})).toBeVisible();
+ await card.getByRole('combobox',{name:'View',exact:true}).selectOption('table');
+ await card.getByRole('textbox',{name:'Filter returned data'}).fill('row-5099');
+ await expect(card.getByText('0 of 0 rows',{exact:true})).toBeVisible();
+ const href=await card.getByRole('link',{name:'Export evidence',exact:false}).getAttribute('href');
+ const exported=JSON.parse(decodeURIComponent(href!.split(',')[1]));
+ expect(exported.programs.long_preview.long_signal.rows).toHaveLength(5100);
+});

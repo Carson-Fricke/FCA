@@ -19,13 +19,6 @@ from fastapi import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 
-from thesis.agent.runtime.conversation import Conversations
-from thesis.chat import (
-    ChatService,
-    CrossWorkspaceLinkError,
-    MessageRole,
-    MessageState,
-)
 from thesis.http.errors import require_service
 from thesis.http.errors import service_error as _service_error
 from thesis.http.wire import (
@@ -35,6 +28,14 @@ from thesis.http.wire import (
     CreateMessageResponseWire,
     SteeringPercolationWire,
 )
+from thesis.research.investigations import Investigations
+from thesis_runtime.conversations import (
+    ChatService,
+    CrossWorkspaceLinkError,
+    MessageRole,
+    MessageState,
+)
+from thesis_runtime.conversations.conversation import Conversations
 
 
 class ChatHTTPModel(BaseModel):
@@ -63,6 +64,7 @@ class CreateInvestigationRequest(ChatHTTPModel):
 class CreateMessageRequest(ChatHTTPModel):
     actor_id: str = Field(min_length=1, max_length=128)
     body: str = Field(min_length=1, max_length=32_768)
+    message_id: str | None = Field(default=None, min_length=1, max_length=128)
     role: MessageRole = MessageRole.USER
     attachment_ids: tuple[str, ...] = ()
     investigation_ids: tuple[str, ...] = ()
@@ -126,6 +128,10 @@ def get_chat_service(request: Request) -> ChatService:
     return require_service(request, "chat_service", ChatService)
 
 
+def get_investigations(request: Request) -> Investigations:
+    return require_service(request, "investigations", Investigations)
+
+
 def create_chat_router() -> APIRouter:
     """Create the UI-facing router.
 
@@ -135,7 +141,7 @@ def create_chat_router() -> APIRouter:
     router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["chat"])
 
     @router.post("/chats", response_model=ChatThreadWire)
-    async def create_chat(
+    def create_chat(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: CreateChatRequest,
         chat_service: Annotated[ChatService, Depends(get_chat_service)],
@@ -145,9 +151,11 @@ def create_chat_router() -> APIRouter:
                 workspace_id,
                 title=request.title,
                 owner_actor_id=request.owner_actor_id,
-                investigation_ids=request.investigation_ids,
-                strategy_ids=request.strategy_ids,
-                experiment_ids=request.experiment_ids,
+                references={
+                    "fca.investigation": request.investigation_ids,
+                    "fca.strategy": request.strategy_ids,
+                    "fca.experiment": request.experiment_ids,
+                },
             )
         except Exception as error:
             raise _service_error(error) from error
@@ -194,7 +202,7 @@ def create_chat_router() -> APIRouter:
         return max(matches, key=lambda execution: execution.created_at).as_dict()
 
     @router.post("/chats/{chat_id}/archive", response_model=ChatThreadWire)
-    async def archive_chat(
+    def archive_chat(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_service: Annotated[ChatService, Depends(get_chat_service)],
@@ -221,7 +229,7 @@ def create_chat_router() -> APIRouter:
         response_model=CreateMessageResponseWire,
         response_model_exclude_unset=True,
     )
-    async def create_message(
+    def create_message(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: CreateMessageRequest,
@@ -269,22 +277,26 @@ def create_chat_router() -> APIRouter:
                     body=request.body,
                     role=request.role,
                     attachment_ids=request.attachment_ids,
-                    investigation_ids=request.investigation_ids or None,
+                    references={"fca.investigation": request.investigation_ids}
+                    if request.investigation_ids
+                    else None,
                     targets_execution_id=request.targets_execution_id,
                     steering_intent=request.steering_intent,
-                    message_factory=partial(root.send, schedule=False),
+                    message_factory=partial(
+                        root.send, schedule=False, message_id=request.message_id
+                    ),
                     after_delivery=conversations.schedule_input,
                 )
             else:
-                chat_service.get_chat(workspace_id, chat_id)
                 message = root.send(
                     body=request.body,
                     actor_id=actor_id,
                     role=request.role,
                     attachment_ids=request.attachment_ids,
-                    investigation_ids=request.investigation_ids,
+                    references={"fca.investigation": request.investigation_ids},
                     execution_id=request.execution_id,
                     intent_epoch=request.intent_epoch,
+                    message_id=request.message_id,
                 )
         except Exception as error:
             raise _service_error(error) from error
@@ -319,7 +331,7 @@ def create_chat_router() -> APIRouter:
         return {"items": [message.as_dict() for message in messages]}
 
     @router.post("/chats/{chat_id}/messages/{message_id}/state")
-    async def transition_message(
+    def transition_message(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         message_id: Annotated[str, Path(min_length=1, max_length=128)],
@@ -340,7 +352,7 @@ def create_chat_router() -> APIRouter:
         return message.as_dict()
 
     @router.post("/chats/{chat_id}/attachments")
-    async def create_attachment(
+    def create_attachment(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: CreateAttachmentRequest,
@@ -361,7 +373,7 @@ def create_chat_router() -> APIRouter:
         return attachment.as_dict()
 
     @router.get("/chats/{chat_id}/attachments")
-    async def list_attachments(
+    def list_attachments(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_service: Annotated[ChatService, Depends(get_chat_service)],
@@ -373,7 +385,7 @@ def create_chat_router() -> APIRouter:
         return {"items": [item.as_dict() for item in attachments]}
 
     @router.post("/attachments/{attachment_id}/upload")
-    async def upload_attachment(
+    def upload_attachment(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         attachment_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: UploadAttachmentRequest,
@@ -391,7 +403,7 @@ def create_chat_router() -> APIRouter:
         return attachment.as_dict()
 
     @router.post("/attachments/{attachment_id}/scan")
-    async def scan_attachment(
+    def scan_attachment(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         attachment_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: ScanAttachmentRequest,
@@ -409,13 +421,13 @@ def create_chat_router() -> APIRouter:
         return attachment.as_dict()
 
     @router.post("/investigations")
-    async def create_investigation(
+    def create_investigation(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: CreateInvestigationRequest,
-        chat_service: Annotated[ChatService, Depends(get_chat_service)],
+        investigations: Annotated[Investigations, Depends(get_investigations)],
     ) -> dict[str, object]:
         try:
-            investigation = chat_service.create_investigation(
+            investigation = investigations.create(
                 workspace_id,
                 title=request.title,
                 objective=request.objective,
@@ -429,27 +441,20 @@ def create_chat_router() -> APIRouter:
         return investigation.as_dict()
 
     @router.get("/investigations")
-    async def list_investigations(
+    def list_investigations(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
-        chat_service: Annotated[ChatService, Depends(get_chat_service)],
+        investigations: Annotated[Investigations, Depends(get_investigations)],
     ) -> dict[str, object]:
-        return {
-            "items": [
-                item.as_dict()
-                for item in chat_service.list_investigations(workspace_id)
-            ]
-        }
+        return {"items": [item.as_dict() for item in investigations.list(workspace_id)]}
 
     @router.get("/investigations/{investigation_id}")
-    async def get_investigation(
+    def get_investigation(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         investigation_id: Annotated[str, Path(min_length=1, max_length=128)],
-        chat_service: Annotated[ChatService, Depends(get_chat_service)],
+        investigations: Annotated[Investigations, Depends(get_investigations)],
     ) -> dict[str, object]:
         try:
-            investigation = chat_service.get_investigation(
-                workspace_id, investigation_id
-            )
+            investigation = investigations.get(workspace_id, investigation_id)
         except Exception as error:
             raise _service_error(error) from error
         return investigation.as_dict()
@@ -459,7 +464,7 @@ def create_chat_router() -> APIRouter:
         deprecated=True,
         summary="Post a steering message into the execution's chat",
     )
-    async def steer_workflow(
+    def steer_workflow(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         execution_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: SteerWorkflowRequest,
@@ -503,7 +508,7 @@ def create_chat_router() -> APIRouter:
         return execution.as_dict()
 
     @router.post("/executions/{execution_id}/start")
-    async def start_workflow(
+    def start_workflow(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         execution_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: ActorRequest,
@@ -518,7 +523,7 @@ def create_chat_router() -> APIRouter:
         return execution.as_dict()
 
     @router.post("/executions/{execution_id}/stop")
-    async def stop_workflow(
+    def stop_workflow(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         execution_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: ActorRequest,
@@ -533,7 +538,7 @@ def create_chat_router() -> APIRouter:
         return execution.as_dict()
 
     @router.post("/executions/{execution_id}/cancel")
-    async def cancel_workflow(
+    def cancel_workflow(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         execution_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: ActorRequest,
@@ -548,7 +553,7 @@ def create_chat_router() -> APIRouter:
         return execution.as_dict()
 
     @router.get("/executions")
-    async def list_executions(
+    def list_executions(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_service: Annotated[ChatService, Depends(get_chat_service)],
     ) -> dict[str, object]:
@@ -560,7 +565,7 @@ def create_chat_router() -> APIRouter:
         }
 
     @router.get("/executions/{execution_id}")
-    async def get_execution(
+    def get_execution(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         execution_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_service: Annotated[ChatService, Depends(get_chat_service)],
@@ -572,7 +577,7 @@ def create_chat_router() -> APIRouter:
         return execution.as_dict()
 
     @router.post("/executions/{execution_id}/tools")
-    async def submit_tool_job(
+    def submit_tool_job(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         execution_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: SubmitToolJobRequest,
@@ -585,16 +590,22 @@ def create_chat_router() -> APIRouter:
                 tool_name=request.tool_name,
                 actor_id=request.actor_id,
                 job_id=request.job_id,
-                investigation_id=request.investigation_id,
-                strategy_ids=request.strategy_ids,
-                experiment_ids=request.experiment_ids,
+                references={
+                    "fca.investigation": (
+                        ()
+                        if (request.investigation_id) is None
+                        else ((request.investigation_id),)
+                    ),
+                    "fca.strategy": request.strategy_ids,
+                    "fca.experiment": request.experiment_ids,
+                },
             )
         except Exception as error:
             raise _service_error(error) from error
         return job.as_dict()
 
     @router.get("/executions/{execution_id}/events")
-    async def replay_events(
+    def replay_events(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         execution_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_service: Annotated[ChatService, Depends(get_chat_service)],
@@ -613,7 +624,7 @@ def create_chat_router() -> APIRouter:
         return replay.as_dict()
 
     @router.post("/tool-jobs/{job_id}/result")
-    async def record_tool_result(
+    def record_tool_result(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         job_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: ToolResultRequest,
@@ -634,7 +645,7 @@ def create_chat_router() -> APIRouter:
         return job.as_dict()
 
     @router.post("/tool-jobs/{job_id}/start")
-    async def start_tool_job(
+    def start_tool_job(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         job_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: ActorRequest,

@@ -21,7 +21,7 @@
 	const structured = $derived(isRecord(result.structured) ? result.structured : {});
 
 	const executionId = $derived(
-		readString(structured, 'executionId') ?? readString(structured, 'execution_id')
+		readString(structured, 'executionId')
 	);
 	const view = $derived(executionId ? liveView?.(executionId) : null);
 
@@ -41,15 +41,13 @@
 			trigger_message_id: '',
 			workflow_id:
 				readString(structured, 'workflowId') ??
-				readString(structured, 'workflow_id') ??
 				'',
 			workflow_version:
 				readString(structured, 'version') ??
-				readString(structured, 'workflowVersion') ??
 				'',
 			requested_by: '',
 			state,
-			phase: readString(structured, 'phase'),
+			active_phases: readArray<string>(structured, 'activePhases'),
 			intent_epoch: 0,
 			steering_message_ids: [],
 			created_at: ''
@@ -86,7 +84,6 @@
 	const status = $derived(
 		live?.state ??
 			readString(structured, 'state') ??
-			readString(structured, 'status') ??
 			'running'
 	);
 
@@ -110,6 +107,7 @@
 	{phases}
 	{status}
 	{summary}
+	jobIds={view?.jobIds ?? []}
 	{attentionPhases}
 	{onEnterPhase}
 />

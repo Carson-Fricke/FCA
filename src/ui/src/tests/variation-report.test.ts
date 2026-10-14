@@ -50,7 +50,7 @@ describe('accepted research evidence reports', () => {
     expect(screen.getByTestId('variation-chart-fast')).toHaveTextContent('0.0500');
   });
   it('keeps accepted artifact data through transcript transport', () => {
-    const entries = buildNodeEntries({ messages: [], events: [{actorId:'thesis-workflow',actorScope:'workflow',correlationId:'exec-1',cursor:1,eventId:'evt-1',eventType:'sub_agent.output',executionId:'exec-1',intentEpoch:0,lateResult:false,occurredAt:'2026-01-01T00:00:00Z',payload:{text:'Report',artifact:fixture.forward},workspaceId:'ws-1'}] });
+    const entries = buildNodeEntries({ messages: [], events: [{actorId:'thesis-workflow',actorScope:'workflow',correlationId:'exec-1',cursor:1,seq:1,eventId:'evt-1',eventType:'sub_agent.output',executionId:'exec-1',intentEpoch:0,lateResult:false,occurredAt:'2026-01-01T00:00:00Z',payload:{text:'Report',artifact:fixture.forward},workspaceId:'ws-1'}] });
     render(ScopeTranscript, { props: { entries, workspaceId:'ws-1' } });
     expect(screen.getByText('Forward Parameter Variation')).toBeInTheDocument();
   });

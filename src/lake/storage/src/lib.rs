@@ -32,5 +32,5 @@ pub use parquet_read::{
     read_crypto_trades, read_equity_trades, visit_partition_batches, CryptoTradeRecord,
     EquityTradeRecord, TradePartition,
 };
-pub use ports::{BlobStore, ObjectStore, QueueSender, ReadableBlobStore, SasIssuer};
+pub use ports::{BlobStore, QueueSender, ReadableBlobStore, SasIssuer};
 pub use stream::write_dataset_ipc_stream;

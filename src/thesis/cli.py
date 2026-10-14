@@ -25,17 +25,21 @@ from thesis.identity.models import AccountRole, Invite
 from thesis.workspaces import load_workspace_manifest
 
 BACKEND_CAPABILITIES: tuple[str, ...] = (
-    "agent",
-    "artifacts",
-    "auth",
-    "chat",
-    "execution",
-    "http",
-    "integrations",
-    "persistence",
-    "providers",
-    "strategies",
-    "workspaces",
+    "thesis.application",
+    "thesis.artifacts",
+    "thesis.auth",
+    "thesis.http",
+    "thesis.integrations",
+    "thesis.persistence",
+    "thesis.strategies",
+    "thesis.workspaces",
+    "thesis.extensions.tools",
+    "thesis.extensions.workflows",
+    "thesis_runtime.conversations",
+    "thesis_runtime.sessions",
+    "thesis_runtime.workflows",
+    "thesis_runtime.execution",
+    "thesis_runtime.adapters.providers",
 )
 
 _DEFAULT_SERVE_HOST = "127.0.0.1"
@@ -250,6 +254,17 @@ def serve(
     )
 
 
+@app.command()
+def worker() -> None:
+    """Run renewable, fenced conversation and workflow claims independently of HTTP."""
+    application = serving_app_from_environment()
+    runner = application.state.durable_worker
+    try:
+        runner.run()
+    except KeyboardInterrupt:
+        runner.stop()
+
+
 def serve_binding(
     *, host: str | None = None, port: int | None = None
 ) -> tuple[str, int]:
@@ -354,7 +369,11 @@ def thesis_config_dir(root: str | Path | None = None) -> Path:
         root_path = (
             Path(configured_root)
             if configured_root
-            else Path(__file__).resolve().parents[2]
+            else next(
+                parent
+                for parent in Path(__file__).resolve().parents
+                if (parent / "pyproject.toml").is_file()
+            )
         )
     else:
         root_path = Path(root)
@@ -374,7 +393,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _capability_importable(capability: str) -> bool:
     try:
-        import_module(f"thesis.{capability}")
+        import_module(capability)
     except Exception:
         return False
     return True

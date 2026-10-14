@@ -35,7 +35,7 @@ _WINDOW = {"start": "2026-09-21T13:30:00Z", "end": "2026-09-28T13:30:00Z"}
 def _model() -> ResearchModel:
     return ResearchModel(
         model_id="fit-study",
-        version="1.0.0",
+        version="a" * 64,
         description="Fit extraction",
         source=_SOURCE,
         outputs=("data_ok",),

@@ -1885,7 +1885,7 @@ pub fn run_native_engine(
 ) -> Result<BacktestOutcome, BacktestError> {
     let requirements = runtime_subscriptions(configuration, &strategies)?;
     super::preflight::validate_subscription_coverage(fixture, &requirements)?;
-    manifest.effective_subscriptions = Some(requirements.clone());
+    manifest.effective_subscriptions = requirements.clone();
     let execution = if configuration.shell == "study" {
         Vec::new()
     } else {
@@ -1893,11 +1893,9 @@ pub fn run_native_engine(
     };
     let mut acquired = requirements.clone();
     acquired.extend(execution.iter().cloned());
-    manifest.acquired_subscriptions = Some(source_subscriptions(
-        &acquired,
-        &configuration.data_source_bar_interval,
-    )?);
-    manifest.execution_subscriptions = Some(execution);
+    manifest.acquired_subscriptions =
+        source_subscriptions(&acquired, &configuration.data_source_bar_interval)?;
+    manifest.execution_subscriptions = execution;
     let frames =
         assemble_subscription_frames(configuration, fixture, synthetic_options, &requirements)?;
     super::preflight::validate_completed_bar_coverage(&requirements, &frames)?;

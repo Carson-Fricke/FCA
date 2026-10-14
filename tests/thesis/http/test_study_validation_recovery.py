@@ -3,15 +3,19 @@
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from tests.thesis.workflows.registry.hypothesis_development._support import (
+from tests.thesis.extensions.workflows.hypothesis_development._support import (
     _discovery_envelope,
     _hypothesis_envelope,
     _inline_model,
+    _only_active_phase,
+    _phase_attempt,
     _sketch_document,
 )
+from tests.thesis.submissions import MemorySubmissions
 from tests.thesis.workspaces._support import MemoryGitFactory, Repositories
 
 from thesis.agent.harness_tools import (
@@ -20,23 +24,23 @@ from thesis.agent.harness_tools import (
     HarnessToolResult,
     HarnessToolSpec,
 )
-from thesis.agent.messages import from_record
-from thesis.agent.runtime.context import ToolContext
-from thesis.agent.runtime.conversation import Conversations
-from thesis.agent.runtime.store import PersistenceSubAgentStore
-from thesis.chat import ChatService
-from thesis.chat.contracts import ToolJobState
+from thesis.application import composition as serving
 from thesis.experiments.mandate import (
-    derive_mandate,
+    resolve_research_mandate,
     rfc3339,
 )
-from thesis.http import serving
-from thesis.providers.openrouter import OpenRouterProvider
 from thesis.research.hypothesis import InMemoryHypothesisStore
 from thesis.research.models import InMemoryResearchModelStore
-from thesis.workflows.core.execution_store import InMemoryExecutionStore
 from thesis.workspaces.manifest import load_workspace_manifest
 from thesis.workspaces.programs import WorkspacePrograms
+from thesis_runtime.adapters.providers.openrouter import OpenRouterProvider
+from thesis_runtime.contracts.context import ToolContext
+from thesis_runtime.contracts.messages import from_record
+from thesis_runtime.contracts.records import ToolJobState
+from thesis_runtime.conversations import ChatService
+from thesis_runtime.conversations.conversation import Conversations
+from thesis_runtime.subagents.store import PersistenceSubAgentStore
+from thesis_runtime.workflows.execution_store import InMemoryExecutionStore
 
 
 class Harness(HarnessToolProvider):
@@ -49,7 +53,7 @@ class Harness(HarnessToolProvider):
         from thesis.workspaces.programs import WorkspacePrograms
 
         # Fresh packaged SDK metadata, without an inherited uninitialized client.
-        programs = WorkspacePrograms(cast(Any, None))
+        programs = WorkspacePrograms(cast(Any, None), submissions=MemorySubmissions())
         version, abi = programs._sdk_metadata(programs.sdk_root)
         return {
             "sdkIdentity": programs._sdk_identity(),
@@ -199,7 +203,7 @@ def setup_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     work = []
     stack = serving.build_serving_stack(
         chat_service=chat,
-        model_provider=cast(OpenRouterProvider, object()),
+        model_provider=cast(OpenRouterProvider, SimpleNamespace(model="test/model")),
         harness_tools=harness,
         workspace_repositories=repositories,
         execution_store=InMemoryExecutionStore(),
@@ -210,22 +214,15 @@ def setup_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     workflow = stack.workflow_runtime.build_hypothesis_development(chat=chat)
     wid = manifest.workspace_id
     thread = chat.create_chat(wid, title="Validation", owner_actor_id="operator")
-    trigger = chat.create_message(
+    trigger = chat.send_message(
         wid, thread.chat_id, actor_id="operator", body="Study momentum"
     )
     request = workflow.launch(
         wid,
         thread.chat_id,
         actor_id="operator",
-        ideas="Study momentum",
-        launch_options={
-            "partition": {
-                "historyDays": 1825,
-                "forwardDays": 90,
-                "informationHorizonDays": 1,
-                "positionHorizonDays": 1,
-                "liquidationDays": 0,
-            }
+        inputs={
+            "idea": "Study momentum",
         },
         trigger_message_id=trigger.message_id,
     )
@@ -247,22 +244,63 @@ def setup_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             allowed_tools=discovery_record.allowed_tools,
         )
     )
+    setup_context = ToolContext(
+        workspace_id=wid,
+        chat_id=thread.chat_id,
+        conversation_id=node,
+        sub_agent_id=node,
+        actor_id="operator",
+        workflow_execution_id=request.execution_id,
+        phase_attempt_id=discovery_record.phase_attempt_id,
+        phase_executor=True,
+        allowed_tools=discovery_record.allowed_tools,
+    )
+    assert discovery_registry.dispatch(
+        "set_research_window",
+        {
+            "development": {
+                "start": "2021-01-01T00:00:00Z",
+                "end": "2026-06-01T00:00:00Z",
+            },
+            "forward": {"start": "2026-06-01T00:00:00Z", "end": "2026-09-01T00:00:00Z"},
+        },
+        context=setup_context,
+    ).ok
+    discovery_registry = callbacks["registry"](setup_context)
     sketch = discovery_registry.dispatch(
         "author_strategy_sketch",
         {
             "sketch_id": "momentum-edge",
             "sketch": _sketch_document(),
         },
+        context=ToolContext(
+            workspace_id=wid,
+            chat_id=thread.chat_id,
+            conversation_id=node,
+            sub_agent_id=node,
+            actor_id="operator",
+            workflow_execution_id=request.execution_id,
+            phase_executor=True,
+            allowed_tools=discovery_record.allowed_tools,
+        ),
     )
     assert sketch.ok, sketch.text
     callbacks["sketchReference"] = sketch.structured["reference"]
     discovery = _discovery_envelope()
     discovery["sketchReference"] = callbacks["sketchReference"]
     workflow.apply_phase_completion(
-        request, node, {"target": "model_creation", "discovery": discovery}
+        request,
+        node,
+        {"target": "model_creation", "discovery": discovery},
+        attempt_id=_phase_attempt(workflow, request.workspace_id, node),
     )
     work.pop(0)()
-    node = workflow.active_orchestrators[request.execution_id].sub_agent_id
+    node = workflow.active_orchestrators[
+        (
+            request.execution_id,
+            _only_active_phase(workflow, request.workspace_id, request.execution_id),
+        )
+    ].sub_agent_id
     record = PersistenceSubAgentStore(chat.persistence).get_sub_agent(wid, node)
     assert record is not None
     context = ToolContext(
@@ -290,6 +328,7 @@ def setup_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             "source": legacy["source"],
             "configuration": configuration,
         },
+        context=context,
     )
     assert authored.ok
     return (
@@ -341,7 +380,11 @@ def test_author_validate_complete_then_trials_use_pinned_commit(tmp_path, monkey
         callbacks,
         work,
     ) = setup_workflow(tmp_path, monkeypatch)
-    checked = registry.dispatch("validate_study", {"program_id": "momentum"})
+    checked = registry.dispatch(
+        "validate_study",
+        {"program_id": "momentum"},
+        context=invocation_context(request, record),
+    )
     assert checked.ok
     completion = completion_from(checked.structured, callbacks["sketchReference"])
     validate_count = len(harness.calls)
@@ -357,6 +400,7 @@ def test_author_validate_complete_then_trials_use_pinned_commit(tmp_path, monkey
             "expected": 'publish("sharpe", 1.0)',
             "replacement": 'publish("sharpe", -9.0)',
         },
+        context=invocation_context(request, record),
     )
     assert updated.ok and updated.structured["version"] != checked.structured["version"]
     work.pop(0)()
@@ -389,7 +433,7 @@ def test_root_catalog_failure_is_a_durable_notice_without_fake_tool(monkeypatch)
 
     chat = ChatService()
     thread = chat.create_chat("workspace", title="Catalog", owner_actor_id="operator")
-    chat.create_message("workspace", thread.chat_id, actor_id="operator", body="Help")
+    chat.send_message("workspace", thread.chat_id, actor_id="operator", body="Help")
     failure = HarnessToolFailure(
         kind="transport", message="catalog TLS certificate verify failed"
     )
@@ -399,7 +443,8 @@ def test_root_catalog_failure_is_a_durable_notice_without_fake_tool(monkeypatch)
 
     monkeypatch.setattr(serving, "build_session_registry", fail_registry)
     stack = serving.build_serving_stack(
-        chat_service=chat, model_provider=cast(OpenRouterProvider, object())
+        chat_service=chat,
+        model_provider=cast(OpenRouterProvider, SimpleNamespace(model="test/model")),
     )
     assert stack.conversations is not None
     assert stack.conversations.root("workspace", thread.chat_id).run_turn() is None
@@ -417,7 +462,11 @@ def test_failed_validation_requires_patch_and_revalidate_id(tmp_path, monkeypatc
         tmp_path, monkeypatch
     )
     harness.reject = True
-    checked = registry.dispatch("validate_study", {"program_id": "momentum"})
+    checked = registry.dispatch(
+        "validate_study",
+        {"program_id": "momentum"},
+        context=invocation_context(request, record),
+    )
     assert not checked.ok
     completion = completion_from(checked.structured, callbacks["sketchReference"])
     assert "accepted validation" in callbacks["validate"](
@@ -432,9 +481,14 @@ def test_failed_validation_requires_patch_and_revalidate_id(tmp_path, monkeypatc
             "expected": 'publish("sharpe", 1.0)',
             "replacement": 'publish("sharpe", 2.0)',
         },
+        context=invocation_context(request, record),
     )
     assert patched.ok
-    checked = registry.dispatch("validate_study", {"program_id": "momentum"})
+    checked = registry.dispatch(
+        "validate_study",
+        {"program_id": "momentum"},
+        context=invocation_context(request, record),
+    )
     assert checked.ok
     assert (
         callbacks["validate"](
@@ -465,7 +519,11 @@ def test_compiler_change_invalidates_stored_completion_until_id_revalidated(
     _, _, _, request, record, registry, harness, callbacks, _ = setup_workflow(
         tmp_path, monkeypatch
     )
-    checked = registry.dispatch("validate_study", {"program_id": "momentum"})
+    checked = registry.dispatch(
+        "validate_study",
+        {"program_id": "momentum"},
+        context=invocation_context(request, record),
+    )
     assert checked.ok
     completion = completion_from(checked.structured, callbacks["sketchReference"])
     assert callbacks["validate"](request.workspace_id, record, completion) is None
@@ -473,7 +531,11 @@ def test_compiler_change_invalidates_stored_completion_until_id_revalidated(
     assert "compiler identity" in callbacks["validate"](
         request.workspace_id, record, completion
     )
-    revalidated = registry.dispatch("validate_study", {"program_id": "momentum"})
+    revalidated = registry.dispatch(
+        "validate_study",
+        {"program_id": "momentum"},
+        context=invocation_context(request, record),
+    )
     assert revalidated.ok
     assert revalidated.structured["version"] == checked.structured["version"]
     assert revalidated.structured["validationIdentity"] == "test-harness-v2"
@@ -493,8 +555,16 @@ def test_inline_validation_and_foreign_or_stale_completion_are_rejected(
     _, _, _, request, record, registry, _, callbacks, _ = setup_workflow(
         tmp_path, monkeypatch
     )
-    assert not registry.dispatch("validate_study", {"model": _inline_model()}).ok
-    checked = registry.dispatch("validate_study", {"program_id": "momentum"})
+    assert not registry.dispatch(
+        "validate_study",
+        {"model": _inline_model()},
+        context=invocation_context(request, record),
+    ).ok
+    checked = registry.dispatch(
+        "validate_study",
+        {"program_id": "momentum"},
+        context=invocation_context(request, record),
+    )
     completion = completion_from(checked.structured, callbacks["sketchReference"])
     helper = replace(record, phase_executor=False)
     assert "owning phase executor" in callbacks["validate"](
@@ -514,6 +584,7 @@ def test_inline_validation_and_foreign_or_stale_completion_are_rejected(
             "expected": 'publish("sharpe", 1.0)',
             "replacement": 'publish("sharpe", 2.0)',
         },
+        context=invocation_context(request, record),
     )
     assert update.ok
     assert "stale" in callbacks["validate"](request.workspace_id, record, completion)
@@ -533,14 +604,23 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         callbacks,
         work,
     ) = setup_workflow(tmp_path, monkeypatch)
-    study = registry.dispatch("validate_study", {"program_id": "momentum"})
+    study = registry.dispatch(
+        "validate_study",
+        {"program_id": "momentum"},
+        context=invocation_context(request, record),
+    )
     callbacks["apply"](
         request.workspace_id,
         record,
         completion_from(study.structured, callbacks["sketchReference"]),
     )
     work.pop(0)()
-    verdict_node = workflow.active_orchestrators[request.execution_id].sub_agent_id
+    verdict_node = workflow.active_orchestrators[
+        (
+            request.execution_id,
+            _only_active_phase(workflow, request.workspace_id, request.execution_id),
+        )
+    ].sub_agent_id
     workflow.apply_phase_completion(
         request,
         verdict_node,
@@ -560,9 +640,15 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
                 ],
             },
         },
+        attempt_id=_phase_attempt(workflow, request.workspace_id, verdict_node),
     )
     work.pop(0)()
-    design_node = workflow.active_orchestrators[request.execution_id].sub_agent_id
+    design_node = workflow.active_orchestrators[
+        (
+            request.execution_id,
+            _only_active_phase(workflow, request.workspace_id, request.execution_id),
+        )
+    ].sub_agent_id
     design = PersistenceSubAgentStore(stack.chat_service.persistence).get_sub_agent(
         request.workspace_id, design_node
     )
@@ -600,8 +686,11 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
                 }
             },
         },
+        context=context,
     ).ok
-    checked = registry.dispatch("validate_strategy", {"program_id": "alpha"})
+    checked = registry.dispatch(
+        "validate_strategy", {"program_id": "alpha"}, context=context
+    )
     assert checked.ok
     reference = {
         key: checked.structured[key]
@@ -623,6 +712,7 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
             "replacement": "struct AuthoredStrategy; // changed latest",
             "configuration": {**config, "end": "2024-01-03T00:00:00Z"},
         },
+        context=context,
     )
     assert updated.ok
     work.pop(0)()
@@ -631,7 +721,12 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
     )
     assert execution.phase == "strategy_backtesting"
     assert not any(name == "run_backtest" for name, _ in harness.calls)
-    backtest_node = workflow.active_orchestrators[request.execution_id].sub_agent_id
+    backtest_node = workflow.active_orchestrators[
+        (
+            request.execution_id,
+            _only_active_phase(workflow, request.workspace_id, request.execution_id),
+        )
+    ].sub_agent_id
     backtest = PersistenceSubAgentStore(stack.chat_service.persistence).get_sub_agent(
         request.workspace_id, backtest_node
     )
@@ -644,11 +739,31 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
             allowed_tools=backtest.allowed_tools,
         )
     )
-    assert not backtest_registry.dispatch("run_backtest", {"program_id": "alpha"}).ok
+    assert not backtest_registry.dispatch(
+        "run_backtest",
+        {"program_id": "alpha"},
+        context=replace(
+            context,
+            conversation_id=backtest_node,
+            sub_agent_id=backtest_node,
+            allowed_tools=backtest.allowed_tools,
+        ),
+    ).ok
     assert not any(name == "run_backtest" for name, _ in harness.calls)
-    assert registry.dispatch("validate_strategy", {"program_id": "alpha"}).ok
+    assert registry.dispatch(
+        "validate_strategy", {"program_id": "alpha"}, context=context
+    ).ok
     harness.pending_backtest = True
-    result = backtest_registry.dispatch("run_backtest", {"program_id": "alpha"})
+    result = backtest_registry.dispatch(
+        "run_backtest",
+        {"program_id": "alpha"},
+        context=replace(
+            context,
+            conversation_id=backtest_node,
+            sub_agent_id=backtest_node,
+            allowed_tools=backtest.allowed_tools,
+        ),
+    )
     assert result.ok
     executed_job_id = cast(str, result.structured["job_id"])
     retained = stack.chat_service.find_tool_job(request.workspace_id, executed_job_id)
@@ -660,7 +775,16 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
     assert result.structured["result"]["state"] == "running"
     assert "metrics" not in result.structured["result"]
     harness.refuse_backtest = True
-    refused = backtest_registry.dispatch("run_backtest", {"program_id": "alpha"})
+    refused = backtest_registry.dispatch(
+        "run_backtest",
+        {"program_id": "alpha"},
+        context=replace(
+            context,
+            conversation_id=backtest_node,
+            sub_agent_id=backtest_node,
+            allowed_tools=backtest.allowed_tools,
+        ),
+    )
     harness.refuse_backtest = False
     assert not refused.ok
     refused_launch = [
@@ -696,7 +820,16 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         ("read_artifact", {"job_id": "job-study-run", "name": "metrics.json"}),
         ("read_sdk_reference", {"topic": "strategy"}),
     ):
-        assert backtest_registry.dispatch(tool, arguments).ok
+        assert backtest_registry.dispatch(
+            tool,
+            arguments,
+            context=replace(
+                context,
+                conversation_id=backtest_node,
+                sub_agent_id=backtest_node,
+                allowed_tools=backtest.allowed_tools,
+            ),
+        ).ok
     executed_reference = {
         key: result.structured[key]
         for key in ("workspaceId", "kind", "programId", "gitCommit", "version")
@@ -712,6 +845,7 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
                 "strategy": executed_reference,
             },
         },
+        attempt_id=_phase_attempt(workflow, request.workspace_id, backtest_node),
     )
     work.pop(0)()
     assert (
@@ -720,7 +854,12 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         ).phase
         == "optimization"
     )
-    optimization_node = workflow.active_orchestrators[request.execution_id].sub_agent_id
+    optimization_node = workflow.active_orchestrators[
+        (
+            request.execution_id,
+            _only_active_phase(workflow, request.workspace_id, request.execution_id),
+        )
+    ].sub_agent_id
     optimization = PersistenceSubAgentStore(
         stack.chat_service.persistence
     ).get_sub_agent(request.workspace_id, optimization_node)
@@ -733,18 +872,52 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
             allowed_tools=optimization.allowed_tools,
         )
     )
-    assert optimization_registry.dispatch("read_strategy", {"program_id": "alpha"}).ok
     assert optimization_registry.dispatch(
-        "read_sdk_reference", {"topic": "strategy"}
+        "read_strategy",
+        {"program_id": "alpha"},
+        context=replace(
+            context,
+            conversation_id=optimization_node,
+            sub_agent_id=optimization_node,
+            allowed_tools=optimization.allowed_tools,
+        ),
     ).ok
-    assert optimization_registry.dispatch("run_backtest", {"program_id": "alpha"}).ok
+    assert optimization_registry.dispatch(
+        "read_sdk_reference",
+        {"topic": "strategy"},
+        context=replace(
+            context,
+            conversation_id=optimization_node,
+            sub_agent_id=optimization_node,
+            allowed_tools=optimization.allowed_tools,
+        ),
+    ).ok
+    assert optimization_registry.dispatch(
+        "run_backtest",
+        {"program_id": "alpha"},
+        context=replace(
+            context,
+            conversation_id=optimization_node,
+            sub_agent_id=optimization_node,
+            allowed_tools=optimization.allowed_tools,
+        ),
+    ).ok
     for tool, arguments in (
         ("get_job_status", {"job_id": "job-study-run"}),
         ("get_job_result", {"job_id": "job-study-run"}),
         ("list_artifacts", {"job_id": "job-study-run"}),
         ("read_artifact", {"job_id": "job-study-run", "name": "metrics.json"}),
     ):
-        assert optimization_registry.dispatch(tool, arguments).ok
+        assert optimization_registry.dispatch(
+            tool,
+            arguments,
+            context=replace(
+                context,
+                conversation_id=optimization_node,
+                sub_agent_id=optimization_node,
+                allowed_tools=optimization.allowed_tools,
+            ),
+        ).ok
     assert (
         stack.chat_service.get_execution(
             request.workspace_id, request.execution_id
@@ -757,6 +930,12 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
             "program_id": "alpha",
             "assignments": [{"fast": 5}, {"fast": 10}, {"fast": 20}],
         },
+        context=replace(
+            context,
+            conversation_id=optimization_node,
+            sub_agent_id=optimization_node,
+            allowed_tools=optimization.allowed_tools,
+        ),
     )
     assert batch.ok
     batch_id = cast(str, batch.structured["batchId"])
@@ -764,8 +943,26 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
     assert [point["state"] for point in points] == ["running", "running", "running"]
     for point in points:
         job_id = cast(str, point["jobId"])
-        assert optimization_registry.dispatch("get_job_status", {"job_id": job_id}).ok
-        assert optimization_registry.dispatch("get_job_result", {"job_id": job_id}).ok
+        assert optimization_registry.dispatch(
+            "get_job_status",
+            {"job_id": job_id},
+            context=replace(
+                context,
+                conversation_id=optimization_node,
+                sub_agent_id=optimization_node,
+                allowed_tools=optimization.allowed_tools,
+            ),
+        ).ok
+        assert optimization_registry.dispatch(
+            "get_job_result",
+            {"job_id": job_id},
+            context=replace(
+                context,
+                conversation_id=optimization_node,
+                sub_agent_id=optimization_node,
+                allowed_tools=optimization.allowed_tools,
+            ),
+        ).ok
     evaluation = {
         "strategy": executed_reference,
         "batchId": batch_id,
@@ -798,6 +995,7 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         request,
         optimization_node,
         {"target": "null_testing", "optimization": evaluation},
+        attempt_id=_phase_attempt(workflow, request.workspace_id, optimization_node),
     )
     work.pop(0)()
     assert (
@@ -806,7 +1004,12 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         ).phase
         == "null_testing"
     )
-    null_node = workflow.active_orchestrators[request.execution_id].sub_agent_id
+    null_node = workflow.active_orchestrators[
+        (
+            request.execution_id,
+            _only_active_phase(workflow, request.workspace_id, request.execution_id),
+        )
+    ].sub_agent_id
     null_testing = PersistenceSubAgentStore(
         stack.chat_service.persistence
     ).get_sub_agent(request.workspace_id, null_node)
@@ -819,7 +1022,16 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
             allowed_tools=null_testing.allowed_tools,
         )
     )
-    assert null_registry.dispatch("run_backtest", {"program_id": "alpha"}).ok
+    assert null_registry.dispatch(
+        "run_backtest",
+        {"program_id": "alpha"},
+        context=replace(
+            context,
+            conversation_id=null_node,
+            sub_agent_id=null_node,
+            allowed_tools=null_testing.allowed_tools,
+        ),
+    ).ok
     null_batch = null_registry.dispatch(
         "run_null_batch",
         {
@@ -829,6 +1041,12 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
             "block_size": 5,
             "seeds": [1, 2],
         },
+        context=replace(
+            context,
+            conversation_id=null_node,
+            sub_agent_id=null_node,
+            allowed_tools=null_testing.allowed_tools,
+        ),
     )
     assert null_batch.ok
     null_points = cast(list[dict[str, object]], null_batch.structured["points"])
@@ -874,6 +1092,7 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         request,
         null_node,
         {"target": "variation", "nullTesting": null_evaluation},
+        attempt_id=_phase_attempt(workflow, request.workspace_id, null_node),
     )
     work.pop(0)()
     assert (
@@ -882,7 +1101,12 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         ).phase
         == "variation"
     )
-    variation_node = workflow.active_orchestrators[request.execution_id].sub_agent_id
+    variation_node = workflow.active_orchestrators[
+        (
+            request.execution_id,
+            _only_active_phase(workflow, request.workspace_id, request.execution_id),
+        )
+    ].sub_agent_id
     variation_agent = PersistenceSubAgentStore(
         stack.chat_service.persistence
     ).get_sub_agent(request.workspace_id, variation_node)
@@ -895,7 +1119,16 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
             allowed_tools=variation_agent.allowed_tools,
         )
     )
-    declaration = variation_registry.dispatch("read_strategy", {"program_id": "alpha"})
+    declaration = variation_registry.dispatch(
+        "read_strategy",
+        {"program_id": "alpha"},
+        context=replace(
+            context,
+            conversation_id=variation_node,
+            sub_agent_id=variation_node,
+            allowed_tools=variation_agent.allowed_tools,
+        ),
+    )
     assert declaration.ok
     assert declaration.structured["parameters"] == {
         "fast": {
@@ -911,6 +1144,12 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
             "program_id": "alpha",
             "assignments": [{"fast": 4}, {"fast": 6}],
         },
+        context=replace(
+            context,
+            conversation_id=variation_node,
+            sub_agent_id=variation_node,
+            allowed_tools=variation_agent.allowed_tools,
+        ),
     )
     assert variation_batch.ok
     variation_points = cast(
@@ -923,8 +1162,26 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
     assert all(isinstance(point["jobId"], str) for point in variation_points)
     for point in variation_points:
         job_id = cast(str, point["jobId"])
-        assert variation_registry.dispatch("get_job_status", {"job_id": job_id}).ok
-        assert variation_registry.dispatch("get_job_result", {"job_id": job_id}).ok
+        assert variation_registry.dispatch(
+            "get_job_status",
+            {"job_id": job_id},
+            context=replace(
+                context,
+                conversation_id=variation_node,
+                sub_agent_id=variation_node,
+                allowed_tools=variation_agent.allowed_tools,
+            ),
+        ).ok
+        assert variation_registry.dispatch(
+            "get_job_result",
+            {"job_id": job_id},
+            context=replace(
+                context,
+                conversation_id=variation_node,
+                sub_agent_id=variation_node,
+                allowed_tools=variation_agent.allowed_tools,
+            ),
+        ).ok
     variation = {
         "strategy": executed_reference,
         "batchId": variation_batch.structured["batchId"],
@@ -955,13 +1212,19 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         request,
         variation_node,
         {"target": "forward_validation", "variation": variation},
+        attempt_id=_phase_attempt(workflow, request.workspace_id, variation_node),
     )
     work.pop(0)()
     forward_execution = stack.chat_service.get_execution(
         request.workspace_id, request.execution_id
     )
     assert forward_execution.phase == "forward_validation"
-    forward_node = workflow.active_orchestrators[request.execution_id].sub_agent_id
+    forward_node = workflow.active_orchestrators[
+        (
+            request.execution_id,
+            _only_active_phase(workflow, request.workspace_id, request.execution_id),
+        )
+    ].sub_agent_id
     forward_agent = PersistenceSubAgentStore(
         stack.chat_service.persistence
     ).get_sub_agent(request.workspace_id, forward_node)
@@ -976,7 +1239,14 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
     )
     forward_start = len(harness.calls)
     center_run = forward_registry.dispatch(
-        "run_backtest", {"program_id": "alpha", "parameters": {"fast": 5}}
+        "run_backtest",
+        {"program_id": "alpha", "parameters": {"fast": 5}},
+        context=replace(
+            context,
+            conversation_id=forward_node,
+            sub_agent_id=forward_node,
+            allowed_tools=forward_agent.allowed_tools,
+        ),
     )
     assert center_run.ok
     forward_observed_run = cast(str, center_run.structured["job_id"])
@@ -989,6 +1259,12 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
             "block_size": 5,
             "seeds": [1, 2],
         },
+        context=replace(
+            context,
+            conversation_id=forward_node,
+            sub_agent_id=forward_node,
+            allowed_tools=forward_agent.allowed_tools,
+        ),
     )
     assert forward_null_batch.ok
     forward_null_points = cast(
@@ -1001,6 +1277,12 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
             "program_id": "alpha",
             "assignments": [{"fast": 4}, {"fast": 6}],
         },
+        context=replace(
+            context,
+            conversation_id=forward_node,
+            sub_agent_id=forward_node,
+            allowed_tools=forward_agent.allowed_tools,
+        ),
     )
     assert forward_variation_batch.ok
     forward_points = cast(
@@ -1014,21 +1296,65 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         ("get_job_status", {"job_id": forward_observed_run}),
         ("get_job_result", {"job_id": forward_observed_run}),
     ):
-        assert forward_registry.dispatch(tool, arguments).ok
+        assert forward_registry.dispatch(
+            tool,
+            arguments,
+            context=replace(
+                context,
+                conversation_id=forward_node,
+                sub_agent_id=forward_node,
+                allowed_tools=forward_agent.allowed_tools,
+            ),
+        ).ok
     for point in forward_null_points:
         job_id = cast(str, point["jobId"])
-        assert forward_registry.dispatch("get_job_status", {"job_id": job_id}).ok
-        assert forward_registry.dispatch("get_job_result", {"job_id": job_id}).ok
+        assert forward_registry.dispatch(
+            "get_job_status",
+            {"job_id": job_id},
+            context=replace(
+                context,
+                conversation_id=forward_node,
+                sub_agent_id=forward_node,
+                allowed_tools=forward_agent.allowed_tools,
+            ),
+        ).ok
+        assert forward_registry.dispatch(
+            "get_job_result",
+            {"job_id": job_id},
+            context=replace(
+                context,
+                conversation_id=forward_node,
+                sub_agent_id=forward_node,
+                allowed_tools=forward_agent.allowed_tools,
+            ),
+        ).ok
     for point in forward_points:
         job_id = cast(str, point["jobId"])
-        assert forward_registry.dispatch("get_job_status", {"job_id": job_id}).ok
-        assert forward_registry.dispatch("get_job_result", {"job_id": job_id}).ok
+        assert forward_registry.dispatch(
+            "get_job_status",
+            {"job_id": job_id},
+            context=replace(
+                context,
+                conversation_id=forward_node,
+                sub_agent_id=forward_node,
+                allowed_tools=forward_agent.allowed_tools,
+            ),
+        ).ok
+        assert forward_registry.dispatch(
+            "get_job_result",
+            {"job_id": job_id},
+            context=replace(
+                context,
+                conversation_id=forward_node,
+                sub_agent_id=forward_node,
+                allowed_tools=forward_agent.allowed_tools,
+            ),
+        ).ok
 
-    document = workflow.execution_store.get(request.execution_id)
-    mandate = derive_mandate(
-        request.workspace_id,
-        request.execution_id,
-        document.launch_request,
+    mandate = resolve_research_mandate(
+        workflow.execution_store,
+        workspace_id=request.workspace_id,
+        execution_id=request.execution_id,
     )
     assert mandate is not None
     forward_window = {
@@ -1110,6 +1436,7 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         request,
         forward_node,
         {"target": "completed", "forwardValidation": forward_evaluation},
+        attempt_id=_phase_attempt(workflow, request.workspace_id, forward_node),
     )
     execution = stack.chat_service.get_execution(
         request.workspace_id, request.execution_id
@@ -1164,12 +1491,16 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
 def test_completion_receipt_writer_failure_propagates(
     tmp_path, monkeypatch, failed_activity
 ):
-    from thesis.agent.runtime.session import SessionPersistenceError
+    from thesis_runtime.tools.registry import SessionPersistenceError
 
     _, stack, _, request, record, registry, _, callbacks, _ = setup_workflow(
         tmp_path, monkeypatch
     )
-    checked = registry.dispatch("validate_study", {"program_id": "momentum"})
+    checked = registry.dispatch(
+        "validate_study",
+        {"program_id": "momentum"},
+        context=invocation_context(request, record),
+    )
     create = stack.chat_service.create_message
 
     def fail_write(*args, **kwargs):
@@ -1214,6 +1545,7 @@ def test_trials_pin_indicator_dependencies_and_configuration(tmp_path, monkeypat
             "source": INDICATOR_TEMPLATE,
             "configuration": configuration,
         },
+        context=invocation_context(request, record),
     ).ok
     updated = registry.dispatch(
         "update_study",
@@ -1222,9 +1554,14 @@ def test_trials_pin_indicator_dependencies_and_configuration(tmp_path, monkeypat
             "expected_version": snapshot["version"],
             "indicator_ids": ["signal"],
         },
+        context=invocation_context(request, record),
     )
     assert updated.ok
-    checked = registry.dispatch("validate_study", {"program_id": "momentum"})
+    checked = registry.dispatch(
+        "validate_study",
+        {"program_id": "momentum"},
+        context=invocation_context(request, record),
+    )
     assert checked.ok
     accepted = programs.load(
         request.workspace_id, "study", "momentum", str(checked.structured["gitCommit"])
@@ -1232,7 +1569,11 @@ def test_trials_pin_indicator_dependencies_and_configuration(tmp_path, monkeypat
     completion = completion_from(checked.structured, callbacks["sketchReference"])
     assert callbacks["validate"](request.workspace_id, record, completion) is None
     callbacks["apply"](request.workspace_id, record, completion)
-    indicator = registry.dispatch("read_indicator", {"program_id": "signal"})
+    indicator = registry.dispatch(
+        "read_indicator",
+        {"program_id": "signal"},
+        context=invocation_context(request, record),
+    )
     assert registry.dispatch(
         "update_indicator",
         {
@@ -1241,6 +1582,7 @@ def test_trials_pin_indicator_dependencies_and_configuration(tmp_path, monkeypat
             "expected": "pub struct AuthoredIndicator",
             "replacement": "// changed dependency\npub struct AuthoredIndicator",
         },
+        context=invocation_context(request, record),
     ).ok
     work.pop(0)()
     launch = next(arguments for name, arguments in harness.calls if name == "run_study")
@@ -1249,3 +1591,18 @@ def test_trials_pin_indicator_dependencies_and_configuration(tmp_path, monkeypat
         == accepted["source"]
     )
     assert "changed dependency" not in str(accepted["source"])
+
+
+def invocation_context(request, record):
+    return ToolContext(
+        workspace_id=request.workspace_id,
+        chat_id=request.chat_id,
+        conversation_id=record.sub_agent_id,
+        sub_agent_id=record.sub_agent_id,
+        actor_id=record.created_by,
+        workflow_execution_id=request.execution_id,
+        phase_attempt_id=record.phase_attempt_id,
+        phase_executor=record.phase_executor,
+        allowed_tools=record.allowed_tools,
+        intent_epoch=request.intent_epoch,
+    )

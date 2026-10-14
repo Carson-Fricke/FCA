@@ -14,6 +14,7 @@ function event(
 		actorScope: 'workflow',
 		correlationId: 'exec-1',
 		cursor,
+        seq: cursor,
 		eventId: `evt-${cursor}`,
 		eventType,
 		executionId: 'exec-1',

@@ -2,7 +2,7 @@
 	import type { ToolResult } from '$lib/types';
 	import { isRecord, prettyJson } from './safe';
 
-	let { result }: { result: ToolResult; workspaceId: string } = $props();
+	let { result, hideSummary=false }: { result: ToolResult; workspaceId: string; hideSummary?:boolean } = $props();
 
 	const structured = $derived(isRecord(result.structured) ? result.structured : {});
 	const structuredJson = $derived(prettyJson(structured));
@@ -10,7 +10,7 @@
 </script>
 
 <div class="space-y-2" data-testid="generic-tool-card">
-	{#if result.summary}
+	{#if result.summary && !hideSummary}
 		<p class="text-xs text-slate-700">{result.summary}</p>
 	{/if}
 

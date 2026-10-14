@@ -8,12 +8,6 @@ from collections.abc import Mapping
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
-from thesis.chat import (
-    CrossWorkspaceLinkError,
-    InvalidLifecycleTransition,
-    RecordNotFound,
-    ToolJobConflictError,
-)
 from thesis.integrations.harness_activation import (
     CapabilityUnavailableError,
     HarnessActivationError,
@@ -24,6 +18,12 @@ from thesis.integrations.mcp import (
     HarnessMcpProtocolError,
     HarnessMcpToolError,
     HarnessMcpTransportError,
+)
+from thesis_runtime.conversations import (
+    CrossWorkspaceLinkError,
+    InvalidLifecycleTransition,
+    RecordNotFound,
+    ToolJobConflictError,
 )
 
 _LOGGER = logging.getLogger(__name__)

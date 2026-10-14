@@ -592,5 +592,37 @@ async fn bars_ensure_requires_the_interval_and_keeps_job_ids_distinct() {
     assert!(option_bars.2["error"]["details"][0]["msg"]
         .as_str()
         .expect("message")
-        .contains("not supported for options"));
+        .contains("interval is required for bars"));
+}
+
+#[tokio::test]
+async fn option_bar_ensure_preserves_interval_and_uses_distinct_jobs() {
+    let symbol = "SPY240119C00500000";
+    let launcher = RecordingLauncher::default();
+    let mut state = base_state(shared_catalog([]));
+    state.contracts = Some(Arc::new(MemoryContractRepository::from_records([
+        contract(symbol, "SPY", date(1, 19)),
+    ])));
+    state.ensure_launcher = Some(launcher.launcher());
+    let router = build_app(state);
+    let mut ids = Vec::new();
+    for interval in ["1min", "1d"] {
+        let request = json!({"asset_class":"option","data_type":"bars","interval":interval,
+            "symbol":symbol,"start_date":"2024-01-18","end_date":"2024-01-19"});
+        let (status, _, body) = send(
+            &router,
+            post_json("/v1/catalog/ensure", Some(TOKEN), request),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        ids.push(body["job_id"].clone());
+    }
+    assert_ne!(ids[0], ids[1]);
+    let launched = launcher.jobs();
+    assert_eq!(launched.len(), 2);
+    assert_eq!(launched[0].request.interval.as_deref(), Some("1min"));
+    assert_eq!(launched[1].request.interval.as_deref(), Some("1d"));
+    assert!(launched
+        .iter()
+        .all(|job| job.request.symbol == symbol && job.request.asset_class == AssetClass::Option));
 }

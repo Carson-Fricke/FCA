@@ -7,6 +7,7 @@ vi.mock('$app/state', () => ({ page: { params: { workspace: 'route-workspace' } 
 
 const definition: WorkflowDefinition = {
 	workflow_id: 'performance-workflow', version: '1.0.0', title: 'Shared topology',
+	splits: {},
 	phases: ['review', 'completed'], terminal_phases: ['completed'],
 	transitions: { review: ['completed'], completed: [] }
 };
@@ -14,7 +15,7 @@ const execution: WorkflowExecutionRecord = {
 	execution_id: 'exec-1', chat_id: 'chat-1', trigger_message_id: 'msg-1',
 	workflow_id: definition.workflow_id, workflow_version: definition.version,
 	workspace_id: 'workspace-a', requested_by: 'operator', state: 'running',
-	phase: 'review', intent_epoch: 0, steering_message_ids: [], created_at: ''
+	control_sequence: 0, active_phases: ['review'], intent_epoch: 0, steering_message_ids: [], created_at: ''
 };
 const phases: WorkflowPhase[] = [{ name: 'review', status: 'active' }];
 const options = { workspaceId: 'workspace-a', version: definition.version };

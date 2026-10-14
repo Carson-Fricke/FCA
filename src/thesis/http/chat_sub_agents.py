@@ -2,7 +2,7 @@
 
 Sub-agents are attached to a chat, not to a workflow execution, so this router
 serves the durable ownership view: it projects the first-class
-:class:`~thesis.chat.contracts.SubAgentRecord` store into a nested tree and
+:class:`~thesis_runtime.contracts.records.SubAgentRecord` store into a nested tree and
 exposes list, read, children, operator-input, and operator-cancel routes.
 Because the tree is a pure function of durable records, a process restart
 reconstructs exactly the same nodes.
@@ -37,27 +37,31 @@ from fastapi import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 
-from thesis.agent.runtime.conversation import Conversations
-from thesis.agent.runtime.delivery import (
+from thesis.http.chat import _service_error, get_chat_service
+from thesis.http.wire import NodeInputReceiptWire, SubAgentNodeListWire
+from thesis_runtime.conversations import (
+    ChatService,
+    RecordNotFound,
+    WorkflowExecutionState,
+)
+from thesis_runtime.conversations.conversation import Conversations
+from thesis_runtime.conversations.delivery import (
     NodeInputNotAccepted,
     NodeInputNotFound,
 )
-from thesis.agent.runtime.lifecycle import SubAgentLifecycle
-from thesis.agent.runtime.policy import (
+from thesis_runtime.subagents.lifecycle import SubAgentLifecycle
+from thesis_runtime.subagents.policy import (
     AnsweringActor,
     OperatorActorKind,
     OperatorPolicyDenied,
 )
-from thesis.agent.runtime.store import PersistenceSubAgentStore
-from thesis.agent.runtime.tree import (
+from thesis_runtime.subagents.store import PersistenceSubAgentStore
+from thesis_runtime.subagents.tree import (
     ChatSubAgentTree,
     ChatSubAgentTreeWire,
     SubAgentNodeWire,
     project_chat_sub_agents,
 )
-from thesis.chat import ChatService, RecordNotFound, WorkflowExecutionState
-from thesis.http.chat import _service_error, get_chat_service
-from thesis.http.wire import NodeInputReceiptWire, SubAgentNodeListWire
 
 #: Execution states that no longer have live work to stop.
 _TERMINAL_EXECUTION_STATES = frozenset(
@@ -155,6 +159,7 @@ class ChatSubAgentMessageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     body: str = Field(min_length=1, max_length=32_768)
+    message_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 def _node_not_executable() -> HTTPException:
@@ -280,7 +285,7 @@ def create_chat_sub_agent_router(
         return {"items": [child.as_dict() for child in node.children]}
 
     @router.get("/sub_agents/{sub_agent_id}/events")
-    async def replay_chat_sub_agent_events(
+    def replay_chat_sub_agent_events(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         sub_agent_id: Annotated[str, Path(min_length=1, max_length=128)],
@@ -290,7 +295,7 @@ def create_chat_sub_agent_router(
         include_descendants: Annotated[bool, Query()] = False,
     ) -> dict[str, object]:
         """Replay one node's activity, preserving the execution cursor."""
-        from thesis.execution.sub_agents import filter_replay
+        from thesis_runtime.execution.sub_agents import filter_replay
 
         try:
             _, tree = _tree(workspace_id, chat_id, chat_service)
@@ -316,7 +321,7 @@ def create_chat_sub_agent_router(
     @router.post(
         "/sub_agents/{sub_agent_id}/messages", response_model=NodeInputReceiptWire
     )
-    async def post_chat_sub_agent_message(
+    def post_chat_sub_agent_message(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         sub_agent_id: Annotated[str, Path(min_length=1, max_length=128)],
@@ -350,6 +355,7 @@ def create_chat_sub_agent_router(
                 sub_agent_id,
                 body=request.body,
                 actor=actor,
+                message_id=request.message_id,
             )
         except NodeInputNotFound as error:
             raise _not_found() from error
@@ -371,7 +377,7 @@ def create_chat_sub_agent_router(
         return result
 
     @router.post("/sub_agents/{sub_agent_id}/cancel")
-    async def cancel_chat_sub_agent(
+    def cancel_chat_sub_agent(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         chat_id: Annotated[str, Path(min_length=1, max_length=128)],
         sub_agent_id: Annotated[str, Path(min_length=1, max_length=128)],

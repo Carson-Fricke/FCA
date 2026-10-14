@@ -6,10 +6,11 @@ import type { WorkflowExecutionRecord, WorkflowPhase } from '$lib/types';
  *
  * The transcript provides this at its component root so the registry-selected
  * renderer (`WorkflowExecutionCard`) upgrades a persisted `workflow_execution`
- * datum with the same liveness the legacy `kind=workflow` branch has: the live
+ * datum with live
  * execution/phases/attention state and the phase navigation callback.
  */
 export interface WorkflowLiveView {
+    jobIds?: string[];
 	execution: WorkflowExecutionRecord | null;
 	phases: WorkflowPhase[];
 	attentionPhases: string[];

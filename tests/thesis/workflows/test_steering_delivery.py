@@ -1,16 +1,20 @@
 """Public workflow steering uses canonical root intake before its single wake."""
 
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, Never
 from unittest.mock import Mock
 
 import pytest
 
-from thesis.agent.messages import from_record
-from thesis.agent.runtime.activity import decode_activity
-from thesis.agent.runtime.conversation import Conversations
-from thesis.chat.contracts import (
+from thesis_runtime.adapters.providers.session_adapter import (
+    NativeSessionAdapter,
+    project_native_messages,
+)
+from thesis_runtime.contracts.activity import decode_activity
+from thesis_runtime.contracts.messages import from_record
+from thesis_runtime.contracts.records import (
     ChatMessage,
     InvalidLifecycleTransition,
     MessageRole,
@@ -18,19 +22,24 @@ from thesis.chat.contracts import (
     WorkflowDefinition,
     WorkflowExecution,
 )
-from thesis.chat.service import ChatService
-from thesis.execution.events import ExecutionEventType
-from thesis.providers.session_adapter import project_native_messages
-from thesis.workflows.core.execution_store import InMemoryExecutionStore
-from thesis.workflows.core.phase import ConversationPhase, TerminalPhase
-from thesis.workflows.core.spec import WorkflowSpec
-from thesis.workflows.core.workflow import Workflow, WorkflowDoctrine, WorkflowPorts
+from thesis_runtime.conversations.conversation import Conversations
+from thesis_runtime.conversations.service import ChatService
+from thesis_runtime.execution.events import ExecutionEventType
+from thesis_runtime.workflows.execution_store import InMemoryExecutionStore
+from thesis_runtime.workflows.phase import ConversationPhase, TerminalPhase
+from thesis_runtime.workflows.spec import WorkflowSpec
+from thesis_runtime.workflows.workflow import Workflow, WorkflowDoctrine, WorkflowPorts
 
 NOW = datetime(2026, 10, 3, tzinfo=UTC)
 
 
 def _unused(*args: object, **kwargs: object) -> Never:
     pytest.fail("steering must not execute a workflow phase")
+
+
+class SteeringExtension:
+    def invoke(self, operation: str, payload: Mapping[str, Any]) -> Never:
+        return _unused(operation, payload)
 
 
 @pytest.fixture
@@ -41,7 +50,7 @@ def runtime() -> tuple[
     thread = chat.create_chat("workspace", title="Steering", owner_actor_id="operator")
     provider = Mock()
     provider.complete.side_effect = AssertionError("steering must not call a provider")
-    conversations = Conversations(chat=chat, provider=provider)
+    conversations = Conversations(chat=chat, provider=NativeSessionAdapter(provider))
     trigger = conversations.root("workspace", thread.chat_id).send(
         "Research", actor_id="operator", schedule=False
     )
@@ -69,14 +78,7 @@ def runtime() -> tuple[
         activity={},
         default_activity="research",
         mcp_tools={},
-        request_of=_unused,
-        context_of=_unused,
-        project=_unused,
-        reconstruct=_unused,
-        summarize=_unused,
-        report=_unused,
-        validate_launch=_unused,
-        reduce_transition=_unused,
+        extension=SteeringExtension(),
     )
     workflow = Workflow(
         WorkflowSpec(
@@ -186,7 +188,7 @@ def test_existing_message_is_not_redelivered_or_scheduled(
             schedule=False,
         )
     else:
-        message = chat.create_message(
+        message = chat.send_message(
             "workspace",
             execution.chat_id,
             actor_id="operator",

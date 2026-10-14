@@ -1,5 +1,5 @@
 ---
-applyTo: "src/thesis/agent/**,src/thesis/providers/**,src/thesis/chat/**,src/thesis/workflows/**,src/ui/src/lib/**,tests/thesis/**"
+applyTo: "src/thesis/agent/**,src/thesis/workflows/**,src/thesis/application/**,src/thesis/extensions/**,src/thesis_runtime/**,src/ui/src/lib/**,tests/thesis/**,tests/thesis_runtime/**"
 ---
 
 # Agent Session Delivery Instructions
@@ -12,7 +12,7 @@ Read `.github/architecture/thesis-agent-workflow-runtime.md`, section
 ## Canonical Delivery
 
 - The runtime MUST use one singular `AgentSession` inbox of neutral
-  `thesis.agent.messages.SessionMessage` inputs, uniformly regardless of source
+  `thesis_runtime.contracts.messages.SessionMessage` inputs, uniformly regardless of source
   or agent kind. Its only directions are `incoming`, `outgoing`, and
   `instruction`. `MessageContent` carries `source`, `text`, `result`, optional
   `ToolCorrelation(request_message_id, request_id, tool_name)`, and `requests`.
@@ -20,7 +20,7 @@ Read `.github/architecture/thesis-agent-workflow-runtime.md`, section
   session message types. Model-profile roles are separate configuration too.
 - Every incoming producer MUST use the same canonical incoming writer,
   `Conversations.deliver_session_message`, delegated to by the `Conversation`
-  handle and backed by `runtime/incoming.py::write_incoming`: operator messages,
+  handle and backed by `thesis_runtime/conversations/incoming.py::write_incoming`: operator messages,
   initial prompts, tool execution results, helper results, workflow outcomes, runtime
   notifications, repair feedback, and asynchronous completions. Tool execution
   results MUST be incoming deliveries, not direct provider-history appends.
@@ -61,7 +61,11 @@ Read `.github/architecture/thesis-agent-workflow-runtime.md`, section
   no input ACK and no invented empty outgoing reply.
 - Mid-turn input MUST remain durable and be consumed at the next eligible model
   boundary. It MUST NOT mutate an in-flight request or schedule duplicate turns
-  for consumed input. Roots, helpers, and phases MUST share these semantics.
+  for consumed input. New operator input MUST cooperatively stop active model
+  generation, seal received reasoning/text as a canonical outgoing partial with
+  no tool requests, and begin another model request with that evidence and the
+  steering. The interrupted request MUST NOT ACK inputs or dispatch tools.
+  Roots, helpers, and phases MUST share these semantics.
 
 ## Provider Projection
 
@@ -88,20 +92,42 @@ Read `.github/architecture/thesis-agent-workflow-runtime.md`, section
 - The adapter MUST NOT persist, schedule, ACK, dispatch tools, invoke execution
   callbacks, or introspect runtime services for hidden capabilities. Projection
   MUST be deterministic and I/O-free. A thin completion wrapper MAY call its
-  injected `provider.complete` port; that transport boundary does not authorize
+  injected `provider.stream` port; that transport boundary does not authorize
   I/O in projection or ownership of runtime effects.
+
+## Incremental Output
+
+- `AgentSession` delegates each model invocation to `ModelInvocation`; its exact
+  request audit MUST be durable before provider iteration begins. Provider adapters
+  yield neutral `OutputDelta` values followed by one complete outgoing
+  `SessionMessage`. They MUST NOT publish progress or invoke persistence callbacks.
+- Visible partial output MUST be committed as `output` timeline records. Fragments
+  carry stable invocation/message/scope identities and UTF-8 byte offsets. They
+  MUST NOT enter the inbox, canonical history, consumption ACK or tool dispatch.
+- The final canonical outgoing message closes provisional output. Invocation
+  success MUST follow output persistence; ACK and dispatch follow that commit.
+  Operator steering instead closes provisional output with a canonical outgoing
+  partial marked `result.interrupted=true`. This sealed evidence, including
+  received reasoning, MUST enter subsequent context through the shared pure
+  projection. Raw timeline fragments remain presentation-only. Recovery MUST
+  retain the partial and classify the invocation as interrupted, never succeeded.
+  Provider or persistence failures preserve partial evidence and leave inputs
+  pending. Lost owners MUST NOT publish terminal state; fenced recovery closes
+  abandoned progress without replaying the provider request.
 
 ## Durability And Recovery
 
 - Provider snapshot audit is REQUIRED, not an optional effect. Before provider
   execution, `AgentSession` as the caller MUST persist the model
-  `AgentInvocation` in `STARTED` state with reference-only `request_messages`, the
+  `AgentInvocation` through `sessions/model_invocation.py::ModelInvocation` in `STARTED` state with reference-only `request_messages`, the
   opaque `provider_request`, correlation identity, and input hash. Each ordered
   reference MUST contain only `message_id`, `direction`, and `position`, taken
   from the exact working snapshot. New audits MUST NOT duplicate canonical
   message bodies, tool arguments, or results in `request_messages`; the neutral
-  transcript remains their source of truth. Historical full-message audits
-  remain readable as persisted evidence. `request_snapshot`
+  transcript remains their source of truth. Historical full-message audit
+  formats are outdated and MUST NOT have compatibility readers; follow the
+  data cutover policy below. Any remaining acceptance is cleanup debt.
+  `request_snapshot`
   prepares actual projected messages, the advertised tool catalog, options, and
   protocol-mapping/projection and tool-catalog versions purely at the provider
   boundary.
@@ -140,6 +166,24 @@ Read `.github/architecture/thesis-agent-workflow-runtime.md`, section
   hidden writers, provider-history queues, alternate executors, synthetic results,
   or side-effect replay paths. Scheduled wakes MUST NOT count as consumption.
 
+## Current Persisted Contracts
+
+Follow "Current Contracts and Data Cutovers" in
+`.github/instructions/copilot-instructions.md`. Canonical messages, activity
+metadata, invocation audits, ownership, completion policy, and intake positions
+have one current persisted contract. Required facts MUST be written explicitly;
+readers MUST NOT infer them from old roles, parentage, phase names, or untagged
+metadata. Outdated records may be rejected with a diagnostic, not silently
+upgraded or executed. Delete affected obsolete development data within the
+authorized scope, or perform a necessary one-time conversion outside normal
+reads, startup, and execution; remove the temporary converter afterward.
+
+Current restart recovery, consumption ACKs, unknown-outcome reconciliation, and
+fenced ownership remain required. Inline and chunked current payloads and opaque
+provider request evidence do not establish a historical-schema exception.
+Remaining compatibility paths are cleanup debt, not permission to add more.
+Documentation changes alone do not establish that those paths were removed.
+
 ## Responsibility Boundaries
 
 These modules exist in the current source. Their presence alone is not proof of
@@ -149,12 +193,13 @@ introspection.
 
 | Module | Owns | MUST NOT own |
 | --- | --- | --- |
-| `src/thesis/agent/messages.py` | Immutable neutral `SessionMessage`, identity, provenance and explicit correlation | Native-role policy, storage, scheduling, execution |
-| `src/thesis/agent/runtime/inbox.py` | `SessionInbox`, durable intake/consumption through injected ports, positions and idempotency | Provider projection, model/tool execution, workflow policy |
-| `src/thesis/agent/runtime/incoming.py` | `write_incoming`, the singular incoming storage boundary | Scheduling, provider projection, tool execution |
-| `src/thesis/agent/runtime/conversation.py` | `Conversations.deliver_session_message`, handle delegation, admission composition and anchored routing to the one inbox/writer | Duplicate incoming persistence or provider-history construction |
-| `src/thesis/agent/runtime/session.py` | `AgentSession`, durable outgoing requests, authorized execution and outcome delivery through injected ports | Provider-role construction, second inbox, ad-hoc replay |
-| `src/thesis/providers/session_adapter.py` | Pure canonical-history projection and explicit correlation for live/replay | Runtime services, persistence, scheduling, ACKs, tool execution |
+| `src/thesis_runtime/contracts/messages.py` | Immutable neutral `SessionMessage`, identity, provenance and explicit correlation | Native-role policy, storage, scheduling, execution |
+| `src/thesis_runtime/conversations/inbox.py` | `SessionInbox`, durable intake/consumption through injected ports, positions and idempotency | Provider projection, model/tool execution, workflow policy |
+| `src/thesis_runtime/conversations/incoming.py` | `write_incoming`, the singular incoming storage boundary | Scheduling, provider projection, tool execution |
+| `src/thesis_runtime/conversations/conversation.py` | `Conversations.deliver_session_message`, handle delegation, admission composition and anchored routing to the one inbox/writer | Duplicate incoming persistence or provider-history construction |
+| `src/thesis_runtime/sessions/session.py` | `AgentSession`, authorized tool execution, committed-output ACK and outcome delivery through injected ports | Provider-role construction, second inbox, ad-hoc replay |
+| `src/thesis_runtime/sessions/model_invocation.py` | Exact request audit, neutral incremental output, bounded publication, canonical-output commit and model terminal state | Incoming delivery, provider roles, tool dispatch, workflow policy |
+| `src/thesis_runtime/adapters/providers/session_adapter.py` | Pure canonical-history projection and explicit correlation for live/replay | Runtime services, persistence, scheduling, ACKs, tool execution |
 
 Canonical decoding MAY import immutable chat records and the centralized
 activity decoder. It MUST NOT depend on `ChatService`, session
@@ -165,8 +210,9 @@ cannot become a second live delivery path.
 
 Root tool-enabled and model-only sessions MUST both execute `AgentSession`
 through `Conversations.run_node_turn`; an empty registry is not an alternate
-executor, dispatcher, or scheduler. Scheduling remains single-process with
-`WEB_CONCURRENCY=1`. Steering MUST install intent-epoch effects before wake:
+executor, dispatcher, or scheduler. Production scheduling uses durable runnable references and renewable fenced
+worker ownership across replicas. Local coordinator state is derived bookkeeping.
+Steering MUST install intent-epoch effects before wake:
 use the canonical message factory with `schedule=False`, then the ready callback
 (`after_delivery=conversations.schedule_input`). Node/source completion,
 execution-store revision CAS, effects outside the acceptance guard, and
@@ -175,7 +221,7 @@ deterministic-executor failure policy MUST remain unchanged.
 ## Executable Enforcement
 
 - The integration owner MUST retain and run
-  `tests/thesis/agent/runtime/test_delivery_architecture.py` after edits freeze.
+  `tests/thesis_runtime/test_delivery_architecture.py` after edits freeze.
   This mandatory source guard MUST NOT have hidden optional bypasses, skips, or
   missing-module fallbacks. The test MUST read source and inspect Python ASTs
   without importing production modules or triggering import side effects. Missing
@@ -200,7 +246,7 @@ deterministic-executor failure policy MUST remain unchanged.
   storage, scheduling, and execution implementation imports; persistence,
   schedule, ACK, dispatch, and execution-callback calls; and service introspection.
   They MUST allow immutable canonical contracts, chat record/activity decoding,
-  and an injected `provider.complete` wrapper. Checks MUST inspect actual AST
+  and an injected `provider.stream` wrapper. Checks MUST inspect actual AST
   imports/calls and aliases, not broad docstring substring matches.
 - Behavior tests MUST cover live/replay equivalence, explicit correlation, every
   incoming producer, arrival order/idempotency/consumption ACKs, mid-turn input,
@@ -208,9 +254,9 @@ deterministic-executor failure policy MUST remain unchanged.
   delivery, private child transcripts, and checkpoint recovery. Static guards
   enforce selected structure, not the full behavioral contract.
   Required ordering/race coverage belongs in
-  `tests/thesis/agent/runtime/test_arrival_reconciliation.py`; mandatory audit
-  coverage belongs in `tests/thesis/agent/runtime/test_session_input_snapshot.py`
-  and `tests/thesis/providers/test_session_adapter.py`, as named in `REQ-DEL`.
+  `tests/thesis_runtime/test_arrival_reconciliation.py`; mandatory audit
+  coverage belongs in `tests/thesis_runtime/test_session_input_snapshot.py`
+  and `tests/thesis_runtime/adapters/providers/test_session_adapter.py`, as named in `REQ-DEL`.
 - The coordinator owns guard/test changes and verification of `REQ-DEL` in
   `.github/architecture/thesis-agent-workflow-runtime.md`, including its named
   behavior suites. Documentation-only edits do not certify their results.

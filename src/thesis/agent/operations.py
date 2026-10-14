@@ -25,8 +25,9 @@ from thesis.agent.residency import (
 )
 from thesis.agent.router import ModelRouter
 from thesis.agent.skills import content_hash
-from thesis.chat.contracts import ChatThread
-from thesis.chat.service import ChatService
+from thesis.research.investigations import Investigations
+from thesis_runtime.contracts.records import ChatThread
+from thesis_runtime.conversations.service import ChatService
 
 _OPERATION_PREFIX = "op-"
 _OWNER = "thesis-agent"
@@ -164,10 +165,12 @@ class WorkspaceOperations:
         residency: AgentResidency,
         *,
         chat: ChatService | None = None,
+        investigations: Investigations | None = None,
         router: ModelRouter | None = None,
     ) -> None:
         self._residency = residency
         self._chat = chat
+        self._investigations = investigations
         self._router = router
 
     def bind_chat(self, chat: ChatThread) -> ChatThread:
@@ -254,7 +257,7 @@ class WorkspaceOperations:
         _text(topic, "topic", maximum=_TOPIC_MAX)
         operation_id, created_at = self._begin("open_investigation")
         inputs = {"topic": topic}
-        if self._chat is None:
+        if self._investigations is None:
             reason = _UNAVAILABLE_REASON["open_investigation"]
             record = self._record(
                 operation_id,
@@ -273,7 +276,7 @@ class WorkspaceOperations:
                 created_at=created_at,
                 reason=reason,
             )
-        investigation = self._chat.create_investigation(
+        investigation = self._investigations.create(
             self._residency.workspace_id,
             title=topic[:_TITLE_MAX],
             objective=topic,

@@ -125,6 +125,16 @@ impl fmt::Display for InvalidStatus {
 
 impl std::error::Error for InvalidStatus {}
 
+/// A durable stage/dataset observation; updates retain the first timestamp.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobProgress {
+    #[serde(flatten)]
+    pub snapshot: harness_contracts::progress::ExecutionProgress,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub updated_at: DateTime<Utc>,
+}
+
 /// The authoritative record for one harness execution.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobRecord {
@@ -140,6 +150,9 @@ pub struct JobRecord {
     pub updated_at: DateTime<Utc>,
     /// Failure message, when the job failed.
     pub error_message: Option<String>,
+    /// Latest counters for each observed stage/dataset, retained on failure.
+    #[serde(default)]
+    pub progress: Vec<JobProgress>,
     /// Identifier of the strategy (or comma-joined instance identifiers).
     pub strategy_id: String,
     /// First session date, when known.
@@ -178,6 +191,7 @@ impl JobRecord {
             created_at: now,
             updated_at: now,
             error_message: None,
+            progress: Vec::new(),
             strategy_id: String::new(),
             data_start: None,
             data_end: None,
@@ -289,6 +303,13 @@ pub trait JobStore: Send + Sync {
     /// # Errors
     /// Returns an error for an absent, terminal, unsafe, or unwritable job.
     fn mark_running(&self, job_id: &str, started: DateTime<Utc>) -> Result<JobRecord, StoreError>;
+    /// Persist telemetry under the admitted identity; terminal jobs reject late updates.
+    fn update_progress(
+        &self,
+        job_id: &str,
+        snapshot: harness_contracts::progress::ExecutionProgress,
+        now: DateTime<Utc>,
+    ) -> Result<JobRecord, StoreError>;
     /// Publish a terminal result with its complete artifact set. A failed or
     /// cancelled job may publish terminal metadata with an empty artifact set;
     /// successful states still require at least one artifact.
@@ -316,6 +337,56 @@ pub trait JobStore: Send + Sync {
     /// Remove a job's metadata and owned artifacts; returns whether anything
     /// was removed.
     fn delete(&self, job_id: &str) -> bool;
+}
+
+fn apply_progress(
+    record: &mut JobRecord,
+    snapshot: harness_contracts::progress::ExecutionProgress,
+    now: DateTime<Utc>,
+) -> Result<(), StoreError> {
+    if record.state.is_terminal() {
+        return Err(StoreError::Terminal(record.job_id.clone()));
+    }
+    let now = now.max(record.updated_at);
+    for entry in &mut record.progress {
+        if entry.snapshot.stage != snapshot.stage && entry.finished_at.is_none() {
+            entry.finished_at = Some(now);
+        }
+    }
+    let finished_at = snapshot.completed.then_some(now);
+    if let Some(previous) = record.progress.iter_mut().find(|entry| {
+        entry.snapshot.stage == snapshot.stage
+            && entry.snapshot.symbol == snapshot.symbol
+            && entry.snapshot.data_type == snapshot.data_type
+            && entry.snapshot.start_date == snapshot.start_date
+            && entry.snapshot.end_date == snapshot.end_date
+    }) {
+        previous.snapshot = snapshot;
+        previous.updated_at = now;
+        previous.finished_at = finished_at;
+    } else {
+        record.progress.push(JobProgress {
+            snapshot,
+            started_at: now,
+            updated_at: now,
+            finished_at,
+        });
+    }
+    record.updated_at = now;
+    Ok(())
+}
+
+/// Compose the same job telemetry port for MCP and HTTP execution callers.
+pub fn progress_reporter(
+    store: std::sync::Arc<dyn JobStore>,
+    job_id: String,
+) -> harness_contracts::progress::ProgressReporter {
+    std::sync::Arc::new(move |snapshot| {
+        store
+            .update_progress(&job_id, snapshot, Utc::now())
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    })
 }
 
 fn path_segment(value: &str) -> Result<&str, StoreError> {
@@ -446,6 +517,22 @@ impl InMemoryJobStore {
 }
 
 impl JobStore for InMemoryJobStore {
+    fn update_progress(
+        &self,
+        job_id: &str,
+        snapshot: harness_contracts::progress::ExecutionProgress,
+        now: DateTime<Utc>,
+    ) -> Result<JobRecord, StoreError> {
+        path_segment(job_id)?;
+        let mut inner = self.lock();
+        let record = inner
+            .jobs
+            .get_mut(job_id)
+            .ok_or_else(|| StoreError::JobNotFound(job_id.to_string()))?;
+        apply_progress(record, snapshot, now)?;
+        Ok(record.clone())
+    }
+
     fn mark_running(&self, job_id: &str, started: DateTime<Utc>) -> Result<JobRecord, StoreError> {
         path_segment(job_id)?;
         let mut inner = self.lock();
@@ -516,10 +603,19 @@ impl JobStore for InMemoryJobStore {
         {
             return Err(StoreError::Conflict(job_id));
         }
+        let progress = existing.progress.clone();
+        let updated_at = record.updated_at.max(existing.updated_at);
         for (path, payload) in prepared {
             inner.blobs.insert(path, payload);
         }
         let mut updated = record;
+        updated.progress = progress;
+        updated.updated_at = updated_at;
+        for entry in &mut updated.progress {
+            if entry.finished_at.is_none() {
+                entry.finished_at = Some(updated.updated_at);
+            }
+        }
         updated.run_digest = Some(run_digest(&job_id, &digests));
         updated.artifact_count = digests.len() as u64;
         updated.total_bytes = total_bytes;
@@ -662,6 +758,27 @@ impl FileSystemJobStore {
 }
 
 impl JobStore for FileSystemJobStore {
+    fn update_progress(
+        &self,
+        job_id: &str,
+        snapshot: harness_contracts::progress::ExecutionProgress,
+        now: DateTime<Utc>,
+    ) -> Result<JobRecord, StoreError> {
+        path_segment(job_id)?;
+        let _guard = self.lock.lock().unwrap_or_else(|error| error.into_inner());
+        let mut record = self
+            .read_job(job_id)?
+            .ok_or_else(|| StoreError::JobNotFound(job_id.to_string()))?;
+        apply_progress(&mut record, snapshot, now)?;
+        let text = serde_json::to_string_pretty(&record)
+            .map_err(|error| StoreError::Io(error.to_string()))?;
+        // Readers must never observe a partially rewritten progress snapshot.
+        let temporary = self.job_path(job_id).with_extension("json.tmp");
+        fs::write(&temporary, text).map_err(io_error)?;
+        fs::rename(temporary, self.job_path(job_id)).map_err(io_error)?;
+        Ok(record)
+    }
+
     fn mark_running(&self, job_id: &str, started: DateTime<Utc>) -> Result<JobRecord, StoreError> {
         path_segment(job_id)?;
         let _guard = self.lock.lock().unwrap_or_else(|error| error.into_inner());
@@ -738,7 +855,16 @@ impl JobStore for FileSystemJobStore {
             digests.insert(safe_name, artifact_digest(&payload));
             total_bytes += payload.len() as u64;
         }
+        let progress = existing.progress.clone();
+        let updated_at = record.updated_at.max(existing.updated_at);
         let mut updated = record;
+        updated.progress = progress;
+        updated.updated_at = updated_at;
+        for entry in &mut updated.progress {
+            if entry.finished_at.is_none() {
+                entry.finished_at = Some(updated.updated_at);
+            }
+        }
         updated.run_digest = Some(run_digest(&job_id, &digests));
         updated.artifact_count = digests.len() as u64;
         updated.total_bytes = total_bytes;

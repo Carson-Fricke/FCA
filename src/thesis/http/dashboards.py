@@ -137,14 +137,14 @@ def create_dashboard_router() -> APIRouter:
     router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["dashboards"])
 
     @router.get("/dashboards/widgets")
-    async def list_widgets(
+    def list_widgets(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[DashboardDataService, Depends(get_dashboard_service)],
     ) -> dict[str, object]:
         return {"items": list(service.list_widgets(workspace_id))}
 
     @router.post("/dashboards/widgets", status_code=201)
-    async def create_widget(
+    def create_widget(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: CreateWidgetRequest,
         service: Annotated[DashboardDataService, Depends(get_dashboard_service)],
@@ -158,7 +158,7 @@ def create_dashboard_router() -> APIRouter:
         )
 
     @router.delete("/dashboards/widgets/{widget_id}", status_code=204)
-    async def delete_widget(
+    def delete_widget(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         widget_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[DashboardDataService, Depends(get_dashboard_service)],

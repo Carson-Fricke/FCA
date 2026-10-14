@@ -9,18 +9,16 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
-use futures_util::future::BoxFuture;
 use lake_catalog::{
-    AzureTableCatalogRepository, AzureTableJobRepository, CatalogRepository, JobRecord,
-    JobRepository, JobState,
+    AzureTableCatalogRepository, AzureTableJobRepository, CatalogRepository, JobProgress,
+    JobRepository,
 };
 use lake_configuration::{ConfigError, LakeSettings};
-use lake_contracts::{AssetClass, BarInterval, DataError, DataType, DateTime};
-use lake_coverage::{sessions_for, CoverageSession, EnsureJob, EnsureJobLauncher, EnsureSpec};
+use lake_contracts::{DataError, DateTime};
+use lake_coverage::{requested_coverage, EnsureJob, EnsureJobLauncher, EnsureSpec};
 use lake_ingestion::{
-    AzureAtomicIngestCommitter, BarsDataProvider, BarsIngestTransaction, CatalogTradeReader,
-    EquityDataProvider, EquityIngestTransaction, LeasedAtomicIngestCommitter,
-    StagingPartitionWriter,
+    AzureAtomicIngestCommitter, CatalogTradeReader, EnsureIngest, EnsureProgress, EnsureProviders,
+    LeasedAtomicIngestCommitter,
 };
 use lake_providers::{AlpacaClient, ProviderConfig, RequestGovernor};
 use lake_query::{EnsureCallback, FileUrlIssuer, QueryApplicationError};
@@ -76,38 +74,19 @@ impl From<DataError> for HostedEnsureError {
     }
 }
 
-/// The injectable seam replacing `_ingest_sessions` in tests.
-pub type IngestSessions = Arc<
-    dyn Fn(String, Vec<CoverageSession>) -> BoxFuture<'static, Result<(), HostedEnsureError>>
-        + Send
-        + Sync,
->;
-
-/// The injectable seam replacing the hosted bars side effect in tests.
-pub type IngestBars = Arc<
-    dyn Fn(
-            String,
-            BarInterval,
-            Vec<CoverageSession>,
-        ) -> BoxFuture<'static, Result<(), HostedEnsureError>>
-        + Send
-        + Sync,
->;
-
 /// Azure-backed catalog, job, query, and ingest boundaries for hosting.
 pub struct HostedRuntime {
     /// Loaded lake settings.
     pub settings: LakeSettings,
     catalog: Arc<AzureTableCatalogRepository>,
     jobs: Arc<dyn JobRepository>,
+    contracts: Arc<dyn lake_catalog::ContractRepository>,
     sas_issuer: Arc<AzureBlobSasIssuer>,
     read_store: Arc<AzureReadableBlobStore>,
     blob_url: String,
     container_name: String,
     credential: Arc<dyn azure_core::auth::TokenCredential>,
     clock: Arc<dyn Fn() -> DateTime + Send + Sync>,
-    ingest: Option<IngestSessions>,
-    bars_ingest: Option<IngestBars>,
 }
 
 impl std::fmt::Debug for HostedRuntime {
@@ -168,6 +147,13 @@ impl HostedRuntime {
                 Arc::clone(&credential),
             )?,
         ));
+        let contracts = Arc::new(lake_catalog::AzureTableContractRepository::new(Arc::new(
+            lake_catalog::SdkTableEntityStore::from_account_url(
+                &table_url,
+                &coverage_table,
+                Arc::clone(&credential),
+            )?,
+        )));
         let jobs = AzureTableJobRepository::new(Arc::new(
             lake_catalog::SdkTableEntityStore::from_account_url(
                 &table_url,
@@ -190,14 +176,13 @@ impl HostedRuntime {
             settings,
             catalog: Arc::new(catalog),
             jobs: Arc::new(jobs),
+            contracts,
             sas_issuer,
             read_store,
             blob_url,
             container_name,
             credential,
             clock: clock.unwrap_or_else(|| Arc::new(system_now)),
-            ingest: None,
-            bars_ingest: None,
         })
     }
 
@@ -225,6 +210,33 @@ impl HostedRuntime {
         &self.jobs
     }
 
+    pub fn contracts(&self) -> Arc<dyn lake_catalog::ContractRepository> {
+        self.contracts.clone()
+    }
+
+    pub fn option_resolver(self: &Arc<Self>) -> lake_http::state::OptionResolver {
+        let runtime = self.clone();
+        Arc::new(move |selector| {
+            let runtime = runtime.clone();
+            Box::pin(async move {
+                runtime
+                    .require_provider_credentials()
+                    .map_err(|e| DataError::Io(e.to_string()))?;
+                let client = AlpacaClient::with_reqwest(
+                    provider_config(&runtime.settings),
+                    shared_governor(&runtime.settings),
+                )
+                .map_err(|e| DataError::Io(e.to_string()))?;
+                lake_ingestion::options::resolve::OptionContractResolver::new(
+                    Arc::new(client),
+                    runtime.contracts(),
+                )
+                .resolve(&selector)
+                .await
+            })
+        })
+    }
+
     /// The identity-based read-URL issuer for this process.
     #[must_use]
     pub fn sas_issuer(&self) -> &Arc<AzureBlobSasIssuer> {
@@ -241,21 +253,6 @@ impl HostedRuntime {
     #[must_use]
     pub fn with_jobs(mut self, jobs: Arc<dyn JobRepository>) -> Self {
         self.jobs = jobs;
-        self
-    }
-
-    /// Replace the ingest side effect (test seam), mirroring the Python
-    /// monkeypatch of `_ingest_sessions`.
-    #[must_use]
-    pub fn with_ingest_override(mut self, ingest: IngestSessions) -> Self {
-        self.ingest = Some(ingest);
-        self
-    }
-
-    /// Replace the bars side effect (test seam).
-    #[must_use]
-    pub fn with_bars_ingest_override(mut self, bars_ingest: IngestBars) -> Self {
-        self.bars_ingest = Some(bars_ingest);
         self
     }
 
@@ -302,54 +299,76 @@ impl HostedRuntime {
         })
     }
 
-    /// Ingest every planned equity session in one bounded request range.
-    ///
-    /// A bars request first ensures trades for the same window through the
-    /// regular ingest path, then produces session-aligned bars provider-first
-    /// with trade derivation for the remainder.
+    /// Query callbacks calculate the same gap plan used by the ensure route.
     pub async fn ensure_sessions(&self, request: &EnsureSpec) -> Result<(), HostedEnsureError> {
-        if request.asset_class != AssetClass::Equity {
-            return Err(HostedEnsureError::new(format!(
-                "hosted ensure supports equity sessions only, not {}",
-                request.asset_class.value()
-            )));
-        }
-        self.require_provider_credentials()?;
-        let sessions = sessions_for(
-            request.asset_class,
-            request.start_date,
-            request.end_date,
+        let gaps = requested_coverage(
+            self.catalog.as_ref(),
+            None,
+            request,
             (self.clock)(),
+            "ensure",
         )
-        .map_err(|error| HostedEnsureError::new(error.to_string()))?;
-        let symbol = request.symbol.trim().to_uppercase();
-        if request.data_type == DataType::Bars {
-            let interval = request
-                .interval
-                .as_deref()
-                .ok_or_else(|| HostedEnsureError::new("bars requires an interval"))?;
-            let interval = BarInterval::parse(interval)
-                .map_err(|error| HostedEnsureError::new(error.to_string()))?;
-            self.ingest_sessions(&symbol, sessions.clone()).await?;
-            return self.ingest_bars(&symbol, interval, sessions).await;
-        }
-        self.ingest_sessions(&symbol, sessions).await
+        .map_err(|e| HostedEnsureError::new(e.to_string()))?
+        .gap_plan()
+        .gaps;
+        self.run_job(&EnsureJob {
+            job_id: lake_coverage::ensure_job_id(request)
+                .map_err(|e| HostedEnsureError::new(e.to_string()))?,
+            request: request.clone(),
+            gaps,
+        })
+        .await
     }
 
-    /// Run one ensure request and mark the durable job succeeded.
+    /// Compose Azure adapters; coverage application alone settles durable jobs.
     async fn run_job(&self, job: &EnsureJob) -> Result<(), HostedEnsureError> {
-        self.ensure_sessions(&job.request).await?;
-        let now = (self.clock)();
-        let existing = self.jobs.get(&job.job_id)?;
-        let created_at = existing.map_or(now, |record| record.created_at);
-        self.jobs.upsert(&JobRecord::new(
-            job.job_id.clone(),
-            JobState::Succeeded,
-            created_at,
-            now,
-            None,
-        )?)?;
-        Ok(())
+        if job.gaps.is_empty() {
+            return Ok(());
+        }
+        self.require_provider_credentials()?;
+        let client = Arc::new(
+            AlpacaClient::with_reqwest(
+                provider_config(&self.settings),
+                shared_governor(&self.settings),
+            )
+            .map_err(|e| HostedEnsureError::new(e.to_string()))?,
+        );
+        let ingest = EnsureIngest {
+            providers: EnsureProviders {
+                equity: Some(client.clone()),
+                crypto: Some(client.clone()),
+                bars: Some(client.clone()),
+                options: Some(client),
+            },
+            contracts: Some(self.contracts()),
+            committer: Arc::new(self.leased_committer()?),
+            trades: Arc::new(CatalogTradeReader::new(
+                self.catalog.clone(),
+                self.read_store(),
+            )),
+            clock: self.clock.clone(),
+        };
+        let jobs = self.jobs.clone();
+        let job_id = job.job_id.clone();
+        let clock = self.clock.clone();
+        let progress: EnsureProgress = Arc::new(move |total, done, coverage| {
+            if let Ok(Some(mut record)) = jobs.get(&job_id) {
+                if record.state != lake_catalog::JobState::Running {
+                    return;
+                }
+                record.progress = Some(JobProgress {
+                    sessions_total: total as u64,
+                    sessions_done: done as u64,
+                    symbol: coverage.symbol.clone(),
+                    session_date: coverage.session_date.isoformat(),
+                    rows: coverage.row_count,
+                    error: coverage.error_message.clone(),
+                });
+                record.updated_at = clock();
+                let _ = jobs.upsert(&record);
+            }
+        });
+        ingest.run(job, Some(progress)).await.map_err(Into::into)
     }
 
     fn require_provider_credentials(&self) -> Result<(), HostedEnsureError> {
@@ -359,80 +378,6 @@ impl HostedRuntime {
             ));
         }
         Ok(())
-    }
-
-    /// Ingest every closed session through the leased Azure committer.
-    async fn ingest_sessions(
-        &self,
-        symbol: &str,
-        sessions: Vec<CoverageSession>,
-    ) -> Result<(), HostedEnsureError> {
-        if sessions.is_empty() {
-            return Ok(());
-        }
-        if let Some(ingest) = &self.ingest {
-            return ingest(symbol.to_string(), sessions).await;
-        }
-        let provider = self.equity_provider()?;
-        let writer: Arc<dyn lake_ingestion::PartitionWriter> =
-            Arc::new(StagingPartitionWriter::new());
-        let committer: Arc<dyn lake_ingestion::AtomicIngestCommitter> =
-            Arc::new(self.leased_committer()?);
-        let transaction = EquityIngestTransaction::new(provider, writer, committer);
-        for session in &sessions {
-            transaction
-                .run(symbol, session, None)
-                .await
-                .map_err(|error| HostedEnsureError::new(error.to_string()))?;
-        }
-        Ok(())
-    }
-
-    fn equity_provider(&self) -> Result<Arc<dyn EquityDataProvider>, HostedEnsureError> {
-        let client = AlpacaClient::with_reqwest(
-            provider_config(&self.settings),
-            shared_governor(&self.settings),
-        )
-        .map_err(|error| HostedEnsureError::new(error.to_string()))?;
-        Ok(Arc::new(client))
-    }
-
-    /// Produce bars for every planned session after trades are ensured.
-    async fn ingest_bars(
-        &self,
-        symbol: &str,
-        interval: BarInterval,
-        sessions: Vec<CoverageSession>,
-    ) -> Result<(), HostedEnsureError> {
-        if sessions.is_empty() {
-            return Ok(());
-        }
-        if let Some(bars) = &self.bars_ingest {
-            return bars(symbol.to_string(), interval, sessions).await;
-        }
-        let provider: Arc<dyn BarsDataProvider> = self.bars_provider()?;
-        let writer: Arc<dyn lake_ingestion::PartitionWriter> =
-            Arc::new(StagingPartitionWriter::new());
-        let committer: Arc<dyn lake_ingestion::AtomicIngestCommitter> =
-            Arc::new(self.leased_committer()?);
-        let store: Arc<dyn ReadableBlobStore> = self.read_store();
-        let catalog: Arc<dyn CatalogRepository> = self.catalog.clone();
-        let reader = Arc::new(CatalogTradeReader::new(catalog, store));
-        let transaction = BarsIngestTransaction::new(provider, reader, writer, committer);
-        transaction
-            .run(AssetClass::Equity, symbol, interval, &sessions)
-            .await
-            .map_err(|error| HostedEnsureError::new(error.to_string()))?;
-        Ok(())
-    }
-
-    fn bars_provider(&self) -> Result<Arc<dyn BarsDataProvider>, HostedEnsureError> {
-        let client = AlpacaClient::with_reqwest(
-            provider_config(&self.settings),
-            shared_governor(&self.settings),
-        )
-        .map_err(|error| HostedEnsureError::new(error.to_string()))?;
-        Ok(Arc::new(client))
     }
 
     /// The lease-protected atomic committer over the Azure blob store.
@@ -490,6 +435,8 @@ pub struct HostedOverrides {
     pub catalog: Arc<dyn CatalogRepository>,
     /// The hosted durable job repository.
     pub jobs: Arc<dyn JobRepository>,
+    pub contracts: Arc<dyn lake_catalog::ContractRepository>,
+    pub option_resolver: lake_http::state::OptionResolver,
     /// The hosted read-URL issuer.
     pub sas_issuer: Arc<dyn FileUrlIssuer>,
     /// The hosted blob-read seam.
@@ -519,6 +466,8 @@ pub fn hosted_overrides(
     Ok(Some(HostedOverrides {
         catalog,
         jobs: Arc::clone(runtime.jobs()),
+        contracts: runtime.contracts(),
+        option_resolver: runtime.option_resolver(),
         sas_issuer,
         read_store: runtime.read_store(),
         ensure_callback: runtime.ensure_callback(),

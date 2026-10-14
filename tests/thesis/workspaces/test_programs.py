@@ -3,16 +3,17 @@
 import re
 import shutil
 from collections.abc import Callable, Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from functools import cache
 from pathlib import Path
 from typing import cast
 
 import pytest
+from tests.thesis.submissions import MemorySubmissions
 from tests.thesis.workspaces._support import MemoryGitFactory, Repositories
 
 from thesis.experiments.mandate import (
     DataWindowPolicy,
-    LaunchPartition,
     derive_mandate,
     rfc3339,
 )
@@ -85,6 +86,20 @@ def _point_parameters(
     return cast(dict[str, object], instances[0]["parameters"])
 
 
+@cache
+def packaged_sdk_info() -> tuple[object, object, object]:
+    """One immutable deployed SDK identity for the external harness double."""
+    local = WorkspacePrograms(
+        cast(LocalWorkspaceProvider, None), submissions=MemorySubmissions()
+    )
+    reference = local.read_sdk_reference("consumer", max_chars=1)
+    return (
+        reference["sdkIdentity"],
+        reference["sdkVersion"],
+        reference["sdkAbiVersion"],
+    )
+
+
 class Harness:
     validation_identity: str | None = "compiler-one"
 
@@ -94,11 +109,10 @@ class Harness:
         self.reject = False
 
     def current_server_info(self) -> Mapping[str, object]:
-        local = WorkspacePrograms(cast(LocalWorkspaceProvider, None))
-        version, abi = local._sdk_metadata(local.sdk_root)
+        identity, version, abi = packaged_sdk_info()
         return {
             "serverInfo": {
-                "sdkIdentity": local._sdk_identity(),
+                "sdkIdentity": identity,
                 "sdkVersion": version,
                 "sdkAbiVersion": abi,
                 "validationIdentity": self.validation_identity,
@@ -110,7 +124,9 @@ class Harness:
             cast(Mapping[str, object], self.current_server_info()["serverInfo"])
         )
         if "topic" in arguments:
-            local = WorkspacePrograms(cast(LocalWorkspaceProvider, None))
+            local = WorkspacePrograms(
+                cast(LocalWorkspaceProvider, None), submissions=MemorySubmissions()
+            )
             reference = local.read_sdk_reference(
                 cast(str, arguments["topic"]),
                 start_line=cast(int, arguments.get("start_line", 1)),
@@ -165,7 +181,7 @@ def git_programs(
     template = load_workspace_manifest("config/thesis/workspace.yaml").model_dump(
         mode="json"
     )
-    for workspace_id in ("workspace-one", "workspace-two"):
+    for workspace_id in ("workspace-one",):
         data = {
             **template,
             "workspace_id": workspace_id,
@@ -197,15 +213,6 @@ def test_targeted_updates_and_read_ranges(
         "workspace-one", "study", "alpha", STUDY_TEMPLATE, configuration=CONFIG
     )
     version = cast(str, first["version"])
-    with pytest.raises(ProgramArtifactError, match="exactly once"):
-        service.update(
-            "workspace-one",
-            "study",
-            "alpha",
-            expected_version=version,
-            expected="fn",
-            replacement="x",
-        )
     second = service.update(
         "workspace-one",
         "study",
@@ -215,23 +222,9 @@ def test_targeted_updates_and_read_ranges(
         replacement="self.frames += 2",
     )
     assert second["version"] != version
-    with pytest.raises(ProgramArtifactError, match="stale"):
-        service.update(
-            "workspace-one",
-            "study",
-            "alpha",
-            expected_version=version,
-            expected="self.frames += 2",
-            replacement="self.frames += 3",
-        )
     read = service.read("workspace-one", "study", "alpha", start_line=3, end_line=5)
     assert read["source"] == "".join(STUDY_TEMPLATE.splitlines(keepends=True)[2:5])
     assert read["startLine"] == 3 and read["endLine"] == 5
-    for start, end in [(0, 3), (4, 2), (1, 401), (1000, None)]:
-        with pytest.raises(ProgramArtifactError, match="range"):
-            service.read(
-                "workspace-one", "study", "alpha", start_line=start, end_line=end
-            )
     path = provider.resolve_path("workspace-one", "studies/alpha/program.rs")
     path.write_text("uncommitted edit", encoding="utf-8")
     assert "self.frames += 2" in cast(
@@ -686,6 +679,10 @@ def test_reads_bound_characters_not_only_lines(
     assert result["source"] == source[:100] and result["truncated"] is True
     reference = service.read_sdk_reference("program", max_chars=100)
     assert len(cast(str, reference["source"])) == 100 and reference["truncated"] is True
+    for topic in ("research_views", "research_publishing", "research_recipes"):
+        research = service.read_sdk_reference(topic, start_line=1, end_line=3)
+        assert research["sdkIdentity"] == reference["sdkIdentity"]
+        assert research["source"]
 
 
 def test_configuration_diagnostics_are_actionable(
@@ -2029,10 +2026,17 @@ def test_configuration_guard_still_rejects_nested_parameters(
 
 
 def _launch_request(cutoff: datetime) -> dict[str, object]:
-    """The launch request persisted for a cutoff with the default partition."""
+    """Explicit dataset windows used by the program-policy fixture."""
     return {
         "createdAt": cutoff.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "partition": LaunchPartition(1825, 90, 1, 0).as_dict(),
+        "development": {
+            "start": (cutoff - timedelta(days=1825)).isoformat(),
+            "end": (cutoff - timedelta(days=91)).isoformat(),
+        },
+        "forward": {
+            "start": (cutoff - timedelta(days=90)).isoformat(),
+            "end": cutoff.isoformat(),
+        },
     }
 
 
@@ -2468,3 +2472,56 @@ def test_large_null_design_is_submitted_in_explicit_bounded_chunks(
     assert all(
         _null_config(call)["mode"] == "permutation" for call in _run_points(harness)
     )
+
+
+def test_read_range_validation(programs: Programs) -> None:
+    service = programs[0]
+    service.author(
+        "workspace-one", "study", "alpha", STUDY_TEMPLATE, configuration=CONFIG
+    )
+    for start, end in [(0, 3), (4, 2), (1, 401), (1000, None)]:
+        with pytest.raises(ProgramArtifactError, match="range"):
+            service.read(
+                "workspace-one", "study", "alpha", start_line=start, end_line=end
+            )
+
+
+def test_content_updates_reject_ambiguous_match_and_stale_version(
+    programs: Programs,
+) -> None:
+    service, provider, _ = programs
+    first = service.author(
+        "workspace-one", "study", "alpha", STUDY_TEMPLATE, configuration=CONFIG
+    )
+    version = cast(str, first["version"])
+    before = provider.store("workspace-one").head
+    with pytest.raises(ProgramArtifactError, match="exactly once"):
+        service.update(
+            "workspace-one",
+            "study",
+            "alpha",
+            expected_version=version,
+            expected="fn",
+            replacement="x",
+        )
+    assert provider.store("workspace-one").head == before
+    second = service.update(
+        "workspace-one",
+        "study",
+        "alpha",
+        expected_version=version,
+        expected="self.frames += 1",
+        replacement="self.frames += 2",
+    )
+    assert second["version"] != version
+    before = provider.store("workspace-one").head
+    with pytest.raises(ProgramArtifactError, match="stale"):
+        service.update(
+            "workspace-one",
+            "study",
+            "alpha",
+            expected_version=version,
+            expected="self.frames += 2",
+            replacement="self.frames += 3",
+        )
+    assert provider.store("workspace-one").head == before

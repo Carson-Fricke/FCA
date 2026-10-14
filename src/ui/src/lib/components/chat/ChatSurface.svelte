@@ -6,7 +6,6 @@
 	import PhaseRunView from './PhaseRunView.svelte';
 	import ScopeStack from './ScopeStack.svelte';
 	import ScopeTranscript from './ScopeTranscript.svelte';
-	import StreamingReply from './StreamingReply.svelte';
 	import SubAgentComposer from './SubAgentComposer.svelte';
 	import WorkflowCard from './WorkflowCard.svelte';
 	import { setSubAgentLiveView } from './sub-agent-live-view';
@@ -47,7 +46,6 @@
 		onConfirmConsent,
 		onRejectConsent,
 		consentBusy = false,
-		streaming = { active: false, text: '', reasoning: '' },
 		busy = false,
 		onSend,
 		onNodeMessage,
@@ -67,7 +65,6 @@
 		onConfirmConsent?: (confirmation: ConsentConfirmation) => void;
 		onRejectConsent?: () => void;
 		consentBusy?: boolean;
-		streaming?: { active: boolean; text: string; reasoning: string };
 		busy?: boolean;
 		onSend: (input: {
 			body: string;
@@ -173,7 +170,7 @@
 	const phaseAttempts = $derived.by(() => {
 		if (!active || active.kind !== 'phase') return [];
 		if (!active.executionId || !active.phase) return [];
-		return derivePhaseAttempts(controller.eventsForPhase(active.executionId, active.phase), active.phase);
+		return derivePhaseAttempts(timeline.eventsForExecution(active.executionId), active.phase);
 	});
 
 	// The selection is scoped to the phase it was made on, so navigating to
@@ -263,7 +260,7 @@
 	}
 	setWorkflowLiveView((id) => {
 		const live = workflows.get(id);
-		return live ? { ...live, onEnterPhase: (phase, options) => enterPhase(id, phase, options) } : null;
+		return live ? { ...live, jobIds: derivePhaseAttempts(timeline.eventsForExecution(id), live.execution.phase ?? "").slice(-1)[0]?.jobs ?? [], onEnterPhase: (phase, options) => enterPhase(id, phase, options) } : null;
 	});
 
 	function enterSubAgent(node: SubAgentNode): void {
@@ -352,7 +349,7 @@
 		</ScopeStack>
 	{:else}
 		<div class="min-h-0 flex-1 overflow-y-auto p-3" data-testid="transcript-scroll">
-			{#if drafting && !chatId && !messages.length && !streaming.active}
+			{#if drafting && !chatId && !messages.length}
 				<div class="mb-3">
 					<p class="mb-2 text-xs text-slate-500">Start with a suggestion, or ask anything.</p>
 					<ChatStarters
@@ -377,12 +374,7 @@
 				{workflows}
 				onEnterPhase={enterPhase}
 			/>
-			<StreamingReply
-				active={streaming.active}
-				text={streaming.text}
-				reasoning={streaming.reasoning}
-				testId="streaming-reply"
-			/>
+
 			{#each [...workflows.values()].filter((live) => !live.anchored && !timeline.initialLoading) as live (live.execution.execution_id)}
 				<div class="mt-3">
 					<WorkflowCard
@@ -393,6 +385,7 @@
 							? `Current phase ${live.execution.phase}`
 							: 'Awaiting phase transitions'}
 						attentionPhases={live.attentionPhases}
+                        jobIds={derivePhaseAttempts(timeline.eventsForExecution(live.execution.execution_id), live.execution.phase ?? "").slice(-1)[0]?.jobs ?? []}
 						onEnterPhase={(phase, options) => enterPhase(live.execution.execution_id, phase, options)}
 					/>
 				</div>
@@ -452,7 +445,7 @@
 			class="border-t border-surface-700 bg-surface-900 px-3 py-2 text-center text-[11px] text-slate-500"
 			data-testid="scope-readonly"
 		>
-			This phase is a deterministic run and does not accept input.
+			No conversational agent is available for this phase. See phase activity for status or errors.
 		</div>
 	{:else}
 		<ChatComposer

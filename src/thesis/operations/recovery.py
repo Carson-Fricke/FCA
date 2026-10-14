@@ -3,8 +3,8 @@
 Recovery planning answers one question per durable fact: given the process that
 just restarted, what should the coordinator do next? It never mutates the queue,
 the checkpoint store, or Git. Instead it inspects the real
-:class:`~thesis.execution.queue.ExecutionQueue`,
-:class:`~thesis.execution.checkpoints.CheckpointStore`, and Git publication
+:class:`~thesis_runtime.execution.queue.ExecutionQueue`,
+:class:`~thesis_runtime.execution.checkpoints.CheckpointStore`, and Git publication
 state and returns a :class:`RecoveryPlan` of typed decisions. The coordinator
 applies the plan through the queue/checkpoint/publication APIs that already own
 the fenced mutations.
@@ -21,13 +21,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
-from thesis.execution.checkpoints import (
+from thesis.persistence.journal import CommandJournal, JournalEntry
+from thesis_runtime.execution.checkpoints import (
     CheckpointCompatibilityError,
     CheckpointError,
     CheckpointStore,
 )
-from thesis.execution.queue import ExecutionQueue, Workflow
-from thesis.persistence.journal import CommandJournal, JournalEntry
+from thesis_runtime.execution.queue import ExecutionQueue, Workflow
 
 
 class RecoveryError(RuntimeError):

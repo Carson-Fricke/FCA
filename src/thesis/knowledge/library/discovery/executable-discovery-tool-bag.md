@@ -1,13 +1,13 @@
 ---
 id: executable-discovery-tool-bag
 title: Executable discovery tool bag and composition recipes
-version: 1
+version: 4
 created: 2026-10-09
-retrieved: 2026-10-09
+retrieved: 2026-10-13
 source:
   url: https://github.com/Carson-Fricke/FCA
   publisher: FCA Thesis
-  content_hash: 30e6e67e2ebb8054fb8b4b54b23b441dc9dcfb4a223c2ef1a31d45587399245c
+  content_hash: a904522b49994951f27c89f17e1f04e8ee5444d8639ce857c2885d16e4b0ce79
 tags:
   - discovery
   - indicators
@@ -20,10 +20,14 @@ collections:
   - discovery
   - model-cards
 links:
+  - from-market-idea-to-trading-construction
+  - investigating-representations-and-episodes
+  - developing-a-candidate-through-evidence
   - directional-change-events
   - perceptually-important-points
   - discovery-study-design
   - historical-timing-and-leakage
+  - publishing-research-exhibits
 relationships:
   - type: relates
     target: directional-change-events
@@ -40,6 +44,13 @@ a representation that makes the mechanism observable, then explore conditioning,
 entry, exit, and abstention. These are building blocks, not suggested alpha or a
 mandatory checklist. Existing studies can challenge the sketch; their questions
 need not define it. Retrieve method cards and the current SDK before authoring.
+
+For the research process, start with
+[From market idea to trading construction](from-market-idea-to-trading-construction),
+[Investigating representations and episodes](investigating-representations-and-episodes)
+and the [worked research loop](developing-a-candidate-through-evidence). Choose a
+kernel to resolve a design question; collecting more feature statistics is not
+itself development of a trading construction.
 
 The authoritative executable signatures live in
 `harness-strategy-sdk/src/building_blocks.rs` and `outputs.rs`, available through
@@ -59,7 +70,7 @@ streams; derived output windows have a declared fidelity.
 | `CrossoverAge` | Fast/slow and observation time → direction, age, crossing flag | Duration/hazard questions and state persistence | Equality retains prior state; crossing alone is not a profitable trigger |
 | `DirectionalChange` | Price and availability time → confirmed events | Event clocks, reversal/continuation setups | Absolute threshold; confirmation lag; earlier extreme is retrospective |
 | `perceptually_important_points` | Trailing path and point count → selected indices | Path-shape compression and invented shape features | Vertical-distance variant; whole shape available only at window end |
-| `trailing_haar` | Power-of-two trailing values → multiscale detail coefficients | Scale-specific compression and release | Haar basis; no future padding or circular boundary; not MODWT/CWT |
+| `WaveletIndicator` | Completed bars → immutable as-of coarse energy, signed trend and scale energies | Multi-timeframe structure and regime conditioning | Managed trailing Haar; explicit warm-up, missing and availability; no centered padding |
 | `FittedNormalization` | Development observations → frozen mean/scale; later values → normalized value | Explicit training/inference separation | Constant training windows invalid; regime drift; no automatic refitting |
 
 Full MODWT, Morlet CWT, and Hilbert kernels exist inside the backtest package,
@@ -82,79 +93,49 @@ entry condition; trailing PIP slopes with spread-based abstention; and frozen
 normalization of order-flow features to identify unusual activity. Each is a
 possible composition, not a prescribed strategy or a claim of profitability.
 
-## Executable study with a sequence, confirmed events, and a wavelet table
+## Managed wavelet consumption
 
-This complete study illustrates composition and persisted exploratory output.
-Replace the symbol, parameters, and representation to investigate your sketch.
-Author, validate, and run the committed study through the standard program tools.
-Inspect the originating job artifacts; reference that job in sketch evidence.
+Read read_sdk_reference(topic="wavelet") for the current native API. WaveletIndicator
+owns trailing state and subscribes to exact completed bars through MarketConsumer.
+The transform kernel is internal; authored programs must not reimplement wavelets.
+
+This usage fragment belongs inside a study or strategy; read the full template for
+its remaining callbacks and publication contracts:
 
 ```rust
-use std::collections::{BTreeMap, VecDeque};
-use harness_strategy_sdk::{export_study_program, serde_json::{self, Value},
-    BarFrame, MarketConsumer, MetricPublisher, ObservationContext, OutputEvent,
-    OutputPoint, StudyOutput, StudyProgram, Subscription};
-use harness_strategy_sdk::building_blocks::{DirectionalChange, RollingMoments, trailing_haar};
+use harness_strategy_sdk::{Indicator, WaveletIndicator};
 
-struct Exploration {
-    symbol: String, interval: String, dc: DirectionalChange,
-    moments: RollingMoments, window: VecDeque<f64>,
-    points: Vec<OutputPoint>, events: Vec<OutputEvent>, rows: Vec<Vec<Value>>,
-}
-impl StudyProgram for Exploration {
-    fn new(p: Value) -> Self {
-        Self {
-            symbol: p["symbol"].as_str().unwrap_or("MSFT").into(),
-            interval: p["interval"].as_str().unwrap_or("1min").into(),
-            dc: DirectionalChange::new(p["threshold"].as_f64().unwrap_or(1.0)).unwrap(),
-            moments: RollingMoments::new(32).unwrap(), window: VecDeque::new(),
-            points: vec![], events: vec![], rows: vec![],
-        }
-    }
-    fn on_stop(&mut self, out: &mut MetricPublisher) {
-        out.publish_output("dispersion", &StudyOutput::Series { points: self.points.clone() }).unwrap();
-        out.publish_output("release_events", &StudyOutput::Events { events: self.events.clone() }).unwrap();
-        out.publish_output("wavelet_energy", &StudyOutput::Table {
-            columns: vec!["available_at_ns".into(), "support".into(), "energy".into()],
-            rows: self.rows.clone(),
-        }).unwrap();
-    }
-}
-impl MarketConsumer for Exploration {
-    type Context = ObservationContext;
-    fn subscriptions(&self) -> Vec<Subscription> {
-        vec![Subscription::Bars { symbols: vec![self.symbol.clone()], interval: self.interval.clone() }]
-    }
-    fn on_bar(&mut self, frame: &BarFrame, _: &mut ObservationContext) {
-        let Some(bar) = frame.bars_by_symbol.get(self.symbol.as_str()) else { return; };
-        let price = bar.close.to_f64();
-        let dispersion = self.moments.observe(price).unwrap().map(|(_,sd)| sd);
-        self.points.push(OutputPoint { symbol: self.symbol.clone(), interval: self.interval.clone(),
-            event_time_ns: frame.interval_end_ns, available_at_ns: frame.available_at_ns,
-            value: dispersion, undefined_reason: dispersion.is_none().then(|| "warm_up".into()) });
-        if let Some(event) = self.dc.observe(frame.available_at_ns, price).unwrap() {
-            self.events.push(OutputEvent { symbol: self.symbol.clone(),
-                event_time_ns: event.extreme_time_ns, available_at_ns: event.available_at_ns,
-                fields: BTreeMap::from([("direction".into(), serde_json::json!(event.direction)),
-                    ("confirmation_price".into(), serde_json::json!(event.price))]) });
-        }
-        self.window.push_back(price);
-        if self.window.len() > 32 { self.window.pop_front(); }
-        if self.window.len() == 32 {
-            for level in trailing_haar(&self.window.iter().copied().collect::<Vec<_>>()).unwrap() {
-                let energy = level.details.iter().map(|x| x*x).sum::<f64>() / level.details.len() as f64;
-                self.rows.push(vec![serde_json::json!(frame.available_at_ns),
-                    serde_json::json!(level.support), serde_json::json!(energy)]);
-            }
-        }
-    }
-}
-export_study_program!(Exploration);
+// In construction:
+let wavelet = WaveletIndicator::new(vec!["MSFT".into()], "1d".into(), 32, 8)?;
+// Store wavelet in the consumer. Its indicators() returns vec![&mut self.wavelet].
+// In the original setup callback, after dependency-first routing:
+let frozen = self.wavelet.snapshot_at("MSFT", frame.available_at_ns);
+// Store frozen WITH this setup. Later outcome calculation reads this snapshot,
+// never a later Indicator::value(). Historical snapshot_at uses availability
+// bounded by the supplied original decision time, including missing/warm-up.
 ```
 
-For discontinuous input, define whether to reset the window or retain observations
-and record that choice. This example counts observed bars and omits missing bars;
-it does not manufacture observations or infer unseen crossings.
+Snapshots retain decision time, availability, trailing-window start, coarse energy
+share, signed half-window trend in bps, and detail energies by support. Energy is
+unsigned; do not infer direction from it. Missing bars reset warm-up; flat windows
+have undefined energy share. Symbols are isolated and slower features update only
+on their declared completed cadence. Constructor parameters are research choices
+to explore, not default values known to work.
+
+Managed snapshot selection cannot return an observation from after its as-of time.
+Retaining a snapshot prevents later bars from changing its values. Arbitrary authored
+Rust can still fabricate timestamps, call callbacks directly or compute other
+features; this SDK path does not sandbox all possible scientific misrepresentation.
+Critique must verify that the policy actually uses the managed observation path.
+
+## Training strategy evaluation
+
+Use author_strategy with parameter_declaration and validate_strategy, then
+run_backtest/run_backtest_batch on the development window. Diagnostic studies
+do not replace policy evaluation. Retain all candidates and failed attempts.
+run_null_batch supplies fixed-assignment conditional null evidence; see
+[Testing a searched candidate against a null](testing-a-searched-candidate-against-a-null)
+before making search-adjusted claims.
 
 ## Explicit fit and frozen inference recipe
 

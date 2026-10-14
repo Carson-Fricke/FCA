@@ -7,7 +7,10 @@ import { decodeWire } from '$lib/wire';
 
 export function eventFixture(overrides: Partial<ExecutionEvent>): ExecutionEvent {
     const {seq, threadId, ...wire} = overrides;
-    return { ...decodeWire('ExecutionEventWire', { ...fixtures.executionEvents['exec-1'].items[0], ...wire }, 'test/event'), seq, threadId };
+    if (wire.eventType?.startsWith('workflow.') && !['workflow.progress', 'workflow.phase_result'].includes(wire.eventType) && typeof wire.payload?.phase === 'string') {
+        wire.payload = { activePhases: [wire.payload.phase], controlSequence: wire.cursor ?? seq ?? 0, ...wire.payload };
+    }
+    return { ...decodeWire('ExecutionEventWire', { ...fixtures.executionEvents['exec-1'].items[0], ...wire }, 'test/event'), seq: seq ?? overrides.cursor ?? 1, threadId };
 }
 
 export const aggregateDatums: DatumWire[] = [

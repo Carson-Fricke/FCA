@@ -10,13 +10,26 @@ from dataclasses import fields
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal, get_type_hints
 
-from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, create_model
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    TypeAdapter,
+    WithJsonSchema,
+    create_model,
+)
 from pydantic.alias_generators import to_camel
 
-from thesis.agent.runtime.policy import OperatorActorKind
-from thesis.agent.runtime.tree import SubAgentNodeWire
-from thesis.chat.contracts import ChatMessage, ChatThread, WorkflowExecution
-from thesis.execution.events import ExecutionEvent
+from thesis_runtime.contracts.records import (
+    ChatMessage,
+    ChatThread,
+    RecordLinks,
+    WorkflowExecution,
+)
+from thesis_runtime.execution.events import ExecutionEvent
+from thesis_runtime.subagents.policy import OperatorActorKind
+from thesis_runtime.subagents.tree import SubAgentNodeWire
 
 
 class RecordWire(BaseModel):
@@ -40,7 +53,17 @@ def _record_model(
     definitions: dict[str, Any] = {}
     for field in fields(record):
         annotation = hints[field.name]
-        if annotation is datetime:
+        if annotation is RecordLinks:
+            annotation = Annotated[
+                RecordLinks,
+                PlainSerializer(
+                    lambda links: links.as_dict(), return_type=dict[str, object]
+                ),
+                WithJsonSchema(
+                    TypeAdapter(RecordLinks).json_schema(), mode="serialization"
+                ),
+            ]
+        elif annotation is datetime:
             annotation = Annotated[
                 datetime, PlainSerializer(_timestamp, return_type=str)
             ]
@@ -172,8 +195,45 @@ class TimelineExecutionWire(TimelineEnvelopeWire):
     payload: WorkflowExecutionWire
 
 
+class ModelOutputIdentityWire(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid", alias_generator=to_camel, populate_by_name=True
+    )
+    invocation_id: str
+    message_id: str
+    actor_id: str
+
+
+class ModelOutputStartedWire(ModelOutputIdentityWire):
+    state: Literal["started"]
+    started_at: str
+
+
+class ModelOutputDeltaWire(ModelOutputIdentityWire):
+    state: Literal["delta"]
+    channel: Literal["reasoning", "text"]
+    offset: int = Field(ge=0)
+    text: str
+
+
+class ModelOutputInterruptedWire(ModelOutputIdentityWire):
+    state: Literal["interrupted"]
+    failure: dict[str, object]
+
+
+class TimelineOutputWire(TimelineEnvelopeWire):
+    kind: Literal["output"]
+    payload: Annotated[
+        ModelOutputStartedWire | ModelOutputDeltaWire | ModelOutputInterruptedWire,
+        Field(discriminator="state"),
+    ]
+
+
 type TimelineItemWire = Annotated[
-    TimelineMessageWire | TimelineEventWire | TimelineExecutionWire,
+    TimelineMessageWire
+    | TimelineEventWire
+    | TimelineExecutionWire
+    | TimelineOutputWire,
     Field(discriminator="kind"),
 ]
 
@@ -188,6 +248,13 @@ class TimelinePageWire(BaseModel):
     after: int = Field(ge=0)
 
 
+class WorkflowSplitWire(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    branches: dict[str, str]
+    join: str
+
+
 class WorkflowDefinitionWire(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -197,3 +264,4 @@ class WorkflowDefinitionWire(BaseModel):
     phases: tuple[str, ...]
     terminal_phases: tuple[str, ...]
     transitions: dict[str, list[str]]
+    splits: dict[str, WorkflowSplitWire]

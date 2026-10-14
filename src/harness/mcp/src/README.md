@@ -9,7 +9,7 @@ opaque provenance, structured diagnostics, and complete-result reuse metadata.
 - `auth.rs` supplies bearer credentials and authentication settings.
 - `server.rs` dispatches JSON-RPC requests and serializes tool outcomes and
   optional validator-supplied `serverInfo.validationIdentity`.
-- `tools.rs` declares injected ports, composes the tool catalog, and dispatches
+- `tools.rs` declares injected ports, publishes read-only MCP annotations at tool registration, composes the tool catalog, and dispatches
   tool arguments to local or remote boundaries. `validate_study` and
   `validate_strategy` take authored model documents; compilation comes from the
   injected validator, with no structural-only strategy fallback.
@@ -18,6 +18,9 @@ opaque provenance, structured diagnostics, and complete-result reuse metadata.
   object prefix, and adapters. Failed and cancelled jobs publish terminal
   records with an empty artifact set and their truthful `error_message`; a
   successful result still requires at least one artifact.
+  `update_progress` retains observed stage/dataset counters and durations under
+  the same admitted identity; terminal publication preserves the authoritative
+  snapshots and rejects subsequent telemetry.
   `mark_running` persists worker start while preserving accepted input and
   rejecting terminal jobs; local MCP workers call it before doing any work.
 - `transport.rs` serves the composed protocol through stdio and HTTP transports.

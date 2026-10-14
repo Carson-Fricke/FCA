@@ -1,4 +1,13 @@
 //! Shared subscription declarations and dependency-first market routing.
+//!
+//! Individual options use the same quote, trade, and bar subscriptions as stocks.
+//! Subscribe to an input alias (for example `ATM`); the submitted configuration's
+//! `data.options.ATM` selects an underlying/right and either expiration or
+//! days_to_expiration, plus strike or absolute delta. Selection occurs once at
+//! explicit `as_of` no later than replay start. Callbacks receive the alias;
+//! acquisition evidence retains the actual OSI contract, multiplier, and model
+//! assumptions. Delta selection estimates a European-model delta from historical
+//! quotes; it does not roll the contract or supply a chain/Greek subscription.
 
 pub use harness_contracts::{canonical_subscriptions, Subscription};
 use std::collections::BTreeSet;

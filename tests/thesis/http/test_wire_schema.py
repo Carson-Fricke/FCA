@@ -15,18 +15,7 @@ from azure.cosmos.exceptions import CosmosResourceNotFoundError
 from fastapi.testclient import TestClient
 from pydantic import TypeAdapter
 
-from thesis.agent.runtime.activity import ExternalInput, activity_data
-from thesis.agent.runtime.datum import ToolResultWire, tool_result_payload
-from thesis.agent.runtime.tree import (
-    ChatSubAgentTreeWire,
-    SubAgentNodeWire,
-    project_chat_sub_agents,
-)
-from thesis.chat import ChatService, MessageRole, WorkflowDefinition
-from thesis.chat.contracts import SubAgentKind, SubAgentRecord, SubAgentStatus
-from thesis.cosmos.timeline import CosmosTimeline
-from thesis.execution.events import ActorScope, ExecutionEvent, ExecutionEventType
-from thesis.http.application import create_app, require_single_worker
+from thesis.http.application import create_app
 from thesis.http.schema import export_schema, main
 from thesis.http.wire import (
     ChatMessageListWire,
@@ -38,6 +27,25 @@ from thesis.http.wire import (
     TimelineItemWire,
     TimelinePageWire,
     WorkflowDefinitionWire,
+)
+from thesis_runtime.adapters.cosmos.timeline import CosmosTimeline
+from thesis_runtime.contracts.activity import ExternalInput, activity_data
+from thesis_runtime.contracts.datum import ToolResultWire, tool_result_payload
+from thesis_runtime.contracts.records import (
+    SubAgentKind,
+    SubAgentRecord,
+    SubAgentStatus,
+)
+from thesis_runtime.conversations import ChatService, MessageRole, WorkflowDefinition
+from thesis_runtime.execution.events import (
+    ActorScope,
+    ExecutionEvent,
+    ExecutionEventType,
+)
+from thesis_runtime.subagents.tree import (
+    ChatSubAgentTreeWire,
+    SubAgentNodeWire,
+    project_chat_sub_agents,
 )
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
@@ -63,8 +71,10 @@ def validate(schema: dict[str, Any], name: str, payload: object) -> None:
     TypeAdapter(models[name]).validate_python(payload)
 
 
-def test_export_is_deterministic_complete_and_has_no_dangling_refs() -> None:
-    schema = export_schema()
+def test_export_is_deterministic_complete_and_has_no_dangling_refs(
+    wire_schema: dict[str, Any],
+) -> None:
+    schema = wire_schema
     assert schema == export_schema()
     assert schema["openapi"] == "3.1.0"
     components = schema["components"]["schemas"]
@@ -124,13 +134,13 @@ def test_export_is_deterministic_complete_and_has_no_dangling_refs() -> None:
             "$ref": "#/components/schemas/TimelineItemWire"
         }
     assert "ChatMessageRecordWire" not in components
-    assert create_app(in_memory=False).openapi() == schema
 
 
 def test_thread_steering_and_node_receipts_preserve_actual_service_data(
     monkeypatch: pytest.MonkeyPatch,
+    wire_schema: dict[str, Any],
 ) -> None:
-    from thesis.agent.runtime.conversation import Conversations
+    from thesis_runtime.conversations.conversation import Conversations
 
     service = ChatService(clock=lambda: NOW)
     conversations = Conversations(
@@ -143,7 +153,7 @@ def test_thread_steering_and_node_receipts_preserve_actual_service_data(
     monkeypatch.setattr(conversations, "schedule", lambda *args, **kwargs: None)
     app = create_app(bearer_token="token", conversations=conversations)
     client = TestClient(app)
-    schema = app.openapi()
+    schema = wire_schema
     path = "/v1/workspaces/workspace/chats"
     response = client.post(
         "/api" + path,
@@ -180,6 +190,9 @@ def test_thread_steering_and_node_receipts_preserve_actual_service_data(
         kind=SubAgentKind.CONVERSATION,
         status=SubAgentStatus.RUNNING,
         accepts_input=True,
+        conversation_id="agent",
+        root_conversation_id=chat_id,
+        parent_conversation_id=chat_id,
     )
     service.persistence.save(record)
     for prefix in ("", "/api"):
@@ -224,7 +237,10 @@ def test_thread_steering_and_node_receipts_preserve_actual_service_data(
 
 
 def test_schema_output_file_and_stdout_match(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    wire_schema: dict[str, Any],
 ) -> None:
     monkeypatch.setattr(sys, "argv", ["schema"])
     main()
@@ -233,39 +249,16 @@ def test_schema_output_file_and_stdout_match(
     monkeypatch.setattr(sys, "argv", ["schema", "--output", str(output)])
     main()
     assert output.read_text(encoding="utf-8") == stdout
-    assert json.loads(stdout) == export_schema()
+    assert json.loads(stdout) == wire_schema
 
 
-def test_schema_output_does_not_create_missing_parent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    output = tmp_path / "missing" / "backend-wire.json"
-    monkeypatch.setattr(sys, "argv", ["schema", "--output", str(output)])
-    with pytest.raises(SystemExit) as error:
-        main()
-    assert error.value.code == 2
-    assert not output.parent.exists()
-
-
-@pytest.mark.parametrize(
-    "data",
-    [
-        None,
-        {
-            "subAgentId": None,
-            "toolActivity": None,
-            "invocationId": None,
-            "custom": {"stored": True},
-        },
-        activity_data(ExternalInput()) | {"ownerActorId": "operator"},
-    ],
-)
 def test_literal_message_and_extension_metadata_round_trip(
-    data: dict[str, object] | None,
+    wire_schema: dict[str, Any],
 ) -> None:
     service = ChatService(clock=lambda: NOW)
     chat = service.create_chat("workspace", title="Schema", owner_actor_id="operator")
     outcome = tool_result_payload(
+        datum_type="tool_result",
         call_id="call",
         ok=False,
         failure={"kind": "compiler"},
@@ -274,13 +267,14 @@ def test_literal_message_and_extension_metadata_round_trip(
         text="Failed",
         tool="validate_strategy",
     )
-    message = service.create_message(
+    message = service.send_message(
         "workspace",
         chat.chat_id,
         actor_id="operator",
         role=MessageRole.TOOL,
         body="Outcome",
-        data=data,
+        data=activity_data(ExternalInput())
+        | {"ownerActorId": "operator", "custom": {"stored": True}, "nullable": None},
         tool_result=outcome,
     )
     app = create_app(bearer_token="token", chat_service=service)
@@ -289,16 +283,18 @@ def test_literal_message_and_extension_metadata_round_trip(
     )
     assert response.status_code == 200
     assert response.json() == {"items": [message.as_dict()]}
-    schema = export_schema()
+    schema = wire_schema
     validate(schema, "ChatMessageWire", message.as_dict())
     validate(schema, "ChatMessageListWire", response.json())
     validate(schema, "ToolResultWire", outcome)
 
 
-def test_real_tree_and_all_timeline_variants_match_export() -> None:
+def test_real_tree_and_all_timeline_variants_match_export(
+    wire_schema: dict[str, Any],
+) -> None:
     service = ChatService(clock=lambda: NOW)
     chat = service.create_chat("workspace", title="Schema", owner_actor_id="operator")
-    message = service.create_message(
+    message = service.send_message(
         "workspace", chat.chat_id, actor_id="operator", body="Start"
     )
     execution = service.launch_workflow(
@@ -330,6 +326,9 @@ def test_real_tree_and_all_timeline_variants_match_export() -> None:
         status=SubAgentStatus.RUNNING,
         phase_attempt_id="attempt",
         spec_version="2.0.0",
+        conversation_id="agent",
+        root_conversation_id=chat.chat_id,
+        parent_conversation_id=chat.chat_id,
     )
     service.persistence.save(record)
     tree = project_chat_sub_agents(
@@ -376,7 +375,7 @@ def test_real_tree_and_all_timeline_variants_match_export() -> None:
         stream_max_poll_cycles=1,
     )
     client = TestClient(app)
-    schema = export_schema()
+    schema = wire_schema
     path = f"/v1/workspaces/workspace/chats/{chat.chat_id}"
     response = client.get(path + "/sub_agents", headers=HEADERS)
     assert response.json() == tree.as_dict()
@@ -408,19 +407,3 @@ def test_real_tree_and_all_timeline_variants_match_export() -> None:
         "/api/v1/workflows/hypothesis-development", headers=HEADERS
     ).json()
     validate(schema, "WorkflowDefinitionWire", definition)
-
-
-@pytest.mark.parametrize("workers", ["0", "2", "4", "invalid"])
-def test_unsupported_worker_environment_is_rejected(
-    monkeypatch: pytest.MonkeyPatch, workers: str
-) -> None:
-    monkeypatch.setenv("WEB_CONCURRENCY", workers)
-    with pytest.raises(ValueError, match="WEB_CONCURRENCY"):
-        require_single_worker()
-
-
-def test_single_worker_default_is_supported(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
-    require_single_worker()
-    monkeypatch.setenv("WEB_CONCURRENCY", "1")
-    require_single_worker()

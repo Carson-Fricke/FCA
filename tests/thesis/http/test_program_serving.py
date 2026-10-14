@@ -4,23 +4,38 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
+import pytest
+from tests.thesis.workspaces._support import MemoryGitFactory, Repositories
+
 from thesis.agent.harness_tools import (
     HarnessToolProvider,
     HarnessToolResult,
     HarnessToolSpec,
 )
-from thesis.chat import ChatService
-from thesis.chat.contracts import ChatMessage as DurableChatMessage
-from thesis.http.serving import build_serving_stack
-from thesis.providers.invocations import ChatMessage, ModelCompletion, Role, ToolCall
-from thesis.providers.openrouter import OpenRouterProvider
-from thesis.workspaces.local import LocalWorkspaceProvider
+from thesis.application.composition import build_serving_stack
+from thesis.workspaces import programs as program_module
 from thesis.workspaces.manifest import WorkspaceManifest, load_workspace_manifest
 from thesis.workspaces.programs import WorkspacePrograms
+from thesis_runtime.adapters.providers.invocations import (
+    ChatMessage,
+    ModelCompletion,
+    Role,
+    ToolCall,
+)
+from thesis_runtime.adapters.providers.openrouter import OpenRouterProvider
+from thesis_runtime.contracts.records import ChatMessage as DurableChatMessage
+from thesis_runtime.conversations import ChatService
+from thesis_runtime.workflows.execution_store import InMemoryExecutionStore
 
 
-def test_serving_authors_template_validates_and_runs_by_id(tmp_path: Path) -> None:
-    repositories = LocalWorkspaceProvider(tmp_path / "workspaces")
+def test_serving_authors_template_validates_and_runs_by_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    git_factory = MemoryGitFactory()
+    repositories = Repositories(tmp_path / "workspaces", git_factory)
+    # Keep the real serving composition; replace only its external Git adapter.
+    # Real commit/read/dirty-worktree fencing remains in test_programs.py.
+    monkeypatch.setattr(program_module, "GitCoordinator", git_factory)
     manifest = load_workspace_manifest("config/thesis/workspace.yaml").model_dump(
         mode="json"
     )
@@ -81,6 +96,15 @@ def test_serving_authors_template_validates_and_runs_by_id(tmp_path: Path) -> No
             return HarnessToolResult(name, True, structured)
 
     class Provider:
+        model = "test/model"
+
+        def stream(self, *, message_id=None, **kwargs):
+            from tests.thesis_runtime.provider_fakes import completion_frames
+
+            yield from completion_frames(self.complete(**kwargs), message_id)
+
+        streaming = True
+
         def complete(
             self,
             *,
@@ -123,6 +147,7 @@ def test_serving_authors_template_validates_and_runs_by_id(tmp_path: Path) -> No
     )
     stack = build_serving_stack(
         chat_service=chat,
+        execution_store=InMemoryExecutionStore(),
         model_provider=cast(OpenRouterProvider, Provider()),
         harness_tools=cast(HarnessToolProvider, Harness()),
         workspace_repositories=repositories,

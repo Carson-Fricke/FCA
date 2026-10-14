@@ -76,8 +76,12 @@ var containers = [
     partitionPath: '/workspaceId'
   }
   {
-    id: 'executions'
-    partitionPath: '/executionId'
+    id: 'submissions'
+    partitionPath: '/workspaceId'
+  }
+  {
+    id: 'investigations'
+    partitionPath: '/workspaceId'
   }
 ]
 var containerSummary = [

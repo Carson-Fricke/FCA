@@ -29,7 +29,8 @@ subscription filtering, including direct runtime calls in tests.
 - `load.rs` loads libraries, validates ABI handshakes, and owns program states.
 - `run.rs` validates configurations, exposes effective requirements through
   `configuration_subscriptions`, checks study echoes through
-  `inspect_configuration`, and hands constructed instances to engine jobs.
+  `inspect_configuration`, reports compilation through the injected progress
+  port, and hands constructed instances to engine jobs.
 - `runtime.rs` adapts subscribed quotes, trades, interval-identified atomic
   frames, metrics, and strategy orders. Frame orders are returned by
   `on_frame_orders` and stamped at frame availability. The observation-only

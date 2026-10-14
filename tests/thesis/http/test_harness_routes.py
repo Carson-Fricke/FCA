@@ -11,9 +11,11 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from typing import Any, cast
 
 import httpx
 from fastapi.testclient import TestClient
+from tests.thesis.submissions import MemorySubmissions
 
 from thesis.http.application import create_app
 from thesis.http.harness import HarnessDataService
@@ -59,7 +61,12 @@ class FakeMcpHandler:
         elif method == "tools/list":
             result = {
                 "tools": [
-                    {"name": name, "description": f"{name} tool", "inputSchema": {}}
+                    {
+                        "name": name,
+                        "description": f"{name} tool",
+                        "inputSchema": {},
+                        "annotations": {"readOnlyHint": name != "run_backtest"},
+                    }
                     for name in (
                         "run_backtest",
                         "get_job_status",
@@ -114,6 +121,9 @@ class FakeMcpHandler:
                 "created_at": "2026-09-09T12:00:00Z",
                 "updated_at": "2026-09-09T12:01:00Z",
                 "error_message": None,
+                "progress": [
+                    {"stage": "reading_data", "rows": 54782541, "bytes": 4516267408}
+                ],
             },
             "get_job_result": {
                 "job_id": "job-1",
@@ -184,6 +194,7 @@ def _local_service(handler: FakeMcpHandler) -> HarnessDataService:
     topology = HarnessMcpTopology(thesis_location="local", harness_location="local")
     return HarnessDataService(
         topology,
+        submissions=MemorySubmissions(),
         factory=lambda: open_harness_mcp_client(topology, in_process_handler=handler),
     )
 
@@ -197,6 +208,7 @@ def _remote_service(server: FakeHttpMcpServer) -> HarnessDataService:
     )
     return HarnessDataService(
         topology,
+        submissions=MemorySubmissions(),
         factory=lambda: open_harness_mcp_client(
             topology, http_transport=httpx.MockTransport(server.handler)
         ),
@@ -229,6 +241,12 @@ def test_status_reports_local_topology_catalog() -> None:
         "list_artifacts",
     ]
     assert body["server"]["serverInfo"]["name"] == "harness"
+    assert [tool["annotations"]["readOnlyHint"] for tool in body["tools"]] == [
+        False,
+        True,
+        True,
+        True,
+    ]
 
 
 def test_status_reports_remote_health_and_reachability() -> None:
@@ -261,6 +279,40 @@ def test_status_marks_unreachable_harness_without_failing() -> None:
     assert body["tools"] == []
 
 
+def test_option_inputs_survive_thesis_submission_to_the_harness() -> None:
+    handler = FakeMcpHandler()
+    client = _client(_local_service(handler))
+    for selection in (
+        {"expiration": "2024-02-16", "strike": "475"},
+        {"days_to_expiration": 30, "delta": "0.50"},
+    ):
+        data = {
+            "symbols": ["ATM"],
+            "options": {
+                "ATM": {
+                    "underlying": "SPY",
+                    "right": "call",
+                    "as_of": "2024-01-18T21:00:00Z",
+                    **selection,
+                }
+            },
+            "subscriptions": [
+                {"data_type": "quote", "symbols": ["ATM"]},
+                {"data_type": "trade", "symbols": ["ATM"]},
+                {"data_type": "bars", "symbols": ["ATM"], "interval": "1min"},
+            ],
+        }
+        response = client.post(
+            "/v1/backtests/jobs",
+            headers=HEADERS,
+            json={"config": {"shell": "backtest", "data": data}},
+        )
+        assert response.status_code == 202, response.text
+        submitted = handler.arguments[-1]["config"]
+        assert isinstance(submitted, dict)
+        assert submitted["data"] == data
+
+
 def test_launch_backtest_invokes_run_backtest_tool() -> None:
     handler = FakeMcpHandler()
     client = _client(_local_service(handler))
@@ -268,14 +320,14 @@ def test_launch_backtest_invokes_run_backtest_tool() -> None:
     response = client.post(
         "/v1/backtests/jobs",
         headers=HEADERS,
-        json={"config_path": "config/harness/backtest.yaml", "workspace": "alpha"},
+        json={"config": {"shell": "backtest"}, "workspace": "alpha"},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     body = response.json()
     assert body["action"] == "backtest"
     assert body["kind"] == "backtest"
-    assert body["config_path"] == "config/harness/backtest.yaml"
+    assert body["config"] == {"shell": "backtest", "job_id": body["job_id"]}
     assert body["workspace"] == "alpha"
     job_id = body["job_id"]
     assert re.fullmatch(r"job-[0-9a-f]{32}", job_id)
@@ -284,7 +336,10 @@ def test_launch_backtest_invokes_run_backtest_tool() -> None:
     assert "result" not in body
     assert handler.calls == ["run_backtest"]
     assert handler.arguments[0]["job_id"] == job_id
-    assert handler.arguments[0]["config_path"] == "config/harness/backtest.yaml"
+    assert (
+        cast(Mapping[str, object], handler.arguments[0]["config"])["shell"]
+        == "backtest"
+    )
 
 
 def test_launch_backtest_rejects_a_mismatched_acknowledged_job_id() -> None:
@@ -294,7 +349,7 @@ def test_launch_backtest_rejects_a_mismatched_acknowledged_job_id() -> None:
     response = client.post(
         "/v1/backtests/jobs",
         headers=HEADERS,
-        json={"config_path": "config/harness/backtest.yaml"},
+        json={"config": {"shell": "backtest"}},
     )
 
     assert response.status_code == 502
@@ -312,7 +367,7 @@ def test_launch_backtest_rejects_an_absent_acknowledged_job_id() -> None:
     response = client.post(
         "/v1/backtests/jobs",
         headers=HEADERS,
-        json={"config_path": "config/harness/backtest.yaml"},
+        json={"config": {"shell": "backtest"}},
     )
 
     assert response.status_code == 502
@@ -351,6 +406,7 @@ def test_launch_transport_failure_retains_the_submitted_job_id_without_replay() 
     )
     service = HarnessDataService(
         topology,
+        submissions=MemorySubmissions(),
         factory=lambda: open_harness_mcp_client(
             topology, http_transport=httpx.MockTransport(handler)
         ),
@@ -360,7 +416,7 @@ def test_launch_transport_failure_retains_the_submitted_job_id_without_replay() 
     response = client.post(
         "/v1/backtests/jobs",
         headers=HEADERS,
-        json={"config_path": "config/harness/backtest.yaml"},
+        json={"config": {"shell": "backtest"}},
     )
 
     assert response.status_code == 503
@@ -388,6 +444,9 @@ def test_job_status_returns_structured_payload() -> None:
     assert body["job_id"] == "job-1"
     assert body["state"] == "succeeded"
     assert body["error_message"] is None
+    assert body["progress"] == [
+        {"stage": "reading_data", "rows": 54782541, "bytes": 4516267408}
+    ]
 
 
 def test_job_result_and_artifact_manifest_expose_canonical_shape() -> None:
@@ -428,3 +487,37 @@ def test_harness_routes_require_authentication() -> None:
 
     assert client.get("/v1/harness/status").status_code == 401
     assert client.get("/v1/jobs/job-1").status_code == 401
+
+
+def test_submission_survives_service_replacement_and_rejects_identity_reuse(
+    tmp_path,
+) -> None:
+    import pytest
+
+    from thesis.persistence.submissions import SqliteSubmissionStore
+
+    path = tmp_path / "submissions.sqlite"
+    handler = FakeMcpHandler()
+    service = _local_service(handler)
+    service.submissions = SqliteSubmissionStore(path)
+    response = _client(service).post(
+        "/v1/backtests/jobs",
+        headers=HEADERS,
+        json={"config": {"seed": 7}, "workspace": "workspace"},
+    )
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    restarted = SqliteSubmissionStore(path)
+    retained = restarted.get("workspace", job_id)
+    assert retained is not None and cast(dict[str, Any], retained["inputs"])[
+        "config"
+    ] == {"seed": 7, "job_id": job_id}
+    restarted.retain(
+        "workspace",
+        job_id,
+        "run_backtest",
+        cast(Mapping[str, object], retained["inputs"]),
+    )
+    with pytest.raises(ValueError, match="identity conflict"):
+        restarted.retain("workspace", job_id, "run_backtest", {"config": {"seed": 8}})
+    assert handler.calls == ["run_backtest"]

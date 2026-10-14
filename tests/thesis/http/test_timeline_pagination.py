@@ -11,16 +11,28 @@ from azure.cosmos import ContainerProxy
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from thesis.chat import ChatService
-from thesis.cosmos.timeline import CosmosTimeline
 from thesis.http.timeline import create_timeline_router
+from thesis_runtime.adapters.cosmos.timeline import CosmosTimeline
+from thesis_runtime.conversations import ChatService
 
 WORKSPACE = "workspace-a"
 
 
+@pytest.fixture
+def history_size() -> int:
+    return 31
+
+
 @pytest.fixture()
-def timeline_client(service: ChatService) -> Iterator[tuple[TestClient, str]]:
+def timeline_client(
+    service: ChatService, history_size: int
+) -> Iterator[tuple[TestClient, str]]:
     chat = service.create_chat(WORKSPACE, title="History", owner_actor_id="operator")
+    # Cosmos is the external port here; generate its history from one current
+    # message payload instead of exercising intake thousands of times.
+    message = service.send_message(
+        WORKSPACE, chat.chat_id, actor_id="operator", body="History"
+    ).as_dict()
     documents: list[dict[str, object]] = [
         {
             "id": f"item-{seq}",
@@ -30,9 +42,7 @@ def timeline_client(service: ChatService) -> Iterator[tuple[TestClient, str]]:
             "workspaceId": WORKSPACE,
             "ts": "2026-01-01T00:00:00Z",
             "payload": (
-                service.create_message(
-                    WORKSPACE, chat.chat_id, actor_id="operator", body=f"Message {seq}"
-                ).as_dict()
+                {**message, "messageId": f"message-{seq}", "body": f"Message {seq}"}
                 if seq % 3
                 else {
                     "actorId": "operator",
@@ -52,7 +62,7 @@ def timeline_client(service: ChatService) -> Iterator[tuple[TestClient, str]]:
             "seq": seq,
             "_etag": "internal",
         }
-        for seq in range(1, 2_506)
+        for seq in range(1, history_size + 1)
     ]
     for item in documents:
         if item.get("kind") == "message":
@@ -111,7 +121,7 @@ def timeline_client(service: ChatService) -> Iterator[tuple[TestClient, str]]:
         return iter(items)
 
     container = Mock(spec=ContainerProxy)
-    container.read_item.return_value = {"nextSeq": 2_505}
+    container.read_item.return_value = {"nextSeq": history_size}
     container.query_items.side_effect = query_items
     app = FastAPI()
     app.state.chat_service = service
@@ -121,76 +131,69 @@ def timeline_client(service: ChatService) -> Iterator[tuple[TestClient, str]]:
         yield client, f"/v1/workspaces/{WORKSPACE}/chats/{chat.chat_id}/timeline"
 
 
-def test_stored_document_fields_never_leak_onto_the_wire(
-    timeline_client: tuple[TestClient, str],
-) -> None:
-    client, url = timeline_client
-    page = client.get(url, params={"limit": 3, "thread": "root"}).json()
-    assert page["items"]
-    for item in page["items"]:
-        assert "recordType" not in item
-        assert "conversationId" not in item
-        assert "createdAt" not in item
-        assert isinstance(item["ts"], str) and item["ts"].endswith("Z")
-
-
-@pytest.mark.parametrize("thread", [None, "agent-a", "root"])
+@pytest.mark.parametrize("history_size", [2_505])
 def test_backward_pages_recover_complete_scoped_history(
-    timeline_client: tuple[TestClient, str], thread: str | None
+    timeline_client: tuple[TestClient, str],
+    history_size: int,
 ) -> None:
     client, url = timeline_client
-    params: dict[str, str | int] = {"limit": 1_000}
-    if thread is not None:
-        params["thread"] = thread
-    recovered: list[int] = []
-    for _ in range(10):
-        response = client.get(url, params=params)
-        assert response.status_code == 200
-        page = response.json()
-        sequences = [item["seq"] for item in page["items"]]
-        assert sequences == sorted(sequences)
-        assert len(sequences) <= 1_000
-        assert all("_etag" not in item for item in page["items"])
+    for thread in (None, "agent-a", "root"):
+        params: dict[str, str | int] = {"limit": 1_000}
         if thread is not None:
-            assert all(item["threadId"] == thread for item in page["items"])
-        if not sequences:
-            assert page["nextBefore"] is None
-            break
-        assert page["nextBefore"] == min(sequences)
-        if recovered:
-            assert max(sequences) < min(recovered)
-        recovered = sequences + recovered
-        params["before"] = page["nextBefore"]
-    else:
-        pytest.fail("Backward pagination did not terminate")
-    expected = [
-        seq
-        for seq in range(1, 2_506)
-        if thread is None or (seq % 2 == (1 if thread == "agent-a" else 0))
-    ]
-    assert len(expected) > 1_000
-    assert recovered == expected
+            params["thread"] = thread
+        recovered: list[int] = []
+        for _ in range(10):
+            response = client.get(url, params=params)
+            assert response.status_code == 200
+            page = response.json()
+            sequences = [item["seq"] for item in page["items"]]
+            assert sequences == sorted(sequences)
+            assert len(sequences) <= 1_000
+            for item in page["items"]:
+                assert (
+                    not {"_etag", "recordType", "conversationId", "createdAt"}
+                    & item.keys()
+                )
+                assert isinstance(item["ts"], str) and item["ts"].endswith("Z")
+                if thread is not None:
+                    assert item["threadId"] == thread
+            if not sequences:
+                assert page["nextBefore"] is None
+                break
+            assert page["nextBefore"] == min(sequences)
+            if recovered:
+                assert max(sequences) < min(recovered)
+            recovered = sequences + recovered
+            params["before"] = page["nextBefore"]
+        else:
+            pytest.fail("Backward pagination did not terminate")
+        expected = [
+            seq
+            for seq in range(1, history_size + 1)
+            if thread is None or seq % 2 == (1 if thread == "agent-a" else 0)
+        ]
+        assert len(expected) > 1_000
+        assert recovered == expected
 
 
-@pytest.mark.parametrize("after", [0, 5])
-def test_before_and_explicit_after_are_mutually_exclusive(
-    timeline_client: tuple[TestClient, str], after: int
+@pytest.mark.parametrize("history_size", [0])
+def test_invalid_pagination_requests_are_rejected_without_history(
+    timeline_client: tuple[TestClient, str],
+    history_size: int,
 ) -> None:
     client, url = timeline_client
-    response = client.get(url, params={"after": after, "before": 10})
-    assert response.status_code == 422
-    assert "mutually exclusive" in response.json()["detail"]
-
-
-@pytest.mark.parametrize(
-    "params",
-    [{"before": -1}, {"before": "invalid"}, {"limit": 0}, {"limit": 1_001}],
-)
-def test_invalid_pagination_parameters_are_rejected(
-    timeline_client: tuple[TestClient, str], params: dict[str, str | int]
-) -> None:
-    client, url = timeline_client
-    assert client.get(url, params=params).status_code == 422
+    assert client.get(url).json()["after"] == history_size
+    for after in (0, 5):
+        response = client.get(url, params={"after": after, "before": 10})
+        assert response.status_code == 422
+        assert "mutually exclusive" in response.json()["detail"]
+    for params in (
+        {"before": -1},
+        {"before": "invalid"},
+        {"limit": 0},
+        {"limit": 1_001},
+    ):
+        assert client.get(url, params=params).status_code == 422
 
 
 def test_latest_forward_and_empty_pages(
@@ -199,26 +202,20 @@ def test_latest_forward_and_empty_pages(
     client, url = timeline_client
     for params in ({"limit": 2}, {"after": 0, "limit": 2}):
         page = client.get(url, params=params).json()
-        assert [item["seq"] for item in page["items"]] == [2_504, 2_505]
-        assert page["nextBefore"] == 2_504
+        assert [item["seq"] for item in page["items"]] == [30, 31]
+        assert page["nextBefore"] == 30
     page = client.get(url, params={"after": 5, "limit": 2}).json()
     assert [item["seq"] for item in page["items"]] == [6, 7]
     assert page["nextBefore"] == 6
+    page = client.get(url, params={"before": 9, "limit": 2, "thread": "agent-a"}).json()
+    assert [item["seq"] for item in page["items"]] == [5, 7]
+    assert page["nextBefore"] == 5
     for params in ({"before": 0}, {"before": 1}, {"thread": "missing"}):
         assert client.get(url, params=params).json() == {
             "items": [],
             "nextBefore": None,
-            "after": 2_505,
+            "after": 31,
         }
-
-
-def test_backward_cursor_selects_nearest_older_scoped_items(
-    timeline_client: tuple[TestClient, str],
-) -> None:
-    client, url = timeline_client
-    page = client.get(url, params={"before": 9, "limit": 2, "thread": "agent-a"}).json()
-    assert [item["seq"] for item in page["items"]] == [5, 7]
-    assert page["nextBefore"] == 5
 
 
 def test_pagination_preserves_workspace_chat_validation(
@@ -238,11 +235,11 @@ def test_sse_shape_and_resume_are_unchanged(
 ) -> None:
     client, url = timeline_client
     response = client.get(
-        f"{url}/stream", params={"after": 2_503, "limit": 2, "thread": "root"}
+        f"{url}/stream", params={"after": 29, "limit": 2, "thread": "root"}
     )
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
-    assert response.text.startswith("id: 2504\nevent: timeline\ndata: ")
+    assert response.text.startswith("id: 30\nevent: timeline\ndata: ")
     assert response.text.count("event: timeline") == 1
     assert "nextBefore" not in response.text
     assert "_etag" not in response.text
@@ -253,22 +250,13 @@ def test_history_watermark_is_chat_wide_and_sse_only_reads_subsequent_records(
 ) -> None:
     client, url = timeline_client
     snapshot = client.get(url, params={"thread": "root", "limit": 2}).json()
-    assert snapshot["after"] == 2_505
-    assert max(item["seq"] for item in snapshot["items"]) == 2_504
+    assert snapshot["after"] == 31
+    assert max(item["seq"] for item in snapshot["items"]) == 30
     stream = client.get(f"{url}/stream", params={"after": snapshot["after"]})
     assert stream.status_code == 200 and stream.text == ""
     assert (
-        client.get(f"{url}/stream", params={"after": 2_503, "limit": 2}).text.count(
+        client.get(f"{url}/stream", params={"after": 29, "limit": 2}).text.count(
             "event: timeline"
         )
         == 2
     )
-
-
-@pytest.mark.parametrize("stream", [False, True])
-def test_timeline_reads_do_not_project_or_repair(
-    timeline_client: tuple[TestClient, str], stream: bool
-) -> None:
-    client, url = timeline_client
-    response = client.get(url + ("/stream" if stream else ""), params={"after": 2_503})
-    assert response.status_code == 200

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalPhaseName, computeWorkflowGraph } from '$lib/workflow-graph';
+import { computeWorkflowGraph } from '$lib/workflow-graph';
 import type { WorkflowDefinition } from '$lib/types';
 
 const definition: WorkflowDefinition = {
 	workflow_id: 'custom', version: '2', title: 'Custom research',
+	splits: {},
 	phases: ['new_phase', 'model_creation', 'completed'], terminal_phases: ['completed'],
 	transitions: { new_phase: ['model_creation'], model_creation: ['new_phase', 'completed'], completed: [] }
 };
@@ -26,10 +27,5 @@ describe('backend-owned workflow topology', () => {
 		expect(model.edges[1].traversed).toBe(true);
 		expect(model.edges.every((edge) => !!edge.arrow)).toBe(true);
 	});
-	it('keeps retired persisted values readable without adding retired topology', () => {
-		expect(canonicalPhaseName('hypothesis_creation')).toBe('model_creation');
-		const model = computeWorkflowGraph([{ name: 'hypothesis_creation', status: 'done' }], definition);
-		expect(model.nodes.find((node) => node.name === 'model_creation')?.status).toBe('done');
-		expect(model.nodes.some((node) => node.name === 'hypothesis_creation')).toBe(false);
-	});
+
 });

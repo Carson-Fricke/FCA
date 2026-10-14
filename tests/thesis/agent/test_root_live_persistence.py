@@ -7,25 +7,28 @@ from collections.abc import Mapping, Sequence
 
 import pytest
 
-from thesis.agent.messages import decode_transcript, from_record
-from thesis.agent.runtime.conversation import Conversations
-from thesis.agent.runtime.session import (
-    RegisteredTool,
-    SessionToolRegistry,
-    ToolExecution,
+from thesis_runtime.adapters.providers.invocations import (
+    ChatMessage as ProviderChatMessage,
 )
-from thesis.chat import ChatService, replace_record
-from thesis.chat.contracts import ChatMessage, MessageRole
-from thesis.providers.invocations import ChatMessage as ProviderChatMessage
-from thesis.providers.invocations import (
+from thesis_runtime.adapters.providers.invocations import (
     ModelCompletion,
     ProviderUnreachableError,
     Role,
     ToolCall,
 )
-from thesis.providers.session_adapter import (
+from thesis_runtime.adapters.providers.session_adapter import (
     NativeSessionAdapter,
     project_native_messages,
+)
+from thesis_runtime.contracts.context import ToolContext
+from thesis_runtime.contracts.messages import decode_transcript, from_record
+from thesis_runtime.contracts.records import ChatMessage, MessageRole
+from thesis_runtime.conversations import ChatService, replace_record
+from thesis_runtime.conversations.conversation import Conversations
+from thesis_runtime.tools.registry import (
+    RegisteredTool,
+    SessionToolRegistry,
+    ToolExecution,
 )
 
 _WORKSPACE = "live-workspace"
@@ -40,6 +43,13 @@ class Provider:
     def __init__(self, *responses: ModelCompletion | Exception) -> None:
         self.responses = iter(responses)
         self.requests: list[tuple[ProviderChatMessage, ...]] = []
+
+    def stream(self, *, message_id=None, **kwargs):
+        from tests.thesis_runtime.provider_fakes import completion_frames
+
+        yield from completion_frames(self.complete(**kwargs), message_id)
+
+    streaming = True
 
     def complete(
         self,
@@ -59,13 +69,15 @@ class Provider:
 @pytest.mark.parametrize("interrupted", [False, True])
 def test_root_persists_envelope_and_results_before_next_dispatch(
     interrupted: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("thesis_runtime.sessions.recovery.sleep", lambda _: None)
     chat = ChatService()
     thread = chat.create_chat(_WORKSPACE, title="Live", owner_actor_id="operator")
     chat.send_message(_WORKSPACE, thread.chat_id, actor_id="operator", body="Check")
     dispatched: list[Mapping[str, object]] = []
 
-    def handler(arguments: Mapping[str, object]) -> ToolExecution:
+    def handler(arguments: Mapping[str, object], context: ToolContext) -> ToolExecution:
         envelope = chat.list_messages(_WORKSPACE, thread.chat_id)[-1]
         assert envelope.role is MessageRole.ASSISTANT
         assert envelope.body == "Checking now"
@@ -80,6 +92,13 @@ def test_root_persists_envelope_and_results_before_next_dispatch(
         return ToolExecution(ok=True, text="Checked", structured={"value": 42})
 
     class LiveProvider(Provider):
+        def stream(self, *, message_id=None, **kwargs):
+            from tests.thesis_runtime.provider_fakes import completion_frames
+
+            yield from completion_frames(self.complete(**kwargs), message_id)
+
+        streaming = True
+
         def complete(
             self,
             *,
@@ -89,7 +108,11 @@ def test_root_persists_envelope_and_results_before_next_dispatch(
             response_format: Mapping[str, object] | None = None,
         ) -> ModelCompletion:
             if self.requests:
-                tool = chat.list_messages(_WORKSPACE, thread.chat_id)[-1]
+                tool = next(
+                    row
+                    for row in chat.list_messages(_WORKSPACE, thread.chat_id)
+                    if from_record(row).content.correlation is not None
+                )
                 assert tool.role is MessageRole.TOOL
                 assert tool.data is not None
                 canonical = from_record(tool)
@@ -103,8 +126,10 @@ def test_root_persists_envelope_and_results_before_next_dispatch(
                 assert result_payload["invocationId"]
                 assert tool.tool_result is not None
                 assert tool.tool_result["ok"] is True
-                assert messages[-1].tool_call_id == _CALL.id
-                payload = json.loads(messages[-1].content)
+                tool_message = next(
+                    message for message in messages if message.tool_call_id == _CALL.id
+                )
+                payload = json.loads(tool_message.content)
                 assert payload["text"] == "Checked"
                 assert payload["source"] == canonical.content.source == "tool"
                 assert "structured" not in payload["result"]
@@ -126,24 +151,23 @@ def test_root_persists_envelope_and_results_before_next_dispatch(
 
     provider = LiveProvider(
         completion("Checking now", _CALL),
-        ProviderUnreachableError("root model TLS failed")
-        if interrupted
-        else completion("Finished"),
+        *(
+            [ProviderUnreachableError("root model TLS failed")] * 4
+            if interrupted
+            else [completion("Finished")]
+        ),
     )
     registry = SessionToolRegistry(
         [
             RegisteredTool(
-                {
-                    "type": "function",
-                    "function": {"name": "check", "parameters": {"type": "object"}},
-                },
+                {"name": "check", "parameters": {"type": "object"}},
                 handler,
             )
         ]
     )
     service = Conversations(
         chat=chat,
-        provider=provider,
+        provider=NativeSessionAdapter(provider),
         registry_factory=lambda context: registry,
     )
     root = service.root(_WORKSPACE, thread.chat_id)
@@ -151,7 +175,11 @@ def test_root_persists_envelope_and_results_before_next_dispatch(
 
     assert dispatched == [{"value": 42}]
     durable = chat.list_messages(_WORKSPACE, thread.chat_id)
-    assert [message.role for message in durable] == [
+    assert [
+        message.role
+        for message in durable
+        if not (from_record(message).content.result or {}).get("providerRecovery")
+    ] == [
         MessageRole.USER,
         MessageRole.ASSISTANT,
         MessageRole.TOOL,
@@ -198,8 +226,10 @@ def test_root_does_not_dispatch_when_envelope_persistence_fails(
     registry = SessionToolRegistry(
         [
             RegisteredTool(
-                {"type": "function", "function": {"name": "check"}},
-                lambda arguments: dispatched.append("check") or ToolExecution(ok=True),
+                {"name": "check"},
+                lambda arguments, context: (
+                    dispatched.append("check") or ToolExecution(ok=True)
+                ),
             )
         ]
     )
@@ -210,13 +240,123 @@ def test_root_does_not_dispatch_when_envelope_persistence_fails(
     monkeypatch.setattr(chat, "create_message", fail_write)
     root = Conversations(
         chat=chat,
-        provider=Provider(completion("Checking", _CALL)),
+        provider=NativeSessionAdapter(Provider(completion("Checking", _CALL))),
         registry_factory=lambda context: registry,
     ).root(_WORKSPACE, thread.chat_id)
 
-    assert root.run_turn() is None
+    with pytest.raises(OSError, match="durable writer unavailable"):
+        root.run_turn()
     assert dispatched == []
-    assert len(chat.list_messages(_WORKSPACE, thread.chat_id)) == 1
+    durable = chat.list_messages(_WORKSPACE, thread.chat_id)
+    assert len(durable) == 1
+
+
+@pytest.mark.parametrize("steer", [False, True])
+def test_repeated_schema_failures_interrupt_and_new_operator_input_resets_budget(
+    steer: bool,
+) -> None:
+    chat = ChatService()
+    thread = chat.create_chat(
+        _WORKSPACE, title="Schema repair", owner_actor_id="operator"
+    )
+    chat.send_message(_WORKSPACE, thread.chat_id, actor_id="operator", body="Start")
+    dispatched: list[Mapping[str, object]] = []
+    schema = {
+        "oneOf": [
+            {
+                "type": "object",
+                "required": ["input"],
+                "properties": {"input": {"type": "object"}},
+            }
+        ]
+    }
+
+    class RepeatingProvider(Provider):
+        def complete(
+            self, *, messages, role="primary", tools=None, response_format=None
+        ):
+            index = len(self.requests)
+            if steer and index == 1:
+                chat.send_message(
+                    _WORKSPACE,
+                    thread.chat_id,
+                    actor_id="operator",
+                    body="New instruction: repair the input type",
+                )
+            if index < (4 if steer else 3):
+                args = {"input": json.dumps({"idea": f"changed prose {index}"})}
+                self.responses = iter(
+                    [
+                        completion(
+                            "", ToolCall(f"call-{index}", "launch", json.dumps(args))
+                        )
+                    ]
+                )
+            elif steer and index == 4:
+                self.responses = iter(
+                    [
+                        completion(
+                            "",
+                            ToolCall(
+                                "valid-call", "launch", '{"input":{"idea":"Momentum"}}'
+                            ),
+                        )
+                    ]
+                )
+            else:
+                self.responses = iter([completion("Finished")])
+            return super().complete(
+                messages=messages,
+                role=role,
+                tools=tools,
+                response_format=response_format,
+            )
+
+    provider = RepeatingProvider()
+    registry = SessionToolRegistry(
+        [
+            RegisteredTool(
+                {"name": "launch", "parameters": schema},
+                lambda args, context: (dispatched.append(args), ToolExecution(ok=True))[
+                    1
+                ],
+            )
+        ]
+    )
+    service = Conversations(
+        chat=chat,
+        provider=NativeSessionAdapter(provider),
+        registry_factory=lambda context: registry,
+    )
+    result = service.run_node_turn(_WORKSPACE, thread.chat_id, "")
+    durable = chat.list_messages(_WORKSPACE, thread.chat_id)
+    failures = [
+        json.loads(from_record(row).content.as_content())["result"]
+        for row in durable
+        if row.role is MessageRole.TOOL
+    ]
+    assert failures[0]["failure"]["violations"] == [
+        {"path": "input", "message": "expected object; received string"}
+    ]
+    assert len(failures[0]["failure"]["message"]) < 150
+    if steer:
+        assert result.status == "completed"
+        assert len(provider.requests) == 6
+        assert dispatched == [{"input": {"idea": "Momentum"}}]
+        assert any(
+            "New instruction" in message.content for message in provider.requests[2]
+        )
+    else:
+        assert result.status == "interrupted"
+        assert len(provider.requests) == 3
+        assert dispatched == []
+        assert (
+            json.loads(from_record(durable[-1]).content.as_content())["result"][
+                "failure"
+            ]["kind"]
+            == "tool_schema_loop"
+        )
+    assert chat.get_chat(_WORKSPACE, thread.chat_id).state.value == "active"
 
 
 def test_provider_reasoning_is_normalized_before_durable_persistence() -> None:
@@ -235,7 +375,7 @@ def test_provider_reasoning_is_normalized_before_durable_persistence() -> None:
         )
     )
     result = (
-        Conversations(chat=chat, provider=provider)
+        Conversations(chat=chat, provider=NativeSessionAdapter(provider))
         .root(_WORKSPACE, thread.chat_id)
         .run_turn()
     )
@@ -253,7 +393,9 @@ def test_model_only_root_uses_durable_session() -> None:
     chat.send_message(_WORKSPACE, thread.chat_id, actor_id="operator", body="Check")
 
     provider = Provider(completion("Finished"))
-    root = Conversations(chat=chat, provider=provider).root(_WORKSPACE, thread.chat_id)
+    root = Conversations(chat=chat, provider=NativeSessionAdapter(provider)).root(
+        _WORKSPACE, thread.chat_id
+    )
 
     result = root.run_turn()
     assert isinstance(result, ChatMessage)
@@ -292,12 +434,14 @@ def test_root_accepts_tool_result_without_optional_metadata() -> None:
     chat.send_message(_WORKSPACE, thread.chat_id, actor_id="operator", body="Check")
     root = Conversations(
         chat=chat,
-        provider=Provider(completion("Checking", _CALL), completion("Finished")),
+        provider=NativeSessionAdapter(
+            Provider(completion("Checking", _CALL), completion("Finished"))
+        ),
         registry_factory=lambda context: SessionToolRegistry(
             [
                 RegisteredTool(
-                    {"type": "function", "function": {"name": "check"}},
-                    lambda arguments: ToolExecution(ok=True, text="Checked"),
+                    {"name": "check"},
+                    lambda arguments, context: ToolExecution(ok=True, text="Checked"),
                 )
             ]
         ),

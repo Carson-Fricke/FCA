@@ -57,14 +57,16 @@ impl Indicator for Nested {
 }
 
 struct MixedStudy {
+    invalid_view: bool,
     indicator: Nested,
     quotes: u64,
     trades: u64,
     frames: u64,
 }
 impl StudyProgram for MixedStudy {
-    fn new(_: harness_strategy_sdk::serde_json::Value) -> Self {
+    fn new(config: harness_strategy_sdk::serde_json::Value) -> Self {
         Self {
+            invalid_view: config["invalid_view"].as_bool().unwrap_or(false),
             indicator: Nested {
                 sequence: IndicatorSequence::ticks(60_000_000_000).unwrap(),
                 child: QuoteCount {
@@ -90,6 +92,14 @@ impl StudyProgram for MixedStudy {
         }
         metrics.publish_output("signal", &harness_strategy_sdk::StudyOutput::Series {
             points: vec![harness_strategy_sdk::OutputPoint { symbol: "AAA".into(), interval: "1min".into(), event_time_ns: 20, available_at_ns: 25, value: Some(1.0), undefined_reason: None }],
+        }).unwrap();
+        use harness_strategy_sdk::research::{Dataset,Field,FieldType,Panel,ResearchView};
+        metrics.publish_output("research_view", &harness_strategy_sdk::StudyOutput::ResearchView {
+            view: ResearchView {
+                schema_version:1,title:"Recorded signal".into(),description:"JIT publication".into(),limitations:vec![],
+                datasets:vec![Dataset{id:"signal".into(),output:if self.invalid_view {"missing"}else{"signal"}.into(),fields:vec![Field{name:"value".into(),label:"Value".into(),description:"Recorded signal value".into(),field_type:FieldType::Number,unit:None}],identity:None,selection_group:None,event_time:None,available_at:None}],
+                panels:vec![Panel{id:"values".into(),kind:"table".into(),title:"Evidence".into(),dataset:"signal".into(),encodings:Default::default(),description:None}],
+            }
         }).unwrap();
         metrics.publish("quotes", self.quotes as f64).unwrap();
         metrics.publish("trades", self.trades as f64).unwrap();

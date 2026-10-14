@@ -69,7 +69,7 @@ def create_knowledge_router() -> APIRouter:
     router = APIRouter(prefix="/v1", tags=["knowledge"])
 
     @router.get("/knowledge/search")
-    async def search_knowledge(
+    def search_knowledge(
         q: Annotated[str, Query(min_length=1, max_length=512)],
         service: Annotated[
             KnowledgeSearchService, Depends(get_knowledge_search_service)

@@ -7,20 +7,31 @@ have observation-only contexts, while strategies receive an order sink.
 
 - `lib.rs` exposes the public authoring facade and SDK version.
 - `consumer.rs` defines tagged subscriptions, the shared consumer trait,
+  and individual-option input alias conventions for quote, trade, and bar data,
   canonical requirement unions, per-consumer routing signatures, and guarded
   dependency-first routing. Cycles and zero-sized dependencies are rejected.
 - `program.rs` defines program construction, lifecycle, metrics, orders, and
   the separate screening surface.
 - `outputs.rs` defines causal series, confirmed events, scalar-cell tables,
+  independently published dataset semantics and saved research views,
   and frozen fitted state with training-job/window provenance. The host validates
   and persists these through `MetricPublisher.publish_output`. Composed indicator
   OHLC histories are automatically published by dependency path at stop, with
   completed and in-progress tables kept separate and decimals preserved as strings.
 - `building_blocks.rs` provides trailing moments, EMA, simple-average RSI/ATR,
   rolling VWAP, crossover age, directional-change confirmation, trailing-window
-  vertical-distance PIP, Haar detail coefficients, and frozen normalization.
+  vertical-distance PIP and frozen normalization. The Haar kernel is internal to
+  evidence publication; trading wavelet features use the managed indicator.
   These pure kernels hold no market subscriptions or execution capabilities;
   authored consumers own symbol/cadence state and their output timing.
+- `wavelet.rs` implements managed completed-bar Haar features with private per-symbol
+  state, exact-decimal scale energy, signed trend, explicit missing/warm-up and
+  immutable availability-bounded snapshots. Programs own WaveletIndicator through
+  MarketConsumer dependencies and retain snapshots at original setup decisions.
+  This path prevents future observations from changing historical features; it does
+  not restrict arbitrary Rust computations or prove fabricated studies truthful.
+- `research/` defines validated saved-view and dataset-semantic descriptors, evidence publishers and
+  reusable family compositions without implementing new analysis algorithms.
 - `indicator.rs` defines symbol-aware values, mandatory `IndicatorSequence`
   history, and decimal arithmetic. Every owned indicator exposes `value(symbol)`,
   `sequence()`, and `sequence_mut()`; the shared router records its outputs after

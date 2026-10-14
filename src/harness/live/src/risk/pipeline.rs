@@ -194,6 +194,3 @@ impl RiskPipeline {
         }
     }
 }
-
-/// Compatibility alias for the pipeline engine.
-pub type RiskEngine = RiskPipeline;

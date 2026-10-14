@@ -171,6 +171,18 @@ pub fn equity_bars_schema() -> Schema {
 }
 
 /// `crypto.bars`.
+pub fn option_bars_schema() -> Schema {
+    with_metadata(
+        "option.bars",
+        equity_bars_schema()
+            .fields()
+            .iter()
+            .map(|f| f.as_ref().clone())
+            .collect(),
+    )
+}
+
+/// `crypto.bars`.
 pub fn crypto_bars_schema() -> Schema {
     with_metadata(
         "crypto.bars",
@@ -196,6 +208,7 @@ pub fn schema_name(asset_class: AssetClass, data_type: DataType) -> Option<&'sta
         (AssetClass::Crypto, DataType::Trade) => Some("crypto.trade"),
         (AssetClass::Crypto, DataType::Quote) => Some("crypto.quote"),
         (AssetClass::Equity, DataType::Bars) => Some("equity.bars"),
+        (AssetClass::Option, DataType::Bars) => Some("option.bars"),
         (AssetClass::Crypto, DataType::Bars) => Some("crypto.bars"),
         _ => None,
     }
@@ -211,6 +224,7 @@ pub fn schema_for(asset_class: AssetClass, data_type: DataType) -> Result<Schema
         (AssetClass::Crypto, DataType::Trade) => Ok(crypto_trade_schema()),
         (AssetClass::Crypto, DataType::Quote) => Ok(crypto_quote_schema()),
         (AssetClass::Equity, DataType::Bars) => Ok(equity_bars_schema()),
+        (AssetClass::Option, DataType::Bars) => Ok(option_bars_schema()),
         (AssetClass::Crypto, DataType::Bars) => Ok(crypto_bars_schema()),
         _ => Err(DataError::Unsupported(format!(
             "no lake schema for {}.{}",

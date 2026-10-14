@@ -1,5 +1,8 @@
 //! Dependency-light market declarations and persisted configuration hashing.
 
+pub mod progress;
+pub use lake_contracts::{OptionRight, OptionSelector, ResolvedOption};
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};

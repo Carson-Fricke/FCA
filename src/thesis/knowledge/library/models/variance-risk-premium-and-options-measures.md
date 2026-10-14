@@ -13,7 +13,7 @@ tags:
   - implied-volatility
   - volatility-skew
   - term-structure
-  - roadmap
+  - options
 collections:
   - model-cards
 links:
@@ -41,13 +41,13 @@ surface predict returns. This card records the design for those claims.
 
 - What it tests: whether implied volatility exceeds realized volatility
   systematically, and whether surface shape predicts returns.
-- Intake: options quotes or chains synchronized with the underlying; not
-  currently available to the harness study SDK.
+- Intake: individual option quotes, trades, and bars, synchronized with
+  separately subscribed underlying data. Full chains are not an SDK input.
 - Key robustness: implied and realized measures are noisy and measured
   over different horizons; error must be propagated.
 - Main trap: stale or wide option quotes make the premium look larger than
   it is.
-- Treat this card as a roadmap until options intake exists.
+- Single-contract studies are executable; full-surface measures need additional inputs.
 
 ## What it tests
 
@@ -71,18 +71,28 @@ option surface nor a chain subscription exists in the harness study SDK.
 
 ## Intake note
 
-Options intake is not currently supported by the harness study SDK. The SDK
-accepts bars, quotes, and trades for equities only, so this card cannot be
-executed yet and no options falsifier should be authored against the current
-intake. Keep the design here as a roadmap and revisit it when an options
-chain subscription exists.
+Individual options use the same quote, trade, and bar subscriptions as stocks.
+Map each input alias through `data.options` in the submitted configuration to
+`underlying`, `right`, and explicit historical `as_of`, with either `expiration`
+or `days_to_expiration` and either string `strike` or string absolute `delta`.
+For example, `days_to_expiration: 30` and `delta: "0.50"` select one eligible
+contract near that expiry and delta. Selection occurs once before replay;
+rolling requires separate explicitly selected windows.
+
+Delta selection infers a European Black-Scholes model delta from historical
+option and underlying quote midpoints. `risk_free_rate` and `dividend_yield`
+are explicit annual model inputs, both defaulting to zero. This is an estimate
+for US options, not a provider Greek. Acquisition provenance retains the
+selection and actual OSI contract. Automatic selection supports standard
+unadjusted 100-share contracts. Full chains, open interest, exercise, assignment,
+margin, and option-specific portfolio accounting are outside this data interface.
 
 ## Simplest useful test
 
-When intake exists: compute the at-the-money implied variance for a
+Compute the at-the-money implied variance for a
 declared expiry, realized variance over the matching horizon, and test the
-average difference with HAC inference. Until intake exists, confirm the
-card is inapplicable and record that.
+average difference with HAC inference. Declare pricing assumptions and the
+point-in-time selection window before acquiring the contract.
 
 ## False explanations
 
@@ -112,8 +122,8 @@ mid quotes often disappears at executable prices.
 
 ## Failure conditions
 
-- Observable: intake support; condition: test can run; threshold: no
-  options subscription in the harness study SDK.
+- Observable: intake support; condition: test can run; threshold: required
+  chain, open-interest, or contract history is unavailable.
 - Observable: quote staleness; condition: usable surface; threshold:
   fraction of stale or crossed option quotes above the declared level.
 - Observable: horizon match; condition: premium measured cleanly;
@@ -125,6 +135,7 @@ mid quotes often disappears at executable prices.
 
 ## Limitations
 
-This card is documentation only until intake lands. Implied volatility
-extraction is model-dependent, the premium is time-varying, and the
-platform does not yet provide options market structure.
+Implied volatility extraction is model-dependent and the premium is time-varying.
+An individual-contract study does not establish full variance-swap replication
+or supply option portfolio accounting. Reject stale, crossed, and unpriceable
+quotes, and keep the selection model separate from the hypothesis tested.

@@ -14,12 +14,18 @@ from thesis.workspaces.repository import WorkspaceRepositoryProvider
 
 LIBRARY = Path("src/thesis/knowledge/library")
 PAGE_IDS = {
+    "from-market-idea-to-trading-construction",
+    "investigating-representations-and-episodes",
+    "developing-a-candidate-through-evidence",
     "single-security-price-regularity-tests",
     "roll-bid-ask-bounce",
     "robust-autocorrelation-inference",
     "tradability-break-even-and-oos",
 }
 TITLES = {
+    "from-market-idea-to-trading-construction": "From market idea to trading construction",
+    "investigating-representations-and-episodes": "Investigating representations through episodes",
+    "developing-a-candidate-through-evidence": "Developing a candidate through evidence",
     "single-security-price-regularity-tests": (
         "Single-security price-regularity tests"
     ),
@@ -85,3 +91,44 @@ def test_page_titles_retrieve_themselves_with_the_offline_baseline(
         ranked = [cast(str, hit["page_id"]) for hit in hits(result)]
         assert ranked, title
         assert page_id in ranked[:5], (title, ranked)
+
+
+def test_construction_questions_retrieve_readable_discovery_cards(
+    tmp_path: Path,
+) -> None:
+    service = KnowledgeService(
+        cast(WorkspaceRepositoryProvider, Repositories(tmp_path / "workspaces")),
+        LIBRARY,
+    )
+    questions = {
+        "market idea trading construction": "from-market-idea-to-trading-construction",
+        "trend detector confirmation episodes remaining duration": (
+            "investigating-representations-and-episodes"
+        ),
+        "research loop operator steering construction": (
+            "developing-a-candidate-through-evidence"
+        ),
+    }
+    for query, page_id in questions.items():
+        results = hits(
+            service.search(
+                "alpha",
+                query,
+                scope="shared",
+                limit=5,
+                allowed_collections=("discovery",),
+            )
+        )
+        selected = next((hit for hit in results if hit["page_id"] == page_id), None)
+        assert selected is not None, (query, results)
+        read = service.read(
+            "alpha",
+            cast(str, selected["reference"]),
+            allowed_scope="shared",
+            max_chars=6000,
+            allowed_collections=("discovery",),
+        )
+        assert read["page_id"] == page_id
+        assert read["truncated"] is False
+        assert read["data_only"] is True
+        assert read["content"] == KnowledgeCorpus(LIBRARY).load().page(page_id).body

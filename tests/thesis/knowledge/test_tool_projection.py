@@ -9,15 +9,7 @@ from typing import cast
 
 import pytest
 
-from thesis.agent.messages import (
-    MessageContent,
-    SessionMessage,
-    ToolCorrelation,
-    ToolRequest,
-)
-from thesis.agent.runtime.context import ToolContext
-from thesis.agent.runtime.knowledge_tools import knowledge_registered_tools
-from thesis.agent.runtime.session import SessionToolRegistry
+from thesis.extensions.tools.knowledge import knowledge_registered_tools
 from thesis.knowledge.service import (
     DATA_ONLY,
     MAX_READ_CHARS,
@@ -25,7 +17,15 @@ from thesis.knowledge.service import (
     KnowledgeService,
     effective_sources,
 )
-from thesis.providers.session_adapter import project_native_messages
+from thesis_runtime.adapters.providers.session_adapter import project_native_messages
+from thesis_runtime.contracts.context import ToolContext
+from thesis_runtime.contracts.messages import (
+    MessageContent,
+    SessionMessage,
+    ToolCorrelation,
+    ToolRequest,
+)
+from thesis_runtime.tools.registry import SessionToolRegistry
 
 
 class FakeKnowledge:
@@ -165,7 +165,11 @@ def test_search_compacts_ranked_results_before_model_projection(
     arguments: dict[str, object] = {"query": "research"}
     if limit is not None:
         arguments["limit"] = limit
-    execution = registry(service).dispatch("search_knowledge", arguments)
+    execution = registry(service).dispatch(
+        "search_knowledge",
+        arguments,
+        context=ToolContext("alpha", "chat", "conversation", "actor"),
+    )
     assert execution.ok
     expected_limit = 3 if limit is None else limit
     assert service.search_calls[0]["limit"] == expected_limit
@@ -257,7 +261,9 @@ def test_search_preserves_trusted_scope_and_collections(
     if requested is not None:
         arguments["scope"] = requested
     execution = registry(service, scope, ("research",)).dispatch(
-        "search_knowledge", arguments
+        "search_knowledge",
+        arguments,
+        context=ToolContext("alpha", "chat", "conversation", "actor"),
     )
     call = service.search_calls[0]
     assert call["workspace_id"] == "alpha"
@@ -289,9 +295,13 @@ def test_search_rejects_limits_outside_model_contract(
         knowledge_registered_tools(
             cast(KnowledgeService, service),
             ToolContext("alpha", "chat", "conversation", "actor"),
-        )[0].handler(arguments)
+        )[0].handler(arguments, ToolContext("alpha", "chat", "conversation", "actor"))
         if direct
-        else registry(service).dispatch("search_knowledge", arguments)
+        else registry(service).dispatch(
+            "search_knowledge",
+            arguments,
+            context=ToolContext("alpha", "chat", "conversation", "actor"),
+        )
     )
     assert not result.ok
     assert service.search_calls == []
@@ -310,9 +320,13 @@ def test_read_rejects_invalid_content_bounds_before_service(
         knowledge_registered_tools(
             cast(KnowledgeService, service),
             ToolContext("alpha", "chat", "conversation", "actor"),
-        )[1].handler(arguments)
+        )[1].handler(arguments, ToolContext("alpha", "chat", "conversation", "actor"))
         if direct
-        else registry(service).dispatch("read_knowledge", arguments)
+        else registry(service).dispatch(
+            "read_knowledge",
+            arguments,
+            context=ToolContext("alpha", "chat", "conversation", "actor"),
+        )
     )
     assert not result.ok
     assert service.read_calls == []
@@ -324,14 +338,22 @@ def test_selected_read_retains_full_metadata_and_requested_content(
 ) -> None:
     service = FakeKnowledge()
     tools = registry(service, "workspace", ("research",))
-    search = tools.dispatch("search_knowledge", {"query": "research"})
+    search = tools.dispatch(
+        "search_knowledge",
+        {"query": "research"},
+        context=ToolContext("alpha", "chat", "conversation", "actor"),
+    )
     reference = cast(list[dict[str, object]], search.structured["results"])[0][
         "reference"
     ]
     arguments = {"reference": reference}
     if max_chars is not None:
         arguments["max_chars"] = max_chars
-    execution = tools.dispatch("read_knowledge", arguments)
+    execution = tools.dispatch(
+        "read_knowledge",
+        arguments,
+        context=ToolContext("alpha", "chat", "conversation", "actor"),
+    )
     assert execution.ok
     bound = 6000 if max_chars is None else max_chars
     assert service.read_calls == [
@@ -357,7 +379,9 @@ def test_read_still_rejects_paths_and_out_of_scope_references(reference: str) ->
     if reference == "shared":
         reference = cast(str, service.hits[0]["reference"])
     result = registry(service, "workspace").dispatch(
-        "read_knowledge", {"reference": reference}
+        "read_knowledge",
+        {"reference": reference},
+        context=ToolContext("alpha", "chat", "conversation", "actor"),
     )
     assert not result.ok
     assert result.structured == {"data_only": True, "content_notice": DATA_ONLY}

@@ -21,7 +21,93 @@ design language, the backend contracts the UI must preserve, and the
 explicit deferrals. Implemented details are distinguished from the broader
 product requirements; this document does not extend backend contracts.
 
+## Runtime reference projection
+
+Generated HTTP response records expose opaque namespaced `references`. FCA UI
+projection resolves `fca.investigation` and `fca.strategy` for thread kind and
+links; presentation-only flattened arrays do not become runtime record fields.
+The same generated schema validates HTTP, SSE and fixtures. Concrete tool
+renderers remain FCA UI components; the generic runtime retains neutral outcomes.
+
+## Implemented Research Presentation
+
+Tool outcomes use an Activity rail in both root and scoped transcripts: a
+left-aligned, bounded-width surface with one marker per receipt. Rail segments
+connect across transcript spacing only when the previous entry is another tool
+on the rail, including root entries rendered in separate scoped surfaces.
+Chat messages and other timeline entries break the rail. Routine calls
+use compact disclosures; failed calls open their evidence automatically.
+The renderer registry also owns optional row-header adapters: book markers for
+reads, search markers for retrieval, list markers for catalogs, and dots for
+general activity. Headers derive subjects from returned titles or requested topics;
+counts describe returned sources, search matches or collection items, never
+inferred catalog totals. Unknown tools inherit a generic header. Disclosure
+keeps the original returned evidence and execution metadata inspectable.
+Trusted catalog operation semantics (`read`, `write`, `execute`, `interact`)
+travel with the canonical incoming receipt and survive live projection and replay.
+Routine reads default to collapsed receipts; rich result renderers opt into
+inline presentation independently of operation semantics. Expansion preserves
+returned content, arguments and metadata. Reference reads expose content on the
+first expansion and retain the exact returned payload and excerpt boundaries.
+MCP discovery preserves `annotations.readOnlyHint`; this metadata controls
+presentation only and grants no execution or delivery authority.
+Renderer registration chooses receipt versus inline result presentation, so
+studies, sketches and operator requests remain visible without a generic card
+around their existing chrome. Call identity and execution metadata stay in the
+receipt. Strategy sketches show a bounded premise and entry/exit/abstention
+summary; full rules, assumption statuses and investigations, representations,
+revision comparisons, limitations and source remain expandable inline.
+
+`lib/research` is the shared evidence presentation layer for study tool cards
+and `/w/[workspace]/exploration/[id]`. SDK `research_view` outputs bind tables,
+series and events by job and program instance with explicit fields, units,
+identity and information timing. Strict decoders and the JIT host validate
+descriptors and bindings. Built-in primitives compose nine study families;
+specialized panel kinds register local components. No tool result can supply
+executable rendering code or a separate session delivery path.
+
+The explorer gives each descriptor panel its own tab. A Returned data tab holds
+all published outputs, with local visualization and field-mapping controls.
+Study tool cards mount these tabs directly in chat, without an evidence toggle
+or navigation to an explorer. Tool evidence, diagnostics, metrics and retained
+observations appear inside Returned data. Cards observe execution through the
+shared status poller and load artifact views automatically once it is terminal.
+Tabs preserve the composition and linked identity selection. Multiple saved
+compositions use an exhibit selector. The explorer also offers event-coordinate
+cursors, record inspection, expansion, bounded paging and exact artifact exports.
+Unknown extensions retain evidence inspection. Old outputs open Returned data
+and never acquire invented coefficient histories or fitted models.
+Integers outside JavaScript's safe range become exact decimal strings in paged
+HTTP projections; source bytes and artifact SHA remain authoritative.
+`/demo/research` uses explicitly synthetic SDK-generated publications.
+
+Study observations group only within their conversation scope, retaining each
+receipt. Sketch cards compare previously displayed revisions within that scope.
+Knowledge cards preserve reference/provenance and sanitize Markdown.
+`lib/research/jobs.ts` shares observational polling across mounted job cards;
+it cannot submit or replay a job.
+
+## Implemented Harness Execution Inspection
+
+`HarnessExecutionCard.svelte` displays the existing `/v1/jobs/{job_id}` status
+for direct run outcomes, workflow summaries, and deterministic phase attempts.
+Existing `tool.submitted` timeline events link admitted harness job IDs to their
+execution and phase attempt. The card polls observational status every two
+seconds while nonterminal, cancels on navigation, ignores stale replies, and
+stops at terminal status. It does not submit, retry, advance, or pause execution.
+No workflow engine or deterministic executor telemetry path is introduced.
+
+The card shows actual stage, dataset window, session coverage and initial cached
+coverage, received rows/bytes, elapsed time, observation age, and retained error.
+Expandable details show stage durations and the transfer inactivity limit. It
+makes no ETA or trial-completion estimate from data acquisition counters. Old
+records without observations show their existing lifecycle and error fields.
+
 ## Implemented Chat Boundary
+
+An unresolved phase scope shows starting/unavailable activity and retained recovery
+errors. Absence of a phase agent never establishes deterministic execution or
+changes the phase's input policy; a resolved conversational agent owns input.
 
 `ChatHostController` in `chat-host.svelte.ts` owns conversation listing,
 selection, drafts, create/post/delete, percolation receipts,
@@ -34,6 +120,15 @@ request (`GET /v1/workspaces/{id}`) used for existence and the workspace name.
 Counts, activity, open chats, strategies, widgets, and the workspace catalog are
 requested after render and update the shell when they arrive; they do not block
 the first paint.
+The workspace switcher and workspace picker expose **Delete workspace** through
+`DeleteWorkspaceDialog.svelte`. The operator types the workspace name to confirm
+the complete deletion scope. The dialog waits for `DELETE /v1/workspaces/{id}`
+acceptance, keeps failures visible for retry, and only then removes remembered
+selection, widget pins, scope paths, and expansion state. Deleting the current
+workspace returns to the picker; deleting from the picker removes its card.
+The API durably marks all workspace data for deletion, hides the workspace and
+fences conversation activity immediately. Physical non-conversation storage
+cleanup is deferred (see the workspace lifecycle in `fca-thesis.md`).
 Prompt suggestions belong only to the unpersisted draft surface, never to an
 existing chat with empty or pending history. Initial list loading is not a draft.
 
@@ -51,8 +146,8 @@ progressive, and a history failure exposes retry without opening an unanchored
 stream. Conversation and node read routes run synchronous
 storage work off the HTTP event loop. Timeline projection repair is removed;
 the workspace catalog is the authoritative timeline and streams wake on the
-in-process post-commit notification; a recovery-interval fallback bounds a lost
-wake.
+local post-commit notification and the API change-feed watcher; a recovery-interval
+fallback bounds a lost wake.
 
 `workflow-live.ts` derives an execution-indexed `Map<string, WorkflowLiveState>`
 from workflow anchors, timeline execution snapshots, and events grouped by
@@ -64,6 +159,11 @@ including events preceding the snapshot's timeline sequence. Durable node
 projection enriches the map without another stream; only declared workflow
 phases and explicit phase executors own phase steps, not helper agents.
 Scope belongs to the conversation, not the most recently launched workflow.
+The root transcript renders canonical messages and structured activity cards,
+including tool results that arrive before their durable message. Raw execution
+metadata updates workflow cards and scoped phase views;
+`workflow.phase`, tool lifecycle events and other execution metadata do not
+produce standalone root transcript rows, in history or live streaming.
 `sse.ts` retains only the `TimelineStream` client and its framing, URL, and cursor
 helpers.
 
@@ -78,7 +178,7 @@ and are retained. Startup resumes incomplete cleanup from durable tombstones.
 
 List, history-open, and logical-delete latency MUST be below one second against
 real persistence during concurrent conversation writes. The opt-in executable
-acceptance is `tests/thesis/cosmos/test_conversation_latency_live.py`; it includes
+acceptance is `tests/thesis_runtime/adapters/cosmos/test_conversation_latency_live.py`; it includes
 nested agents, tool records, invocation cleanup, and physical timeline cleanup.
 It measures in-process HTTP over Cosmos, not browser boot or remote deployment
 network overhead; those require separate live browser measurements.
@@ -88,7 +188,13 @@ expansion, durable node capabilities, and operator submission. It requests
 history from the injected timeline and derives the tree from durable events and
 listed nodes. It neither executes workflows nor invents phase-agent topology.
 Workflow-node implementation records are hidden and their children navigate via
-the nearest visible ancestor. Only an input-capable agent exposes a composer;
+the nearest visible ancestor. This ancestry is a navigation index, not a list of
+standalone helpers: transcripts exclude explicit phase executors from child-agent
+cards. A nested workflow appears at its launch anchor through its workflow card;
+its phase agents stay indexed for phase drill-in, scoped history, and back navigation.
+Ordinary helpers remain visible as child-agent cards. The browser regression is
+`src/ui/e2e/workflow-hierarchy.spec.ts`.
+Only an input-capable agent exposes a composer;
 backend anchored admission remains authoritative.
 Phase navigation and event selection are keyed by execution ID plus canonical
 phase name, so identically named phases in concurrent workflows cannot collide.
@@ -137,7 +243,7 @@ ACK. Consumption follows a successful request snapshot and persisted output;
 late mid-model input and tool results after a terminal request remain unconsumed.
 Provider protocol grouping MUST NOT change the canonical timeline's arrival
 order. `Conversations.deliver_session_message` and handle delegation converge on
-`runtime/incoming.py::write_incoming`; presentation is not another delivery path.
+`thesis_runtime/conversations/incoming.py::write_incoming`; presentation is not another delivery path.
 Neutral directions are `incoming`, `outgoing`, and trusted-runtime-only
 `instruction`. A durable record without canonical session data is not decoded
 and cannot become bootstrap authority. Provider-native fields in opaque
@@ -163,10 +269,16 @@ byte. Generation and runtime receipt schemas are implemented.
 definitions, tree wrappers/nodes, steering, timeline pages, and full node-input
 receipts before UI adaptation. SSE frames use the same decoder, including nested
 tool outcomes in event extension payloads. Runtime activity is discriminated by
-`activityKind`; historical untagged metadata is allowed by the backend contract,
-not independently guessed by a competing UI schema. Durable tree projections
-retain completion mode, return anchor, phase authority, tools, budgets, contracts,
-attempts, results, and timestamps; context is not invented from a durable node.
+`activityKind`; the current contract requires that discriminator. Backend activity decoding also requires this tag. Declared datum types select
+renderers; tool names do not substitute for missing types. Workflow launch datums
+and execution snapshots are the workflow surfaces. Retired standalone workflow
+messages, phase aliases, inferred executor ownership, mixed event clocks, and
+execution inference from old phase links are removed. Outdated records fail at
+the schema boundary; old phase links surface an explicit outdated message.
+Durable tree
+projections retain completion mode, return anchor, phase authority, tools,
+budgets, contracts, attempts, results, and timestamps; context is not invented
+from a durable node.
 
 `transport.ts` handles HTTP mechanics and exposes `ThesisApiError` with status,
 path, code, message, and details. The canonical envelope is
@@ -185,8 +297,8 @@ sample fixture hashes are not claims of backend-issued provenance.
 
 Both `/v1` and `/api/v1` register on the same backend app and resolve the same
 app-state services and authentication. Missing production services return 503,
-not request-local defaults. Process-local scheduling/brokers require one serving
-worker (`WEB_CONCURRENCY=1`). The current hypothesis-development graph is version
+not request-local defaults. Stream brokers are process-local hints. Production execution belongs to
+durable workers with fenced claims, independently of API replica count. The current hypothesis-development graph is version
 `3.0.0`, with deterministic falsification trials, a typed variation report path
 that renders per-parameter value versus total-return/profit-factor charts, and
 executor-free terminal nodes.
@@ -360,13 +472,22 @@ executor-free terminal nodes.
   execution steer alias.
 - **Streaming:** the implemented chat surface consumes `GET
   /v1/workspaces/{ws}/chats/{chat}/timeline/stream` (SSE), merging durable messages
-  and events plus execution snapshots by timeline ID and `seq`. The stream wakes
-  on the in-process post-commit notification; SSE `id` is the sequence resume cursor
+  and events plus execution snapshots and provisional output by timeline ID and `seq`.
+  Local post-commit hints and an API-scoped cross-process change-feed watcher wake readers; SSE `id` is the sequence resume cursor
   used with `Last-Event-ID`. Thread-scoped REST history uses the same chat's
   `/timeline?thread=...&before=...` until `nextBefore` is null. Legacy execution,
   chat-message, and sub-agent SSE routes are removed. Execution and sub-agent
   REST `/events` replay endpoints remain; they are not live subscriptions.
-  Ephemeral provider deltas are not durable timeline history.
+  Provider-native frames remain private to adapters; committed output records
+  are durable presentation evidence, separate from canonical model history.
+  Durable `output` records project per-invocation reasoning and answer fragments
+  outside canonical message history. The existing thinking disclosure starts
+  collapsed, updates while execution runs, and retains expansion when the final
+  canonical message closes the same identity. Refresh and reconnect rebuild
+  partial output from UTF-8 offsets; interrupted output retains its evidence.
+  Operator steering seals received reasoning/text as a canonical partial under
+  that same identity. Its reasoning disclosure remains available while the next
+  model request includes the sealed evidence and new input.
   Assistant and reasoning text render as sanitized Markdown, with LaTeX math
   (`\(...\)` inline, `\[...\]` display) rendered to KaTeX and the result passed
   through the same sanitizer. A bare `$` is never treated as math so currency
@@ -392,7 +513,13 @@ executor-free terminal nodes.
   in the workspace repository and is served by the API. Client
    state is view state plus one rebuildable timeline projection (selections,
    filters, transient composer input, and the timeline's ordered items).
-  Optimistic updates are bounded to cosmetic acknowledgment and re-synced.
+  Chat sends immediately clear the composer and show a local pending message.
+  Root and node controllers assign one stable identity before dispatch; POST
+  acknowledgement and SSE replace that projection by identity in either order.
+  Local projections never advance the durable timeline cursor. Failed sends
+  remain visibly unconfirmed; drafts restore only when no newer text was typed.
+  Explicit retry of the same failed input reuses its identity. No automatic
+  mutation retry is performed. Workspace detach clears pending retry state.
 
 ## Visual Design Language (from the styling mockup)
 
@@ -446,3 +573,45 @@ adaptive evidence scope. UI fixtures are generated from Python contract records,
 not independently authored financial examples.
 
 Backtest statistics use canonical snake_case fields throughout import and rendering. The UI does not reconstruct aliases or headline financial statistics. Drawdown plot titles use the published maximum and its undefined reason; chart series are visualization only.
+
+
+Backtest launch submits an inline configuration snapshot and receives HTTP 202.
+Screening launch receives a retained job_id immediately; the UI owns status waiting
+and calls the materialize endpoint after completion. Interrupted execution remains
+inspectable through its retained job_id rather than triggering an automatic retry.
+
+
+## Inline study evidence and dataset semantics
+
+Study runs render one `StudyToolCard` execution header and shared research surface.
+The existing read-only job observer supplies lifecycle state; completion reveals
+research tabs in place. Reads select their requested output. Revision and validation
+receipts remain compact. This changes no canonical message or submission path.
+
+`research/ResearchExplorer.svelte` loads selected output evidence lazily through the
+existing immutable artifact API. All outputs and receipt metrics are inspectable
+in Returned data. `ReturnedData`, `EvidencePanel`, and the renderer registry share
+recommendations, compatible field controls, linked evidence, and in-place expansion
+between live chat and the demo. Renderer registrations own optional mapping policies.
+
+The SDK publishes independent `StudyOutput::DatasetSemantics` descriptors (schema
+1) with dataset bindings, row meaning, complete grain, field roles, ordering and
+preferred views. The host checks complete-output grain and agreement with exhibit
+bindings. UI checks and filters cover loaded observations only (5,000 rows or about
+2 MB per output); complete artifact export remains authoritative. No silent client
+aggregation, guessed financial statistics, or automatic historical reruns are added.
+
+## Parallel workflow presentation
+
+The backend's workflow definition declares fixed `splits` with branch entries and
+matching deterministic joins. Execution snapshots carry an explicit active-node
+array. Frontier events include `activePhases`, `controlSequence` and required/
+arrived join branches. The UI renders each current node independently and exposes
+blocked joins as read-only scopes with their missing branches. It never infers
+join readiness from agent prose or marks a sibling complete merely because
+another node advances.
+
+Frontier projection follows accepted control sequence, so delayed publication
+cannot regress the displayed graph. Agent lifecycle events retain attempt IDs;
+phase navigation remains execution-scoped. Definitions without splits retain
+serial layout. This capability changes no current concrete workflow's topology.

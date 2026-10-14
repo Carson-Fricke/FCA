@@ -1,6 +1,8 @@
 # Thesis Workflow Development Instructions
 
-Scope: any change under `src/thesis/workflows/**`, workflow tools, or phase
+Scope: any change under `src/thesis/workflows/**`,
+`src/thesis/extensions/workflows/**`, `src/thesis_runtime/workflows/**`,
+`src/thesis/application/**`, workflow tools, or phase
 agents. Read the repository source directly:
 `.github/architecture/thesis-agent-workflow-runtime.md` (REQ-018..REQ-040 and
 "Option 1 Session Delivery Contract") and
@@ -24,7 +26,7 @@ agents. Read the repository source directly:
    accepted completion contract, the declared pipes, and the start adapter. An
    agent NEVER reads another agent's transcript.
 5. **Workflow-specific content stays in the workflow package**
-   (`workflows/registry/<id>/`). `workflows/core/` stays generic; if your
+   (`thesis/extensions/workflows/<id>/`). `thesis_runtime/workflows/` stays generic; if your
    change adds workflow knowledge to `core/`, it is wrong.
 6. **One writer, one path.** Every incoming producer, including dispatched tool
    results, MUST use `Conversation.deliver_session_message` and the singular
@@ -43,13 +45,20 @@ agents. Read the repository source directly:
 8. **Never invent an entity silently.** A new phase, agent, tool, or durable
    concept must be declared in the phase table, documented, and tested in the
    same change.
-9. **Retired persisted values stay readable.** Durable records decode through
-   closed tables; keep retired enum members and map them on read.
+9. **Keep one current persisted contract.** Follow "Current Contracts and Data
+   Cutovers" in `.github/instructions/copilot-instructions.md`. Remove retired
+   enum members, read-time aliases, inferred required fields, and historical
+   decoders when the contract changes. Delete obsolete development records by
+   default within the authorized scope; required preservation uses a bounded
+   one-time conversion outside the engine. Each workflow ID has one current
+   implementation. Durable versions detect mismatches, not select historical
+   implementations; reject outdated execution records rather than resume them
+   with a different definition.
 10. **Verify the owned scope.** Use the canonical `uv run --extra dev` commands
     in `.github/instructions/copilot-instructions.md` for focused Ruff lint,
     format checks, ty, and pytest. The integration owner runs repository-wide
     verification once after edits freeze and MUST include
-    `tests/thesis/agent/runtime/test_delivery_architecture.py` once the delivery
+    `tests/thesis_runtime/test_delivery_architecture.py` once the delivery
     modules are final. Rewrite old-contract tests; do not keep two truths.
 11. **Submission identity is retained before dispatch.** A phase that submits
     harness work allocates `job_id` once and durably registers the submission,
@@ -78,13 +87,17 @@ and provider-adapter modules are REQUIRED migration targets, not a claim of
 completed implementation. Existing role-based session/projection code MUST NOT
 be extended as an alternative design.
 
-- One conversation abstraction: `thesis.agent.runtime.conversation` owns the
+- One conversation abstraction: `thesis_runtime.conversations.conversation` owns the
   `Conversation` handle and the `Conversations` service; HTTP, tools, and the
   engine see only the service and the handles. Nothing outside the service
   references the turn runner, coordinator, or spawner.
 - A chat is a conversation at the root anchor; a sub-agent is a nested one.
   Phase specs are the sealed union `ConversationPhase` / `OneShotPhase` /
-  `DeterministicPhase`; a deterministic phase builds no conversation at all.
+  `DeterministicPhase` / `TerminalPhase` / `SplitPhase`; deterministic and
+  structural split nodes build no conversation. A split declares fixed named
+  branches and one deterministic join. Keep branch scopes disjoint; only an
+  explicit split creates concurrency. Paired join reducers are pure. Existing
+  workflow definitions stay sequential until their topology is explicitly changed.
 - `ChildConversation` composes the return layer: `returns_to` anchor,
   complete/fail/result/await_result/children/cancel, and one turn-end policy
   (`OneShotPolicy` completes on the final answer; `ConversationalPolicy`
@@ -93,7 +106,8 @@ be extended as an alternative design.
 - The service owns scheduling: every wake is a delivery routed through the
   service's routing rule (root to itself; a record anchor is durable-only;
   every other conversation runs on its one serialized worker).
-- Phase table starts at `hypothesis_creation`; `requested` is retired.
+- The hypothesis-development phase table starts at `discovery`; the current
+  extension spec is authoritative. Retired phases have no read-time aliases.
 - Phase agents are children of the durable workflow node; the node is a record
   and is never turned.
 - Conversation agents accept input from birth; one-shot children complete on

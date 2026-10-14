@@ -154,14 +154,14 @@ def create_strategy_router() -> APIRouter:
     router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["strategies"])
 
     @router.get("/strategies")
-    async def list_strategies(
+    def list_strategies(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[StrategyDataService, Depends(get_strategy_service)],
     ) -> dict[str, object]:
         return {"items": list(service.list_strategies(workspace_id))}
 
     @router.post("/strategies", status_code=201)
-    async def create_strategy(
+    def create_strategy(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         request: CreateStrategyRequest,
         service: Annotated[StrategyDataService, Depends(get_strategy_service)],

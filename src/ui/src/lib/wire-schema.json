@@ -62,14 +62,7 @@
           "type": "string"
         },
         "conversation_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "type": "string"
         },
         "created_at": {
           "type": "string"
@@ -155,12 +148,6 @@
         "intent_epoch": {
           "type": "integer"
         },
-        "investigation_ids": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "kind": {
           "$ref": "#/$defs/TranscriptItemKind"
         },
@@ -187,18 +174,20 @@
             }
           ]
         },
+        "references": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        },
         "role": {
           "$ref": "#/$defs/MessageRole"
         },
         "root_conversation_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "type": "string"
         },
         "schema_version": {
           "type": "integer"
@@ -253,7 +242,7 @@
         "data",
         "state",
         "attachment_ids",
-        "investigation_ids",
+        "references",
         "execution_id",
         "intent_epoch",
         "input_position",
@@ -277,6 +266,18 @@
           "maxLength": 32768,
           "minLength": 1,
           "type": "string"
+        },
+        "message_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -337,14 +338,7 @@
           "type": "string"
         },
         "conversation_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "type": "string"
         },
         "created_at": {
           "type": "string"
@@ -359,7 +353,40 @@
           "type": "object"
         },
         "links": {
-          "$ref": "#/$defs/RecordLinks"
+          "description": "Explicit links shared by conversation and execution records.",
+          "properties": {
+            "chat_ids": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "job_ids": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "references": {
+              "additionalProperties": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": "object"
+            },
+            "workflow_execution_ids": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
         },
         "owner_actor_id": {
           "type": "string"
@@ -375,14 +402,7 @@
           ]
         },
         "root_conversation_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "type": "string"
         },
         "schema_version": {
           "type": "integer"
@@ -600,6 +620,18 @@
           },
           "type": "array"
         },
+        "message_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "role": {
           "$ref": "#/$defs/MessageRole",
           "default": "user"
@@ -654,14 +686,7 @@
           "type": "string"
         },
         "conversation_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "type": "string"
         },
         "created_at": {
           "type": "string"
@@ -747,12 +772,6 @@
         "intent_epoch": {
           "type": "integer"
         },
-        "investigation_ids": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "kind": {
           "$ref": "#/$defs/TranscriptItemKind"
         },
@@ -779,18 +798,20 @@
             }
           ]
         },
+        "references": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        },
         "role": {
           "$ref": "#/$defs/MessageRole"
         },
         "root_conversation_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "type": "string"
         },
         "schema_version": {
           "type": "integer"
@@ -855,7 +876,7 @@
         "data",
         "state",
         "attachment_ids",
-        "investigation_ids",
+        "references",
         "execution_id",
         "intent_epoch",
         "input_position",
@@ -1255,10 +1276,10 @@
           "minLength": 1,
           "type": "string"
         },
-        "config_path": {
-          "maxLength": 2048,
-          "minLength": 1,
-          "type": "string"
+        "config": {
+          "additionalProperties": true,
+          "minProperties": 1,
+          "type": "object"
         },
         "environment": {
           "default": "paper",
@@ -1294,7 +1315,7 @@
       },
       "required": [
         "bundle_ref",
-        "config_path"
+        "config"
       ],
       "type": "object"
     },
@@ -1302,10 +1323,10 @@
       "additionalProperties": false,
       "description": "The canonical launch body accepted by ``POST /v1/backtests/jobs``.",
       "properties": {
-        "config_path": {
-          "maxLength": 2048,
-          "minLength": 1,
-          "type": "string"
+        "config": {
+          "additionalProperties": true,
+          "minProperties": 1,
+          "type": "object"
         },
         "workspace": {
           "anyOf": [
@@ -1320,7 +1341,7 @@
         }
       },
       "required": [
-        "config_path"
+        "config"
       ],
       "type": "object"
     },
@@ -1439,6 +1460,107 @@
       ],
       "type": "object"
     },
+    "ModelOutputDeltaWire": {
+      "additionalProperties": false,
+      "properties": {
+        "actorId": {
+          "type": "string"
+        },
+        "channel": {
+          "enum": [
+            "reasoning",
+            "text"
+          ],
+          "type": "string"
+        },
+        "invocationId": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "const": "delta",
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "invocationId",
+        "messageId",
+        "actorId",
+        "state",
+        "channel",
+        "offset",
+        "text"
+      ],
+      "type": "object"
+    },
+    "ModelOutputInterruptedWire": {
+      "additionalProperties": false,
+      "properties": {
+        "actorId": {
+          "type": "string"
+        },
+        "failure": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "invocationId": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "state": {
+          "const": "interrupted",
+          "type": "string"
+        }
+      },
+      "required": [
+        "invocationId",
+        "messageId",
+        "actorId",
+        "state",
+        "failure"
+      ],
+      "type": "object"
+    },
+    "ModelOutputStartedWire": {
+      "additionalProperties": false,
+      "properties": {
+        "actorId": {
+          "type": "string"
+        },
+        "invocationId": {
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "state": {
+          "const": "started",
+          "type": "string"
+        }
+      },
+      "required": [
+        "invocationId",
+        "messageId",
+        "actorId",
+        "state",
+        "startedAt"
+      ],
+      "type": "object"
+    },
     "NodeInputReceiptWire": {
       "additionalProperties": false,
       "description": "Node-answer HTTP receipt: durable message plus admission provenance.",
@@ -1462,14 +1584,7 @@
           "type": "string"
         },
         "conversation_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "type": "string"
         },
         "created_at": {
           "type": "string"
@@ -1555,12 +1670,6 @@
         "intent_epoch": {
           "type": "integer"
         },
-        "investigation_ids": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "kind": {
           "$ref": "#/$defs/TranscriptItemKind"
         },
@@ -1590,18 +1699,20 @@
             }
           ]
         },
+        "references": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        },
         "role": {
           "$ref": "#/$defs/MessageRole"
         },
         "root_conversation_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "type": "string"
         },
         "schema_version": {
           "type": "integer"
@@ -1659,7 +1770,7 @@
         "data",
         "state",
         "attachment_ids",
-        "investigation_ids",
+        "references",
         "execution_id",
         "intent_epoch",
         "input_position",
@@ -1730,23 +1841,9 @@
       "type": "object"
     },
     "RecordLinks": {
-      "description": "Explicit links shared by chat, investigation, and execution records.",
+      "description": "Explicit links shared by conversation and execution records.",
       "properties": {
         "chat_ids": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "experiment_ids": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "investigation_ids": {
           "default": [],
           "items": {
             "type": "string"
@@ -1760,12 +1857,14 @@
           },
           "type": "array"
         },
-        "strategy_ids": {
-          "default": [],
-          "items": {
-            "type": "string"
+        "references": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
-          "type": "array"
+          "type": "object"
         },
         "workflow_execution_ids": {
           "default": [],
@@ -2463,7 +2562,8 @@
         "mapping": {
           "event": "#/$defs/TimelineEventWire",
           "execution": "#/$defs/TimelineExecutionWire",
-          "message": "#/$defs/TimelineMessageWire"
+          "message": "#/$defs/TimelineMessageWire",
+          "output": "#/$defs/TimelineOutputWire"
         },
         "propertyName": "kind"
       },
@@ -2476,6 +2576,9 @@
         },
         {
           "$ref": "#/$defs/TimelineExecutionWire"
+        },
+        {
+          "$ref": "#/$defs/TimelineOutputWire"
         }
       ]
     },
@@ -2504,6 +2607,82 @@
         },
         "payload": {
           "$ref": "#/$defs/ChatMessageWire"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "threadId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ts": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "chatId",
+        "workspaceId",
+        "seq",
+        "ts",
+        "kind",
+        "payload"
+      ],
+      "type": "object"
+    },
+    "TimelineOutputWire": {
+      "additionalProperties": false,
+      "properties": {
+        "chatId": {
+          "type": "string"
+        },
+        "executionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "output",
+          "type": "string"
+        },
+        "payload": {
+          "discriminator": {
+            "mapping": {
+              "delta": "#/$defs/ModelOutputDeltaWire",
+              "interrupted": "#/$defs/ModelOutputInterruptedWire",
+              "started": "#/$defs/ModelOutputStartedWire"
+            },
+            "propertyName": "state"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ModelOutputStartedWire"
+            },
+            {
+              "$ref": "#/$defs/ModelOutputDeltaWire"
+            },
+            {
+              "$ref": "#/$defs/ModelOutputInterruptedWire"
+            }
+          ]
         },
         "seq": {
           "minimum": 1,
@@ -2588,6 +2767,15 @@
         "tool_name"
       ],
       "type": "object"
+    },
+    "ToolOperation": {
+      "enum": [
+        "read",
+        "write",
+        "execute",
+        "interact"
+      ],
+      "type": "string"
     },
     "ToolRequest": {
       "additionalProperties": false,
@@ -2677,15 +2865,7 @@
           ]
         },
         "datumType": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+          "type": "string"
         },
         "failure": {
           "anyOf": [
@@ -2700,6 +2880,17 @@
         },
         "ok": {
           "type": "boolean"
+        },
+        "operation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolOperation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "structured": {
           "additionalProperties": true,
@@ -2735,6 +2926,7 @@
         "structured",
         "summary",
         "text",
+        "datumType",
         "callId",
         "tool"
       ],
@@ -2745,9 +2937,7 @@
       "enum": [
         "message",
         "tool",
-        "workflow",
         "sub_agent",
-        "gate",
         "artifact"
       ],
       "type": "string"
@@ -2780,6 +2970,12 @@
           },
           "type": "array"
         },
+        "splits": {
+          "additionalProperties": {
+            "$ref": "#/$defs/WorkflowSplitWire"
+          },
+          "type": "object"
+        },
         "terminal_phases": {
           "items": {
             "type": "string"
@@ -2811,7 +3007,8 @@
         "title",
         "phases",
         "terminal_phases",
-        "transitions"
+        "transitions",
+        "splits"
       ],
       "type": "object"
     },
@@ -2830,21 +3027,23 @@
       "additionalProperties": false,
       "description": "Complete serialized workflow execution record.",
       "properties": {
+        "active_phases": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "chat_id": {
           "type": "string"
         },
         "content_hash": {
           "type": "string"
         },
+        "control_sequence": {
+          "type": "integer"
+        },
         "conversation_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "type": "string"
         },
         "created_at": {
           "type": "string"
@@ -2854,12 +3053,6 @@
         },
         "execution_id": {
           "type": "string"
-        },
-        "experiment_ids": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
         },
         "finished_at": {
           "anyOf": [
@@ -2873,16 +3066,6 @@
         },
         "intent_epoch": {
           "type": "integer"
-        },
-        "investigation_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
         },
         "job_ids": {
           "items": {
@@ -2900,28 +3083,20 @@
             }
           ]
         },
-        "phase": {
-          "anyOf": [
-            {
+        "references": {
+          "additionalProperties": {
+            "items": {
               "type": "string"
             },
-            {
-              "type": "null"
-            }
-          ]
+            "type": "array"
+          },
+          "type": "object"
         },
         "requested_by": {
           "type": "string"
         },
         "root_conversation_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "type": "string"
         },
         "schema_version": {
           "type": "integer"
@@ -2930,12 +3105,6 @@
           "$ref": "#/$defs/WorkflowExecutionState"
         },
         "steering_message_ids": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "strategy_ids": {
           "items": {
             "type": "string"
           },
@@ -2979,16 +3148,34 @@
         "workflow_id",
         "workflow_version",
         "requested_by",
-        "investigation_id",
-        "strategy_ids",
-        "experiment_ids",
+        "references",
         "job_ids",
         "state",
-        "phase",
+        "active_phases",
+        "control_sequence",
         "intent_epoch",
         "steering_message_ids",
         "updated_at",
         "finished_at"
+      ],
+      "type": "object"
+    },
+    "WorkflowSplitWire": {
+      "additionalProperties": false,
+      "properties": {
+        "branches": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "join": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "branches",
+        "join"
       ],
       "type": "object"
     }

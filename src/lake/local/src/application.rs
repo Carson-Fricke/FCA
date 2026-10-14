@@ -33,6 +33,11 @@ pub struct LocalProviders {
     pub crypto: Option<Arc<dyn lake_ingestion::CryptoDataProvider>>,
     /// Injected bars provider; built from credentials when absent.
     pub bars: Option<Arc<dyn lake_ingestion::BarsDataProvider>>,
+    /// Option dataset port; production uses the credentialed Alpaca client.
+    pub options: Option<Arc<dyn lake_ingestion::options::transaction::OptionMarketDataClient>>,
+    /// Point-in-time contract master and historical quote input port.
+    pub option_selection:
+        Option<Arc<dyn lake_ingestion::options::resolve::OptionSelectionProvider>>,
 }
 
 /// Build the API over local files and catalog state without Azure clients.
@@ -73,6 +78,49 @@ pub fn create_local_app_with(
 
     let catalog: Arc<JsonCatalogStore> = Arc::new(JsonCatalogStore::open(layout.catalog_path())?);
     let repository: Arc<dyn CatalogRepository> = catalog.clone();
+    let contracts: Arc<dyn lake_catalog::ContractRepository> =
+        Arc::new(crate::options::LocalOptionContracts::open(layout)?);
+    let client = Arc::new(
+        lake_providers::AlpacaClient::with_reqwest(
+            crate::ingest::provider_config(&settings),
+            crate::ingest::shared_governor(&settings),
+        )
+        .map_err(|e| LocalIngestError::new(e.to_string()))?,
+    );
+    let credentials_present = settings
+        .provider
+        .api_key
+        .as_ref()
+        .is_some_and(|s| !s.trim().is_empty())
+        && settings
+            .provider
+            .api_secret
+            .as_ref()
+            .is_some_and(|s| !s.trim().is_empty());
+    let selection_available = providers.option_selection.is_some() || credentials_present;
+    let options = providers.options.or_else(|| {
+        credentials_present.then(|| {
+            client.clone() as Arc<dyn lake_ingestion::options::transaction::OptionMarketDataClient>
+        })
+    });
+    let option_selection = providers.option_selection.unwrap_or_else(|| client.clone());
+    let resolver = Arc::new(
+        lake_ingestion::options::resolve::OptionContractResolver::new(
+            option_selection,
+            contracts.clone(),
+        ),
+    );
+    let option_resolver: lake_http::state::OptionResolver = Arc::new(move |selector| {
+        let resolver = resolver.clone();
+        Box::pin(async move {
+            if !selection_available {
+                return Err(lake_contracts::DataError::value(
+                    "Alpaca credentials are required for option resolution",
+                ));
+            }
+            resolver.resolve(&selector).await
+        })
+    });
     let jobs: Arc<dyn JobRepository> = Arc::new(MemoryJobRepository::new());
     let issuer: Arc<dyn FileUrlIssuer> = Arc::new(LocalFileIssuer::new(layout.objects()));
     let sql_limits = QueryLimits::new(
@@ -90,6 +138,7 @@ pub fn create_local_app_with(
             .with_catalog(Arc::clone(&catalog))
             .with_jobs(Arc::clone(&jobs))
             .with_providers(providers.equity, providers.crypto)
+            .with_options(options, contracts.clone())
             .with_bars_provider(providers.bars),
     );
     let ensure_launcher: EnsureJobLauncher = launcher.launcher();
@@ -126,8 +175,9 @@ pub fn create_local_app_with(
         catalog: repository,
         jobs,
         listings: None,
-        contracts: None,
+        contracts: Some(contracts),
         front_sets: None,
+        option_resolver: Some(option_resolver),
         sas_issuer: Some(issuer),
         read_store: Some(read_store),
         ensure_launcher: Some(ensure_launcher),

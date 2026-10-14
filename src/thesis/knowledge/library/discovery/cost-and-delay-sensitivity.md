@@ -1,13 +1,13 @@
 ---
 id: cost-and-delay-sensitivity
 title: Cost and delay sensitivity
-version: 1
+version: 2
 created: 2026-10-02
-retrieved: 2026-10-02
+retrieved: 2026-10-11
 source:
   url: https://github.com/Carson-Fricke/FCA
   publisher: FCA Thesis
-  content_hash: 856b65e5e8af9a96de8b16d197af259a57f55153edaef707861e2edb490fd725
+  content_hash: ed2b6f332ed312a0f0d1a48a9fe3997facf9e9e4983999e742dc1efe4433dbe9
 tags:
   - transaction-costs
   - execution-delay
@@ -17,6 +17,7 @@ collections:
   - discovery
   - trading-costs
 links:
+  - developing-a-candidate-through-evidence
   - discovery-study-design
   - return-continuation-and-reversal
   - trade-prices-versus-midquotes
@@ -50,14 +51,23 @@ the answer more often than most other study choices.
 
 ## In brief
 
-- Re-run every result with a small cost and an execution delay.
+- Investigate candidate economics with plausible costs and causal execution delay.
 - Compute the break-even cost: the cost where the net effect is zero.
-- If the effect dies at one tick of cost, record that and stop.
+- If relevant economics fail, record which construction and assumptions failed.
 - Cost assumptions belong in the study log, not hidden in the conclusion.
 
 ## Add cost and delay
 
-Charge a cost on every round trip and delay the signal by at least one bar:
+First specify the opportunity, entry eligibility, invalidation and holding/exit
+policy being investigated. A pooled forward-bar average is not an estimate of a
+selective setup's entry-to-exit outcome. Observation-only studies can inspect
+hypothetical paths with explicit fill assumptions; they do not establish executed
+PnL or replace later strategy backtests.
+
+Charge costs on hypothetical round trips and compare plausible execution delays.
+One bar is a useful sensitivity case, not a universal latency assumption across
+different timeframes and tick streams. Ensure the signal is observable before
+the assumed entry price:
 
 \[
 \text{net} = \text{gross} - \text{cost per round trip}
@@ -69,23 +79,30 @@ bars. A table shows sensitivity better than a single number.
 
 ## Break-even cost
 
-The break-even cost is the cost that makes the net effect zero. Compare it
-with the observed spread. If the break-even cost is below the spread, the
-strategy loses by construction for a taker who crosses. See
+The break-even cost is the cost that makes the tested gross expectation zero.
+Report uncertainty and compare like units: round-trip fees, spread crossings,
+slippage and turnover under the declared execution assumptions. If plausible costs
+exceed the estimated gross expectation, that construction has unfavorable expected
+net economics under those assumptions. See
 [Simple trading economics](simple-trading-economics) and [Tradability,
 break-even, and out-of-sample](tradability-break-even-and-oos).
 
 ## If it dies at one tick
 
-Record the death. A finding that cannot survive one tick of cost is a fact
-about friction, not a trading edge. This is a valid and useful study result.
-State it plainly instead of hiding it under gross numbers. See
+Record the adverse economics for the tested opportunity. Do not extrapolate from
+a weak component average to every construction using the feature. Refinements
+need a mechanism-based rationale, not endless cost/threshold changes seeking a
+positive answer. Portfolio breadth may diversify risk but does not eliminate
+negative expected per-trade net economics. Finer data can improve measurement;
+it does not guarantee a larger signal or cheaper execution. See
 [Microstructure false positives](microstructure-false-positives).
 
 ## Cost assumptions
 
-Use the observed spread for the instrument and period, not a market-wide
-average. Include fees and a simple slippage estimate. Keep the assumptions
+Use observed spreads for the instrument and period when available. If only bars
+are available, label cost scenarios as assumptions, and report missing quote or
+execution evidence rather than asserting a measured cost floor. Include fees and
+a simple slippage estimate. Keep the assumptions
 visible in the study log. See [Trade prices versus
 midquotes](trade-prices-versus-midquotes) and
 [Data cost planning](data-cost-planning).

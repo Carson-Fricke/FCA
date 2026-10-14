@@ -2,10 +2,10 @@
 
 import json
 
-from thesis.agent.messages import decode_transcript
-from thesis.chat import ChatService
-from thesis.chat.contracts import MessageRole
-from thesis.providers.session_adapter import project_native_messages
+from thesis_runtime.adapters.providers.session_adapter import project_native_messages
+from thesis_runtime.contracts.messages import decode_transcript
+from thesis_runtime.contracts.records import MessageRole
+from thesis_runtime.conversations import ChatService
 
 
 def test_orphaned_result_and_async_failure_remain_visible() -> None:
@@ -37,7 +37,7 @@ def test_orphaned_result_and_async_failure_remain_visible() -> None:
 
 
 def test_paired_tool_results_keep_native_tool_roles() -> None:
-    from thesis.agent.messages import (
+    from thesis_runtime.contracts.messages import (
         MessageContent,
         SessionMessage,
         ToolCorrelation,

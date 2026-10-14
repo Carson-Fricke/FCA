@@ -8,14 +8,27 @@ from typing import cast
 import pytest
 from fastapi.testclient import TestClient
 
-from thesis.chat import ChatService
+from thesis.application.composition import build_serving_stack
 from thesis.http.application import create_app
-from thesis.http.serving import build_serving_stack
-from thesis.providers.invocations import ChatMessage, ModelCompletion, Role
-from thesis.providers.openrouter import OpenRouterProvider
+from thesis_runtime.adapters.providers.invocations import (
+    ChatMessage,
+    ModelCompletion,
+    Role,
+)
+from thesis_runtime.adapters.providers.openrouter import OpenRouterProvider
+from thesis_runtime.conversations import ChatService
 
 
 class Provider:
+    model = "test/model"
+
+    def stream(self, *, message_id=None, **kwargs):
+        from tests.thesis_runtime.provider_fakes import completion_frames
+
+        yield from completion_frames(self.complete(**kwargs), message_id)
+
+    streaming = True
+
     def complete(
         self,
         *,

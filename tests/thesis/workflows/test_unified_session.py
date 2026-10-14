@@ -6,26 +6,38 @@ from datetime import UTC, datetime
 
 import pytest
 
-from thesis.agent.messages import (
+from thesis_runtime.adapters.providers.invocations import (
+    ChatMessage,
+    ModelCompletion,
+    Role,
+    ToolCall,
+)
+from thesis_runtime.adapters.providers.session_adapter import (
+    NativeSessionAdapter,
+    project_native_messages,
+)
+from thesis_runtime.contracts.context import ToolContext
+from thesis_runtime.contracts.messages import (
     MessageContent,
     SessionMessage,
     ToolCorrelation,
     decode_transcript,
     from_record,
 )
-from thesis.agent.runtime.context import ToolContext
-from thesis.agent.runtime.conversation import Conversations
-from thesis.agent.runtime.delivery import Anchor
-from thesis.agent.runtime.session import (
+from thesis_runtime.contracts.records import (
+    MessageRole,
+    SubAgentKind,
+    WorkflowExecution,
+)
+from thesis_runtime.conversations import ChatService
+from thesis_runtime.conversations.conversation import Conversations
+from thesis_runtime.conversations.delivery import Anchor
+from thesis_runtime.subagents.specs import SubAgentSpec
+from thesis_runtime.tools.registry import (
     RegisteredTool,
     SessionToolRegistry,
     ToolExecution,
 )
-from thesis.agent.runtime.specs import SubAgentSpec
-from thesis.chat import ChatService
-from thesis.chat.contracts import MessageRole, SubAgentKind, WorkflowExecution
-from thesis.providers.invocations import ChatMessage, ModelCompletion, Role, ToolCall
-from thesis.providers.session_adapter import project_native_messages
 
 
 def test_root_and_workflow_phase_have_identical_durable_tool_protocol() -> None:
@@ -36,6 +48,13 @@ def test_root_and_workflow_phase_have_identical_durable_tool_protocol() -> None:
     profiles: list[Role] = []
 
     class Provider:
+        def stream(self, *, message_id=None, **kwargs):
+            from tests.thesis_runtime.provider_fakes import completion_frames
+
+            yield from completion_frames(self.complete(**kwargs), message_id)
+
+        streaming = True
+
         def complete(
             self,
             *,
@@ -61,7 +80,9 @@ def test_root_and_workflow_phase_have_identical_durable_tool_protocol() -> None:
     def registry(context: ToolContext) -> SessionToolRegistry:
         contexts.append(context)
 
-        def handler(arguments: Mapping[str, object]) -> ToolExecution:
+        def handler(
+            arguments: Mapping[str, object], context: ToolContext
+        ) -> ToolExecution:
             anchor = Anchor(context.workspace_id, context.chat_id, context.sub_agent_id)
             envelope = service.transcript(anchor)[-1]
             assert envelope.role is MessageRole.ASSISTANT
@@ -70,13 +91,13 @@ def test_root_and_workflow_phase_have_identical_durable_tool_protocol() -> None:
 
         return SessionToolRegistry(
             [
-                RegisteredTool(
-                    {"type": "function", "function": {"name": "check"}}, handler
-                ),
+                RegisteredTool({"name": "check"}, handler),
             ]
         )
 
-    service = Conversations(chat=chat, provider=Provider(), registry_factory=registry)
+    service = Conversations(
+        chat=chat, provider=NativeSessionAdapter(Provider()), registry_factory=registry
+    )
     chat.persistence.save(
         WorkflowExecution(
             workspace_id="workspace",
@@ -88,6 +109,9 @@ def test_root_and_workflow_phase_have_identical_durable_tool_protocol() -> None:
             requested_by="operator",
             created_by="operator",
             created_at=datetime.now(UTC),
+            conversation_id=thread.chat_id,
+            root_conversation_id=thread.chat_id,
+            parent_conversation_id=None,
         )
     )
     phase = service.lifecycle.spawn(
@@ -95,7 +119,10 @@ def test_root_and_workflow_phase_have_identical_durable_tool_protocol() -> None:
         thread.chat_id,
         actor_id="operator",
         spec=SubAgentSpec(
-            role="research", phase="creation", kind=SubAgentKind.ONE_SHOT
+            role="research",
+            phase="creation",
+            kind=SubAgentKind.ONE_SHOT,
+            allowed_tools=("check",),
         ),
         phase_attempt_id="attempt",
         workflow_execution_id="execution",
@@ -181,6 +208,13 @@ def test_fresh_live_and_replay_inputs_share_exact_projection(source: str) -> Non
     )
 
     class Provider:
+        def stream(self, *, message_id=None, **kwargs):
+            from tests.thesis_runtime.provider_fakes import completion_frames
+
+            yield from completion_frames(self.complete(**kwargs), message_id)
+
+        streaming = True
+
         def complete(
             self,
             *,
@@ -202,19 +236,15 @@ def test_fresh_live_and_replay_inputs_share_exact_projection(source: str) -> Non
                 else (),
             )
 
-    def handler(arguments: Mapping[str, object]) -> ToolExecution:
+    def handler(arguments: Mapping[str, object], context: ToolContext) -> ToolExecution:
         service.deliver_session_message(anchor, incoming[1], schedule=False)
         return ToolExecution(ok=True, text="Checked")
 
     service = Conversations(
         chat=chat,
-        provider=Provider(),
+        provider=NativeSessionAdapter(Provider()),
         registry_factory=lambda context: SessionToolRegistry(
-            [
-                RegisteredTool(
-                    {"type": "function", "function": {"name": "check"}}, handler
-                )
-            ]
+            [RegisteredTool({"name": "check"}, handler)]
         ),
     )
     service.deliver_session_message(anchor, incoming[0], schedule=False)

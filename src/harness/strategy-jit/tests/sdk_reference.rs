@@ -12,13 +12,27 @@ fn sdk_identity_matches_workspace_programs_relative_source_hash_contract() {
             format!("{name}/Cargo.toml"),
             backtest::sha256::digest_hex(&std::fs::read(root.join("Cargo.toml")).unwrap()),
         );
-        for entry in std::fs::read_dir(root.join("src")).unwrap() {
-            let path = entry.unwrap().path();
-            if path.is_file() && path.extension().is_some_and(|extension| extension == "rs") {
-                sources.insert(
-                    format!("{name}/src/{}", path.file_name().unwrap().to_str().unwrap()),
-                    backtest::sha256::digest_hex(&std::fs::read(&path).unwrap()),
-                );
+        let mut directories = vec![root.join("src")];
+        while let Some(directory) = directories.pop() {
+            for entry in std::fs::read_dir(directory).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    directories.push(path);
+                    continue;
+                }
+                if path.is_file() && path.extension().is_some_and(|extension| extension == "rs") {
+                    sources.insert(
+                        format!(
+                            "{name}/{}",
+                            path.strip_prefix(&root)
+                                .unwrap()
+                                .to_str()
+                                .unwrap()
+                                .replace('\\', "/")
+                        ),
+                        backtest::sha256::digest_hex(&std::fs::read(&path).unwrap()),
+                    );
+                }
             }
         }
     }
@@ -52,6 +66,22 @@ fn sdk_identity_matches_workspace_programs_relative_source_hash_contract() {
     assert_eq!(decimal["sdkIdentity"], result["sdkIdentity"]);
     assert_eq!(decimal["topic"], "decimal");
     assert!(decimal["content"].as_str().unwrap().contains("to_f64"));
+    for topic in [
+        "research_views",
+        "research_publishing",
+        "research_recipes",
+        "wavelet",
+    ] {
+        let reference = validation_service()
+            .sdk_reference(
+                json!({"topic":topic,"start_line":1,"end_line":3})
+                    .as_object()
+                    .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(reference["sdkIdentity"], result["sdkIdentity"]);
+        assert!(!reference["content"].as_str().unwrap().is_empty());
+    }
     for invalid in [
         json!({"topic": "../../secret"}),
         json!({"topic": "consumer", "max_chars": 16001}),

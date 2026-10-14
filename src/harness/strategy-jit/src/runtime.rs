@@ -375,6 +375,8 @@ impl StrategyRuntime for JitStudyRuntime {
             return Err(BacktestError::StrategyExecution(detail));
         }
         self.metrics = collector.values;
+        harness_strategy_sdk::research::validate_publication(&collector.outputs)
+            .map_err(BacktestError::StrategyExecution)?;
         self.outputs = collector.outputs;
         Ok(())
     }
@@ -580,6 +582,8 @@ impl StrategyRuntime for JitStrategyRuntime {
             return Err(BacktestError::StrategyExecution(detail));
         }
         self.metrics = collector.values;
+        harness_strategy_sdk::research::validate_publication(&collector.outputs)
+            .map_err(BacktestError::StrategyExecution)?;
         self.outputs = collector.outputs;
         Ok(())
     }

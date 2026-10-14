@@ -7,6 +7,6 @@
 //! through the frozen HTTP contract and never opens lake files.
 
 pub use lake_contracts::{
-    crypto_sessions, crypto_utc_days, partition_path, sessions_for, symbol_filename, xnys_sessions,
-    AssetClass, BarInterval, DataType, ExchangeSession,
+    canonical_osi_symbol, crypto_sessions, crypto_utc_days, partition_path, sessions_for,
+    symbol_filename, xnys_sessions, AssetClass, BarInterval, DataType, ExchangeSession,
 };

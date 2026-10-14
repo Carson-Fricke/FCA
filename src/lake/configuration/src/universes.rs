@@ -291,25 +291,16 @@ impl EquityUniverse {
 impl EquityHistory {
     fn from_section(mut section: Section) -> Result<Self, ConfigError> {
         let trade = HistoryPolicy::from_value(
-            take_alias(&mut section, &["trade", "trades"]),
+            section.take("trades").unwrap_or(Value::Null),
             "equities.soak.history.trades",
         )?;
         let quote = HistoryPolicy::from_value(
-            take_alias(&mut section, &["quote", "quotes"]),
+            section.take("quotes").unwrap_or(Value::Null),
             "equities.soak.history.quotes",
         )?;
         section.finish()?;
         Ok(Self { trade, quote })
     }
-}
-
-fn take_alias(section: &mut Section, names: &[&str]) -> Value {
-    for name in names {
-        if let Some(value) = section.take(name) {
-            return value;
-        }
-    }
-    Value::Null
 }
 
 impl HistoryPolicy {
