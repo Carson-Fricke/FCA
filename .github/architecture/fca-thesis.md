@@ -89,6 +89,7 @@ The wheel and Thesis image builds exercise installed SDK reference/template
 reads under isolated Python. Deployment smoke requires the latest API and
 worker revisions to run the published digest with ready containers; API probes
 must pass, and an old healthy revision never satisfies the rollout check.
+The public UI publishes only after this runtime smoke succeeds.
 SDK version and ABI are read from packaged metadata; SDK identity
 hashes all three crates' manifests and source files. Remote harness access does not
 replace these local reference assets. Shared `prompts/sdk.py` asks for operator

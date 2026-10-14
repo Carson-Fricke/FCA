@@ -747,7 +747,9 @@ jobs:
 
   deploy-ui:
     name: Build and deploy the Thesis UI
-    needs: deploy
+    needs:
+      - deploy
+      - thesis-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Additive public host: the SvelteKit application under src/ui is built on
