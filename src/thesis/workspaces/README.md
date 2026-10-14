@@ -63,9 +63,10 @@ saved exhibits, typed evidence and reusable compositions, alongside the
 renders exact declared subscriptions. Matching local SDK sources are required;
 remote source topics are read from the serving harness after matching its identity.
 Wheels and source distributions ship
-the canonical `strategy-sdk`, `contracts`, and `num` Cargo manifests and Rust
+the canonical `harness/strategy-sdk`, `harness/contracts`, `harness/num`, and
+`lake/contracts` Cargo manifests and Rust
 sources with portable relative dependencies. Version/ABI metadata is read from
-the SDK and checked against the packaged copy; SDK identity hashes all three
+the SDK and checked against the packaged copy; SDK identity hashes all four
 crates' manifests and source files. The shared templates in `programs.py` back
 reference reads and basic authoring. They are minimal SDK contracts, not research
 models with substantive falsifiers or fitted outputs.
