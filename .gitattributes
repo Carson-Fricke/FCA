@@ -4,3 +4,8 @@ src/lake/catalog/tests/oracle/*.json text eol=lf
 src/lake/tests/oracle/** text eol=lf
 config/harness/*.rs text eol=lf
 config/harness/programs/*.rs text eol=lf
+# SDK identities hash canonical bytes in source checkouts, wheels, and images.
+src/harness/strategy-sdk/** text=auto eol=lf
+src/harness/contracts/** text=auto eol=lf
+src/harness/num/** text=auto eol=lf
+src/lake/contracts/** text=auto eol=lf

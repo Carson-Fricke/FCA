@@ -24,6 +24,8 @@ with TemporaryDirectory() as directory:
         crates.add(name)
         assert isinstance(manifest["package"]["version"], str)
         assert (root / "src" / "lib.rs").is_file()
+        for source in [root / "Cargo.toml", *(root / "src").rglob("*.rs")]:
+            assert b"\r\n" not in source.read_bytes(), source
         for section in ("dependencies", "dev-dependencies", "build-dependencies"):
             for dependency in manifest.get(section, {}).values():
                 if isinstance(dependency, dict):

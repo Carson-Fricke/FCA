@@ -91,7 +91,9 @@ worker revisions to run the published digest with ready containers; API probes
 must pass, and an old healthy revision never satisfies the rollout check.
 The public UI publishes only after this runtime smoke succeeds.
 SDK version and ABI are read from packaged metadata; SDK identity
-hashes all four crates' manifests and source files. Compiler provenance covers
+hashes all four crates' manifests and source files using canonical LF bytes on
+Windows and Linux; Git attributes and the installed SDK build smoke enforce
+that byte contract. Compiler provenance covers
 the same complete dependency sources. The shared image verifies the portable
 SDK Cargo dependency graph offline before publishing. Remote harness access does not
 replace these local reference assets. Shared `prompts/sdk.py` asks for operator
