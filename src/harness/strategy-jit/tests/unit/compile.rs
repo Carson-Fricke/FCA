@@ -3,7 +3,7 @@ use super::*;
 use super::fixture::{artifact_value, replace_preserving_mtime, Fixture};
 
 #[test]
-fn contracts_only_source_change_rebuilds_immutable_artifact_and_workspace_key() {
+fn transitive_contract_change_rebuilds_immutable_artifact_and_workspace_key() {
     let fixture = Fixture::new();
     replace_preserving_mtime(
         &fixture.sdk.join("src/lib.rs"),
@@ -36,7 +36,7 @@ fn contracts_only_source_change_rebuilds_immutable_artifact_and_workspace_key() 
 
     // Same size and mtime: content, not package version or filesystem metadata, invalidates reuse.
     replace_preserving_mtime(
-        &fixture.root.join("contracts/src/lib.rs"),
+        &fixture.root.join("lake/contracts/src/lib.rs"),
         "pub const VALUE: u32 = 9;",
     );
     let changed = build();
@@ -134,7 +134,7 @@ fn compiler_contract_rebuilds_same_version_sources_and_legacy_manifests() {
     assert_eq!(artifact_value(&first), 2);
     assert!(build().cached);
     replace_preserving_mtime(
-        &fixture.root.join("num/src/lib.rs"),
+        &fixture.root.join("harness/num/src/lib.rs"),
         "pub const VALUE: u32 = 2;",
     );
     let num_changed = build();
@@ -250,7 +250,7 @@ fn process_compile_worker() {
         &workspace,
         &source,
         ProgramKind::Study,
-        &root.join("strategy-sdk"),
+        &root.join("harness/strategy-sdk"),
     )
     .unwrap();
     std::fs::write(root.join(std::env::var("JIT_TEST_PROCESS_RESULT").unwrap()),

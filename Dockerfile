@@ -125,6 +125,7 @@ RUN chown -R lake:lake /usr/local/cargo
 COPY src/harness/strategy-sdk /opt/rust/sdk/strategy-sdk
 COPY src/harness/num /opt/rust/sdk/num
 COPY src/harness/contracts /opt/rust/sdk/contracts
+COPY src/lake/contracts /opt/rust/lake/contracts
 # The Rust harness process binaries, served directly on PATH (`harness`, `api`,
 # `backtest-job`, `mcp`, `trader`).
 COPY --from=rust \
@@ -138,6 +139,8 @@ COPY --from=rust \
 # execs it; discovery uses LAKE_RUST_BINARY_DIR.
 COPY --from=lake /build/src/lake/target/release/lake /opt/rust/bin/lake
 COPY config/ /app/config/
+RUN cargo metadata --offline --format-version 1 --no-deps \
+    --manifest-path /opt/rust/sdk/strategy-sdk/Cargo.toml > /dev/null
 
 WORKDIR /app
 # The CLI artifact convention writes under .local/ (backtest artifacts,

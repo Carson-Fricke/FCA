@@ -57,6 +57,7 @@ exclude = ["*.target*", "*.tests*", "*.src", "*.src.*"]
 "harness.strategy-sdk" = ["Cargo.toml", "src/*.rs", "src/research/*.rs"]
 "harness.contracts" = ["Cargo.toml", "src/*.rs"]
 "harness.num" = ["Cargo.toml", "src/*.rs"]
+"lake.contracts" = ["Cargo.toml", "src/*.rs"]
 
 [tool.pytest.ini_options]
 addopts = ["--strict-config", "--strict-markers", "--import-mode=importlib", "-ra"]

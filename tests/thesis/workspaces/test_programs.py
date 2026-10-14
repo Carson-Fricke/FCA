@@ -644,10 +644,14 @@ def test_sdk_root_deployment_and_version_mismatch(
     with pytest.raises(ProgramArtifactError, match="unavailable"):
         missing.validate("workspace-one", "study", "alpha")
     assert not harness.calls
-    deployed = tmp_path / "sdk"
+    deployed = tmp_path / "harness" / "strategy-sdk"
     shutil.copytree(service.sdk_root, deployed)
     for crate in ("contracts", "num"):
-        shutil.copytree(service.sdk_root.parent / crate, tmp_path / crate)
+        shutil.copytree(service.sdk_root.parent / crate, tmp_path / "harness" / crate)
+    shutil.copytree(
+        service.sdk_root.parent.parent / "lake" / "contracts",
+        tmp_path / "lake" / "contracts",
+    )
     matched = WorkspacePrograms(
         provider,
         harness,
@@ -758,16 +762,20 @@ def test_sdk_dependency_change_invalidates_validation(
 ) -> None:
     service, provider, harness = programs
     for crate in ("strategy-sdk", "contracts", "num"):
-        shutil.copytree(service.sdk_root.parent / crate, tmp_path / crate)
+        shutil.copytree(service.sdk_root.parent / crate, tmp_path / "harness" / crate)
+    shutil.copytree(
+        service.sdk_root.parent.parent / "lake" / "contracts",
+        tmp_path / "lake" / "contracts",
+    )
     deployed = WorkspacePrograms(
         provider,
         harness,
-        sdk_root=tmp_path / "strategy-sdk",
+        sdk_root=tmp_path / "harness" / "strategy-sdk",
         git_factory=provider.git_factory,
     )
     deployed.author("workspace-one", "study", "alpha", configuration=CONFIG)
     deployed.validate("workspace-one", "study", "alpha")
-    dependency = tmp_path / "contracts/src/lib.rs"
+    dependency = tmp_path / "lake/contracts/src/options.rs"
     dependency.write_text(
         dependency.read_text(encoding="utf-8") + "\n// changed\n", encoding="utf-8"
     )

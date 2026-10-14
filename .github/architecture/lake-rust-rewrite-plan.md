@@ -299,6 +299,9 @@ published client until its consumers migrate.
   reads, and real ingestion. The former independent in-memory CLI router was
   removed; it incorrectly acknowledged ensure work without storing coverage
   in Azure. Local API commands continue to compose `lake-local` explicitly.
+  `lake-contracts` has a standalone Cargo manifest so the same canonical
+  crate travels with the portable authoring SDK in wheels and runtime images;
+  it does not require the rest of the lake workspace at runtime.
   Both local and Azure ensure composition delegate to
   `lake-ingestion::EnsureIngest`: the accepted coverage gap plan selects exact
   datasets and sessions, tick sessions run with concurrency four and separate

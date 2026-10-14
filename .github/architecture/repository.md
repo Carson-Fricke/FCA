@@ -753,9 +753,9 @@ replacing conflicting raw harness/legacy author tools.
 kernel topic, and templates;
 `template=basic` renders exact subscriptions. Local SDK sources are required even
 with a remote harness. Wheels and source distributions package canonical
-`harness/strategy-sdk`, `harness/contracts`, and `harness/num` Cargo manifests and
+`harness/strategy-sdk`, `harness/contracts`, `harness/num`, and `lake/contracts` Cargo manifests and
 Rust sources with portable relative path dependencies. SDK version/ABI metadata
-comes from the packaged SDK; SDK identity hashes all three crates' manifests
+comes from the packaged SDK; SDK identity hashes all four crates' manifests
 and source files. Shared minimal templates in `workspaces/programs.py` back both
 reference reads and basic authoring, not completed research implementations.
 Shared workflow prompt guidance owns targeted repair and

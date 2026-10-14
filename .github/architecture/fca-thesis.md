@@ -82,7 +82,7 @@ or repairing source. The phase agent owns SDK lookup, validation, and repair.
 The shared minimal templates in `workspaces/programs.py` back `read_sdk_reference` (including the `decimal` kernel topic)
 and `template=basic` authoring; they are SDK contracts, not substantive research
 implementations. Wheels and source distributions carry canonical `strategy-sdk`,
-`contracts`, and `num` Cargo manifests/Rust sources with portable relative
+`harness/contracts`, `harness/num`, and `lake/contracts` Cargo manifests/Rust sources with portable relative
 dependencies. Canonical SDK discovery uses the sibling package layout shared by
 source and wheel installations, without searching for a repository checkout.
 The wheel and Thesis image builds exercise installed SDK reference/template
@@ -91,7 +91,9 @@ worker revisions to run the published digest with ready containers; API probes
 must pass, and an old healthy revision never satisfies the rollout check.
 The public UI publishes only after this runtime smoke succeeds.
 SDK version and ABI are read from packaged metadata; SDK identity
-hashes all three crates' manifests and source files. Remote harness access does not
+hashes all four crates' manifests and source files. Compiler provenance covers
+the same complete dependency sources. The shared image verifies the portable
+SDK Cargo dependency graph offline before publishing. Remote harness access does not
 replace these local reference assets. Shared `prompts/sdk.py` asks for operator
 input after three unsuccessful compiler repairs; there is no runtime repair cap.
 

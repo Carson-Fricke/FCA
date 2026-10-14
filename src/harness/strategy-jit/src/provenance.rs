@@ -23,7 +23,13 @@ pub(super) fn compiler_fingerprint(
     ];
     let num = sdk.join("../num");
     let contracts = sdk.join("../contracts");
-    for directory in [sdk.as_path(), contracts.as_path(), num.as_path()] {
+    let lake_contracts = sdk.join("../../lake/contracts");
+    for directory in [
+        sdk.as_path(),
+        contracts.as_path(),
+        num.as_path(),
+        lake_contracts.as_path(),
+    ] {
         fingerprint_file(&mut inputs, &directory.join("Cargo.toml"), false)?;
         fingerprint_file(&mut inputs, &directory.join("build.rs"), true)?;
         fingerprint_sources(&mut inputs, &directory.join("src"))?;

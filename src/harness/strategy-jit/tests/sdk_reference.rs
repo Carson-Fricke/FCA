@@ -6,8 +6,12 @@ use std::collections::BTreeMap;
 fn sdk_identity_matches_workspace_programs_relative_source_hash_contract() {
     let sdk = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../strategy-sdk");
     let mut sources = BTreeMap::new();
-    for name in ["strategy-sdk", "contracts", "num"] {
-        let root = sdk.join("..").join(name);
+    for (name, root) in [
+        ("strategy-sdk", sdk.clone()),
+        ("contracts", sdk.join("../contracts")),
+        ("num", sdk.join("../num")),
+        ("lake-contracts", sdk.join("../../lake/contracts")),
+    ] {
         sources.insert(
             format!("{name}/Cargo.toml"),
             backtest::sha256::digest_hex(&std::fs::read(root.join("Cargo.toml")).unwrap()),

@@ -145,6 +145,7 @@ impl ValidationService {
             ("strategy-sdk", sdk.clone()),
             ("contracts", sdk.join("../contracts")),
             ("num", sdk.join("../num")),
+            ("lake-contracts", sdk.join("../../lake/contracts")),
         ] {
             hashes.insert(
                 format!("{name}/Cargo.toml"),

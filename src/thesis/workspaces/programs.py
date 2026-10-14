@@ -1880,6 +1880,7 @@ impl Default for AuthoredIndicator {
                 ("strategy-sdk", self.sdk_root),
                 ("contracts", self.sdk_root.parent / "contracts"),
                 ("num", self.sdk_root.parent / "num"),
+                ("lake-contracts", self.sdk_root.parent.parent / "lake" / "contracts"),
             ):
                 sources[f"{name}/Cargo.toml"] = _hash(
                     (crate / "Cargo.toml").read_bytes()

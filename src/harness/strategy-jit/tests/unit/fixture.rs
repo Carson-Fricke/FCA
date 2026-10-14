@@ -24,24 +24,31 @@ impl Fixture {
                 .as_nanos(),
             FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
-        let sdk = root.join("strategy-sdk");
+        let sdk = root.join("harness/strategy-sdk");
         for (name, package, source) in [
             (
-                "strategy-sdk",
+                "harness/strategy-sdk",
                 "harness-strategy-sdk",
                 "pub fn value() -> u32 { num::VALUE + 1 }",
             ),
-            ("num", "num", "pub const VALUE: u32 = 1;"),
+            ("harness/num", "num", "pub const VALUE: u32 = 1;"),
             (
-                "contracts",
+                "harness/contracts",
                 "harness-contracts",
+                "pub const VALUE: u32 = lake_contracts::VALUE;",
+            ),
+            (
+                "lake/contracts",
+                "lake-contracts",
                 "pub const VALUE: u32 = 1;",
             ),
         ] {
             let directory = root.join(name);
             std::fs::create_dir_all(directory.join("src")).unwrap();
-            let dependencies = if name == "strategy-sdk" {
+            let dependencies = if package == "harness-strategy-sdk" {
                 "[dependencies]\nnum = { path = \"../num\" }\nharness-contracts = { path = \"../contracts\" }\n"
+            } else if package == "harness-contracts" {
+                "[dependencies]\nlake-contracts = { path = \"../../lake/contracts\" }\n"
             } else {
                 ""
             };

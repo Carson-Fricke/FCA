@@ -52,6 +52,7 @@ authoring defaults or evidence that a research hypothesis has been implemented.
 
 Workspace program IDs and Git publication belong to Thesis, not this crate.
 The JIT compiles the assembled source/configuration it receives. Thesis's packaged
-SDK reference identity includes the canonical SDK, contracts, and num Cargo/source
+SDK reference identity includes the canonical SDK, harness contracts, num, and
+lake contracts Cargo/source
 hashes; JIT compiler provenance additionally covers its own build and toolchain
 environment. These identities have different owners and are not interchangeable.
