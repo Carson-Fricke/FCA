@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use crate::{BlobStore, Lease, LeaseProvider, ReadableBlobStore, SasIssuer, SymbolDayScope};
 use azure_core::auth::TokenCredential;
-use azure_core::request_options::{LeaseDuration, LeaseId};
+use azure_core::request_options::{IfMatchCondition, LeaseDuration, LeaseId};
 use azure_core::{Body, StatusCode};
 use azure_storage::shared_access_signature::service_sas::BlobSasPermissions;
 use azure_storage::shared_access_signature::SasToken;
@@ -404,16 +404,10 @@ impl AzureBlobLeaseProvider {
 impl LeaseProvider for AzureBlobLeaseProvider {
     fn acquire(&self, scope: &SymbolDayScope) -> Result<Box<dyn Lease>, DataError> {
         let path = self.blob_name(scope);
-        // Create the lock blob if missing; an empty overwrite race is benign
-        // because only the lease acquisition grants exclusivity. The Rust SDK
-        // 0.21 builders expose no If-None-Match condition for put-blob, so the
-        // Python `upload_blob(b"", overwrite=False)` existence check becomes a
-        // properties probe.
-        match self.container.download(&path) {
-            Ok(_) => {}
-            Err(DataError::NotFound(_)) => {
-                self.container.upload(&path, b"", true)?;
-            }
+        // Conditional creation accepts an existing empty lock without a ranged
+        // download (which Azure rejects with 416) or overwriting another writer.
+        match self.container.upload(&path, b"", false) {
+            Ok(()) | Err(DataError::Conflict(_)) => {}
             Err(error) => return Err(error),
         }
         let lease_id = self
@@ -571,15 +565,22 @@ impl SdkBlobContainer {
 }
 
 impl AzureBlobContainer for SdkBlobContainer {
-    fn upload(&self, path: &str, payload: &[u8], _overwrite: bool) -> Result<(), DataError> {
+    fn upload(&self, path: &str, payload: &[u8], overwrite: bool) -> Result<(), DataError> {
         let client = self.container.blob_client(path);
-        let future = client
-            .put_block_blob(Body::from(payload.to_vec()))
-            .into_future();
+        let mut request = client.put_block_blob(Body::from(payload.to_vec()));
+        if !overwrite {
+            request = request.if_match(IfMatchCondition::NotMatch("*".into()));
+        }
         self.executor
-            .block_on(future)?
+            .block_on(request.into_future())?
             .map(|_| ())
-            .map_err(http_error)
+            .map_err(|error| {
+                if !overwrite && is_http_status(&error, StatusCode::PreconditionFailed) {
+                    DataError::Conflict(error.to_string())
+                } else {
+                    http_error(error)
+                }
+            })
     }
 
     fn download(&self, path: &str) -> Result<Vec<u8>, DataError> {
@@ -738,3 +739,7 @@ pub fn sas_issuer_from_account_url(
     )?);
     AzureBlobSasIssuer::with_ttl_seconds(backend, container_name, ttl_seconds)
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/azure_http.rs"]
+mod azure_http_behavior;

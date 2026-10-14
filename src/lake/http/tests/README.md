@@ -6,6 +6,6 @@ Tests exercise the public application and acquisition boundaries; fake transport
 - `entra_auth.rs` — Entra managed-identity JWT authentication, ported from
 - `health_auth.rs` — Health, authentication, and unmatched-route behavior.
 - `query.rs` — File-query and deferred SQL-query route behavior.
-- `read.rs` — Streaming Arrow IPC read route behavior.
+- `read.rs` — Streaming Arrow IPC read route behavior, including bounded/coalesced frames, unchanged IPC bytes, final flush, and storage-error propagation.
 - `reference.rs` — Point-in-time reference universe and facts route behavior.
 - `support/` contains shared fixtures or focused boundary checks.

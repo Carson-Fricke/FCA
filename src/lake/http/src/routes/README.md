@@ -9,5 +9,5 @@ HTTP handlers over catalog, coverage, query, and injected resolution/ensure port
 - `options.rs` — Resolve one individual contract before acquiring its ordinary datasets.
 - `query.rs` — Authenticated file-query and bounded SQL-query routes.
 - `raw.rs` — Authenticated raw-object metadata route.
-- `read.rs` — Authenticated streaming Arrow IPC read route.
+- `read.rs` — Authenticated streaming Arrow IPC read route. A bounded 64 KiB buffer coalesces Arrow's small writes before the response channel; IPC completion flushes the final bytes and errors remain stream failures.
 - `reference.rs` — Authenticated point-in-time reference routes.

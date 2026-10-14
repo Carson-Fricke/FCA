@@ -24,6 +24,13 @@ streaming `GET /v1/read` route serves `trade`, `quote`, and `bars`
 partitions as Arrow IPC, and `GET /v1/reference/universe` /
 `GET /v1/reference/facts` publish the point-in-time reference views.
 
+Hosted symbol-day locks use atomic conditional blob creation (`If-None-Match: *`)
+followed by lease acquisition. Existing empty lock blobs are valid coordination
+objects: acquisition never downloads or overwrites them. SDK HTTP behavior
+checks cover reuse, create races, active-owner conflicts, and permission errors.
+The read route coalesces Arrow writes into bounded 64 KiB response chunks over
+its bounded channel, preserving the canonical IPC bytes and streaming failures.
+
 ## Why rewrite
 
 Three structural costs, measured on the local stack.

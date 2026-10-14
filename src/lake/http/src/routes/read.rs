@@ -24,6 +24,8 @@ use crate::selection::{contracts_or_default, option_coverage, OptionRequestLike}
 use crate::state::ApiContext;
 use crate::validate::StrictQuery;
 
+const RESPONSE_CHUNK_BYTES: usize = 64 * 1024;
+
 /// Stream the ensured Arrow IPC stream for the requested window.
 pub(crate) async fn read(
     State(context): State<ApiContext>,
@@ -47,7 +49,9 @@ pub(crate) async fn read(
     let (sender, receiver) = tokio::sync::mpsc::channel::<Result<Bytes, io::Error>>(1);
     let error_sender = sender.clone();
     tokio::task::spawn_blocking(move || {
-        let writer = ChannelWriter { sender };
+        // Arrow issues many small writes, including alignment padding. Buffer
+        // them before crossing the channel; finish flushes the final IPC bytes.
+        let writer = io::BufWriter::with_capacity(RESPONSE_CHUNK_BYTES, ChannelWriter { sender });
         if let Err(error) =
             write_dataset_ipc_stream(&*store, &object_paths, asset_class, data_type, writer)
         {
@@ -146,10 +150,11 @@ struct ChannelWriter {
 
 impl std::io::Write for ChannelWriter {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        let length = buffer.len().min(RESPONSE_CHUNK_BYTES);
         self.sender
-            .blocking_send(Ok(Bytes::copy_from_slice(buffer)))
+            .blocking_send(Ok(Bytes::copy_from_slice(&buffer[..length])))
             .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "client disconnected"))?;
-        Ok(buffer.len())
+        Ok(length)
     }
 
     fn flush(&mut self) -> io::Result<()> {

@@ -8,10 +8,12 @@ use arrow_array::{Array, Decimal128Array, RecordBatch, StringArray, TimestampNan
 use arrow_ipc::reader::StreamReader;
 use arrow_schema::Schema;
 use axum::http::{header, StatusCode};
+use http_body_util::BodyExt;
 use lake_catalog::CatalogRepository;
 use lake_contracts::{schema_for, AssetClass, DataType, Date};
 use serde_json::json;
 use support::*;
+use tower::ServiceExt;
 
 fn date(month: u32, day: u32) -> Date {
     Date::from_ymd(2024, month, day).expect("valid date")
@@ -253,5 +255,86 @@ async fn read_requires_a_bearer_token() {
             .get(header::WWW_AUTHENTICATE)
             .and_then(|value| value.to_str().ok()),
         Some("Bearer")
+    );
+}
+
+#[tokio::test]
+async fn large_reads_coalesce_bounded_frames_without_changing_ipc_bytes() {
+    let temporary = tempfile::tempdir().expect("tempdir");
+    let store = Arc::new(lake_storage::LocalFilesystemStore::new(temporary.path()));
+    let rows: Vec<_> = (0..4096)
+        .map(|id| json!({"timestamp": "2024-01-18T14:30:00Z", "trade_id": id, "exchange": "XNAS", "price": "190.12", "size": 10, "conditions": ["@"], "tape": "C"}))
+        .collect();
+    write_market_partition(
+        &store,
+        AssetClass::Equity,
+        DataType::Trade,
+        None,
+        "AAPL",
+        date(1, 18),
+        &rows,
+    );
+    let record = complete_record(AssetClass::Equity, DataType::Trade, "AAPL", date(1, 18));
+    let mut expected = Vec::new();
+    lake_storage::write_dataset_ipc_stream(
+        &*store,
+        &[record.object_path.clone().expect("object path")],
+        AssetClass::Equity,
+        DataType::Trade,
+        &mut expected,
+    )
+    .expect("expected stream");
+    let catalog = shared_catalog([record]);
+    let mut state = base_state(catalog);
+    state.read_store = Some(store);
+    let router = build_app(state);
+    let request = get_auth("/v1/read?asset_class=equity&data_type=trade&symbol=AAPL&start_date=2024-01-18&end_date=2024-01-18");
+    let response = router.oneshot(request).await.expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = response.into_body();
+    let mut bytes = Vec::new();
+    let mut frames = 0;
+    while let Some(frame) = body.frame().await {
+        let frame = frame.expect("stream frame");
+        if let Some(data) = frame.data_ref() {
+            assert!(data.len() <= 64 * 1024, "bounded response buffer");
+            frames += 1;
+            bytes.extend_from_slice(data);
+        }
+    }
+    assert!(
+        frames < 32,
+        "must coalesce small Arrow writes, got {frames} frames"
+    );
+    assert_eq!(
+        bytes, expected,
+        "transport buffering must preserve canonical IPC bytes and EOF"
+    );
+    let (_, batches) = decode_stream(&bytes);
+    assert_eq!(
+        batches.iter().map(RecordBatch::num_rows).sum::<usize>(),
+        rows.len()
+    );
+}
+
+#[tokio::test]
+async fn failed_partition_reads_remain_stream_failures() {
+    let temporary = tempfile::tempdir().expect("tempdir");
+    let store = Arc::new(lake_storage::LocalFilesystemStore::new(temporary.path()));
+    let catalog = shared_catalog([complete_record(
+        AssetClass::Equity,
+        DataType::Trade,
+        "AAPL",
+        date(1, 18),
+    )]);
+    let mut state = base_state(catalog);
+    state.read_store = Some(store);
+    let router = build_app(state);
+    let request = get_auth("/v1/read?asset_class=equity&data_type=trade&symbol=AAPL&start_date=2024-01-18&end_date=2024-01-18");
+    let response = router.oneshot(request).await.expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response.into_body().collect().await.is_err(),
+        "missing storage payload must not become a successful partial stream"
     );
 }
