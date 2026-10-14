@@ -5,6 +5,9 @@
 !src/**
 !config/
 !config/**
+!scripts/
+!scripts/ci/
+!scripts/ci/installed_sdk_smoke.py
 !strategies/
 !strategies/**
 src/harness/target/

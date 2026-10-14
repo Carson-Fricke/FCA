@@ -83,7 +83,13 @@ The shared minimal templates in `workspaces/programs.py` back `read_sdk_referenc
 and `template=basic` authoring; they are SDK contracts, not substantive research
 implementations. Wheels and source distributions carry canonical `strategy-sdk`,
 `contracts`, and `num` Cargo manifests/Rust sources with portable relative
-dependencies. SDK version and ABI are read from packaged metadata; SDK identity
+dependencies. Canonical SDK discovery uses the sibling package layout shared by
+source and wheel installations, without searching for a repository checkout.
+The wheel and Thesis image builds exercise installed SDK reference/template
+reads under isolated Python. Deployment smoke requires the latest API and
+worker revisions to run the published digest with ready containers; API probes
+must pass, and an old healthy revision never satisfies the rollout check.
+SDK version and ABI are read from packaged metadata; SDK identity
 hashes all three crates' manifests and source files. Remote harness access does not
 replace these local reference assets. Shared `prompts/sdk.py` asks for operator
 input after three unsuccessful compiler repairs; there is no runtime repair cap.

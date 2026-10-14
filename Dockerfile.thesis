@@ -14,6 +14,8 @@ RUN uv sync --locked --no-dev --no-install-project
 
 COPY src/ ./src/
 RUN uv sync --locked --no-dev --no-editable
+COPY scripts/ci/installed_sdk_smoke.py /tmp/installed_sdk_smoke.py
+RUN uv run --no-sync python -I /tmp/installed_sdk_smoke.py
 RUN test -x /opt/venv/bin/thesis
 
 FROM python:3.12-slim AS runtime

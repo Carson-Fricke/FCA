@@ -36,6 +36,9 @@ from thesis_runtime.storage.ownership import assert_owned
 
 ProgramKind = Literal["study", "strategy", "indicator"]
 
+# Source and wheel installations share the same thesis/harness sibling layout.
+_PACKAGED_SDK_ROOT = Path(__file__).resolve().parents[2] / "harness" / "strategy-sdk"
+
 #: Settle one dispatched execution's definitive non-success outcome, given the
 #: execution certainty and an optional message.
 JobSettlement = Callable[[str, str | None], None]
@@ -332,16 +335,7 @@ class WorkspacePrograms:
         self.repositories = repositories
         self.sketches = WorkspaceSketches(repositories, git_factory=git_factory)
         self.harness = harness
-        self.sdk_root = sdk_root or (
-            next(
-                parent
-                for parent in Path(__file__).resolve().parents
-                if (parent / "pyproject.toml").is_file()
-            )
-            / "src"
-            / "harness"
-            / "strategy-sdk"
-        )
+        self.sdk_root = sdk_root or _PACKAGED_SDK_ROOT
         self._git_factory = git_factory
         self._catalog_cache: dict[
             tuple[str, str], tuple[str, tuple[dict[str, object], ...]]
@@ -1877,17 +1871,7 @@ impl Default for AuthoredIndicator {
     def _sdk_identity(self) -> str:
         try:
             metadata = self._sdk_metadata(self.sdk_root)
-            canonical = (
-                next(
-                    parent
-                    for parent in Path(__file__).resolve().parents
-                    if (parent / "pyproject.toml").is_file()
-                )
-                / "src"
-                / "harness"
-                / "strategy-sdk"
-            )
-            if metadata != self._sdk_metadata(canonical):
+            if metadata != self._sdk_metadata(_PACKAGED_SDK_ROOT):
                 raise ProgramArtifactError(
                     "SDK reference/templates do not match the packaged SDK"
                 )

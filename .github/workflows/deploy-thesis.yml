@@ -13,6 +13,8 @@ on:
     paths:
       - .github/workflows/deploy-thesis.yml
       - Dockerfile.thesis
+      - .dockerignore
+      - scripts/ci/**
       - infra/main.bicep
       - infra/modules/thesis.bicep
       - infra/modules/thesis-workspaces.bicep
@@ -27,24 +29,7 @@ on:
       - pyproject.toml
       - uv.lock
   workflow_dispatch:
-    inputs:
-      expect-thesis-serving:
-        description: >-
-          Whether the Thesis API process is expected to serve /health. True
-          makes degraded health fail the smoke; false reports it as an
-          expected warning until the workspace data services are composed.
-        required: false
-        type: boolean
-        default: false
   workflow_call:
-    inputs:
-      expect-thesis-serving:
-        description: >-
-          Whether the Thesis API process is expected to serve /health. True
-          makes degraded health fail the smoke.
-        required: false
-        type: boolean
-        default: false
 
 concurrency:
   # Shared across every workflow that deploys infra/main.bicep (deploy-main,
@@ -461,10 +446,8 @@ jobs:
     timeout-minutes: 20
     # The smoke is non-destructive: it is read-only except for the temporary
     # one-replica Thesis API scale used by the private ingress health probe,
-    # which is restored through an exit trap (mirroring quant-smoke). While
-    # the workspace data services are being composed, degraded health is
-    # reported as a warning; EXPECT_THESIS_SERVING=true turns it into a
-    # failure once the runtime is complete.
+    # which restores the previous scale through an exit trap. Both API and
+    # worker must run the new digest; an old healthy revision cannot pass.
     environment:
       name: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
     permissions:
@@ -473,7 +456,6 @@ jobs:
     env:
       THESIS_IMAGE_REFERENCE: ${{ needs.build-thesis-image.outputs.image-reference }}
       THESIS_IMAGE_DIGEST: ${{ needs.build-thesis-image.outputs.image-digest }}
-      EXPECT_THESIS_SERVING: ${{ inputs.expect-thesis-serving || 'false' }}
       THESIS_HARNESS_BEARER_TOKEN_SECRET_NAME: ${{ vars.THESIS_HARNESS_BEARER_TOKEN_SECRET_NAME }}
       THESIS_MODEL_API_KEY_SECRET_NAME: ${{ vars.THESIS_MODEL_API_KEY_SECRET_NAME }}
       THESIS_GITEA_TOKEN_SECRET_NAME: ${{ vars.THESIS_GITEA_TOKEN_SECRET_NAME }}
@@ -518,7 +500,7 @@ jobs:
             fi
           done
 
-          for boolean in EXPECT_THESIS_SERVING THESIS_ENABLE_EXTERNAL_INGRESS; do
+          for boolean in THESIS_ENABLE_EXTERNAL_INGRESS; do
             value="${!boolean,,}"
             if [[ -z "$value" ]]; then
               value="false"
@@ -670,144 +652,39 @@ jobs:
         run: |
           set -euo pipefail
 
-          strict_serving="${EXPECT_THESIS_SERVING,,}"
-          if [[ -z "$strict_serving" ]]; then
-            strict_serving="false"
+          app_name="${RESOURCE_NAME_PREFIX,,}-${DEPLOYMENT_ENVIRONMENT,,}-thesis-api"
+          previous_min="$(az containerapp show --name "$app_name" --resource-group "$AZURE_RESOURCE_GROUP" --query properties.template.scale.minReplicas -o tsv)"
+          restore_scale() {
+            if [[ "$previous_min" == "0" ]]; then
+              az containerapp update --name "$app_name" --resource-group "$AZURE_RESOURCE_GROUP" --min-replicas 0 --only-show-errors --output none
+            fi
+          }
+          if [[ "$previous_min" == "0" ]]; then
+            trap restore_scale EXIT
+            az containerapp update --name "$app_name" --resource-group "$AZURE_RESOURCE_GROUP" --min-replicas 1 --only-show-errors --output none
           fi
-          scaffold_note="The Thesis API workspace data services may still fail closed, so degraded health is reported as a warning until they are composed."
+
+          bash scripts/ci/wait_aca_revision.sh "$app_name" "$AZURE_RESOURCE_GROUP" "$THESIS_IMAGE_REFERENCE" healthy
+          bash scripts/ci/wait_aca_revision.sh "${app_name}-worker" "$AZURE_RESOURCE_GROUP" "$THESIS_IMAGE_REFERENCE" ready
 
           if [[ "${THESIS_ENABLE_EXTERNAL_INGRESS,,}" == "true" ]]; then
-            health_status="$(curl \
-              --silent \
-              --show-error \
-              --location \
-              --output /dev/null \
-              --write-out '%{http_code}' \
-              --connect-timeout 10 \
-              --max-time 30 \
-              --retry 12 \
-              --retry-all-errors \
-              --retry-delay 5 \
-              "https://${THESIS_API_FQDN}/health" || echo '000')"
-            if [[ "$health_status" != "200" ]]; then
-              if [[ "$strict_serving" == "true" ]]; then
-                echo "::error::The Thesis API /health probe returned $health_status instead of 200"
-                exit 1
-              fi
-              echo "::warning::The Thesis API /health probe returned $health_status. $scaffold_note"
+            curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+              --retry 12 --retry-all-errors --retry-delay 5 "https://${THESIS_API_FQDN}/health" >/dev/null
+            protected_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+              --connect-timeout 10 --max-time 30 "https://${THESIS_API_FQDN}/v1/auth/check")"
+            if [[ "$protected_status" != "401" ]]; then
+              echo "::error::The Thesis API protected route returned $protected_status instead of 401"
+              exit 1
             fi
-
-            protected_status="000"
-            if [[ "$health_status" == "200" ]]; then
-              # The protected route must reject anonymous calls; this proves
-              # the authentication boundary without moving the bearer token
-              # into the runner. The healthy revision already proves the
-              # versionless Key Vault reference for thesis-api-bearer-token
-              # resolves.
-              protected_status="$(curl \
-                --silent \
-                --show-error \
-                --location \
-                --output /dev/null \
-                --write-out '%{http_code}' \
-                --connect-timeout 10 \
-                --max-time 30 \
-                "https://${THESIS_API_FQDN}/v1/auth/check")"
-              if [[ "$protected_status" != "401" ]]; then
-                if [[ "$strict_serving" == "true" ]]; then
-                  echo "::error::The Thesis API protected route returned $protected_status instead of rejecting anonymous access"
-                  exit 1
-                fi
-                echo "::warning::The Thesis API protected route returned $protected_status. $scaffold_note"
-              fi
-            fi
-
-            {
-              echo "### Thesis API health"
-              echo "- Mode: public ingress"
-              echo "- \\`/health\\` returned \\`$health_status\\` and \\`/v1/auth/check\\` returned \\`$protected_status\\`"
-              if [[ "$strict_serving" != "true" ]]; then
-                echo "- $scaffold_note"
-              fi
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            normalized_prefix="${RESOURCE_NAME_PREFIX,,}"
-            normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
-            thesis_api_app_name="${normalized_prefix}-${normalized_environment}-thesis-api"
-
-            restore_scale_to_zero() {
-              az containerapp update \
-                --name "$thesis_api_app_name" \
-                --resource-group "$AZURE_RESOURCE_GROUP" \
-                --min-replicas 0 \
-                --only-show-errors \
-                --output none
-            }
-            trap restore_scale_to_zero EXIT
-
-            az containerapp update \
-              --name "$thesis_api_app_name" \
-              --resource-group "$AZURE_RESOURCE_GROUP" \
-              --min-replicas 1 \
-              --only-show-errors \
-              --output none
-
-            health_state="Unknown"
-            provisioning_state="Unknown"
-            for _ in {1..24}; do
-              revision="$(az containerapp revision list \
-                --name "$thesis_api_app_name" \
-                --resource-group "$AZURE_RESOURCE_GROUP" \
-                --output json \
-                | jq --compact-output \
-                  '[.[] | select(.properties.active == true)] | sort_by(.properties.createdTime) | last // {}')"
-              health_state="$(jq --raw-output '.properties.healthState // "Unknown"' <<<"$revision")"
-              provisioning_state="$(jq --raw-output '.properties.provisioningState // "Unknown"' <<<"$revision")"
-              if [[ "$health_state" == "Healthy" && "$provisioning_state" == "Provisioned" ]]; then
-                break
-              fi
-              if [[ "$provisioning_state" == "Failed" ]]; then
-                break
-              fi
-              sleep 5
-            done
-
-            if [[ "$health_state" == "Healthy" && "$provisioning_state" == "Provisioned" ]]; then
-              # Mirroring quant-smoke, the private path proves health through
-              # the platform probes; a public runner cannot reach the
-              # internal FQDN to exercise the 401 boundary directly.
-              probe_outcome="The active revision passed all three \\`/health\\` probes"
-            else
-              if [[ "$strict_serving" == "true" ]]; then
-                echo "::error::The private Thesis API revision did not pass its /health probes ($health_state, $provisioning_state)"
-                exit 1
-              fi
-              echo "::warning::The private Thesis API revision reported $health_state, $provisioning_state. $scaffold_note"
-              probe_outcome="Revision reported \\`$health_state\\`, \\`$provisioning_state\\`"
-            fi
-
-            restore_scale_to_zero
-            trap - EXIT
-
-            {
-              echo "### Thesis API health"
-              echo "- Mode: private ingress (temporary one-replica probe, restored to zero)"
-              echo "- $probe_outcome"
-              if [[ "$strict_serving" != "true" ]]; then
-                echo "- $scaffold_note"
-              fi
-            } >> "$GITHUB_STEP_SUMMARY"
           fi
+          echo "### Thesis API and worker" >> "$GITHUB_STEP_SUMMARY"
+          echo "Both latest revisions are ready on the published digest; API platform probes passed." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check the custom hostname (optional)
         shell: bash
         run: |
           set -euo pipefail
 
-          strict_serving="${EXPECT_THESIS_SERVING,,}"
-          if [[ -z "$strict_serving" ]]; then
-            strict_serving="false"
-          fi
           check_enabled="${THESIS_CHECK_CUSTOM_DOMAIN,,}"
 
           if [[ "$check_enabled" != "true" ]]; then
@@ -839,11 +716,8 @@ jobs:
             --retry-delay 5 \
             "https://${THESIS_CUSTOM_DOMAIN}/health" || echo '000')"
           if [[ "$health_status" != "200" ]]; then
-            if [[ "$strict_serving" == "true" ]]; then
-              echo "::error::The custom hostname /health probe on $THESIS_CUSTOM_DOMAIN returned $health_status instead of 200"
-              exit 1
-            fi
-            echo "::warning::The custom hostname /health probe on $THESIS_CUSTOM_DOMAIN returned $health_status (managed-certificate issuance can lag the first binding)"
+            echo "::error::The custom hostname /health probe on $THESIS_CUSTOM_DOMAIN returned $health_status instead of 200"
+            exit 1
           fi
 
           protected_status="000"
@@ -860,11 +734,8 @@ jobs:
               --max-time 30 \
               "https://${THESIS_CUSTOM_DOMAIN}/v1/auth/check")"
             if [[ "$protected_status" != "401" ]]; then
-              if [[ "$strict_serving" == "true" ]]; then
-                echo "::error::The custom hostname protected route on $THESIS_CUSTOM_DOMAIN returned $protected_status instead of rejecting anonymous access"
-                exit 1
-              fi
-              echo "::warning::The custom hostname protected route on $THESIS_CUSTOM_DOMAIN returned $protected_status"
+              echo "::error::The custom hostname protected route on $THESIS_CUSTOM_DOMAIN returned $protected_status instead of rejecting anonymous access"
+              exit 1
             fi
           fi
 

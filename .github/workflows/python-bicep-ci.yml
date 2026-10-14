@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/python-bicep-ci.yml"
       - ".github/workflows/deploy-thesis.yml"
+      - "scripts/ci/**"
       - "**/*.py"
       - "config/**"
       - "tests/**"
@@ -23,6 +24,7 @@ on:
     paths:
       - ".github/workflows/python-bicep-ci.yml"
       - ".github/workflows/deploy-thesis.yml"
+      - "scripts/ci/**"
       - "**/*.py"
       - "config/**"
       - "tests/**"
@@ -80,6 +82,11 @@ jobs:
 
       - name: Build package
         run: uv build --python 3.12 --wheel --force-pep517 --out-dir dist-ci --clear --no-create-gitignore .
+
+      - name: Verify installed SDK outside the checkout
+        run: |
+          uv export --locked --no-dev --no-emit-project --no-hashes --format requirements-txt --output-file dist-ci/requirements.txt
+          uv run --python 3.12 --isolated --no-project --with-requirements dist-ci/requirements.txt --with ./dist-ci/fca-0.1.0-py3-none-any.whl python -I scripts/ci/installed_sdk_smoke.py
 
   rust:
     name: Rust format, lint, and tests
