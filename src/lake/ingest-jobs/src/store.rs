@@ -106,6 +106,7 @@ impl JobStore {
             .await?
             .header("If-None-Match", "*")
             .header("x-ms-blob-type", "BlockBlob")
+            .header(reqwest::header::CONTENT_LENGTH, 0)
             .body("")
             .send()
             .await
@@ -213,6 +214,7 @@ impl JobStore {
             .await?
             .header("x-ms-lease-action", "acquire")
             .header("x-ms-lease-duration", "60")
+            .header(reqwest::header::CONTENT_LENGTH, 0)
             .body("")
             .send()
             .await
@@ -279,6 +281,7 @@ impl OwnedJob {
                 .await?
                 .header("x-ms-lease-action", action)
                 .header("x-ms-lease-id", &self.lease)
+                .header(reqwest::header::CONTENT_LENGTH, 0)
                 .body("")
                 .send()
                 .await

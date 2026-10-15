@@ -70,6 +70,10 @@ async fn azure(
         return xml.into_response();
     }
     if let Some(key) = path.strip_prefix("blob/") {
+        // Azure requires an explicit zero length for empty blob/lease PUTs.
+        if method == Method::PUT && body.is_empty() && headers.get("content-length").is_none() {
+            return StatusCode::LENGTH_REQUIRED.into_response();
+        }
         let mut leases = state.leases.lock().unwrap();
         let mut blobs = state.blobs.lock().unwrap();
         if let Some(action) = headers

@@ -172,4 +172,6 @@ Native and HTTP option acquisition validate the same contract membership and use
 
 Azure conditional blob creation treats `412` and the specific `409 BlobAlreadyExists` response as existing-resource outcomes. Admission validates retained input before joining; coordinator-lock creation then acquires the existing lock. Other conflicts retain their failure/ownership semantics.
 
+Empty Blob and lease PUTs explicitly send `Content-Length: 0`, as required by Azure Storage. The Azure HTTP behavior boundary enforces this requirement for admission/reconciliation and lease acquisition, renewal and release.
+
 The Linux runtime supplies a writable local data root and the bundled worker path. Local signed-object transport accepts an explicit public base URL for forwarded ports and LAN clients. The ingestion image imports the shared build cache as well as its own cache, retaining the narrow runtime image while reusing already-built worker artifacts.
