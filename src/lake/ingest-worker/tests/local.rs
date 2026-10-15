@@ -138,11 +138,12 @@ async fn local_worker_publishes_all_datasets_and_retained_admission_survives_hos
                 .to_string(),
         ),
         ("LAKE_API__BEARER_TOKEN".into(), "local-test".into()),
+        ("LAKE_LOCAL_PUBLIC_URL".into(), base.clone()),
     ]);
     let host = lake_hosted::api::create_host(
         &env,
         Arc::new(|| lake_contracts::DateTime::parse_iso_utc("2024-02-01T00:00:00Z").unwrap()),
-        &base,
+        "http://invalid.test/internal-bind",
     )
     .unwrap();
     let access = host.access;

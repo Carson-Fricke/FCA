@@ -19,3 +19,5 @@ The combined host injects native access directly. Separate clients explicitly co
 `market-data-profile --session <closed-date>` benchmarks native acquisition and verified reads. `--endpoint <combined-base>/market-data` measures a separate client. Use one closed symbol-session and isolated storage for cold ingestion comparisons; `--no-ensure` measures existing data. Reports never contain credentials or signed URLs.
 
 `uv run --extra dev lake local reset --yes` explicitly removes only a marker-valid local data tree. Outdated documents are rejected, never upgraded at read time. See `.github/architecture/market-data-runtime.md` for boundaries and deployment details.
+
+The shared Linux image defaults to `/app/.local/market-lake` and its bundled finite worker. Set `LAKE_LOCAL_PUBLIC_URL` to the externally reachable combined market-data base when forwarding ports or serving LAN clients; it controls scoped object-download URLs, independently of the bind address.

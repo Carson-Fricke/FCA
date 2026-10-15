@@ -171,3 +171,5 @@ Local process reconciliation runs at 250 ms; Azure control-plane reconciliation 
 Native and HTTP option acquisition validate the same contract membership and use one canonical option job identity. Unknown contracts fail before admission in both transports.
 
 Azure conditional blob creation treats `412` and the specific `409 BlobAlreadyExists` response as existing-resource outcomes. Admission validates retained input before joining; coordinator-lock creation then acquires the existing lock. Other conflicts retain their failure/ownership semantics.
+
+The Linux runtime supplies a writable local data root and the bundled worker path. Local signed-object transport accepts an explicit public base URL for forwarded ports and LAN clients. The ingestion image imports the shared build cache as well as its own cache, retaining the narrow runtime image while reusing already-built worker artifacts.

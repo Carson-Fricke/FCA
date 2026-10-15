@@ -19,6 +19,14 @@ pub fn local_overrides(
     bearer: &str,
 ) -> Result<(crate::HostedOverrides, Router), crate::HostedEnsureError> {
     let error = |e: DataError| crate::HostedEnsureError::new(e.to_string());
+    let public = harness_lakeclient::LakeClientConfig::new(
+        env.get("LAKE_LOCAL_PUBLIC_URL")
+            .map(String::as_str)
+            .unwrap_or(base),
+        bearer,
+    )
+    .map_err(|e| crate::HostedEnsureError::new(e.to_string()))?;
+    let base = public.base_url();
     let layout = lake_local::LocalLayout::from_environment(None, env)
         .map_err(|e| crate::HostedEnsureError::new(e.to_string()))?;
     layout

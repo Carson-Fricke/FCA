@@ -89,5 +89,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.image.outputs.name }}-ingestion:${{ github.sha }}
-          cache-from: type=gha,scope=fca-ingestion-image
+          cache-from: |
+            type=gha,scope=fca-shared-image
+            type=gha,scope=fca-ingestion-image
           cache-to: type=gha,mode=max,scope=fca-ingestion-image

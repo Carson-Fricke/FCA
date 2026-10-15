@@ -7,3 +7,5 @@ This hosting boundary selects explicit local or Azure adapters and injects the s
 - `runtime.rs`: wires Azure storage, catalog, durable admission and ACI reconciliation, and shares acquisition callbacks with local composition.
 - `local.rs`: wires filesystem catalog/jobs, finite local workers and scoped HMAC object downloads.
 - `access.rs`: adapts catalog, acquisition and object ports to native harness requests, preserving shared ensure policy and verified reading without HTTP self-calls.
+
+`LAKE_LOCAL_PUBLIC_URL` selects the external market-data base for signed local object downloads when a proxy, LAN name or forwarded port differs from the bind address.
