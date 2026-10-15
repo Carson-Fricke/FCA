@@ -10,4 +10,4 @@ Alpaca transport, pacing, parsing, and acquisition. The option contract master i
 - `lib.rs` — Alpaca market-data client for the market lake.
 - `parse.rs` — Alpaca response page and row parsing.
 - `records.rs` — Normalized provider records independent of HTTP transport.
-- `transport.rs` — Injectable HTTP transport and the production reqwest implementation.
+- `transport.rs` — Injectable HTTP transport and the production reqwest implementation; response JSON decoding runs on the blocking pool so in-flight downloads retain async worker capacity.

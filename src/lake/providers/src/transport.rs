@@ -118,7 +118,13 @@ impl AlpacaTransport for ReqwestTransport {
                 .text()
                 .await
                 .map_err(|error| TransportFailure::Transport(error.to_string()))?;
-            let body = decode_body(&text, status)?;
+            // A full SIP page is CPU-heavy to decode. Keep JSON allocation and
+            // parsing off the async workers needed by other in-flight requests.
+            let body = tokio::task::spawn_blocking(move || decode_body(&text, status))
+                .await
+                .map_err(|error| {
+                    TransportFailure::Protocol(format!("response decode task failed: {error}"))
+                })??;
             Ok(TransportResponse {
                 status,
                 retry_after,

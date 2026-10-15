@@ -1003,6 +1003,8 @@ fn account_from_url(account_url: &str) -> Result<String, DataError> {
 /// from ordinary sync threads, from inside another runtime's workers, and
 /// from test tasks, and the runtime is never dropped in a context where
 /// blocking is not allowed.
+/// Independent SDK operations are spawned together; each synchronous caller
+/// waits only for its own result, never for an unrelated operation to finish.
 #[derive(Clone)]
 struct Executor {
     sender: std::sync::mpsc::Sender<Task>,
@@ -1028,7 +1030,7 @@ impl Executor {
                     return;
                 };
                 for task in receiver {
-                    runtime.block_on(task);
+                    runtime.spawn(task);
                 }
             });
         Self { sender }
@@ -1180,3 +1182,7 @@ impl TableEntityStore for SdkTableEntityStore {
             .map_err(http_error)
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/azure_http.rs"]
+mod azure_http_behavior;

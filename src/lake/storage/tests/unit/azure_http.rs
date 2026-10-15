@@ -108,7 +108,7 @@ impl HttpClient for BlobHttp {
     }
 }
 
-fn container(http: Arc<BlobHttp>) -> Arc<SdkBlobContainer> {
+fn container<T: HttpClient + 'static>(http: Arc<T>) -> Arc<SdkBlobContainer> {
     Arc::new(SdkBlobContainer {
         container: BlobServiceClient::builder("testaccount", StorageCredentials::anonymous())
             .transport(TransportOptions::new(http))
@@ -186,4 +186,48 @@ fn create_permission_errors_propagate_and_object_replacement_still_overwrites() 
         http.state.lock().unwrap().payload.as_deref(),
         Some(b"second".as_slice())
     );
+}
+
+#[derive(Debug)]
+struct ConcurrentBlobHttp(tokio::sync::Barrier);
+
+impl HttpClient for ConcurrentBlobHttp {
+    fn execute_request<'a, 'b, 'future>(
+        &'a self,
+        request: &'b Request,
+    ) -> BoxFuture<'future, azure_core::Result<Response>>
+    where
+        'a: 'future,
+        'b: 'future,
+        Self: 'future,
+    {
+        Box::pin(async move {
+            // Neither upload can finish until the other reaches the service.
+            // The timeout makes a serial-executor regression fail, not hang.
+            tokio::time::timeout(std::time::Duration::from_secs(2), self.0.wait())
+                .await
+                .expect("independent blob operations must overlap");
+            assert_eq!(request.method(), &Method::Put);
+            Ok(response(
+                if request.url().path().ends_with("denied.parquet") {
+                    StatusCode::Forbidden
+                } else {
+                    StatusCode::Created
+                },
+            ))
+        })
+    }
+}
+
+#[test]
+fn independent_uploads_overlap_and_keep_their_own_results() {
+    let store = AzureBlobStore::new(container(Arc::new(ConcurrentBlobHttp(
+        tokio::sync::Barrier::new(2),
+    ))));
+    std::thread::scope(|threads| {
+        let good = threads.spawn(|| store.replace("good.parquet", b"good"));
+        let denied = threads.spawn(|| store.replace("denied.parquet", b"denied"));
+        good.join().unwrap().expect("unrelated upload succeeds");
+        assert!(matches!(denied.join().unwrap(), Err(DataError::Io(_))));
+    });
 }

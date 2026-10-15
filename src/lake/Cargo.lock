@@ -2182,6 +2182,7 @@ dependencies = [
  "azure_core",
  "azure_data_tables",
  "azure_storage",
+ "bytes",
  "futures-util",
  "lake-contracts",
  "serde",
@@ -2352,6 +2353,7 @@ dependencies = [
 name = "lake-providers"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "futures-util",
  "lake-catalog",
  "lake-contracts",

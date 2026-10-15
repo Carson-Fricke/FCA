@@ -498,6 +498,15 @@ derived bars when available. `GET /v1/read` streams `trade`, `quote`, and
 `GET /v1/reference/facts` serve the point-in-time classification universe and
 facts.
 
+Provider response JSON decoding runs on Tokio's blocking pool, alongside the
+existing page-row conversion, keeping async workers available for downloads.
+The Blob and Table adapters retain synchronous ports backed by dedicated SDK
+runtimes. Their dispatcher threads spawn independent operations concurrently;
+each caller waits for its own result. Lease acquisition, conditional object
+creation, and per-operation ordering remain the coordination boundaries.
+Real-SDK tests with simulated HTTP require independent Blob uploads and Table
+upserts to overlap while preserving separate success/failure results.
+
 ```text
 src/lake/
 |-- Cargo.toml                 Workspace manifest (resolver 2)
