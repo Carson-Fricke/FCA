@@ -141,7 +141,7 @@ Native HTTP/MCP execution receives catalog/acquisition and object ports directly
 
 Local job and publication ownership uses kernel locks, released automatically on process death. Worker executables are pinned under the owned data root by content hash, so admitted jobs retain the accepted binary and running workers do not lock the build output. Per-record atomic catalog files isolate concurrent publications and avoid whole-catalog rewrites. Local/provider credentials never enter durable job specifications.
 
-Azure registration and the conditioned OIDC bootstrap are completed. The consolidated release and performance evidence remain pending until live verification finishes.
+Azure registration and the conditioned OIDC bootstrap are completed. The first consolidated Azure revision is deployed; final-source rollout and performance verification are in progress. The provider-free coordinator is named `<quant-api-name>-dispatch`, within ACA job naming limits.
 
 ## Executable verification
 

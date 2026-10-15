@@ -327,7 +327,7 @@ jobs:
           expected_ingestion_image="${acr_login_server}/${GITHUB_REPOSITORY_NAME,,}-ingestion@${INGESTION_DIGEST}"
           [[ "$ingestion_image" == "$expected_ingestion_image" ]] || { echo "::error::ACI ingestion image configuration mismatch"; exit 1; }
 
-          dispatcher_image="$(az containerapp job show --name "${quant_api_app_name}-ingestion-dispatcher" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.template.containers[?name=='dispatcher'].image | [0]" -o tsv)"
+          dispatcher_image="$(az containerapp job show --name "${quant_api_app_name}-dispatch" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.template.containers[?name=='dispatcher'].image | [0]" -o tsv)"
           [[ "$dispatcher_image" == "$expected_ingestion_image" ]] || { echo "::error::Dispatcher image configuration mismatch"; exit 1; }
 
           quant_api_image="$(az containerapp show \

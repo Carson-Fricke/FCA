@@ -331,7 +331,7 @@ resource environmentDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-0
 
 // Coordination is finite and provider-free. The API can scale to zero without stranding durable work.
 resource ingestionDispatcher 'Microsoft.App/jobs@2025-07-01' = {
-  name: '${quantApiAppName}-ingestion-dispatcher'
+  name: '${quantApiAppName}-dispatch'
   location: location
   tags: tags
   identity: {
