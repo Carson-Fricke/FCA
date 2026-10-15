@@ -139,7 +139,9 @@ impl HostedRuntime {
             store: JobStore::new(format!("{blob_url}/{container_name}"), credential.clone())?,
             runner: AciRunner::new(AciConfig::from_environment(environ)?, credential.clone())?,
         });
-        ingestion.clone().start_reconciler();
+        ingestion
+            .clone()
+            .start_reconciler(std::time::Duration::from_secs(2));
         Ok(Self {
             catalog: Arc::new(catalog),
             jobs,

@@ -165,3 +165,5 @@ provider execution are superseded by these boundaries. Provider transaction,
 publication, SDK-concurrency and schema tests remain required.
 
 Option membership and canonical option-file classification live in `lake-coverage`; `lake-query::plan_snapshot` is shared by native and HTTP readers. Local and Azure query admission use the same retained-job callback and terminal-state policy.
+
+Local process reconciliation runs at 250 ms; Azure control-plane reconciliation runs at 2 s. Caller-owned completion observation caps polling at 500 ms. These bounds avoid multi-second local completion/handoff delays without copying execution policy.

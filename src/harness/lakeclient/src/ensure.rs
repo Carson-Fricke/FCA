@@ -13,9 +13,9 @@ use std::time::Duration;
 use crate::models::{CoverageEntry, JobStatus};
 
 /// First coverage-poll interval.
-pub(crate) const POLL_START: Duration = Duration::from_millis(1_000);
+pub(crate) const POLL_START: Duration = Duration::from_millis(100);
 /// Coverage polls never wait longer than this between attempts.
-pub(crate) const POLL_MAX: Duration = Duration::from_millis(5_000);
+pub(crate) const POLL_MAX: Duration = Duration::from_millis(500);
 
 /// The coverage-poll interval that follows one wait.
 pub(crate) fn next_poll_interval(current: Duration) -> Duration {

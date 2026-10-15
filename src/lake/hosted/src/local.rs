@@ -61,7 +61,8 @@ pub fn local_overrides(
         })
         .map_err(error)?,
     });
-    jobs.clone().start_reconciler();
+    jobs.clone()
+        .start_reconciler(std::time::Duration::from_millis(250));
     let catalog = Arc::new(lake_local::FileCatalog::new(
         layout.state_dir().join("catalog"),
     ));

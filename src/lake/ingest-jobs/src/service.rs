@@ -166,13 +166,16 @@ impl<R: WorkerRunner, S: JobPersistence> IngestionJobs<R, S> {
         }
         owner.release().await
     }
-    pub fn start_reconciler(self: Arc<Self>) -> tokio::task::JoinHandle<()> {
+    pub fn start_reconciler(
+        self: Arc<Self>,
+        interval: std::time::Duration,
+    ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             loop {
                 if let Err(error) = self.reconcile().await {
                     eprintln!("ingestion reconciliation failed: {error}");
                 }
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                tokio::time::sleep(interval).await;
             }
         })
     }
