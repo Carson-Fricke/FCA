@@ -82,6 +82,9 @@ RUN cargo build --locked --release -p lake-cli --bins
 # Provider execution has a small independent image; it carries no JIT compiler or DuckDB.
 FROM rust-base AS ingestion-builder
 WORKDIR /build/src/lake
+COPY --from=lake-planner /build/recipe.json /build/recipe.json
+COPY src/harness/ /build/src/harness/
+RUN cargo chef cook --locked --release --recipe-path /build/recipe.json -p lake-ingest-worker -p lake-ingest-jobs
 COPY src/lake/ ./
 COPY src/harness/ /build/src/harness/
 RUN cargo build --locked --release -p lake-ingest-worker -p lake-ingest-jobs --bins

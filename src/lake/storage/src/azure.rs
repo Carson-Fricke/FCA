@@ -124,9 +124,20 @@ impl Executor {
         self.sender
             .send(task)
             .map_err(|_| DataError::io("the azure sdk executor is unavailable"))?;
-        receiver
-            .recv()
-            .map_err(|_| DataError::io("the azure sdk executor stopped"))
+        let receive = || {
+            receiver
+                .recv()
+                .map_err(|_| DataError::io("the azure sdk executor stopped"))
+        };
+        if tokio::runtime::Handle::try_current().is_ok_and(|handle| {
+            handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread
+        }) {
+            // Synchronous ports may be called on an async worker. Hand its
+            // scheduler work off while waiting, including pooled credential I/O.
+            tokio::task::block_in_place(receive)
+        } else {
+            receive()
+        }
     }
 }
 

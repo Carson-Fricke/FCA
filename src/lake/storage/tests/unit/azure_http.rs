@@ -219,15 +219,14 @@ impl HttpClient for ConcurrentBlobHttp {
     }
 }
 
-#[test]
-fn independent_uploads_overlap_and_keep_their_own_results() {
-    let store = AzureBlobStore::new(container(Arc::new(ConcurrentBlobHttp(
-        tokio::sync::Barrier::new(2),
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn independent_uploads_overlap_and_keep_their_own_results() {
+    let store = Arc::new(AzureBlobStore::new(container(Arc::new(
+        ConcurrentBlobHttp(tokio::sync::Barrier::new(2)),
     ))));
-    std::thread::scope(|threads| {
-        let good = threads.spawn(|| store.replace("good.parquet", b"good"));
-        let denied = threads.spawn(|| store.replace("denied.parquet", b"denied"));
-        good.join().unwrap().expect("unrelated upload succeeds");
-        assert!(matches!(denied.join().unwrap(), Err(DataError::Io(_))));
-    });
+    let good_store = store.clone();
+    let good = tokio::spawn(async move { good_store.replace("good.parquet", b"good") });
+    let denied = tokio::spawn(async move { store.replace("denied.parquet", b"denied") });
+    good.await.unwrap().expect("unrelated upload succeeds");
+    assert!(matches!(denied.await.unwrap(), Err(DataError::Io(_))));
 }

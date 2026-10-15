@@ -174,4 +174,8 @@ Azure conditional blob creation treats `412` and the specific `409 BlobAlreadyEx
 
 Empty Blob and lease PUTs explicitly send `Content-Length: 0`, as required by Azure Storage. The Azure HTTP behavior boundary enforces this requirement for admission/reconciliation and lease acquisition, renewal and release.
 
+The synchronous Blob and Table SDK bridges yield multithreaded Tokio scheduler workers while waiting for their dedicated SDK executors. A one-worker API must remain live while storage operations and shared credential I/O complete. The SDK HTTP concurrency behavior tests run on a single Tokio worker and verify overlapping operations with independent outcomes.
+
 The Linux runtime supplies a writable local data root and the bundled worker path. Local signed-object transport accepts an explicit public base URL for forwarded ports and LAN clients. The ingestion image imports the shared build cache as well as its own cache, retaining the narrow runtime image while reusing already-built worker artifacts.
+
+The finite-worker builder cooks dependencies from the lake Cargo recipe before restoring application sources. Source-only changes therefore reuse its dependency compilation layer as well as the harness's.

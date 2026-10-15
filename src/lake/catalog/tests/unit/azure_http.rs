@@ -49,9 +49,9 @@ impl HttpClient for ConcurrentTableHttp {
     }
 }
 
-#[test]
-fn independent_upserts_overlap_and_keep_their_own_results() {
-    let store = SdkTableEntityStore {
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn independent_upserts_overlap_and_keep_their_own_results() {
+    let store = Arc::new(SdkTableEntityStore {
         table: TableServiceClientBuilder::new("testaccount", StorageCredentials::anonymous())
             .transport(TransportOptions::new(Arc::new(ConcurrentTableHttp(
                 tokio::sync::Barrier::new(2),
@@ -60,17 +60,18 @@ fn independent_upserts_overlap_and_keep_their_own_results() {
             .build()
             .table_client("coverage"),
         executor: Executor::shared(),
-    };
+    });
     let entity = |key| {
         serde_json::json!({"PartitionKey": "coverage", "RowKey": key})
             .as_object()
             .unwrap()
             .clone()
     };
-    std::thread::scope(|threads| {
-        let good = threads.spawn(|| store.upsert_entity(entity("good")));
-        let denied = threads.spawn(|| store.upsert_entity(entity("denied")));
-        good.join().unwrap().expect("unrelated upsert succeeds");
-        assert!(matches!(denied.join().unwrap(), Err(DataError::Io(_))));
-    });
+    let good_store = store.clone();
+    let good_entity = entity("good");
+    let denied_entity = entity("denied");
+    let good = tokio::spawn(async move { good_store.upsert_entity(good_entity) });
+    let denied = tokio::spawn(async move { store.upsert_entity(denied_entity) });
+    good.await.unwrap().expect("unrelated upsert succeeds");
+    assert!(matches!(denied.await.unwrap(), Err(DataError::Io(_))));
 }

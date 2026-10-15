@@ -1049,9 +1049,20 @@ impl Executor {
         self.sender
             .send(task)
             .map_err(|_| DataError::io("the azure tables executor is unavailable"))?;
-        receiver
-            .recv()
-            .map_err(|_| DataError::io("the azure tables executor stopped"))
+        let receive = || {
+            receiver
+                .recv()
+                .map_err(|_| DataError::io("the azure tables executor stopped"))
+        };
+        if tokio::runtime::Handle::try_current().is_ok_and(|handle| {
+            handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread
+        }) {
+            // Keep the caller's scheduler and shared credential I/O alive,
+            // including when the API has only one runtime worker.
+            tokio::task::block_in_place(receive)
+        } else {
+            receive()
+        }
     }
 }
 
