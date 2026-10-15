@@ -21,6 +21,8 @@ pub enum DataError {
     Unsupported(String),
     /// A terminal ensure job failed.
     EnsureJob(String),
+    /// Acquisition is durably admitted; deterministic callers may wait on this retained ID.
+    PendingJob(String),
     /// Fixed-point arithmetic overflowed, divided by zero, or failed to parse.
     Arithmetic(String),
     /// A provider stream or HTTP peer sent an invalid frame.
@@ -74,6 +76,7 @@ impl fmt::Display for DataError {
             | Self::Incomplete(message)
             | Self::Unsupported(message)
             | Self::EnsureJob(message)
+            | Self::PendingJob(message)
             | Self::Arithmetic(message)
             | Self::Protocol(message)
             | Self::NotFound(message)

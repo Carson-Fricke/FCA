@@ -6,7 +6,6 @@ Authenticated market-lake routes and their injected application state. Individua
 - `error.rs` — The error envelope shared by every market-lake HTTP response.
 - `lib.rs` — Axum boundary publishing the market-lake catalog, ensure, query, read, raw,
 - `models.rs` — Strict request and response models for the market-lake HTTP boundary.
-- `selection.rs` — Option contract selection shared by the coverage, ensure, and query routes.
 - `state.rs` — Injected state and request-boundary configuration for the lake API.
 - `validate.rs` — Serde-based extractors and the request validators shared by every route.
 - `routes/` contains the corresponding implementation slice.

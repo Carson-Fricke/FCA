@@ -1,5 +1,3 @@
-# CLI behavior tests
+# CLI verification
 
-`api_composition.rs` verifies that published API startup validates configured
-Azure storage and that protected HTTP routes reject anonymous callers. Tests
-use the CLI composition boundary without contacting Azure or Alpaca.
+The retired standalone API composition tests are removed. The combined HTTP capabilities are verified at their application boundaries; this folder contains no test code.

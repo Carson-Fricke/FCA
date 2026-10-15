@@ -37,6 +37,19 @@ impl BlockingLakeClient {
     ) -> Result<harness_contracts::ResolvedOption, LakeClientError> {
         self.block_on(self.client.resolve_option(selector))
     }
+    pub fn from_access(
+        access: std::sync::Arc<dyn crate::MarketAccess>,
+    ) -> Result<Self, LakeClientError> {
+        let runtime = Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .map_err(|e| LakeClientError::Config(e.to_string()))?;
+        Ok(Self {
+            client: LakeClient::from_access(access)?,
+            runtime: Some(runtime),
+        })
+    }
     /// Build a blocking client from resolved configuration.
     ///
     /// # Errors
@@ -127,7 +140,7 @@ impl BlockingLakeClient {
         self.block_on(self.client.ensure(spec))
     }
 
-    /// Read the ensured dataset window as Arrow IPC batches.
+    /// Read the ensured dataset window as verified Arrow batches.
     ///
     /// # Errors
     ///

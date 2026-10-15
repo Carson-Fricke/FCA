@@ -3,7 +3,6 @@
 mod support;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::http::StatusCode;
 use lake_catalog::{
@@ -11,7 +10,6 @@ use lake_catalog::{
     MemoryContractRepository, MemoryJobRepository,
 };
 use lake_contracts::{AssetClass, DataType, Date};
-use lake_coverage::EnsureJobLauncher;
 use serde_json::json;
 use support::*;
 
@@ -45,9 +43,10 @@ async fn satisfied_ensure_returns_coverage_without_launching() {
         equity_record(date(1, 18), CoverageStatus::Complete),
         equity_record(date(1, 19), CoverageStatus::Complete),
     ]));
-    let launcher = RecordingLauncher::default();
+    let launcher = RecordingAdmission::default();
     let mut state = base_state(catalog);
-    state.ensure_launcher = Some(launcher.launcher());
+    state.jobs = launcher.records.clone();
+    state.ensure_admission = Some(launcher.launcher());
     let router = build_app(state);
 
     let (status, headers, body) = send(
@@ -72,189 +71,6 @@ async fn satisfied_ensure_returns_coverage_without_launching() {
     );
     assert!(headers.get("location").is_none());
     assert!(launcher.jobs().is_empty());
-}
-
-#[tokio::test]
-async fn missing_ensure_returns_synchronous_completion_when_the_launcher_fills() {
-    let catalog = shared_catalog([]);
-    let mut state = base_state(Arc::clone(&catalog) as Arc<dyn lake_catalog::CatalogRepository>);
-    state.ensure_launcher = Some(filling_launcher(
-        Arc::clone(&catalog) as Arc<dyn lake_catalog::CatalogRepository>
-    ));
-    let router = build_app(state);
-
-    let (status, headers, body) = send(
-        &router,
-        post_json(
-            "/v1/catalog/ensure",
-            Some(TOKEN),
-            equity_body("2024-01-18", "2024-01-18"),
-        ),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["entries"][0]["status"], "complete");
-    assert!(headers.get("location").is_none());
-}
-
-#[tokio::test]
-async fn missing_ensure_persists_a_stable_job_and_polls_to_completion() {
-    let catalog = shared_catalog([]);
-    let launcher = RecordingLauncher::default();
-    let mut state = base_state(Arc::clone(&catalog) as Arc<dyn lake_catalog::CatalogRepository>);
-    state.ensure_launcher = Some(launcher.launcher());
-    let router = build_app(state);
-
-    let request = equity_body("2024-01-18", "2024-01-19");
-    let (first_status, first_headers, first) = send(
-        &router,
-        post_json("/v1/catalog/ensure", Some(TOKEN), request.clone()),
-    )
-    .await;
-    let (second_status, _, second) = send(
-        &router,
-        post_json("/v1/catalog/ensure", Some(TOKEN), request),
-    )
-    .await;
-
-    assert_eq!(first_status, StatusCode::ACCEPTED);
-    assert_eq!(second_status, StatusCode::ACCEPTED);
-    assert_eq!(first, second);
-    assert_eq!(first["state"], "complete");
-    assert_eq!(
-        first_headers["location"],
-        format!("/v1/jobs/{}", first["job_id"].as_str().expect("job id"))
-    );
-
-    let launched = launcher.jobs();
-    assert_eq!(launched.len(), 2);
-    assert_eq!(
-        launched[0].job_id,
-        first["job_id"].as_str().expect("job id")
-    );
-    assert_eq!(launched[0].gaps.len(), 2);
-    assert_eq!(launched[0].request.symbol, "AAPL");
-
-    let job_id = first["job_id"].as_str().expect("job id");
-    let (poll_status, _, polled) = send(&router, get_auth(&format!("/v1/jobs/{job_id}"))).await;
-    assert_eq!(poll_status, StatusCode::OK);
-    assert_eq!(
-        polled,
-        json!({
-            "job_id": job_id,
-            "state": "complete",
-            "created_at": "2024-01-22T12:00:00Z",
-            "updated_at": "2024-01-22T12:00:00Z",
-            "error_message": null,
-            "progress": null,
-        })
-    );
-}
-
-#[tokio::test]
-async fn an_in_flight_job_short_circuits_without_relaunching() {
-    let catalog = shared_catalog([]);
-    let blocking: EnsureJobLauncher = Arc::new(|_job| {
-        Box::pin(async {
-            tokio::time::sleep(Duration::from_secs(30)).await;
-            Ok(())
-        })
-    });
-    let mut state = base_state(Arc::clone(&catalog) as Arc<dyn lake_catalog::CatalogRepository>);
-    state.ensure_launcher = Some(blocking);
-    state.ensure_wait_deadline_seconds = 0.01;
-    let router = build_app_with(
-        state,
-        lake_http::LakeApiConfig {
-            bearer_token: Some(TOKEN.to_string()),
-            ensure_wait_deadline_seconds: 0.01,
-        },
-    );
-
-    let started = std::time::Instant::now();
-    let (first_status, _, first) = send(
-        &router,
-        post_json(
-            "/v1/catalog/ensure",
-            Some(TOKEN),
-            equity_body("2024-01-18", "2024-01-19"),
-        ),
-    )
-    .await;
-    let elapsed = started.elapsed();
-    let (second_status, _, second) = send(
-        &router,
-        post_json(
-            "/v1/catalog/ensure",
-            Some(TOKEN),
-            equity_body("2024-01-18", "2024-01-19"),
-        ),
-    )
-    .await;
-
-    assert_eq!(first_status, StatusCode::ACCEPTED);
-    assert_eq!(second_status, StatusCode::ACCEPTED);
-    assert_eq!(first, second);
-    assert_eq!(first["state"], "running");
-    assert!(elapsed < Duration::from_secs(1));
-}
-
-#[tokio::test]
-async fn a_launcher_failure_is_persisted_as_a_failed_job() {
-    let catalog = shared_catalog([]);
-    let mut state = base_state(Arc::clone(&catalog) as Arc<dyn lake_catalog::CatalogRepository>);
-    state.ensure_launcher = Some(failing_launcher("launcher failed"));
-    let router = build_app(state);
-
-    let (status, _, body) = send(
-        &router,
-        post_json(
-            "/v1/catalog/ensure",
-            Some(TOKEN),
-            equity_body("2024-01-18", "2024-01-19"),
-        ),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::ACCEPTED);
-    assert_eq!(body["state"], "failed");
-    let job_id = body["job_id"].as_str().expect("job id");
-    let (_, _, polled) = send(&router, get_auth(&format!("/v1/jobs/{job_id}"))).await;
-    assert_eq!(polled["state"], "failed");
-    assert_eq!(polled["error_message"], "launcher failed");
-}
-
-#[tokio::test]
-async fn a_terminal_unsatisfied_job_is_superseded_and_relaunched() {
-    let catalog = Arc::new(MemoryCatalogRepository::from_records([equity_record(
-        date(1, 18),
-        CoverageStatus::Error,
-    )]));
-    let launcher = RecordingLauncher::default();
-    let mut state = base_state(catalog);
-    state.ensure_launcher = Some(launcher.launcher());
-    let router = build_app(state);
-
-    let body = equity_body("2024-01-18", "2024-01-18");
-    let (first_status, _, first) = send(
-        &router,
-        post_json("/v1/catalog/ensure", Some(TOKEN), body.clone()),
-    )
-    .await;
-    let (second_status, _, second) =
-        send(&router, post_json("/v1/catalog/ensure", Some(TOKEN), body)).await;
-
-    assert_eq!(first_status, StatusCode::ACCEPTED);
-    assert_eq!(second_status, StatusCode::ACCEPTED);
-    assert_eq!(first, second);
-    let launched = launcher.jobs();
-    assert_eq!(launched.len(), 2);
-    assert_eq!(launched[0].gaps[0].state.value(), "error");
-    let job_id = first["job_id"].as_str().expect("job id");
-    let (_, _, polled) = send(&router, get_auth(&format!("/v1/jobs/{job_id}"))).await;
-    assert_eq!(polled["state"], "complete");
-    assert!(polled["error_message"].is_null());
 }
 
 #[tokio::test]
@@ -313,9 +129,10 @@ async fn ensure_and_poll_require_authentication() {
 #[tokio::test]
 async fn ensure_accepts_a_range_beyond_the_former_catalog_cap() {
     let catalog = shared_catalog([]);
-    let launcher = RecordingLauncher::default();
+    let launcher = RecordingAdmission::default();
     let mut state = base_state(Arc::clone(&catalog) as Arc<dyn lake_catalog::CatalogRepository>);
-    state.ensure_launcher = Some(launcher.launcher());
+    state.jobs = launcher.records.clone();
+    state.ensure_admission = Some(launcher.launcher());
     let router = build_app(state);
 
     let (status, _, body) = send(
@@ -329,113 +146,17 @@ async fn ensure_accepts_a_range_beyond_the_former_catalog_cap() {
     .await;
 
     assert_eq!(status, StatusCode::ACCEPTED);
-    assert_eq!(body["state"], "complete");
+    assert_eq!(body["state"], "queued");
     let launched = launcher.jobs();
     assert_eq!(launched.len(), 1);
-    assert!(launched[0].gaps.len() > 366);
+    assert_eq!(launched[0].requests.len(), 1);
     assert_eq!(
-        launched[0].gaps[0].session_date(),
-        Date::from_ymd(2022, 1, 3).expect("valid date")
+        launched[0].requests[0].start_date,
+        Date::from_ymd(2022, 1, 3).unwrap()
     );
     assert_eq!(
-        launched[0].gaps.last().expect("last gap").session_date(),
-        Date::from_ymd(2024, 1, 19).expect("valid date")
-    );
-}
-
-#[tokio::test]
-async fn option_ensure_uses_selected_osi_contracts_and_a_stable_job_id() {
-    let contract_symbol = "SPY240119C00500000";
-    let catalog = shared_catalog([]);
-    let launcher = RecordingLauncher::default();
-    let jobs = shared_jobs([]);
-    let mut state = base_state(Arc::clone(&catalog) as Arc<dyn lake_catalog::CatalogRepository>);
-    state.jobs = Arc::clone(&jobs) as Arc<dyn lake_catalog::JobRepository>;
-    state.ensure_launcher = Some(launcher.launcher());
-    state.contracts = Some(Arc::new(MemoryContractRepository::from_records([
-        contract(contract_symbol, "SPY", date(1, 19)),
-    ])));
-    let router = build_app(state);
-
-    let body = json!({
-        "asset_class": "option",
-        "data_type": "trade",
-        "contract_symbols": [contract_symbol],
-        "start_date": "2024-01-19",
-        "end_date": "2024-01-19",
-    });
-    let (first_status, _, first) = send(
-        &router,
-        post_json("/v1/catalog/ensure", Some(TOKEN), body.clone()),
-    )
-    .await;
-    let (second_status, _, second) =
-        send(&router, post_json("/v1/catalog/ensure", Some(TOKEN), body)).await;
-
-    assert_eq!(first_status, StatusCode::ACCEPTED);
-    assert_eq!(second_status, StatusCode::ACCEPTED);
-    assert_eq!(first, second);
-    // Byte-pinned SHA-256 identifier for the selected membership.
-    assert_eq!(
-        first["job_id"],
-        "ensure-f4b653ffbbc0a5b6060732437f7adc25b69a49335ca532f2b4fddb84ec9595e8"
-    );
-    assert_eq!(first["state"], "complete");
-    let launched = launcher.jobs();
-    assert_eq!(launched.len(), 2);
-    assert_eq!(launched[0].request.symbol, contract_symbol);
-    assert_eq!(
-        launched[0]
-            .gaps
-            .iter()
-            .map(|gap| gap.symbol.clone())
-            .collect::<Vec<_>>(),
-        vec![contract_symbol.to_string()]
-    );
-    assert_eq!(
-        launched[0].job_id,
-        format!(
-            "{}-{contract_symbol}",
-            first["job_id"].as_str().expect("job id")
-        )
-    );
-}
-
-#[tokio::test]
-async fn option_ensure_launches_one_deduplicated_job_per_contract() {
-    let first_symbol = "SPY240119C00500000";
-    let second_symbol = "SPY240119C00510000";
-    let mut state = base_state(Arc::new(MemoryCatalogRepository::new()));
-    let launcher = RecordingLauncher::default();
-    state.ensure_launcher = Some(launcher.launcher());
-    state.contracts = Some(Arc::new(MemoryContractRepository::from_records([
-        contract(first_symbol, "SPY", date(1, 19)),
-        contract(second_symbol, "SPY", date(1, 19)),
-    ])));
-    let router = build_app(state);
-
-    let body = json!({
-        "asset_class": "option",
-        "data_type": "trade",
-        "contract_symbols": [first_symbol, second_symbol, first_symbol],
-        "start_date": "2024-01-19",
-        "end_date": "2024-01-19",
-    });
-    let (status, _, response) =
-        send(&router, post_json("/v1/catalog/ensure", Some(TOKEN), body)).await;
-
-    assert_eq!(status, StatusCode::ACCEPTED);
-    let job_id = response["job_id"].as_str().expect("job id");
-    let launched = launcher.jobs();
-    assert_eq!(
-        launched
-            .iter()
-            .map(|job| job.job_id.clone())
-            .collect::<Vec<_>>(),
-        vec![
-            format!("{job_id}-{first_symbol}"),
-            format!("{job_id}-{second_symbol}"),
-        ]
+        launched[0].requests[0].end_date,
+        Date::from_ymd(2024, 1, 19).unwrap()
     );
 }
 
@@ -448,9 +169,10 @@ async fn satisfied_option_ensure_returns_coverage_without_launching() {
         contract_symbol,
         date(1, 19),
     )]));
-    let launcher = RecordingLauncher::default();
+    let launcher = RecordingAdmission::default();
     let mut state = base_state(catalog);
-    state.ensure_launcher = Some(launcher.launcher());
+    state.jobs = launcher.records.clone();
+    state.ensure_admission = Some(launcher.launcher());
     state.contracts = Some(Arc::new(MemoryContractRepository::from_records([
         contract(contract_symbol, "SPY", date(1, 19)),
     ])));
@@ -516,9 +238,10 @@ async fn ensure_rejects_unsupported_requests() {
 #[tokio::test]
 async fn bars_ensure_requires_the_interval_and_keeps_job_ids_distinct() {
     let catalog = shared_catalog([]);
-    let launcher = RecordingLauncher::default();
+    let launcher = RecordingAdmission::default();
     let mut state = base_state(catalog);
-    state.ensure_launcher = Some(launcher.launcher());
+    state.jobs = launcher.records.clone();
+    state.ensure_admission = Some(launcher.launcher());
     let router = build_app(state);
 
     let body = |interval: &str| {
@@ -547,8 +270,8 @@ async fn bars_ensure_requires_the_interval_and_keeps_job_ids_distinct() {
     assert_ne!(minute["job_id"], day["job_id"]);
     let launched = launcher.jobs();
     assert_eq!(launched.len(), 2);
-    assert_eq!(launched[0].request.interval.as_deref(), Some("1min"));
-    assert_eq!(launched[1].request.interval.as_deref(), Some("1d"));
+    assert_eq!(launched[0].requests[0].interval.as_deref(), Some("1min"));
+    assert_eq!(launched[1].requests[0].interval.as_deref(), Some("1d"));
 
     let missing = send(
         &router,
@@ -598,12 +321,13 @@ async fn bars_ensure_requires_the_interval_and_keeps_job_ids_distinct() {
 #[tokio::test]
 async fn option_bar_ensure_preserves_interval_and_uses_distinct_jobs() {
     let symbol = "SPY240119C00500000";
-    let launcher = RecordingLauncher::default();
+    let launcher = RecordingAdmission::default();
     let mut state = base_state(shared_catalog([]));
     state.contracts = Some(Arc::new(MemoryContractRepository::from_records([
         contract(symbol, "SPY", date(1, 19)),
     ])));
-    state.ensure_launcher = Some(launcher.launcher());
+    state.jobs = launcher.records.clone();
+    state.ensure_admission = Some(launcher.launcher());
     let router = build_app(state);
     let mut ids = Vec::new();
     for interval in ["1min", "1d"] {
@@ -620,9 +344,215 @@ async fn option_bar_ensure_preserves_interval_and_uses_distinct_jobs() {
     assert_ne!(ids[0], ids[1]);
     let launched = launcher.jobs();
     assert_eq!(launched.len(), 2);
-    assert_eq!(launched[0].request.interval.as_deref(), Some("1min"));
-    assert_eq!(launched[1].request.interval.as_deref(), Some("1d"));
+    assert_eq!(launched[0].requests[0].interval.as_deref(), Some("1min"));
+    assert_eq!(launched[1].requests[0].interval.as_deref(), Some("1d"));
     assert!(launched
         .iter()
-        .all(|job| job.request.symbol == symbol && job.request.asset_class == AssetClass::Option));
+        .all(|job| job.requests[0].symbol == symbol
+            && job.requests[0].asset_class == AssetClass::Option));
+}
+
+#[tokio::test]
+async fn admission_returns_queued_and_joins_without_api_owned_execution() {
+    let launcher = RecordingAdmission::default();
+    let mut state = base_state(shared_catalog([]));
+    state.jobs = launcher.records.clone();
+    state.ensure_admission = Some(launcher.launcher());
+    let router = axum::Router::new().nest("/market-data", build_app(state));
+    let admission_path = "/market-data/v1/catalog/ensure";
+    let body = equity_body("2024-01-18", "2024-01-19");
+    let first = send(
+        &router,
+        post_json(admission_path, Some(TOKEN), body.clone()),
+    )
+    .await;
+    let second = send(&router, post_json(admission_path, Some(TOKEN), body)).await;
+    assert_eq!(first.0, StatusCode::ACCEPTED);
+    assert_eq!(first.2, second.2);
+    assert_eq!(first.2["state"], "queued");
+    assert_eq!(launcher.jobs().len(), 1);
+    let id = first.2["job_id"].as_str().unwrap();
+    let location = reqwest::Url::parse(&format!("http://api{admission_path}"))
+        .unwrap()
+        .join(first.1["location"].to_str().unwrap())
+        .unwrap();
+    assert_eq!(location.path(), format!("/market-data/v1/jobs/{id}"));
+    let polled = send(&router, get_auth(location.path())).await;
+    assert_eq!(polled.2["state"], "queued");
+}
+
+#[tokio::test]
+async fn interrupted_admission_reconciles_the_same_retained_job() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let launcher = RecordingAdmission::default();
+    let admitted = launcher.launcher();
+    let first = Arc::new(AtomicBool::new(true));
+    let first_call = first.clone();
+    let mut state = base_state(shared_catalog([]));
+    state.jobs = launcher.records.clone();
+    state.ensure_admission = Some(Arc::new(move |job| {
+        let admitted = admitted.clone();
+        let first = first_call.clone();
+        Box::pin(async move {
+            admitted(job).await?;
+            if first.swap(false, Ordering::SeqCst) {
+                Err(lake_contracts::DataError::Io(
+                    "acknowledgement interrupted".into(),
+                ))
+            } else {
+                Ok(())
+            }
+        })
+    }));
+    let router = build_app(state);
+    let body = equity_body("2024-01-18", "2024-01-19");
+    assert!(send(
+        &router,
+        post_json("/v1/catalog/ensure", Some(TOKEN), body.clone())
+    )
+    .await
+    .0
+    .is_server_error());
+    let accepted = send(&router, post_json("/v1/catalog/ensure", Some(TOKEN), body)).await;
+    assert_eq!(accepted.0, StatusCode::ACCEPTED);
+    assert_eq!(launcher.jobs().len(), 1);
+    assert_eq!(accepted.2["job_id"], launcher.jobs()[0].job_id);
+}
+
+#[tokio::test]
+async fn missing_admission_acknowledgement_is_a_protocol_failure() {
+    let mut state = base_state(shared_catalog([]));
+    state.ensure_admission = Some(Arc::new(|_| Box::pin(async { Ok(()) })));
+    let result = send(
+        &build_app(state),
+        post_json(
+            "/v1/catalog/ensure",
+            Some(TOKEN),
+            equity_body("2024-01-18", "2024-01-19"),
+        ),
+    )
+    .await;
+    assert!(result.0.is_server_error());
+}
+
+#[tokio::test]
+async fn an_explicit_new_attempt_never_overwrites_a_terminal_job() {
+    use lake_catalog::JobRepository;
+    let launcher = RecordingAdmission::default();
+    let mut state = base_state(shared_catalog([]));
+    state.jobs = launcher.records.clone();
+    state.ensure_admission = Some(launcher.launcher());
+    let router = build_app(state);
+    let mut body = equity_body("2024-01-18", "2024-01-19");
+    body["job_id"] = json!("ingest-first");
+    assert_eq!(
+        send(
+            &router,
+            post_json("/v1/catalog/ensure", Some(TOKEN), body.clone())
+        )
+        .await
+        .2["job_id"],
+        "ingest-first"
+    );
+    let mut original = launcher.records.get("ingest-first").unwrap().unwrap();
+    original.state = JobState::Failed;
+    launcher.records.upsert(&original).unwrap();
+    assert_eq!(
+        send(
+            &router,
+            post_json("/v1/catalog/ensure", Some(TOKEN), body.clone())
+        )
+        .await
+        .2["state"],
+        "failed"
+    );
+    body["job_id"] = json!("ingest-second");
+    assert_eq!(
+        send(&router, post_json("/v1/catalog/ensure", Some(TOKEN), body))
+            .await
+            .2["state"],
+        "queued"
+    );
+    assert_eq!(
+        launcher.records.get("ingest-first").unwrap().unwrap(),
+        original
+    );
+}
+
+#[tokio::test]
+async fn option_membership_is_one_durable_job_with_all_selected_contracts() {
+    let launcher = RecordingAdmission::default();
+    let mut state = base_state(shared_catalog([]));
+    state.jobs = launcher.records.clone();
+    state.ensure_admission = Some(launcher.launcher());
+    let first = "SPY240119C00500000";
+    let second = "SPY240119C00510000";
+    state.contracts = Some(Arc::new(MemoryContractRepository::from_records([
+        contract(first, "SPY", date(1, 19)),
+        contract(second, "SPY", date(1, 19)),
+    ])));
+    let progress_catalog = state.catalog.clone();
+    let router = build_app(state);
+    let body = json!({"asset_class":"option","data_type":"trade","contract_symbols":[first,second,first],"start_date":"2024-01-19","end_date":"2024-01-19"});
+    let accepted = send(
+        &router,
+        post_json("/v1/catalog/ensure", Some(TOKEN), body.clone()),
+    )
+    .await;
+    assert_eq!(accepted.0, StatusCode::ACCEPTED, "{:?}", accepted.2);
+    progress_catalog
+        .upsert(&complete_record(
+            AssetClass::Option,
+            DataType::Trade,
+            first,
+            date(1, 19),
+        ))
+        .unwrap();
+    let joined = send(&router, post_json("/v1/catalog/ensure", Some(TOKEN), body)).await;
+    assert_eq!(joined.0, StatusCode::ACCEPTED, "{:?}", joined.2);
+    let jobs = launcher.jobs();
+    assert_eq!(jobs.len(), 1);
+    let symbols: std::collections::BTreeSet<_> =
+        jobs[0].requests.iter().map(|g| g.symbol.as_str()).collect();
+    assert_eq!(symbols, std::collections::BTreeSet::from([first, second]));
+    assert_eq!(accepted.2["job_id"], jobs[0].job_id);
+}
+
+#[tokio::test]
+async fn option_resolution_acceptance_preserves_the_hosts_mount_prefix() {
+    let mut state = base_state(shared_catalog([]));
+    state.jobs = Arc::new(MemoryJobRepository::from_records([JobRecord::new(
+        "option-one",
+        JobState::Queued,
+        as_of(),
+        as_of(),
+        None,
+    )
+    .unwrap()]));
+    state.option_resolver = Some(Arc::new(|_, id| {
+        Box::pin(async move { Err(lake_contracts::DataError::PendingJob(id.unwrap())) })
+    }));
+    let router = axum::Router::new().nest("/market-data", build_app(state));
+    let path = "/market-data/v1/options/resolve";
+    let accepted = send(
+        &router,
+        post_json(
+            path,
+            Some(TOKEN),
+            json!({
+                "job_id":"option-one", "underlying":"SPY", "right":"call",
+                "as_of":"2024-01-18T21:00:00Z", "expiration":"2024-02-16", "strike":"100"
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(accepted.0, StatusCode::ACCEPTED, "{}", accepted.2);
+    let location = reqwest::Url::parse(&format!("http://api{path}"))
+        .unwrap()
+        .join(accepted.1["location"].to_str().unwrap())
+        .unwrap();
+    assert_eq!(location.path(), "/market-data/v1/jobs/option-one");
+    let polled = send(&router, get_auth(location.path())).await;
+    assert_eq!(polled.0, StatusCode::OK);
+    assert_eq!(polled.2["job_id"], "option-one");
 }

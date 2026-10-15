@@ -10,6 +10,9 @@ param registryName string
 @maxLength(36)
 param runtimePrincipalId string
 
+@description('Harness identity that pulls the combined API and execution images.')
+param quantPrincipalId string
+
 @description('Optional deployer principal that imports a private source image and verifies its mirrored digest.')
 param imageImportPrincipalId string = ''
 
@@ -82,6 +85,16 @@ resource runtimeAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(registry.id, runtimePrincipalId, acrPullRole.id)
   properties: {
     principalId: runtimePrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: acrPullRole.id
+  }
+}
+
+resource quantAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: registry
+  name: guid(registry.id, quantPrincipalId, acrPullRole.id)
+  properties: {
+    principalId: quantPrincipalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: acrPullRole.id
   }

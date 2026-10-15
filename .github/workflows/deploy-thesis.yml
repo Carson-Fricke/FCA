@@ -312,7 +312,7 @@ jobs:
 
           normalized_prefix="${RESOURCE_NAME_PREFIX,,}"
           normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
-          api_app_name="${normalized_prefix}-${normalized_environment}-api"
+          api_app_name="${normalized_prefix}-${normalized_environment}-quant-api"
 
           # The Thesis deployment is additive, so the market-lake workloads
           # keep their currently deployed digest-pinned image; rebuilding the
@@ -327,6 +327,9 @@ jobs:
             exit 1
           fi
 
+          ingestion_image_reference="$(az containerapp show --name "$api_app_name" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.template.containers[?name=='api'].env[?name=='LAKE_INGEST_IMAGE'].value | [0][0]" -o tsv)"
+          [[ "$ingestion_image_reference" == *@sha256:* ]] || { echo "::error::Deployed ACI image configuration is missing"; exit 1; }
+          printf 'ingestion-image-reference=%s\n' "$ingestion_image_reference" >> "$GITHUB_OUTPUT"
           printf 'lake-image-reference=%s\n' "$lake_image_reference" >> "$GITHUB_OUTPUT"
 
       - name: Validate and deploy the digest-pinned thesis composition
@@ -334,6 +337,7 @@ jobs:
         env:
           DEPLOYMENT_NAME: fca-thesis-${{ github.run_id }}-${{ github.run_attempt }}
           LAKE_IMAGE_REFERENCE: ${{ steps.lake.outputs.lake-image-reference }}
+          INGESTION_IMAGE_REFERENCE: ${{ steps.lake.outputs.ingestion-image-reference }}
           BUDGET_ALERT_CONTACT_EMAIL: ${{ secrets.BUDGET_ALERT_CONTACT_EMAIL }}
         run: |
           set -euo pipefail
@@ -370,6 +374,7 @@ jobs:
             "resourceNamePrefix=$RESOURCE_NAME_PREFIX"
             "environmentName=$DEPLOYMENT_ENVIRONMENT"
             "sharedImageReference=$LAKE_IMAGE_REFERENCE"
+            "ingestionImageReference=$INGESTION_IMAGE_REFERENCE"
             "githubOwner=$GITHUB_OWNER"
             "githubOwnerId=$GITHUB_OWNER_ID"
             "githubRepository=$GITHUB_REPOSITORY_NAME"

@@ -17,7 +17,7 @@ use backtest::backtest::errors::BacktestError;
 use backtest::backtest::job::{
     parse_timestamp_ns, run_native_job_with_lake_client, BacktestJobError,
 };
-use harness_lakeclient::testing::{quote_stream, FakeLakeConfig, FakeLakeServer, FakeQuoteRow};
+use harness_lakeclient::testing::{quote_parquet, FakeLakeConfig, FakeLakeServer, FakeQuoteRow};
 use harness_lakeclient::{BlockingLakeClient, LakeClientConfig};
 
 const TOKEN: &str = "capital-fraction-token";
@@ -70,9 +70,9 @@ fn configuration(capital_fraction: &str) -> BacktestConfig {
 fn run(name: &str, configuration: &BacktestConfig) -> (Result<bool, BacktestJobError>, PathBuf) {
     let start = parse_timestamp_ns("2024-01-02T14:30:00Z").expect("start");
     let server = FakeLakeServer::start(FakeLakeConfig {
-        read_bodies_by_type: BTreeMap::from([(
+        partitions_by_type: BTreeMap::from([(
             "quote".to_string(),
-            quote_stream(
+            quote_parquet(
                 "SPY",
                 &[FakeQuoteRow::new(start, "9", "10", 100, 100, "XNYS")],
             ),

@@ -14,7 +14,8 @@ members = [
     "providers",
     "storage",
     "ingestion",
-    "queue",
+    "ingest-jobs",
+    "ingest-worker",
     "query",
     "http",
     "local",
@@ -37,7 +38,7 @@ lake-coverage = { path = "coverage" }
 lake-providers = { path = "providers" }
 lake-storage = { path = "storage" }
 lake-ingestion = { path = "ingestion" }
-lake-queue = { path = "queue" }
+lake-ingest-jobs = { path = "ingest-jobs" }
 lake-query = { path = "query" }
 lake-http = { path = "http" }
 lake-local = { path = "local" }
@@ -57,7 +58,6 @@ azure_identity = "0.21"
 azure_storage = "0.21"
 azure_storage_blobs = "0.21"
 azure_data_tables = "0.21"
-azure_storage_queues = "0.21"
 bytes = "1"
 clap = { version = "4.6", features = ["derive"] }
 futures-util = "0.3"

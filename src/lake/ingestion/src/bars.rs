@@ -41,16 +41,17 @@
 
 use std::sync::Arc;
 
+use crate::trade_inputs::{crypto_trades, equity_trades, CryptoTradeRecord, EquityTradeRecord};
 use futures_util::future::BoxFuture;
+use harness_market_reader::{
+    MarketDataReader, MarketDataSnapshot, Partition, PartitionSource, ReaderError, SnapshotRequest,
+};
 use lake_catalog::{BarSource, CatalogRepository, CoverageRecord, CoverageStatus};
 use lake_contracts::decimal::ONE_UNSCALED;
 use lake_contracts::{AssetClass, BarInterval, DataError, DataType, Date, DateTime, Decimal18};
 use lake_coverage::CoverageSession;
 use lake_providers::{NormalizedBar, NormalizedCryptoTrade, NormalizedTrade, ProviderError};
-use lake_storage::{
-    read_crypto_trades, read_equity_trades, CryptoTradeRecord, EquityTradeRecord, ParquetMetadata,
-    ReadableBlobStore, StorageCapGuard,
-};
+use lake_storage::{ParquetMetadata, ReadableBlobStore, StorageCapGuard};
 use serde_json::Value;
 
 use crate::common::{
@@ -138,33 +139,79 @@ impl TradePartitionReader for CatalogTradeReader {
             let Some(path) = record.object_path else {
                 return Ok(None);
             };
-            match asset_class {
-                AssetClass::Equity => {
-                    let partition = read_equity_trades(self.store.as_ref(), &path)?;
-                    Ok(Some(StoredTradePartition {
-                        records: partition
-                            .records
-                            .into_iter()
-                            .map(StoredTrade::Equity)
-                            .collect(),
-                        revision: partition.revision,
-                    }))
-                }
-                AssetClass::Crypto => {
-                    let partition = read_crypto_trades(self.store.as_ref(), &path)?;
-                    Ok(Some(StoredTradePartition {
-                        records: partition
-                            .records
-                            .into_iter()
-                            .map(StoredTrade::Crypto)
-                            .collect(),
-                        revision: partition.revision,
-                    }))
-                }
-                other => Err(DataError::value(format!(
-                    "bars derivation supports equity and crypto only, not {other}"
-                ))),
-            }
+            let checksum = record.checksum.ok_or_else(|| {
+                DataError::value("trade partition metadata is outdated: checksum required")
+            })?;
+            let snapshot = MarketDataSnapshot::new(
+                SnapshotRequest {
+                    asset_class: asset_class.value().into(),
+                    data_type: "trade".into(),
+                    symbol: symbol.into(),
+                    start_date: session_date.isoformat(),
+                    end_date: session_date.isoformat(),
+                    interval: None,
+                },
+                vec![Partition {
+                    session_date: session_date.isoformat(),
+                    object_path: path,
+                    checksum: checksum.clone(),
+                    row_count: record.row_count,
+                    byte_size: record.byte_size,
+                }],
+            )
+            .map_err(DataError::io)?;
+            let reader = MarketDataReader::configured().map_err(DataError::io)?;
+            let mut records = Vec::new();
+            reader
+                .visit(&snapshot, &TradeObjects(self.store.clone()), |batch| {
+                    match asset_class {
+                        AssetClass::Equity => records.extend(
+                            equity_trades(&[batch])
+                                .map_err(|e| ReaderError::Decode(e.to_string()))?
+                                .into_iter()
+                                .map(StoredTrade::Equity),
+                        ),
+                        AssetClass::Crypto => records.extend(
+                            crypto_trades(&[batch])
+                                .map_err(|e| ReaderError::Decode(e.to_string()))?
+                                .into_iter()
+                                .map(StoredTrade::Crypto),
+                        ),
+                        _ => {
+                            return Err(ReaderError::Decode(
+                                "bars derivation supports equity and crypto only".into(),
+                            ))
+                        }
+                    }
+                    Ok(())
+                })
+                .await
+                .map_err(DataError::io)?;
+            Ok(Some(StoredTradePartition {
+                records,
+                revision: checksum,
+            }))
+        })
+    }
+}
+
+struct TradeObjects(Arc<dyn ReadableBlobStore>);
+impl PartitionSource for TradeObjects {
+    fn read<'a>(
+        &'a self,
+        partition: &'a Partition,
+    ) -> BoxFuture<'a, Result<bytes::Bytes, ReaderError>> {
+        let store = self.0.clone();
+        let path = partition.object_path.clone();
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                store
+                    .read(&path)
+                    .map(bytes::Bytes::from)
+                    .map_err(|e| ReaderError::Source(e.to_string()))
+            })
+            .await
+            .map_err(|e| ReaderError::Source(e.to_string()))?
         })
     }
 }

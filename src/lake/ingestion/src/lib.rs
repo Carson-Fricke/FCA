@@ -9,8 +9,7 @@
 //! provider records, stages one Parquet object per data type, and publishes the
 //! objects together with their coverage rows through exactly one
 //! caller-supplied atomic commit. Option transactions work at the OSI
-//! symbol-day boundary and are reached through the queue handler and CLI
-//! paths, exactly as in Python.
+//! symbol-day boundary and are composed by the finite ACI worker.
 //!
 //! Two semantics are load-bearing and reproduced exactly:
 //!
@@ -22,7 +21,6 @@
 //!    Alpaca's `end` parameter is inclusive and the closing auction print
 //!    belongs to its session.
 
-mod azure;
 mod bars;
 mod common;
 mod crypto;
@@ -31,9 +29,11 @@ mod equities;
 mod leased;
 pub mod options;
 mod providers;
+mod publication;
 mod staging;
+mod trade_inputs;
+pub use trade_inputs::{CryptoTradeRecord, EquityTradeRecord};
 
-pub use azure::AzureAtomicIngestCommitter;
 pub use bars::{
     derive_crypto_bars, derive_equity_bars, BarsIngestResult, BarsIngestTransaction,
     CatalogTradeReader, StoredTrade, StoredTradePartition, TradePartitionReader,
@@ -44,10 +44,10 @@ pub use ensure::{EnsureIngest, EnsureProgress, EnsureProviders};
 pub use equities::{EquityIngestResult, EquityIngestTransaction};
 pub use leased::{scope_for_coverage, LeasedAtomicIngestCommitter};
 pub use options::{
-    enqueue_option_backfill, plan_option_backfill, OptionBackfillItem, OptionBackfillPlan,
-    OptionBackfillRequest, OptionChainSelector, OptionClock, OptionIngestResult,
-    OptionIngestTransaction, OptionMarketDataClient, OptionQueueHandler, OptionSpotProvider,
-    QueueSender, SpotValues,
+    plan_option_backfill, OptionBackfillItem, OptionBackfillPlan, OptionBackfillRequest,
+    OptionChainSelector, OptionClock, OptionIngestResult, OptionIngestTransaction,
+    OptionMarketDataClient, OptionSpotProvider, SpotValues,
 };
 pub use providers::{BarsDataProvider, CryptoDataProvider, EquityDataProvider};
+pub use publication::ObjectCatalogCommitter;
 pub use staging::StagingPartitionWriter;

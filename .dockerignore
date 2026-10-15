@@ -8,10 +8,15 @@
 !scripts/
 !scripts/ci/
 !scripts/ci/installed_sdk_smoke.py
+!scripts/ci/merge_cargo_recipes.py
 !strategies/
 !strategies/**
 src/harness/target/
 src/lake/target/
+**/.local/
+src/ui/node_modules/
+src/ui/.svelte-kit/
+src/ui/build/
 **/__pycache__/
 **/*.py[cod]
 **/*.egg-info/

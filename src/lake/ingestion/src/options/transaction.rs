@@ -3,8 +3,8 @@
 //! Ports `lake.ingestion.options.transaction`. Option work is deliberately
 //! kept at the OSI symbol-day boundary: the option client can batch provider
 //! requests internally, while each selected contract gets deterministic trade
-//! and quote objects plus matching coverage rows. Queue delivery remains owned
-//! by the future queue crate through [`OptionQueueHandler`](crate::options::worker::OptionQueueHandler).
+//! and quote objects plus matching coverage rows. Job execution and ownership
+//! belong to the finite ACI worker, outside this transaction.
 //!
 //! Semantics preserved exactly:
 //!

@@ -5,7 +5,7 @@
 //! not timing-asserted here; the ordering contract is what callers rely on for
 //! deterministic failure reporting.
 
-use harness_lakeclient::testing::{bars_stream, FakeBarRow, FakeLakeConfig, FakeLakeServer};
+use harness_lakeclient::testing::{bars_parquet, FakeBarRow, FakeLakeConfig, FakeLakeServer};
 use harness_lakeclient::{BlockingLakeClient, EnsureSpec, LakeClientConfig, ReadSpec};
 
 const TOKEN: &str = "batch-token";
@@ -39,7 +39,12 @@ fn ensure_spec(symbol: &str, data_type: &str) -> EnsureSpec {
 }
 
 fn read_spec(symbol: &str, data_type: &str) -> ReadSpec {
-    ReadSpec::new("equity", data_type, symbol, "2024-01-02", "2024-01-02")
+    let spec = ReadSpec::new("equity", data_type, symbol, "2024-01-02", "2024-01-02");
+    if data_type == "bars" {
+        spec.with_interval("1min")
+    } else {
+        spec
+    }
 }
 
 fn ensured_symbols(server: &FakeLakeServer) -> Vec<String> {
@@ -79,9 +84,9 @@ fn ensure_many_issues_every_spec_and_keeps_order() {
 #[test]
 fn read_many_returns_each_specs_bodies_in_order() {
     let mut config = satisfied_ensure_config();
-    config.read_bodies_by_type = std::collections::BTreeMap::from([(
+    config.partitions_by_type = std::collections::BTreeMap::from([(
         "bars".to_string(),
-        bars_stream(
+        bars_parquet(
             "SPY",
             &[FakeBarRow::new(
                 1_704_153_600_000_000_000,

@@ -16,7 +16,6 @@ use lake_catalog::{
 use lake_configuration::OptionsUniverse;
 use lake_contracts::{xnys_sessions, AssetClass, DataError, DataType, Date, DateTime, Decimal18};
 use lake_coverage::CoverageSession;
-use serde_json::{json, Value};
 
 /// The injected UTC clock used instead of `as_of`.
 pub type OptionClock = Arc<dyn Fn() -> DateTime + Send + Sync>;
@@ -47,7 +46,7 @@ impl SpotValues {
     }
 }
 
-/// One selected OSI symbol-day request for the shared queue worker.
+/// One selected OSI symbol-day request for external ingestion admission.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OptionBackfillItem {
     /// The selected contract.
@@ -69,27 +68,6 @@ impl OptionBackfillItem {
     /// The XNYS session date.
     pub fn session_date(&self) -> Date {
         self.session.session_date
-    }
-
-    /// The complete provider-independent worker payload.
-    pub fn queue_message(&self) -> Value {
-        json!({
-            "asset_class": AssetClass::Option.value(),
-            "data_types": self
-                .data_types
-                .iter()
-                .map(|data_type| data_type.value())
-                .collect::<Vec<_>>(),
-            "end_time": format_datetime(self.session.close_time),
-            "expiration_date": self.contract.expiration_date.isoformat(),
-            "option_type": self.contract.option_type.value(),
-            "replace_existing": self.replace_existing,
-            "session_date": self.session_date().isoformat(),
-            "start_time": format_datetime(self.session.open_time),
-            "strike_price": self.contract.strike_price.to_canonical_string(),
-            "symbol": self.contract.symbol,
-            "underlying": self.contract.underlying,
-        })
     }
 }
 
@@ -255,23 +233,6 @@ pub fn plan_option_backfill(
     )
 }
 
-/// Dispatch option work through the existing queue sender boundary.
-pub trait QueueSender: Send + Sync {
-    /// Send one queue message.
-    fn send(&self, message: &Value) -> Result<(), DataError>;
-}
-
-/// Send every plan item's queue message, returning how many were sent.
-pub fn enqueue_option_backfill(
-    plan: &OptionBackfillPlan,
-    sender: &dyn QueueSender,
-) -> Result<usize, DataError> {
-    for item in plan.items() {
-        sender.send(&item.queue_message())?;
-    }
-    Ok(plan.items().len())
-}
-
 /// Normalize the underlyings list: canonicalize, deduplicate, sort.
 fn configuration_underlyings(
     underlyings: Option<&[String]>,
@@ -404,9 +365,4 @@ fn replace_existing(
             .get(&(symbol.to_string(), session_date, *data_type))
             .is_some_and(|record| record.status == CoverageStatus::Partial)
     })
-}
-
-/// Format one session bound the way Python's `_format_datetime` does.
-pub(crate) fn format_datetime(value: DateTime) -> String {
-    value.isoformat_seconds_z()
 }

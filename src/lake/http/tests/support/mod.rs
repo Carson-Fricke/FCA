@@ -21,7 +21,7 @@ use lake_catalog::{
     MemoryJobRepository,
 };
 use lake_contracts::{partition_path, AssetClass, DataError, DataType, Date, DateTime, Decimal18};
-use lake_coverage::{EnsureJob, EnsureJobLauncher};
+use lake_coverage::{EnsureAdmission, EnsureSubmission};
 use lake_http::{create_app, ApiClock, LakeApiConfig, LakeApiState};
 use lake_query::{EnsureCallback, FileUrlIssuer, QueryApplicationError};
 use lake_storage::{BlobStore, LocalFilesystemStore, ParquetMetadata, ParquetWriter};
@@ -52,11 +52,10 @@ pub fn base_state(catalog: Arc<dyn CatalogRepository>) -> LakeApiState {
         option_resolver: None,
         sas_issuer: None,
         read_store: None,
-        ensure_launcher: None,
+        ensure_admission: None,
         ensure_callback: None,
         bounded_query: None,
         authorized_force_override: false,
-        ensure_wait_deadline_seconds: 1.0,
         bearer_token: Some(TOKEN.to_string()),
         entra: None,
         now: clock_at(as_of()),
@@ -69,7 +68,6 @@ pub fn build_app(state: LakeApiState) -> Router {
         Arc::new(state),
         LakeApiConfig {
             bearer_token: Some(TOKEN.to_string()),
-            ensure_wait_deadline_seconds: 1.0,
         },
     )
 }
@@ -224,68 +222,49 @@ impl FileUrlIssuer for FailingIssuer {
 
 /// An ensure launcher recording every job it received.
 #[derive(Clone, Default)]
-pub struct RecordingLauncher {
-    jobs: Arc<Mutex<Vec<EnsureJob>>>,
+pub struct RecordingAdmission {
+    jobs: Arc<Mutex<Vec<EnsureSubmission>>>,
+    pub records: Arc<MemoryJobRepository>,
 }
 
-impl RecordingLauncher {
+impl RecordingAdmission {
     /// The jobs launched so far.
-    pub fn jobs(&self) -> Vec<EnsureJob> {
+    pub fn jobs(&self) -> Vec<EnsureSubmission> {
         self.jobs.lock().expect("lock").clone()
     }
 
     /// The launcher seam itself.
-    pub fn launcher(&self) -> EnsureJobLauncher {
+    pub fn launcher(&self) -> EnsureAdmission {
         let jobs = Arc::clone(&self.jobs);
+        let records = self.records.clone();
         Arc::new(move |job| {
             let jobs = Arc::clone(&jobs);
+            let records = records.clone();
             Box::pin(async move {
-                jobs.lock().expect("lock").push(job);
+                use lake_catalog::JobRepository;
+                let mut admitted = jobs.lock().expect("lock");
+                if let Some(existing) = admitted
+                    .iter()
+                    .find(|accepted| accepted.job_id == job.job_id)
+                {
+                    if existing.requests != job.requests {
+                        return Err(DataError::Conflict("ingestion input changed".into()));
+                    }
+                }
+                if records.get(&job.job_id)?.is_none() {
+                    records.upsert(&lake_catalog::JobRecord::new(
+                        job.job_id.clone(),
+                        lake_catalog::JobState::Queued,
+                        as_of(),
+                        as_of(),
+                        None,
+                    )?)?;
+                    admitted.push(job);
+                }
                 Ok(())
             })
         })
     }
-}
-
-/// An ensure launcher that fills every gap by writing complete catalog rows.
-pub fn filling_launcher(catalog: Arc<dyn CatalogRepository>) -> EnsureJobLauncher {
-    Arc::new(move |job: EnsureJob| {
-        let catalog = Arc::clone(&catalog);
-        Box::pin(async move {
-            for gap in &job.gaps {
-                let session_date = gap.session_date();
-                let object_path = partition_path(
-                    session_date,
-                    job.request.asset_class,
-                    job.request.data_type,
-                    job.request.interval.as_deref(),
-                    &job.request.symbol,
-                )
-                .map_err(|error| DataError::value(error.to_string()))?;
-                let record = CoverageRecord::new(
-                    job.request.asset_class,
-                    job.request.data_type,
-                    job.request.symbol.clone(),
-                    session_date,
-                    CoverageStatus::Complete,
-                    Some(object_path),
-                    12,
-                    3456,
-                    None,
-                    None,
-                    job.request.interval.clone(),
-                )
-                .map_err(|error| DataError::value(error.to_string()))?;
-                catalog.upsert(&record)?;
-            }
-            Ok(())
-        })
-    })
-}
-
-/// An ensure launcher that always fails.
-pub fn failing_launcher(message: &'static str) -> EnsureJobLauncher {
-    Arc::new(move |_job| Box::pin(async move { Err(DataError::value(message)) }))
 }
 
 /// A plain contract record for option selection tests.

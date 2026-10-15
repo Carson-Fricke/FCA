@@ -10,7 +10,7 @@ use backtest::backtest::config::BacktestConfig;
 use backtest::backtest::engine_core::MarketSubscription;
 use backtest::backtest::job::{lake_fixture_with_subscriptions, parse_timestamp_ns};
 use harness_lakeclient::testing::{
-    bars_stream, quote_stream, trade_stream, FakeBarRow, FakeLakeConfig, FakeLakeServer,
+    bars_parquet, quote_parquet, trade_parquet, FakeBarRow, FakeLakeConfig, FakeLakeServer,
     FakeQuoteRow, FakeTradeRow,
 };
 use harness_lakeclient::{BlockingLakeClient, LakeClientConfig};
@@ -35,18 +35,18 @@ fn studies_acquire_exact_inputs_and_backtests_add_tick_execution_feeds() {
     }) {
         let start = config().start_ns;
         let server = FakeLakeServer::start(FakeLakeConfig {
-            read_bodies_by_type: BTreeMap::from([
-                ("bars".into(), bars_stream("SPY", &[bar_row(0)])),
+            partitions_by_type: BTreeMap::from([
+                ("bars".into(), bars_parquet("SPY", &[bar_row(0)])),
                 (
                     "quote".into(),
-                    quote_stream(
+                    quote_parquet(
                         "SPY",
                         &[FakeQuoteRow::new(start, "10", "11", 100, 100, "XNYS")],
                     ),
                 ),
                 (
                     "trade".into(),
-                    trade_stream("SPY", &[FakeTradeRow::new(start, 1, "10", 100, "XNYS")]),
+                    trade_parquet("SPY", &[FakeTradeRow::new(start, 1, "10", 100, "XNYS")]),
                 ),
             ]),
             ..FakeLakeConfig::new(TOKEN)
@@ -85,10 +85,10 @@ fn studies_acquire_exact_inputs_and_backtests_add_tick_execution_feeds() {
             assert_eq!(body["symbol"], "SPY");
         }
         assert_eq!(
-            requests.iter().filter(|r| r.path == "/v1/read").count(),
+            requests.iter().filter(|r| r.path == "/v1/snapshot").count(),
             acquired.len()
         );
-        for request in requests.iter().filter(|r| r.path == "/v1/read") {
+        for request in requests.iter().filter(|r| r.path == "/v1/snapshot") {
             assert!(acquired.contains(&request.query["data_type"].as_str()));
         }
     }
@@ -97,9 +97,9 @@ fn studies_acquire_exact_inputs_and_backtests_add_tick_execution_feeds() {
 #[test]
 fn missing_requested_stream_is_not_covered_by_bars_and_unsupported_intervals_fail_before_io() {
     let server = FakeLakeServer::start(FakeLakeConfig {
-        read_bodies_by_type: BTreeMap::from([
-            ("bars".into(), bars_stream("SPY", &[bar_row(0)])),
-            ("trade".into(), trade_stream("SPY", &[])),
+        partitions_by_type: BTreeMap::from([
+            ("bars".into(), bars_parquet("SPY", &[bar_row(0)])),
+            ("trade".into(), trade_parquet("SPY", &[])),
         ]),
         ..FakeLakeConfig::new(TOKEN)
     });
@@ -132,7 +132,7 @@ fn missing_requested_stream_is_not_covered_by_bars_and_unsupported_intervals_fai
 #[test]
 fn acquisition_rejects_bars_without_completed_frame_coverage() {
     let server = FakeLakeServer::start(FakeLakeConfig {
-        read_bodies_by_type: BTreeMap::from([("bars".into(), bars_stream("SPY", &[bar_row(0)]))]),
+        partitions_by_type: BTreeMap::from([("bars".into(), bars_parquet("SPY", &[bar_row(0)]))]),
         ..FakeLakeConfig::new(TOKEN)
     });
     let mut config = config();
@@ -158,9 +158,9 @@ fn exclusive_end_dates_and_nanosecond_row_bounds_are_exact() {
     ] {
         let end_ns = stamp(end);
         let server = FakeLakeServer::start(FakeLakeConfig {
-            read_bodies_by_type: BTreeMap::from([(
+            partitions_by_type: BTreeMap::from([(
                 "quote".into(),
-                quote_stream(
+                quote_parquet(
                     "SPY",
                     &[
                         FakeQuoteRow::new(start - 1, "10", "11", 100, 100, "XNYS"),
@@ -195,7 +195,7 @@ fn exclusive_end_dates_and_nanosecond_row_bounds_are_exact() {
                     serde_json::from_slice(request.body.as_ref().unwrap()).unwrap();
                 assert_eq!(body["start_date"], "2024-01-02");
                 assert_eq!(body["end_date"], expected_date);
-            } else if request.path == "/v1/read" {
+            } else if request.path == "/v1/snapshot" {
                 assert_eq!(request.query["start_date"], "2024-01-02");
                 assert_eq!(request.query["end_date"], expected_date);
             }
@@ -238,9 +238,9 @@ fn bar_row(minute: i64) -> FakeBarRow {
 #[test]
 fn multi_symbol_study_acquires_every_symbol_and_keeps_canonical_order() {
     let server = FakeLakeServer::start(FakeLakeConfig {
-        read_bodies_by_type: BTreeMap::from([(
+        partitions_by_type: BTreeMap::from([(
             "bars".to_string(),
-            bars_stream("SPY", &[bar_row(1), bar_row(0)]),
+            bars_parquet("SPY", &[bar_row(1), bar_row(0)]),
         )]),
         ..FakeLakeConfig::new(TOKEN)
     });
@@ -282,7 +282,7 @@ fn multi_symbol_study_acquires_every_symbol_and_keeps_canonical_order() {
     assert_eq!(
         requests
             .iter()
-            .filter(|request| request.path == "/v1/read")
+            .filter(|request| request.path == "/v1/snapshot")
             .count(),
         2
     );
@@ -292,7 +292,7 @@ fn multi_symbol_study_acquires_every_symbol_and_keeps_canonical_order() {
 fn multiple_timeframes_acquire_one_canonical_minute_source_window() {
     let rows: Vec<_> = (0..390).map(bar_row).collect();
     let server = FakeLakeServer::start(FakeLakeConfig {
-        read_bodies_by_type: BTreeMap::from([("bars".into(), bars_stream("SPY", &rows))]),
+        partitions_by_type: BTreeMap::from([("bars".into(), bars_parquet("SPY", &rows))]),
         ..FakeLakeConfig::new(TOKEN)
     });
     let subscriptions: Vec<_> = ["1min", "5min", "1d"]
@@ -318,7 +318,7 @@ fn multiple_timeframes_acquire_one_canonical_minute_source_window() {
     assert_eq!(
         requests
             .iter()
-            .filter(|request| request.path == "/v1/read")
+            .filter(|request| request.path == "/v1/snapshot")
             .count(),
         1
     );

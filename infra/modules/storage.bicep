@@ -36,10 +36,6 @@ var tableNames = {
   // control table cannot carry a hyphen.
   killSwitch: 'killswitch'
 }
-var queueNames = {
-  backfill: 'backfill'
-  deadLetter: 'backfill-poison'
-}
 var coldTierAction = enableColdTier ? {
   tierToCold: {
     daysAfterModificationGreaterThan: coldAfterDays
@@ -91,18 +87,6 @@ resource harnessContainers 'Microsoft.Storage/storageAccounts/blobServices/conta
   properties: {
     publicAccess: 'None'
   }
-}]
-
-resource queueService 'Microsoft.Storage/storageAccounts/queueServices@2023-05-01' = {
-  name: 'default'
-  parent: storageAccount
-  properties: {}
-}
-
-resource queues 'Microsoft.Storage/storageAccounts/queueServices/queues@2023-05-01' = [for queueName in items(queueNames): {
-  name: queueName.value
-  parent: queueService
-  properties: {}
 }]
 
 resource tableService 'Microsoft.Storage/storageAccounts/tableServices@2023-05-01' = {
@@ -157,12 +141,10 @@ output storageAccountId string = storageAccount.id
 output endpoints object = {
   blob: storageAccount.properties.primaryEndpoints.blob
   dfs: storageAccount.properties.primaryEndpoints.dfs
-  queue: storageAccount.properties.primaryEndpoints.queue
   table: storageAccount.properties.primaryEndpoints.table
 }
 output resourceNames object = {
   lakeContainer: lakeContainer.name
   harnessContainers: harnessContainerNames
-  queues: queueNames
   tables: tableNames
 }

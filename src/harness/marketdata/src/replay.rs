@@ -2,7 +2,7 @@
 //!
 //! Port of `harness.data.replay`. The feed is an adapter rather than a storage
 //! client: callers provide already-normalized event streams decoded from the
-//! market-lake read route's Arrow IPC batches. Replay owns at most one
+//! shared market-data reader's Arrow batches. Replay owns at most one
 //! lookahead event per active source and merges events by the deterministic
 //! `(timestamp, sequence, event-class priority, source order)` key.
 //!
@@ -55,8 +55,7 @@ pub fn events_from_arrow(
 
 /// Decode one Parquet object into normalized market events.
 ///
-/// This decodes the live recorder's own part format; market-lake reads go
-/// through the Arrow IPC read route and [`events_from_arrow`] instead.
+/// This decodes the live recorder's own part format; market-lake reads use the shared reader and [`events_from_arrow`] instead.
 ///
 /// # Errors
 ///

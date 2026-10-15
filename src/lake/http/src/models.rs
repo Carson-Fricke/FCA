@@ -529,6 +529,7 @@ impl CoverageQuery {
 /// A validated equity or crypto ensure body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EquityEnsureRequest {
+    pub job_id: Option<String>,
     /// Requested asset class.
     pub asset_class: AssetClass,
     /// Requested data type.
@@ -546,10 +547,11 @@ pub(crate) struct EquityEnsureRequest {
 /// A validated option ensure body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OptionEnsureRequest {
+    pub job_id: Option<String>,
     /// Requested data type.
     pub data_type: DataType,
     pub interval: Option<String>,
-    /// Legacy single-symbol selector.
+    /// Individual contract selector.
     pub symbol: Option<String>,
     /// Requested underlying.
     pub underlying: Option<String>,
@@ -590,6 +592,7 @@ fn parse_equity_ensure(
     reject_unknown(
         object,
         &[
+            "job_id",
             "asset_class",
             "data_type",
             "symbol",
@@ -606,6 +609,7 @@ fn parse_equity_ensure(
     let end_date = parse_date(&required_string(object, "end_date")?, "end_date")?;
     validate_date_range(start_date, end_date)?;
     Ok(EquityEnsureRequest {
+        job_id: ingestion_job_id(object.get("job_id"))?,
         asset_class,
         data_type,
         symbol,
@@ -621,6 +625,7 @@ fn parse_option_ensure(
     reject_unknown(
         object,
         &[
+            "job_id",
             "asset_class",
             "data_type",
             "symbol",
@@ -651,6 +656,7 @@ fn parse_option_ensure(
         ));
     }
     Ok(OptionEnsureRequest {
+        job_id: ingestion_job_id(object.get("job_id"))?,
         data_type,
         interval,
         symbol,
@@ -898,4 +904,27 @@ fn parse_query_selection(
         end_date,
         interval,
     })
+}
+
+/// Explicit new attempts use a fresh ID; an omitted ID joins the canonical dataset request.
+pub(crate) fn ingestion_job_id(
+    value: Option<&serde_json::Value>,
+) -> Result<Option<String>, ApiError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let id = value
+        .as_str()
+        .filter(|id| {
+            !id.is_empty()
+                && id.len() <= 128
+                && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        })
+        .ok_or_else(|| {
+            ApiError::validation_error(
+                "job_id",
+                "job ID must contain 1..128 ASCII letters, digits or hyphens",
+            )
+        })?;
+    Ok(Some(id.into()))
 }

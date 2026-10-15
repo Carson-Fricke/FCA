@@ -1,11 +1,10 @@
-# src
+# Local harness market-data adapters
 
-Local filesystem composition, persistent coverage and option metadata, and on-demand ingestion. Option resolution seeds state/option-contracts.json for later requests and API restarts. Azure deployment composition belongs to lake-hosted.
+This capability supplies filesystem persistence and finite worker processes. It never calls providers or hosts HTTP routes; both deployments share ingestion application behavior and the harness reader.
 
-- `application.rs` — Local-only composition for the market-lake HTTP application.
-- `committer.rs` — Local commit boundaries: objects first, then coverage.
-- `ensure.rs` — Filesystem and provider composition for the shared ensure application.
-- `ingest.rs` — Alpaca ingestion composed over local filesystem adapters.
-- `lib.rs` — Local composition over filesystem state: layout, ingest, backfill, and the ensure launcher.
-- `options.rs` — Durable local option contract metadata.
-- `state.rs` — Deterministic filesystem layout and local object URLs.
+- `lib.rs`: exports the local adapter facade.
+- `state.rs`: resolves and initializes an explicitly owned filesystem tree and implements marker-protected cleanup.
+- `catalog.rs`: indexes current coverage and contract records in independently atomic files, avoiding whole-catalog rewrites.
+- `ownership.rs`: protects cross-process job and publication ownership with kernel file locks.
+- `jobs.rs`: durably admits immutable work and exposes fenced updates through the shared persistence ports.
+- `runner.rs`: pins a worker executable by content hash, starts finite child processes, reconciles ownership after host restart and prohibits unknown-outcome replay.

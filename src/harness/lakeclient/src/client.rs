@@ -1,11 +1,9 @@
 //! The market-lake HTTP client.
 
-use arrow_buffer::Buffer;
-use arrow_ipc::reader::StreamDecoder;
 use harness_contracts::progress::{ExecutionProgress, ExecutionStage, ProgressReporter};
 use std::collections::BTreeMap;
 use std::fmt;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use arrow_array::RecordBatch;
 use futures_util::stream::{self, StreamExt};
@@ -22,8 +20,7 @@ use crate::models::{CoverageReport, EnsureResponse, FactsResponse, JobStatus, Un
 use crate::spec::{EnsureSpec, ReadSpec};
 
 /// Default Azure market-lake endpoint; environment overrides can select a local lake.
-pub const DEFAULT_LAKE_BASE_URL: &str =
-    "https://fca-ml-dev-api.lemonhill-3b437822.westus2.azurecontainerapps.io";
+pub const DEFAULT_LAKE_BASE_URL: &str = "http://127.0.0.1:8001/market-data";
 /// Wall-clock bound for control calls; connect/read inactivity bound for Arrow streams.
 const HTTP_TIMEOUT_SECONDS: u64 = 60;
 /// The most ensure or read requests the batch helpers keep in flight at once.
@@ -121,8 +118,11 @@ impl LakeClientConfig {
 #[derive(Clone)]
 pub struct LakeClient {
     config: LakeClientConfig,
-    http: reqwest::Client,
-    stream_http: reqwest::Client,
+    pub(crate) access: Option<std::sync::Arc<dyn crate::MarketAccess>>,
+    pub(crate) http: reqwest::Client,
+    object_http: reqwest::Client,
+    reader: harness_market_reader::MarketDataReader,
+    pub(crate) pins: crate::snapshot::Pins,
     reporter: Option<ProgressReporter>,
 }
 
@@ -137,6 +137,21 @@ impl fmt::Debug for LakeClient {
 }
 
 impl LakeClient {
+    pub fn from_access(
+        access: std::sync::Arc<dyn crate::MarketAccess>,
+    ) -> Result<Self, LakeClientError> {
+        let mut client = Self::new(LakeClientConfig::new(
+            "http://in-process.invalid",
+            "in-process",
+        )?)?;
+        client.access = Some(access);
+        Ok(client)
+    }
+    /// Compose an explicitly scoped reader/cache service (the default uses the process reader).
+    pub fn with_reader(mut self, reader: harness_market_reader::MarketDataReader) -> Self {
+        self.reader = reader;
+        self
+    }
     /// Build a client from resolved configuration.
     ///
     /// # Errors
@@ -161,16 +176,19 @@ impl LakeClient {
                     "the market-lake HTTP client could not be built: {error}"
                 ))
             })?;
-        let stream_http = reqwest::Client::builder()
+        let object_http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(HTTP_TIMEOUT_SECONDS))
             .read_timeout(Duration::from_secs(HTTP_TIMEOUT_SECONDS))
-            .default_headers(headers)
             .build()
             .map_err(|error| LakeClientError::Config(error.to_string()))?;
         Ok(Self {
             config,
+            access: None,
             http,
-            stream_http,
+            object_http,
+            reader: harness_market_reader::MarketDataReader::configured()
+                .map_err(|e| LakeClientError::Config(e.to_string()))?,
+            pins: Default::default(),
             reporter: None,
         })
     }
@@ -178,6 +196,7 @@ impl LakeClient {
     /// Attach the execution owner's progress port; clones share this port.
     pub fn with_progress(mut self, reporter: ProgressReporter) -> Self {
         self.reporter = Some(reporter);
+        self.pins = Default::default();
         self
     }
 
@@ -254,15 +273,7 @@ impl LakeClient {
         } else {
             0
         };
-        let value = self
-            .post_value("/v1/catalog/ensure", &spec.ensure_body())
-            .await
-            .map_err(|error| LakeClientError::EnsureRequest(error.to_string()))?;
-        let response: EnsureResponse = serde_json::from_value(value).map_err(|error| {
-            LakeClientError::EnsureRequest(format!(
-                "market-lake ensure response is not valid: {error}"
-            ))
-        })?;
+        let response = self.admit_ensure(spec).await?;
         let entries = response.entries.unwrap_or_default();
         if self.reporter.is_some() && !entries.is_empty() {
             self.report_coverage(spec, &entries, cached)?;
@@ -284,15 +295,52 @@ impl LakeClient {
             })
     }
 
+    /// Durably admit acquisition; callers retain its acknowledgement and choose waiting policy.
+    pub async fn admit_ensure(
+        &self,
+        spec: &EnsureSpec,
+    ) -> Result<crate::EnsureResponse, LakeClientError> {
+        let value = match &self.access {
+            Some(access) => {
+                access
+                    .request(crate::MarketRequest::Ensure(spec.clone()))
+                    .await?
+            }
+            None => self
+                .post_value("/v1/catalog/ensure", &spec.ensure_body())
+                .await
+                .map_err(|error| LakeClientError::EnsureRequest(error.to_string()))?,
+        };
+        let response: EnsureResponse = serde_json::from_value(value).map_err(|error| {
+            LakeClientError::EnsureRequest(format!(
+                "market-lake ensure response is not valid: {error}"
+            ))
+        })?;
+        if response.entries.is_none() && response.job_id.as_deref().is_none_or(str::is_empty) {
+            return Err(LakeClientError::Protocol(
+                "ingestion acknowledgement has no coverage or retained job ID".into(),
+            ));
+        }
+        Ok(response)
+    }
+
     /// Fetch the coverage report for one window.
     ///
     /// # Errors
     ///
     /// Returns a typed error when the request or decode fails.
     pub async fn coverage(&self, spec: &EnsureSpec) -> Result<CoverageReport, LakeClientError> {
-        let value = self
-            .get_value("/v1/catalog/coverage", &spec.query_params())
-            .await?;
+        let value = match &self.access {
+            Some(access) => {
+                access
+                    .request(crate::MarketRequest::Coverage(spec.clone()))
+                    .await?
+            }
+            None => {
+                self.get_value("/v1/catalog/coverage", &spec.query_params())
+                    .await?
+            }
+        };
         serde_json::from_value(value).map_err(|error| {
             LakeClientError::Protocol(format!(
                 "market-lake coverage response is not valid: {error}"
@@ -306,7 +354,14 @@ impl LakeClient {
     ///
     /// Returns a typed error when the request or decode fails.
     pub async fn job(&self, job_id: &str) -> Result<JobStatus, LakeClientError> {
-        let value = self.get_value(&format!("/v1/jobs/{job_id}"), &[]).await?;
+        let value = match &self.access {
+            Some(access) => {
+                access
+                    .request(crate::MarketRequest::Job(job_id.into()))
+                    .await?
+            }
+            None => self.get_value(&format!("/v1/jobs/{job_id}"), &[]).await?,
+        };
         serde_json::from_value(value).map_err(|error| {
             LakeClientError::Protocol(format!("market-lake job response is not valid: {error}"))
         })
@@ -329,7 +384,7 @@ impl LakeClient {
         Ok(earliest_complete_date(&report.entries))
     }
 
-    /// Read the ensured dataset window as decoded Arrow IPC batches.
+    /// Read the ensured dataset window as verified Arrow batches.
     ///
     /// Rows arrive in the lake's frozen order (timestamp, then deterministic
     /// ordering keys). A `404 no_data` response maps to an empty batch list:
@@ -338,7 +393,7 @@ impl LakeClient {
     /// # Errors
     ///
     /// Returns a typed error for a non-success status other than `no_data`, a
-    /// transport failure, or a stream that does not decode as Arrow IPC.
+    /// transport failure, or a partition that fails integrity or decoding checks.
     pub async fn read_arrow(&self, spec: &ReadSpec) -> Result<Vec<RecordBatch>, LakeClientError> {
         let mut batches = Vec::new();
         self.visit_arrow(spec, |batch| {
@@ -349,9 +404,23 @@ impl LakeClient {
         Ok(batches)
     }
 
+    /// Return the exact manifest pinned for this execution's read request.
+    pub async fn snapshot(
+        &self,
+        spec: &ReadSpec,
+    ) -> Result<harness_market_reader::MarketDataSnapshot, LakeClientError> {
+        Ok(self
+            .resolve_snapshot(spec)
+            .await?
+            .get()
+            .expect("resolved snapshot")
+            .snapshot
+            .clone())
+    }
+
     /// Decode and consume Arrow batches as they arrive. The 60-second limit is
     /// an idle-read timeout, so a healthy large stream can take longer overall.
-    /// No whole-response byte buffer or automatic replay is used.
+    /// Compressed partitions are verified before decoding; decoded batches are bounded and reused.
     pub async fn visit_arrow<F>(
         &self,
         spec: &ReadSpec,
@@ -367,66 +436,60 @@ impl LakeClient {
         progress.end_date = Some(spec.end_date.clone());
         progress.request_timeout_seconds = Some(HTTP_TIMEOUT_SECONDS);
         self.report_progress(progress.clone())?;
-        let mut response = self
-            .stream_http
-            .get(self.url("/v1/read"))
-            .query(&spec.query_params())
-            .send()
-            .await
-            .map_err(|error| read_transport_error(spec, &error, 0))?;
-        let status = response.status();
-        if status.as_u16() == 404 {
-            let bytes = response
-                .bytes()
-                .await
-                .map_err(|error| read_transport_error(spec, &error, 0))?;
-            let error = http_error(404, &bytes);
-            if matches!(&error, LakeClientError::Http { code: Some(code), .. } if code == "no_data")
-            {
-                progress.completed = true;
-                self.report_progress(progress)?;
-                return Ok(());
-            }
+        let pin = self.resolve_snapshot(spec).await?;
+        let resolved = pin.get().expect("resolved snapshot");
+        let source = crate::snapshot::SignedObjects {
+            observed: Default::default(),
+            http: &self.object_http,
+            control: self,
+            snapshot: &resolved.snapshot,
+            locations: &resolved.locations,
+        };
+        let measured = self
+            .access
+            .as_ref()
+            .map(|access| crate::access::MeasuredSource {
+                inner: access.source(),
+                observed: &source.observed,
+            });
+        let input = measured.as_ref().map_or(
+            &source as &dyn harness_market_reader::PartitionSource,
+            |value| value,
+        );
+        let mut last_report = std::time::Instant::now();
+        let mut consume_error = None;
+        let result = self
+            .reader
+            .visit(&resolved.snapshot, input, |batch| {
+                progress.rows += batch.num_rows() as u64;
+                progress.bytes = source.observed.load(std::sync::atomic::Ordering::Relaxed);
+                if let Err(error) = consume(batch) {
+                    consume_error = Some(error.clone());
+                    return Err(harness_market_reader::ReaderError::Decode(
+                        error.to_string(),
+                    ));
+                }
+                if last_report.elapsed() >= Duration::from_secs(1) {
+                    self.report_progress(progress.clone())
+                        .map_err(|e| harness_market_reader::ReaderError::Source(e.to_string()))?;
+                    last_report = std::time::Instant::now();
+                }
+                Ok(())
+            })
+            .await;
+        progress.bytes = source.observed.load(std::sync::atomic::Ordering::Relaxed);
+        if let Some(error) = consume_error {
+            self.report_progress(progress)?;
             return Err(error);
         }
-        if !status.is_success() {
-            let bytes = response
-                .bytes()
-                .await
-                .map_err(|error| read_transport_error(spec, &error, 0))?;
-            return Err(http_error(status.as_u16(), &bytes));
-        }
-        let mut decoder = StreamDecoder::new();
-        let mut last_report = Instant::now();
-        while let Some(chunk) = match response.chunk().await {
-            Ok(chunk) => chunk,
-            Err(error) => {
-                self.report_progress(progress.clone())?;
-                return Err(read_transport_error(spec, &error, progress.bytes));
-            }
-        } {
-            progress.bytes += chunk.len() as u64;
-            let mut buffer = Buffer::from(chunk.as_ref());
-            while !buffer.is_empty() {
-                let decoded = decoder
-                    .decode(&mut buffer)
-                    .map_err(|error| LakeClientError::Decode(error.to_string()));
-                if decoded.is_err() {
-                    self.report_progress(progress.clone())?;
+        if let Err(error) = result {
+            self.report_progress(progress)?;
+            return Err(match error {
+                harness_market_reader::ReaderError::Source(message) => {
+                    LakeClientError::Transport(message)
                 }
-                if let Some(batch) = decoded? {
-                    progress.rows += batch.num_rows() as u64;
-                    consume(batch)?;
-                }
-            }
-            if last_report.elapsed() >= Duration::from_secs(1) {
-                self.report_progress(progress.clone())?;
-                last_report = Instant::now();
-            }
-        }
-        if let Err(error) = decoder.finish() {
-            self.report_progress(progress.clone())?;
-            return Err(LakeClientError::Decode(error.to_string()));
+                other => LakeClientError::Decode(other.to_string()),
+            });
         }
         progress.completed = true;
         self.report_progress(progress)?;
@@ -473,9 +536,17 @@ impl LakeClient {
     ///
     /// Returns a typed error when the request or decode fails.
     pub async fn reference_universe(&self, as_of: &str) -> Result<Vec<String>, LakeClientError> {
-        let value = self
-            .get_value("/v1/reference/universe", &[("as_of", as_of.to_string())])
-            .await?;
+        let value = match &self.access {
+            Some(access) => {
+                access
+                    .request(crate::MarketRequest::Universe(as_of.into()))
+                    .await?
+            }
+            None => {
+                self.get_value("/v1/reference/universe", &[("as_of", as_of.to_string())])
+                    .await?
+            }
+        };
         let response: UniverseResponse = serde_json::from_value(value).map_err(|error| {
             LakeClientError::Protocol(format!(
                 "market-lake universe response is not valid: {error}"
@@ -495,7 +566,17 @@ impl LakeClient {
         as_of: &str,
     ) -> Result<BTreeMap<String, BTreeMap<String, String>>, LakeClientError> {
         let params = vec![("as_of", as_of.to_string()), ("symbols", symbols.join(","))];
-        let value = self.get_value("/v1/reference/facts", &params).await?;
+        let value = match &self.access {
+            Some(access) => {
+                access
+                    .request(crate::MarketRequest::Facts {
+                        symbols: symbols.to_vec(),
+                        as_of: as_of.into(),
+                    })
+                    .await?
+            }
+            None => self.get_value("/v1/reference/facts", &params).await?,
+        };
         let response: FactsResponse = serde_json::from_value(value).map_err(|error| {
             LakeClientError::Protocol(format!("market-lake facts response is not valid: {error}"))
         })?;
@@ -534,7 +615,7 @@ impl LakeClient {
         }
     }
 
-    fn url(&self, path: &str) -> String {
+    pub(crate) fn url(&self, path: &str) -> String {
         format!("{}{path}", self.config.base_url)
     }
 
@@ -572,13 +653,52 @@ impl LakeClient {
         selector
             .validate()
             .map_err(|e| LakeClientError::Config(e.to_string()))?;
-        let value = self
-            .post_value(
-                "/v1/options/resolve",
-                &serde_json::to_value(selector)
-                    .map_err(|e| LakeClientError::Config(e.to_string()))?,
-            )
-            .await?;
+        let body =
+            serde_json::to_value(selector).map_err(|e| LakeClientError::Config(e.to_string()))?;
+        let response = self
+            .http
+            .post(self.url("/v1/options/resolve"))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| LakeClientError::Transport(e.to_string()))?;
+        let accepted = response.status().as_u16() == 202;
+        let mut value = self.value(response).await?;
+        if accepted {
+            let id = value
+                .get("job_id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| {
+                    LakeClientError::Protocol(
+                        "option acquisition acknowledgement omitted its job ID".into(),
+                    )
+                })?
+                .to_string();
+            loop {
+                let record = self.job(&id).await?;
+                if record.job_id != id {
+                    return Err(LakeClientError::Protocol(
+                        "option acquisition job ID mismatch".into(),
+                    ));
+                }
+                match record.state.as_str() {
+                    "complete" => break,
+                    "failed" => {
+                        return Err(LakeClientError::EnsureIncomplete(format!(
+                            "option acquisition job {id} failed"
+                        )))
+                    }
+                    "queued" | "running" => tokio::time::sleep(POLL_START).await,
+                    _ => {
+                        return Err(LakeClientError::Protocol(
+                            "unknown option acquisition state".into(),
+                        ))
+                    }
+                }
+            }
+            value = self.option_value(selector, &body).await?;
+        }
         let resolved: harness_contracts::ResolvedOption = serde_json::from_value(value)
             .map_err(|e| LakeClientError::Protocol(format!("invalid option resolution: {e}")))?;
         resolved
@@ -587,6 +707,20 @@ impl LakeClient {
         Ok(resolved)
     }
 
+    async fn option_value(
+        &self,
+        selector: &harness_contracts::OptionSelector,
+        body: &Value,
+    ) -> Result<Value, LakeClientError> {
+        match &self.access {
+            Some(access) => {
+                access
+                    .request(crate::MarketRequest::ResolveOption(selector.clone()))
+                    .await
+            }
+            None => self.post_value("/v1/options/resolve", body).await,
+        }
+    }
     async fn value(&self, response: reqwest::Response) -> Result<Value, LakeClientError> {
         let status = response.status();
         let bytes = response
@@ -603,7 +737,7 @@ impl LakeClient {
 }
 
 /// Render one non-success response with the lake's error code when present.
-fn http_error(status: u16, body: &[u8]) -> LakeClientError {
+pub(crate) fn http_error(status: u16, body: &[u8]) -> LakeClientError {
     let code = serde_json::from_slice::<Value>(body)
         .ok()
         .and_then(|value| {
@@ -618,27 +752,4 @@ fn http_error(status: u16, body: &[u8]) -> LakeClientError {
         code,
         body: String::from_utf8_lossy(body).to_string(),
     }
-}
-
-fn read_transport_error(spec: &ReadSpec, error: &reqwest::Error, bytes: u64) -> LakeClientError {
-    let cause = if error.is_timeout() {
-        if error.is_connect() {
-            "connection timed out after 60 seconds"
-        } else {
-            "idle read timed out after 60 seconds"
-        }
-        .to_string()
-    } else {
-        let mut detail = error.to_string();
-        let mut source = std::error::Error::source(error);
-        while let Some(cause) = source {
-            detail.push_str(&format!(": {cause}"));
-            source = cause.source();
-        }
-        detail
-    };
-    LakeClientError::Transport(format!(
-        "reading {} {} {} through {} after {bytes} bytes: {cause}",
-        spec.symbol, spec.data_type, spec.start_date, spec.end_date
-    ))
 }

@@ -1,22 +1,20 @@
-//! Axum boundary publishing the market-lake catalog, ensure, query, read, raw,
+//! Axum boundary publishing catalog, admission, query, snapshots, raw objects,
 //! and reference routes.
 //!
-//! This crate is the Rust port of `lake.http`: the published HTTP contract the
-//! harness and Thesis consume. Paths, methods, status codes, JSON field names,
-//! bearer authentication, and error envelopes stay byte-compatible with the
-//! Python application.
+//! This capability publishes the current catalog, admission, snapshot and query
+//! contracts under the harness host's `/market-data` prefix. It depends on
+//! injected repositories and execution ports, never provider execution.
 //!
 //! Three seams are deliberately injected rather than constructed here: the
 //! repositories and URL issuer live in [`LakeApiState`], the blob-read seam
-//! backing the streaming read and reference routes is an injected
+//! backing raw object and reference routes is an injected
 //! [`lake_storage::ReadableBlobStore`], and the request boundary configuration
 //! lives in [`LakeApiConfig`]. The coverage clock is an injected provider so
 //! tests can pin the as-of instant that classifies a currently open session as
 //! partial.
 //!
-//! The bounded DuckDB SQL mode is a later phase: with no SQL engine configured,
-//! `POST /v1/query` with `mode: "sql"` returns the Python
-//! `query_unavailable` rejection.
+//! The bounded SQL engine is injected by hosting composition. Without that
+//! capability, SQL requests return `query_unavailable`.
 
 pub mod auth;
 pub mod models;
@@ -24,7 +22,6 @@ pub mod routes;
 pub mod state;
 
 mod error;
-mod selection;
 mod validate;
 
 use std::sync::Arc;
@@ -53,7 +50,8 @@ pub fn create_app(state: Arc<LakeApiState>, config: LakeApiConfig) -> Router {
         .route("/v1/jobs/{job_id}", get(routes::ensure::job_status))
         .route("/v1/query", post(routes::query::query))
         .route("/v1/options/resolve", post(routes::options::resolve))
-        .route("/v1/read", get(routes::read::read))
+        .route("/v1/snapshot", get(routes::snapshot::snapshot))
+        .route("/v1/snapshot/locations", post(routes::snapshot::locations))
         .route("/v1/raw", get(routes::raw::raw_object))
         .route("/v1/reference/universe", get(routes::reference::universe))
         .route("/v1/reference/facts", get(routes::reference::facts))

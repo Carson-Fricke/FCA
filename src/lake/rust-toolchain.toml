@@ -1,7 +1,5 @@
-# Pin the Rust toolchain for the market-lake workspace. The channel tracks the
-# current stable release; rustfmt and clippy accompany it in CI and are
-# installed automatically by rustup.
+# Keep local, CI and container builds on one reproducible compiler.
 [toolchain]
-channel = "stable"
+channel = "1.98.1"
 components = ["rustfmt", "clippy"]
 profile = "minimal"

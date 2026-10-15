@@ -21,7 +21,7 @@ use backtest::backtest::fixture::{
 use backtest::backtest::job::{parse_timestamp_ns, run_native_study_job_with_lake_client};
 use backtest::backtest::null::apply_null_transform;
 use backtest::backtest::preflight::preflight_data;
-use harness_lakeclient::testing::{bars_stream, FakeBarRow, FakeLakeConfig, FakeLakeServer};
+use harness_lakeclient::testing::{bars_parquet, FakeBarRow, FakeLakeConfig, FakeLakeServer};
 use harness_lakeclient::{BlockingLakeClient, LakeClientConfig};
 use num::Decimal18;
 use serde_json::{json, Value};
@@ -548,7 +548,7 @@ fn run_study(config: &BacktestConfig, name: &str) -> Value {
         })
         .collect();
     let server = FakeLakeServer::start(FakeLakeConfig {
-        read_bodies_by_type: BTreeMap::from([("bars".to_string(), bars_stream("SPY", &bars))]),
+        partitions_by_type: BTreeMap::from([("bars".to_string(), bars_parquet("SPY", &bars))]),
         ..FakeLakeConfig::new(TOKEN)
     });
     let directory = std::env::temp_dir().join(format!("backtest-null-transform-{name}"));

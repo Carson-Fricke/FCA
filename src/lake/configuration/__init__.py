@@ -6,7 +6,6 @@ from lake.configuration.settings import (
     BackfillSettings,
     LakeSettings,
     ProviderSettings,
-    QueueSettings,
     StorageSettings,
     load_settings,
 )
@@ -29,7 +28,6 @@ __all__ = [
     "OptionSelection",
     "OptionsUniverse",
     "ProviderSettings",
-    "QueueSettings",
     "StorageSettings",
     "UniverseSettings",
     "load_settings",

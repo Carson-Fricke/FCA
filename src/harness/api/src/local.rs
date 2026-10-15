@@ -48,13 +48,26 @@ fn created_receipt(job_id: &str, kind: JobKind) -> Value {
 /// Local backtest submitter that runs the native engine and records the job.
 pub struct NativeBacktestSubmitter {
     job_store: Arc<dyn JobStore>,
+    access: Option<Arc<dyn harness_lakeclient::MarketAccess>>,
 }
 
 impl NativeBacktestSubmitter {
     /// Compose a submitter over the shared durable job store.
     #[must_use]
     pub fn new(job_store: Arc<dyn JobStore>) -> Self {
-        Self { job_store }
+        Self {
+            job_store,
+            access: None,
+        }
+    }
+    pub fn with_access(
+        job_store: Arc<dyn JobStore>,
+        access: Arc<dyn harness_lakeclient::MarketAccess>,
+    ) -> Self {
+        Self {
+            job_store,
+            access: Some(access),
+        }
     }
 }
 
@@ -96,6 +109,7 @@ impl mcp::tools::BacktestSubmitter for NativeBacktestSubmitter {
         });
         let job_store = self.job_store.clone();
         let background_job_id = job_id.clone();
+        let access = self.access.clone();
         let _handle = std::thread::spawn(move || {
             run_background_backtest(
                 job_store,
@@ -103,6 +117,7 @@ impl mcp::tools::BacktestSubmitter for NativeBacktestSubmitter {
                 configuration,
                 output_dir,
                 started,
+                access,
             );
         });
         Ok(created_receipt(&job_id, JobKind::Backtest))
@@ -112,13 +127,26 @@ impl mcp::tools::BacktestSubmitter for NativeBacktestSubmitter {
 /// Local study submitter that runs the native engine study path and records it.
 pub struct NativeStudySubmitter {
     job_store: Arc<dyn JobStore>,
+    access: Option<Arc<dyn harness_lakeclient::MarketAccess>>,
 }
 
 impl NativeStudySubmitter {
     /// Compose a submitter over the shared durable job store.
     #[must_use]
     pub fn new(job_store: Arc<dyn JobStore>) -> Self {
-        Self { job_store }
+        Self {
+            job_store,
+            access: None,
+        }
+    }
+    pub fn with_access(
+        job_store: Arc<dyn JobStore>,
+        access: Arc<dyn harness_lakeclient::MarketAccess>,
+    ) -> Self {
+        Self {
+            job_store,
+            access: Some(access),
+        }
     }
 }
 
@@ -160,6 +188,7 @@ impl mcp::tools::StudySubmitter for NativeStudySubmitter {
         });
         let job_store = self.job_store.clone();
         let background_job_id = job_id.clone();
+        let access = self.access.clone();
         let _handle = std::thread::spawn(move || {
             run_background_study(
                 job_store,
@@ -167,6 +196,7 @@ impl mcp::tools::StudySubmitter for NativeStudySubmitter {
                 configuration,
                 output_dir,
                 started,
+                access,
             );
         });
         Ok(created_receipt(&job_id, JobKind::Study))
@@ -633,6 +663,7 @@ fn run_background_study(
     configuration: BacktestConfig,
     output_dir: PathBuf,
     started: DateTime<Utc>,
+    access: Option<Arc<dyn harness_lakeclient::MarketAccess>>,
 ) {
     let guard = BackgroundJobGuard::new(job_store.clone(), &job_id, started);
     if !start_background_job(&job_store, &job_id) {
@@ -643,7 +674,7 @@ fn run_background_study(
         let job_id = job_id.clone();
         let output_dir = output_dir.clone();
         move || {
-            run_background_study_inner(job_store, job_id, configuration, output_dir);
+            run_background_study_inner(job_store, job_id, configuration, output_dir, access);
         }
     }));
     if let Err(payload) = outcome {
@@ -666,8 +697,12 @@ fn run_background_study_inner(
     job_id: String,
     mut configuration: BacktestConfig,
     output_dir: PathBuf,
+    access: Option<Arc<dyn harness_lakeclient::MarketAccess>>,
 ) {
-    let client = match BlockingLakeClient::from_env() {
+    let client = match access.map_or_else(
+        BlockingLakeClient::from_env,
+        BlockingLakeClient::from_access,
+    ) {
         Ok(client) => client,
         Err(error) => {
             let message = format!("market-lake client: {error}");
@@ -737,6 +772,7 @@ fn run_background_backtest(
     configuration: BacktestConfig,
     output_dir: PathBuf,
     started: DateTime<Utc>,
+    access: Option<Arc<dyn harness_lakeclient::MarketAccess>>,
 ) {
     let guard = BackgroundJobGuard::new(job_store.clone(), &job_id, started);
     if !start_background_job(&job_store, &job_id) {
@@ -747,7 +783,7 @@ fn run_background_backtest(
         let job_id = job_id.clone();
         let output_dir = output_dir.clone();
         move || {
-            run_background_backtest_inner(job_store, job_id, configuration, output_dir);
+            run_background_backtest_inner(job_store, job_id, configuration, output_dir, access);
         }
     }));
     if let Err(payload) = outcome {
@@ -770,8 +806,12 @@ fn run_background_backtest_inner(
     job_id: String,
     configuration: BacktestConfig,
     output_dir: PathBuf,
+    access: Option<Arc<dyn harness_lakeclient::MarketAccess>>,
 ) {
-    let client = match BlockingLakeClient::from_env() {
+    let client = match access.map_or_else(
+        BlockingLakeClient::from_env,
+        BlockingLakeClient::from_access,
+    ) {
         Ok(client) => client,
         Err(error) => {
             let message = format!("market-lake client: {error}");

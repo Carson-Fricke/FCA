@@ -30,6 +30,9 @@ name = "mcp"
 path = "src/bin/mcp.rs"
 
 [dependencies]
+futures-util = "0.3"
+lake-hosted = { path = "../../lake/hosted" }
+lake-contracts = { path = "../../lake/contracts" }
 harness-contracts = { path = "../contracts" }
 config = { path = "../config" }
 axum = "0.8"
@@ -54,3 +57,7 @@ ureq = { version = "2", features = ["json"] }
 harness-lakeclient = { path = "../lakeclient", features = ["test-support"] }
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
+
+[[bin]]
+name = "market-data-profile"
+path = "src/bin/market_data_profile.rs"

@@ -17,6 +17,19 @@ param environmentName string = 'dev'
 @minLength(1)
 param sharedImageReference string
 
+@description('Digest-pinned finite ACI ingestion worker image.')
+param ingestionImageReference string = sharedImageReference
+param ingestionCpu string = '4'
+param ingestionMemoryGb string = '8'
+@minValue(1)
+param ingestionSessionConcurrency int = 1
+@minValue(1)
+@maxValue(16)
+param ingestionMaxWorkers int = 2
+@minValue(60)
+@maxValue(604800)
+param ingestionTimeoutSeconds int = 86400
+
 @description('GitHub organization or user owning the repository. This public value must match the immutable OIDC subject casing.')
 @minLength(1)
 param githubOwner string
@@ -54,14 +67,8 @@ param allowPublicNetworkAccess bool = false
 @description('Whether the API accepts public ingress. Keep disabled until the API authentication boundary is ready.')
 param enableExternalApiIngress bool = false
 
-@description('Five-field UTC cron expression for the scheduled ingest job.')
-param ingestCronExpression string = '0 1 * * *'
-
 @description('Entra application client ID the API accepts as token audience. Empty keeps the API on static bearer authentication only.')
 param lakeApiAudience string = ''
-
-@description('Maximum seconds allowed for one ingest job replica execution.')
-param ingestReplicaTimeoutSeconds int = 3600
 
 @description('Whether to deploy the always-on crypto trader Container App. The scheduled RTH equities trader is always deployed; false leaves no crypto compute in the resource group.')
 param enableCryptoTrader bool = false
@@ -207,8 +214,6 @@ var githubDeployerIdentityName = '${namePrefix}-github-deployer'
 var containerRegistryName = 'fca${take(uniqueString(resourceGroup().id, namePrefix, 'registry'), 18)}'
 var logAnalyticsWorkspaceName = '${namePrefix}-logs'
 var containerAppsEnvironmentName = '${namePrefix}-cae'
-var apiAppName = '${namePrefix}-api'
-var ingestJobName = '${namePrefix}-ingest'
 var quantApiAppName = '${namePrefix}-quant-api'
 var rthTraderAppName = '${namePrefix}-rth-trader'
 var cryptoTraderAppName = '${namePrefix}-crypto-trader'
@@ -280,6 +285,7 @@ module containerRegistry './modules/container-registry.bicep' = {
   name: 'market-lake-container-registry'
   params: {
     registryName: containerRegistryName
+    quantPrincipalId: identities.outputs.quantRuntimeIdentity.principalId
     runtimePrincipalId: identities.outputs.runtimeIdentity.principalId
     thesisPrincipalId: deployThesis ? thesisIdentity.properties.principalId : ''
     location: location
@@ -302,6 +308,7 @@ module access './modules/access.bicep' = {
   params: {
     enableGitea: enableGitea
     runtimePrincipalId: identities.outputs.runtimeIdentity.principalId
+    runtimeIdentityResourceId: identities.outputs.runtimeIdentity.resourceId
     quantPrincipalId: identities.outputs.quantRuntimeIdentity.principalId
     githubDeployerPrincipalId: identities.outputs.githubDeployerIdentity.principalId
     githubDeployerIdentityName: githubDeployerIdentityName
@@ -319,9 +326,13 @@ module containerApps './modules/container-apps.bicep' = {
   params: {
     logAnalyticsWorkspaceName: logAnalyticsWorkspaceName
     containerAppsEnvironmentName: containerAppsEnvironmentName
-    apiAppName: apiAppName
-    ingestJobName: ingestJobName
     sharedImageReference: sharedImageReference
+    ingestionImageReference: ingestionImageReference
+    ingestionCpu: ingestionCpu
+    ingestionMemoryGb: ingestionMemoryGb
+    ingestionSessionConcurrency: ingestionSessionConcurrency
+    ingestionMaxWorkers: ingestionMaxWorkers
+    ingestionTimeoutSeconds: ingestionTimeoutSeconds
     registryLoginServer: containerRegistry.outputs.registry.loginServer
     storageAccountName: storage.outputs.storageAccountName
     keyVaultUri: keyVault.outputs.keyVaultUri
@@ -330,8 +341,6 @@ module containerApps './modules/container-apps.bicep' = {
     location: location
     tags: tags
     logRetentionDays: logRetentionDays
-    ingestCronExpression: ingestCronExpression
-    ingestReplicaTimeoutSeconds: ingestReplicaTimeoutSeconds
     allowPublicLogQuery: false
     enableExternalApiIngress: enableExternalApiIngress
     lakeApiTenantId: tenant().tenantId
@@ -489,8 +498,6 @@ output deploymentSummary object = {
     githubDeployerIdentity: identities.outputs.githubDeployerIdentity.name
     logAnalyticsWorkspace: logAnalyticsWorkspaceName
     containerAppsEnvironment: containerAppsEnvironmentName
-    api: apiAppName
-    ingestJob: ingestJobName
     quantApi: quantApiAppName
     rthTrader: rthTraderAppName
     cryptoTrader: cryptoTraderAppName

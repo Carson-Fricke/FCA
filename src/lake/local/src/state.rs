@@ -1,18 +1,9 @@
-//! Deterministic filesystem layout and local object URLs.
-//!
-//! Ports `lake/local/state.py`: the repository-ignored directory tree one local
-//! market-lake instance owns, the ownership marker that makes initialization
-//! and reset safe, and the file-URL issuer confined to the object root.
+//! Owned development filesystem layout and explicit marker-protected cleanup.
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
-
-use lake_catalog::JsonCatalogStore;
-use lake_contracts::DataError;
-use lake_query::FileUrlIssuer;
 
 /// The ownership marker file name inside the local data root.
 pub const MARKER_NAME: &str = ".market-lake-local";
@@ -45,17 +36,6 @@ impl fmt::Display for LocalStateError {
 }
 
 impl std::error::Error for LocalStateError {}
-
-impl From<DataError> for LocalStateError {
-    fn from(error: DataError) -> Self {
-        Self {
-            message: error.to_string(),
-        }
-    }
-}
-
-/// The coverage catalog persisted at `state/catalog.json`.
-pub type LocalCatalog = Arc<JsonCatalogStore>;
 
 /// Repository-ignored directories owned by one local market-lake instance.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -111,11 +91,6 @@ impl LocalLayout {
     /// The local state directory below the data root.
     pub fn state_dir(&self) -> PathBuf {
         self.root.join("state")
-    }
-
-    /// The coverage catalog file path.
-    pub fn catalog_path(&self) -> PathBuf {
-        self.state_dir().join("catalog.json")
     }
 
     /// The ownership marker path.
@@ -215,57 +190,6 @@ impl LocalLayout {
                 root.display()
             ))
         })
-    }
-}
-
-/// Issue local file URLs confined to the configured object root.
-#[derive(Clone, Debug)]
-pub struct LocalFileIssuer {
-    root: PathBuf,
-}
-
-impl LocalFileIssuer {
-    /// Build an issuer over a resolved object root.
-    pub fn new(objects_root: impl Into<PathBuf>) -> Self {
-        Self {
-            root: resolve(objects_root.into()),
-        }
-    }
-}
-
-impl FileUrlIssuer for LocalFileIssuer {
-    fn issue(&self, object_path: &str) -> Result<String, DataError> {
-        if object_path.is_empty()
-            || object_path.contains('\\')
-            || object_path.starts_with('/')
-            || object_path
-                .split('/')
-                .any(|part| part.is_empty() || part == "." || part == "..")
-        {
-            return Err(DataError::value(
-                "object path must be a canonical relative POSIX path",
-            ));
-        }
-        let mut target = self.root.clone();
-        for part in object_path.split('/') {
-            target.push(part);
-        }
-        if !target.starts_with(&self.root) {
-            return Err(DataError::value(
-                "object path escapes the local object root",
-            ));
-        }
-        if !target.is_file() {
-            return Err(DataError::not_found(format!(
-                "local object is unavailable: {object_path}"
-            )));
-        }
-        let root_text = self.root.to_string_lossy().replace('\\', "/");
-        if root_text.starts_with('/') {
-            Ok(format!("file://{root_text}/{object_path}"))
-        } else {
-            Ok(format!("file:///{root_text}/{object_path}"))
-        }
     }
 }
 

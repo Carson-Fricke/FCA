@@ -330,7 +330,8 @@ jobs:
             # authentication boundary without moving the bearer token into the
             # runner. The healthy revision already proves the versionless Key
             # Vault reference for harness-api-bearer-token resolves.
-            protected_status="$(curl \
+            for protected_path in /v1/auth/check /market-data/v1/auth/check; do
+              protected_status="$(curl \
               --silent \
               --show-error \
               --location \
@@ -338,16 +339,17 @@ jobs:
               --write-out '%{http_code}' \
               --connect-timeout 10 \
               --max-time 30 \
-              "https://${QUANT_API_FQDN}/v1/auth/check")"
-            if [[ "$protected_status" != "401" ]]; then
-              echo "::error::The quant API protected route returned $protected_status instead of rejecting anonymous access"
-              exit 1
-            fi
+              "https://${QUANT_API_FQDN}${protected_path}")"
+              if [[ "$protected_status" != "401" ]]; then
+                echo "::error::The protected route $protected_path returned $protected_status instead of rejecting anonymous access"
+                exit 1
+              fi
+            done
 
             {
               echo "### Quant API health"
               echo "- Mode: public ingress"
-              echo "- \\`/health\\` returned status ok and \\`/v1/auth/check\\` rejected anonymous access with 401"
+              echo "- \\`/health\\` returned status ok; harness and market-data protected routes rejected anonymous access with 401"
             } >> "$GITHUB_STEP_SUMMARY"
           else
             normalized_prefix="${RESOURCE_NAME_PREFIX,,}"

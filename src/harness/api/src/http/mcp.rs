@@ -38,13 +38,32 @@ use super::store::JobStore;
 ///
 /// Returns [`ContextError`] when the local tool context cannot be composed.
 pub fn compose_local_server(job_store: Arc<dyn JobStore>) -> Result<Arc<McpServer>, ContextError> {
+    compose_server(job_store, None)
+}
+pub fn compose_server(
+    job_store: Arc<dyn JobStore>,
+    access: Option<Arc<dyn harness_lakeclient::MarketAccess>>,
+) -> Result<Arc<McpServer>, ContextError> {
     let mut context =
         HarnessToolsContext::new(Boundary::Local, Arc::new(EnvironmentBearerTokenSource));
-    context.backtest_submitter = Some(Arc::new(NativeBacktestSubmitter::new(job_store.clone())));
-    context.study_submitter = Some(Arc::new(NativeStudySubmitter::new(job_store.clone())));
+    context.backtest_submitter = Some(Arc::new(match &access {
+        Some(access) => NativeBacktestSubmitter::with_access(job_store.clone(), access.clone()),
+        None => NativeBacktestSubmitter::new(job_store.clone()),
+    }));
+    context.study_submitter = Some(Arc::new(match &access {
+        Some(access) => NativeStudySubmitter::with_access(job_store.clone(), access.clone()),
+        None => NativeStudySubmitter::new(job_store.clone()),
+    }));
     context.screening_submitter = Some(Arc::new(NativeScreeningSubmitter::new(
         job_store.clone(),
-        Arc::new(NativeScreenRunner::default()),
+        Arc::new(NativeScreenRunner {
+            lake_client: access
+                .map(harness_lakeclient::BlockingLakeClient::from_access)
+                .transpose()
+                .map_err(|e| ContextError(e.to_string()))?
+                .map(Arc::new),
+            ..Default::default()
+        }),
     )));
     context.study_validator = Some(Arc::new(NativeStudyValidator));
     context.job_store = Some(job_store);

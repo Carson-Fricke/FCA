@@ -64,13 +64,7 @@ async fn authenticator_fails_closed_without_a_configured_token() {
 
     let mut state = base_state(Arc::new(MemoryCatalogRepository::new()));
     state.bearer_token = None;
-    let router = build_app_with(
-        state,
-        lake_http::LakeApiConfig {
-            bearer_token: None,
-            ensure_wait_deadline_seconds: 1.0,
-        },
-    );
+    let router = build_app_with(state, lake_http::LakeApiConfig { bearer_token: None });
     let (status, _, _) = send(&router, get_auth("/v1/auth/check")).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }

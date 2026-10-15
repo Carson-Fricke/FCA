@@ -77,6 +77,7 @@ impl From<lake_contracts::DataError> for DataError {
             ContractError::NotFound(message) => Self::Incomplete(message),
             ContractError::Conflict(message) => Self::Unsupported(message),
             ContractError::Io(message) => Self::Incomplete(message),
+            ContractError::PendingJob(message) => Self::Incomplete(message),
         }
     }
 }

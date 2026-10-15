@@ -6,8 +6,8 @@ pub mod health;
 pub mod options;
 pub mod query;
 pub mod raw;
-pub mod read;
 pub mod reference;
+pub mod snapshot;
 
 use crate::error::ApiError;
 

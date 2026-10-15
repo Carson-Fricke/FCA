@@ -1,104 +1,80 @@
-//! Streaming consumption through the HTTP port, with no production data traffic.
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
-use axum::{body::Body, routing::get, Router};
-use harness_lakeclient::testing::{bars_stream, FakeBarRow, FakeLakeConfig, FakeLakeServer};
+//! Execution reads reuse pinned manifests and verified Arrow data through the real HTTP adapter.
+use harness_lakeclient::testing::{bars_parquet, FakeBarRow, FakeLakeConfig, FakeLakeServer};
 use harness_lakeclient::{LakeClient, LakeClientConfig, ReadSpec};
+use harness_market_reader::{CacheConfig, MarketDataReader};
+use std::sync::{Arc, Mutex};
 
 #[tokio::test]
-async fn consumes_a_batch_before_the_server_can_finish_the_response() {
-    let payload = bars_stream("SPY", &[FakeBarRow::new(0, "10", "11", "9", "10", "1")]);
-    let (send, receive) = tokio::sync::oneshot::channel();
-    let receive = Arc::new(Mutex::new(Some(receive)));
-    let app = Router::new().route(
-        "/v1/read",
-        get(move || {
-            let payload = payload.clone();
-            let receive = receive.lock().unwrap().take().unwrap();
-            async move {
-                let first = payload[..payload.len() - 8].to_vec();
-                let stream = futures_util::stream::unfold(
-                    (Some(first), Some(receive)),
-                    |(first, receive)| async move {
-                        if let Some(first) = first {
-                            Some((Ok::<_, std::io::Error>(first), (None, receive)))
-                        } else if let Some(receive) = receive {
-                            receive.await.unwrap();
-                            Some((Ok(vec![255, 255, 255, 255, 0, 0, 0, 0]), (None, None)))
-                        } else {
-                            None
-                        }
-                    },
-                );
-                Body::from_stream(stream)
-            }
-        }),
-    );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let observations = Arc::new(Mutex::new(Vec::new()));
-    let captured = observations.clone();
-    let client =
-        LakeClient::new(LakeClientConfig::new(format!("http://{address}"), "test").unwrap())
-            .unwrap()
-            .with_progress(Arc::new(move |snapshot| {
-                captured.lock().unwrap().push(snapshot);
-                Ok(())
-            }));
-    let mut send = Some(send);
-    let mut rows = 0;
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        client.visit_arrow(
-            &ReadSpec::new("equity", "bars", "SPY", "2024-01-02", "2024-01-02"),
-            |batch| {
-                rows += batch.num_rows();
-                send.take().unwrap().send(()).unwrap();
-                Ok(())
-            },
-        ),
-    )
-    .await
-    .expect("batch must be consumed before EOF")
-    .unwrap();
-    assert_eq!(rows, 1);
-    let observations = observations.lock().unwrap();
-    let last = observations.last().unwrap();
-    assert_eq!(last.rows, 1);
-    assert!(last.bytes > 0);
-    assert!(last.completed);
-    assert_eq!(last.request_timeout_seconds, Some(60));
-    server.abort();
-}
-
-#[test]
-fn truncated_stream_does_not_report_success_or_retry() {
-    let mut payload = bars_stream("SPY", &[FakeBarRow::new(0, "10", "11", "9", "10", "1")]);
-    payload.truncate(payload.len() - 12);
+async fn repeated_execution_reads_pin_one_manifest_and_reuse_verified_buffers() {
     let server = FakeLakeServer::start(FakeLakeConfig {
-        read_bodies: vec![(200, payload)],
+        partition_bodies: vec![(
+            200,
+            bars_parquet("SPY", &[FakeBarRow::new(0, "10", "11", "9", "10", "1")]),
+        )],
         ..FakeLakeConfig::new("test")
     });
-    let client = harness_lakeclient::BlockingLakeClient::new(
-        LakeClientConfig::new(server.base_url(), "test").unwrap(),
-    )
-    .unwrap();
-    let observations = Arc::new(Mutex::new(Vec::new()));
-    let captured = observations.clone();
-    let client = client.with_progress(Arc::new(move |snapshot| {
-        captured.lock().unwrap().push(snapshot);
-        Ok(())
-    }));
-    let result = client.visit_arrow(
-        &ReadSpec::new("equity", "bars", "SPY", "2024-01-02", "2024-01-02"),
-        |_| Ok(()),
+    let directory = tempfile::tempdir().unwrap();
+    let progress = Arc::new(Mutex::new(Vec::new()));
+    let recorded = progress.clone();
+    let client = LakeClient::new(LakeClientConfig::new(server.base_url(), "test").unwrap())
+        .unwrap()
+        .with_reader(MarketDataReader::new(CacheConfig {
+            directory: directory.path().into(),
+            disk_bytes: 1_000_000,
+            memory_bytes: 1_000_000,
+        }))
+        .with_progress(Arc::new(move |value| {
+            recorded.lock().unwrap().push(value);
+            Ok(())
+        }));
+    let spec =
+        ReadSpec::new("equity", "bars", "SPY", "2024-01-02", "2024-01-02").with_interval("1min");
+    let other = client.clone();
+    let (first, second) = tokio::join!(client.read_arrow(&spec), other.read_arrow(&spec));
+    let first = first.unwrap();
+    let second = second.unwrap();
+    assert_eq!(first[0].num_rows(), 1);
+    assert_eq!(
+        first[0].column(0).to_data().buffers()[0].as_ptr(),
+        second[0].column(0).to_data().buffers()[0].as_ptr()
     );
-    assert!(result.is_err());
-    assert_eq!(server.requests().len(), 1);
-    let observations = observations.lock().unwrap();
-    let last = observations.last().unwrap();
-    assert!(last.bytes > 0);
-    assert!(!last.completed);
+    let requests = server.requests();
+    assert_eq!(
+        requests.iter().filter(|r| r.path == "/v1/snapshot").count(),
+        1
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|r| r.path.starts_with("/objects/"))
+            .count(),
+        1
+    );
+    assert!(requests
+        .iter()
+        .filter(|r| r.path.starts_with("/objects/"))
+        .all(|r| r.authorization.is_none()));
+    assert!(progress.lock().unwrap().last().unwrap().completed);
+    client
+        .clone()
+        .with_progress(Arc::new(|_| Ok(())))
+        .read_arrow(&spec)
+        .await
+        .unwrap();
+    assert_eq!(
+        server
+            .requests()
+            .iter()
+            .filter(|r| r.path == "/v1/snapshot")
+            .count(),
+        2
+    );
+    assert_eq!(
+        server
+            .requests()
+            .iter()
+            .filter(|r| r.path.starts_with("/objects/"))
+            .count(),
+        1
+    );
 }

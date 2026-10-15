@@ -364,7 +364,6 @@ async fn app_accepts_static_bearer_when_entra_configured() {
         state,
         lake_http::LakeApiConfig {
             bearer_token: Some("transition-secret".to_string()),
-            ensure_wait_deadline_seconds: 1.0,
         },
     );
 

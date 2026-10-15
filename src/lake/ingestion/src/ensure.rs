@@ -40,7 +40,11 @@ impl EnsureIngest {
         &self,
         job: &EnsureJob,
         progress: Option<EnsureProgress>,
+        max_concurrent_sessions: usize,
     ) -> Result<(), DataError> {
+        if max_concurrent_sessions == 0 {
+            return Err(DataError::value("session concurrency must be positive"));
+        }
         let request = job.request.canonical();
         request
             .validate_interval()
@@ -127,7 +131,7 @@ impl EnsureIngest {
                     }) as BoxFuture<'_, Result<CoverageRecord, DataError>>
                 })
                 .collect();
-            let mut work = stream::iter(futures).buffer_unordered(4);
+            let mut work = stream::iter(futures).buffer_unordered(max_concurrent_sessions);
             let mut done = 0;
             while let Some(result) = work.next().await {
                 done += 1;

@@ -4,25 +4,14 @@
 
 ## Status
 
-Phases 0–6 are complete: the market-lake service is native Rust in the
-workspace under `src/lake/`, the `lake` console script execs the Rust binary
-through a thin Python shim (`lake.cli.rust_entrypoints`), and the published
-HTTP contract is served byte-compatibly. Phase 5 landed the remainder —
-option ingestion, the `lake-reference` ingest crate, DuckDB-backed bounded
-SQL, the `lake-queue` worker with dead letters, the Azure hosted boundaries
-(tables, blobs, SAS, leases, Entra JWT validation) with the
-`lake ingest`/`lake operations` commands — and the harness reads reference
-data through the lake's `universe` and `facts` routes. Phase 6 deleted every
-Python module the Rust crates replaced, keeping only the retained library
-surface below for code that is not the lake service.
-
-The screener migration (`screener-rust-migration.md`) added `bars` as a lake
-data type with the `interval=1min|1d` partition dimension: bars are fetched
-provider-first and derived from stored trades otherwise, with the derivation
-invalidated and re-derived when the trade partition revision changes. The
-streaming `GET /v1/read` route serves `trade`, `quote`, and `bars`
-partitions as Arrow IPC, and `GET /v1/reference/universe` /
-`GET /v1/reference/facts` publish the point-in-time reference views.
+The Rust rewrite is complete. The current hosting shape is defined in
+[Harness market-data runtime](market-data-runtime.md): one combined harness API,
+a shared harness-owned read-only reader, checksum-pinned snapshots/caches and
+finite ACI ingestion workers. Standalone API entrypoints are removed; the complete local harness uses filesystem adapters and finite local workers through shared ingestion contracts; `lake local reset --yes` remains explicit cleanup.
+The unused queue worker and enqueue contracts are removed in favor of durable
+ACI admission.
+Historical phase descriptions below record the completed rewrite rather than
+provide a second supported deployment shape.
 
 Hosted symbol-day locks use atomic conditional blob creation (`If-None-Match: *`)
 followed by lease acquisition. Existing empty lock blobs are valid coordination
@@ -87,9 +76,11 @@ src/lake/
   providers/     # Alpaca client: paging, retry/backoff, Retry-After
   storage/       # Arrow/Parquet writer, object store, atomic replace, leases, capacity
   ingestion/     # equity, crypto, and option transactions, record validation
-  local/         # local layout, ensure launcher, local composition
+  local/         # owned local layout and explicit cleanup
   http/          # axum boundary: the published lake contract
-  cli/           # `lake local api|ingest|reset`
+  cli/           # explicit owned-data cleanup
+  ingest-jobs/   # durable ACI admission/reconciliation
+  ingest-worker/ # finite provider process
 ```
 
 Phase 5 adds `reference/`, `query/`, `queue/`, and `hosted/` (Azure).

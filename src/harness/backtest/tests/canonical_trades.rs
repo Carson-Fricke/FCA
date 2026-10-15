@@ -20,7 +20,7 @@ use backtest::backtest::errors::BacktestError;
 use backtest::backtest::job::{
     parse_timestamp_ns, run_native_job_with_lake_client, BacktestJobError,
 };
-use harness_lakeclient::testing::{quote_stream, FakeLakeConfig, FakeLakeServer, FakeQuoteRow};
+use harness_lakeclient::testing::{quote_parquet, FakeLakeConfig, FakeLakeServer, FakeQuoteRow};
 use harness_lakeclient::{BlockingLakeClient, LakeClientConfig};
 use num::Decimal18;
 use serde_json::Value;
@@ -115,7 +115,7 @@ fn run_scripted_job(
     PathBuf,
 ) {
     let server = FakeLakeServer::start(FakeLakeConfig {
-        read_bodies_by_type: BTreeMap::from([("quote".to_string(), quote_stream("SPY", quotes))]),
+        partitions_by_type: BTreeMap::from([("quote".to_string(), quote_parquet("SPY", quotes))]),
         ..FakeLakeConfig::new(TOKEN)
     });
     let directory = std::env::temp_dir().join(format!("backtest-canonical-trades-{name}"));

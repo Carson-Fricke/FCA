@@ -33,8 +33,8 @@ crate.
 ## Workspace
 
 - Workspace root is `src/harness/Cargo.toml`. Crates are direct children:
-  `native`, `num`, `marketdata`, `backtest`, `live`, `api`, `mcp`, `config`,
-  `strategy-sdk`, `strategy-jit`. The embedded-Python host was removed: no
+  `num`, `marketdata`, `backtest`, `live`, `api`, `mcp`, `config`,
+  `contracts`, `strategy-sdk`, `strategy-jit`, `lakeclient`, `market-reader`. The embedded-Python host was removed: no
   harness build or test needs a Python interpreter, and authored programs run
   through the `harness-strategy-jit` seam.
 - From `src/harness`, run `cargo fmt --all --check`,
@@ -42,5 +42,6 @@ crate.
   `cargo test --workspace`. No Python interpreter is needed.
 - Workspace root is also `src/lake/Cargo.toml`. Crates are direct children:
   `contracts`, `configuration`, `catalog`, `coverage`, `providers`,
-  `storage`, `ingestion`, `query`, `http`, `local`, `cli`. From `src/lake`,
+  `storage`, `ingestion`, `ingest-jobs`, `ingest-worker`, `query`,
+  `http`, `local`, `reference`, `hosted`, `cli`. From `src/lake`,
   run the same three gates; no Python interpreter is needed.

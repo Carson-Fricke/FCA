@@ -185,9 +185,41 @@ pub fn resolve_api_settings(
 /// Returns [`ApiConfigError`] for configuration or bind failures.
 pub async fn serve_api(args: &crate::ApiArgs) -> Result<(), ApiConfigError> {
     let (settings, bearer) = resolve_api_settings(args)?;
-    let mut config = AppConfig::durable_default();
+    let mut environ: std::collections::BTreeMap<String, String> = std::env::vars().collect();
+    if !environ.contains_key("LAKE_API__BEARER_TOKEN") {
+        if let Some(token) = bearer
+            .as_ref()
+            .or_else(|| environ.get("HARNESS_API_BEARER_TOKEN"))
+        {
+            environ.insert("LAKE_API__BEARER_TOKEN".into(), token.clone());
+        }
+    }
+    let host = if settings.host == "0.0.0.0" {
+        "127.0.0.1"
+    } else {
+        &settings.host
+    };
+    let market = lake_hosted::api::create_host(
+        &environ,
+        std::sync::Arc::new(|| {
+            lake_contracts::DateTime::from_micros(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock")
+                    .as_micros()
+                    .min(i64::MAX as u128) as i64,
+            )
+        }),
+        &format!("http://{host}:{}/market-data", settings.port),
+    )
+    .map_err(|e| ApiConfigError(e.to_string()))?;
+    let mut config = AppConfig::durable_default()
+        .with_market_access(market.access)
+        .map_err(ApiConfigError)?;
     config.bearer_token = bearer;
-    let app = create_app(config).map_err(|error| ApiConfigError(error.to_string()))?;
+    let app = create_app(config)
+        .map_err(|e| ApiConfigError(e.to_string()))?
+        .nest("/market-data", market.router);
     let addr: SocketAddr = format!("{}:{}", settings.host, settings.port)
         .parse()
         .map_err(|error| ApiConfigError(format!("invalid bind address: {error}")))?;

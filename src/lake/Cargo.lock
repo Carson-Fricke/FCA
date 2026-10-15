@@ -736,21 +736,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "azure_storage_queues"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7aa417d6bdda9c5c0d08b96617f0bd85e4f30142797b2a948f3c27963df8b58b"
-dependencies = [
- "azure_core",
- "azure_storage",
- "futures",
- "serde",
- "time",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "azure_svc_blobstorage"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1228,6 +1213,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dotenvy"
+version = "0.15.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
+
+[[package]]
 name = "duckdb"
 version = "1.10505.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1696,6 +1687,51 @@ dependencies = [
  "crunchy",
  "num-traits",
  "zerocopy",
+]
+
+[[package]]
+name = "harness-contracts"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "lake-contracts",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "harness-lakeclient"
+version = "0.1.0"
+dependencies = [
+ "arrow-array 59.3.0",
+ "async-trait",
+ "bytes",
+ "futures-util",
+ "harness-contracts",
+ "harness-market-reader",
+ "reqwest 0.13.5",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
+name = "harness-market-reader"
+version = "0.1.0"
+dependencies = [
+ "arrow-array 59.3.0",
+ "bytes",
+ "futures-util",
+ "hex",
+ "lake-contracts",
+ "parquet",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
+ "tokio",
 ]
 
 [[package]]
@@ -2196,21 +2232,9 @@ dependencies = [
 name = "lake-cli"
 version = "0.1.0"
 dependencies = [
- "axum",
  "clap",
- "lake-catalog",
- "lake-configuration",
- "lake-contracts",
- "lake-coverage",
- "lake-hosted",
- "lake-http",
- "lake-ingestion",
  "lake-local",
- "lake-providers",
- "lake-storage",
  "serde_json",
- "tokio",
- "tower",
 ]
 
 [[package]]
@@ -2249,23 +2273,30 @@ dependencies = [
 name = "lake-hosted"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "azure_core",
  "azure_data_tables",
  "azure_identity",
  "azure_storage_blobs",
+ "bytes",
  "futures-util",
+ "harness-lakeclient",
+ "harness-market-reader",
+ "hex",
+ "hmac",
  "lake-catalog",
  "lake-configuration",
  "lake-contracts",
  "lake-coverage",
  "lake-http",
- "lake-ingestion",
- "lake-providers",
+ "lake-ingest-jobs",
+ "lake-local",
  "lake-query",
- "lake-queue",
  "lake-storage",
+ "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "tower",
@@ -2279,7 +2310,9 @@ dependencies = [
  "arrow-ipc 59.3.0",
  "arrow-schema 59.3.0",
  "axum",
+ "futures-executor",
  "futures-util",
+ "harness-market-reader",
  "hex",
  "http-body-util",
  "jsonwebtoken",
@@ -2303,12 +2336,68 @@ dependencies = [
 ]
 
 [[package]]
-name = "lake-ingestion"
+name = "lake-ingest-jobs"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "azure_core",
+ "azure_identity",
  "futures-util",
+ "hex",
+ "httpdate",
+ "lake-catalog",
+ "lake-contracts",
+ "lake-storage",
+ "quick-xml",
+ "reqwest 0.13.5",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "time",
+ "tokio",
+]
+
+[[package]]
+name = "lake-ingest-worker"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "azure_core",
+ "azure_identity",
+ "dotenvy",
+ "harness-lakeclient",
+ "harness-market-reader",
+ "lake-catalog",
+ "lake-configuration",
+ "lake-contracts",
+ "lake-coverage",
+ "lake-hosted",
+ "lake-ingest-jobs",
+ "lake-ingestion",
+ "lake-local",
+ "lake-providers",
+ "lake-storage",
+ "reqwest 0.13.5",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
+]
+
+[[package]]
+name = "lake-ingestion"
+version = "0.1.0"
+dependencies = [
+ "arrow-array 59.3.0",
+ "async-trait",
+ "axum",
+ "bytes",
+ "futures-util",
+ "harness-market-reader",
  "http-body-util",
  "lake-catalog",
  "lake-configuration",
@@ -2328,25 +2417,17 @@ dependencies = [
 name = "lake-local"
 version = "0.1.0"
 dependencies = [
- "arrow-ipc 59.3.0",
- "axum",
- "futures-util",
- "http-body-util",
+ "async-trait",
+ "hex",
  "lake-catalog",
- "lake-configuration",
  "lake-contracts",
- "lake-coverage",
- "lake-http",
- "lake-ingestion",
- "lake-providers",
- "lake-query",
+ "lake-ingest-jobs",
  "lake-storage",
  "serde",
  "serde_json",
  "sha2",
  "tempfile",
  "tokio",
- "tower",
 ]
 
 [[package]]
@@ -2380,24 +2461,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "lake-queue"
-version = "0.1.0"
-dependencies = [
- "azure_core",
- "azure_identity",
- "azure_storage",
- "azure_storage_queues",
- "futures-util",
- "hex",
- "lake-configuration",
- "lake-contracts",
- "lake-storage",
- "serde_json",
- "sha2",
  "tokio",
 ]
 
@@ -3333,6 +3396,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",

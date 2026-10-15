@@ -60,7 +60,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install pinned Rust toolchain
-        run: rustup toolchain install stable --profile minimal
+        run: rustup toolchain install 1.98.1 --profile minimal
 
       - name: Verify lockfile
         run: uv lock --check
@@ -103,7 +103,7 @@ jobs:
 
       - name: Install pinned Rust toolchain
         run: |
-          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
           rustup show
 
       - name: Check formatting
@@ -130,7 +130,7 @@ jobs:
 
       - name: Install pinned Rust toolchain
         run: |
-          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
           rustup show
 
       - name: Check formatting

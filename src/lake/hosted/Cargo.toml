@@ -7,16 +7,21 @@ publish.workspace = true
 description = "Azure hosted composition for the published market-lake API and ingest."
 
 [dependencies]
+lake-local.workspace = true
+harness-lakeclient = { path = "../../harness/lakeclient" }
+harness-market-reader = { path = "../../harness/market-reader" }
+async-trait.workspace = true
+bytes.workspace = true
+serde.workspace = true
+hmac = "0.12"
 lake-contracts.workspace = true
 lake-configuration.workspace = true
 lake-catalog.workspace = true
 lake-coverage.workspace = true
-lake-ingestion.workspace = true
-lake-providers.workspace = true
 lake-query.workspace = true
 lake-http.workspace = true
-lake-queue.workspace = true
 lake-storage.workspace = true
+lake-ingest-jobs.workspace = true
 azure_core.workspace = true
 azure_identity.workspace = true
 azure_storage_blobs.workspace = true
@@ -24,6 +29,8 @@ azure_data_tables.workspace = true
 axum.workspace = true
 futures-util.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]

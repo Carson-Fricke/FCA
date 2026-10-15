@@ -8,6 +8,9 @@ param enableGitea bool = false
 @maxLength(36)
 param runtimePrincipalId string
 
+@description('Identity the dispatcher may attach to ingestion groups.')
+param runtimeIdentityResourceId string
+
 @description('Object/principal ID of the quant-harness runtime user-assigned managed identity.')
 @minLength(36)
 @maxLength(36)
@@ -89,12 +92,12 @@ resource roleBasedAccessControlAdministratorRole 'Microsoft.Authorization/roleDe
   name: 'f58310d9-a9f6-439a-9e8d-f62e7b41a168'
 }
 
-// The condition bounds role-assignment writes/deletes to the five allow-listed
-// data-plane role definitions. The principal is intentionally NOT restricted:
+// The condition bounds role-assignment writes/deletes to the seven allow-listed
+// data/control-plane role definitions. The principal is intentionally NOT restricted:
 // the deployment creates workload identities (the quant-harness and Thesis
 // user-assigned identities) whose principal IDs are unknown at bootstrap time,
 // and those identities legitimately receive these data roles.
-var githubDeployerRbacCondition = '((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/write\'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {7f951dda-4ed3-4680-a7ca-43fe172d538d, ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3, 4633458b-17de-408a-b874-0445c86b69e6})) AND ((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/delete\'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {7f951dda-4ed3-4680-a7ca-43fe172d538d, ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3, 4633458b-17de-408a-b874-0445c86b69e6}))'
+var githubDeployerRbacCondition = '((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/write\'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {7f951dda-4ed3-4680-a7ca-43fe172d538d, ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3, 4633458b-17de-408a-b874-0445c86b69e6, 5d977122-f97e-4b4d-a52f-6b43003ddb4d, f1a07417-d97a-45cb-824c-7a7467783830})) AND ((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/delete\'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {7f951dda-4ed3-4680-a7ca-43fe172d538d, ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3, 4633458b-17de-408a-b874-0445c86b69e6, 5d977122-f97e-4b4d-a52f-6b43003ddb4d, f1a07417-d97a-45cb-824c-7a7467783830}))'
 
 resource runtimeBlobAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: storageAccount
@@ -236,7 +239,7 @@ output quantRoleAssignments object = {
   ]
 }
 
-@description('Deployer bootstrap state. An authorized caller must deploy once with assignments enabled, then recurring GitHub deployments must use false. Contributor manages resource-group resources; the conditioned RBAC Administrator can assign only the required data roles to any workload principal at the resource-group scope (covering accounts and vaults created by later deployments).')
+@description('Deployer bootstrap state. An authorized caller must deploy once with assignments enabled, then recurring GitHub deployments must use false. Contributor manages resource-group resources; the conditioned RBAC Administrator can assign only the required data and ingestion-control roles to any workload principal at the resource-group scope (covering accounts and vaults created by later deployments).')
 output githubDeployerBootstrap object = {
   assignmentsEnabled: assignGithubDeployerRoles
   roles: [
@@ -255,4 +258,25 @@ output githubDeployerBootstrap object = {
   bootstrapCallerRequires: 'Microsoft.Authorization/roleAssignments/write at the resource-group scope'
   recurringGithubValue: false
   rebootstrapWhen: 'A wave adds a new role-assignment scope (such as a new storage account) or a new workload principal, or the allow-listed data roles change'
+}
+
+resource ingestionIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' existing = {
+  name: last(split(runtimeIdentityResourceId, '/'))
+}
+resource aciDispatcherAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, quantPrincipalId, '5d977122-f97e-4b4d-a52f-6b43003ddb4d')
+  properties: {
+    principalId: quantPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5d977122-f97e-4b4d-a52f-6b43003ddb4d')
+  }
+}
+resource ingestionIdentityAttachment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(ingestionIdentity.id, quantPrincipalId, 'f1a07417-d97a-45cb-824c-7a7467783830')
+  scope: ingestionIdentity
+  properties: {
+    principalId: quantPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'f1a07417-d97a-45cb-824c-7a7467783830')
+  }
 }

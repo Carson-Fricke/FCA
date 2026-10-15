@@ -33,11 +33,6 @@ const ENV_SCHEMA: &[(&str, EnvKind)] = &[
     ("ingest.backfill.order", EnvKind::Str),
     ("ingest.backfill.liquidity_rank_tiebreaker", EnvKind::Bool),
     ("ingest.backfill.asset_priority", EnvKind::StrList),
-    ("ingest.queue.visibility_timeout_seconds", EnvKind::Uint),
-    ("ingest.queue.visibility_renewal_seconds", EnvKind::Uint),
-    ("ingest.queue.max_delivery_attempts", EnvKind::Uint),
-    ("ingest.queue.dead_letter_on_exhaustion", EnvKind::Bool),
-    ("api.ensure_wait_deadline_seconds", EnvKind::Uint),
     ("api.sas.ttl_seconds", EnvKind::Uint),
     ("api.sas.read_only", EnvKind::Bool),
     ("api.sas.object_scoped", EnvKind::Bool),
@@ -154,8 +149,6 @@ pub struct ColdSettings {
 pub struct IngestSettings {
     /// Backfill scheduling policy.
     pub backfill: BackfillSettings,
-    /// Queue delivery policy.
-    pub queue: QueueSettings,
 }
 
 /// Backfill scheduling policy.
@@ -171,24 +164,9 @@ pub struct BackfillSettings {
     pub asset_priority: Vec<String>,
 }
 
-/// Queue delivery policy.
-#[derive(Clone, Debug, PartialEq)]
-pub struct QueueSettings {
-    /// Message visibility timeout in seconds.
-    pub visibility_timeout_seconds: u64,
-    /// Visibility renewal cadence in seconds.
-    pub visibility_renewal_seconds: u64,
-    /// Delivery attempts before dead-lettering.
-    pub max_delivery_attempts: u32,
-    /// Whether exhausted messages are dead-lettered.
-    pub dead_letter_on_exhaustion: bool,
-}
-
 /// HTTP API configuration.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ApiSettings {
-    /// Ensure wait deadline in seconds.
-    pub ensure_wait_deadline_seconds: u32,
     /// SAS issuance settings.
     pub sas: SasSettings,
     /// SQL query limits.
@@ -498,9 +476,8 @@ impl ColdSettings {
 impl IngestSettings {
     fn from_section(mut section: Section) -> Result<Self, ConfigError> {
         let backfill = BackfillSettings::from_section(section.object("backfill")?)?;
-        let queue = QueueSettings::from_section(section.object("queue")?)?;
         section.finish()?;
-        Ok(Self { backfill, queue })
+        Ok(Self { backfill })
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
@@ -539,12 +516,6 @@ impl IngestSettings {
                 "ingest.backfill.asset_priority must not contain duplicates",
             ));
         }
-        if self.queue.visibility_timeout_seconds == 0
-            || self.queue.visibility_renewal_seconds == 0
-            || self.queue.max_delivery_attempts == 0
-        {
-            return Err(ConfigError::new("ingest.queue values must be positive"));
-        }
         Ok(())
     }
 }
@@ -565,25 +536,8 @@ impl BackfillSettings {
     }
 }
 
-impl QueueSettings {
-    fn from_section(mut section: Section) -> Result<Self, ConfigError> {
-        let visibility_timeout_seconds = section.uint("visibility_timeout_seconds")?;
-        let visibility_renewal_seconds = section.uint("visibility_renewal_seconds")?;
-        let max_delivery_attempts = section.uint("max_delivery_attempts")? as u32;
-        let dead_letter_on_exhaustion = section.boolean("dead_letter_on_exhaustion")?;
-        section.finish()?;
-        Ok(Self {
-            visibility_timeout_seconds,
-            visibility_renewal_seconds,
-            max_delivery_attempts,
-            dead_letter_on_exhaustion,
-        })
-    }
-}
-
 impl ApiSettings {
     fn from_section(mut section: Section) -> Result<Self, ConfigError> {
-        let ensure_wait_deadline_seconds = section.uint("ensure_wait_deadline_seconds")? as u32;
         let sas = SasSettings::from_section(section.object("sas")?)?;
         let sql = SqlSettings::from_section(section.object("sql")?)?;
         let auth = match section.take("auth") {
@@ -593,7 +547,6 @@ impl ApiSettings {
         let bearer_token = optional_non_empty(section.opt_string("bearer_token")?)?;
         section.finish()?;
         let settings = Self {
-            ensure_wait_deadline_seconds,
             sas,
             sql,
             auth,
@@ -604,11 +557,6 @@ impl ApiSettings {
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
-        if self.ensure_wait_deadline_seconds == 0 {
-            return Err(ConfigError::new(
-                "api.ensure_wait_deadline_seconds must be positive",
-            ));
-        }
         if !(1..=86_400).contains(&self.sas.ttl_seconds) {
             return Err(ConfigError::new(
                 "api.sas.ttl_seconds must be between 1 and 86400",

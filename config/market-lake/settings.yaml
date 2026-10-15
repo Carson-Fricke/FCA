@@ -46,14 +46,7 @@ ingest:
       - equity_backfill
       - options_backfill
       - crypto_backfill
-  queue:
-    visibility_timeout_seconds: 300
-    visibility_renewal_seconds: 60
-    max_delivery_attempts: 5
-    dead_letter_on_exhaustion: true
-
 api:
-  ensure_wait_deadline_seconds: 20
   sas:
     ttl_seconds: 900
     read_only: true

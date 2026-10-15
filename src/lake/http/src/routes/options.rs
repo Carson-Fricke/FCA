@@ -1,12 +1,23 @@
 //! Resolve one individual contract before acquiring its ordinary datasets.
 use crate::{error::ApiError, state::ApiContext};
-use axum::{extract::State, http::StatusCode, Json};
-use lake_contracts::{OptionSelector, ResolvedOption};
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
+use lake_contracts::OptionSelector;
 
 pub(crate) async fn resolve(
     State(context): State<ApiContext>,
-    Json(value): Json<serde_json::Value>,
-) -> Result<Json<ResolvedOption>, ApiError> {
+    Json(mut value): Json<serde_json::Value>,
+) -> Result<Response, ApiError> {
+    let job_id = crate::models::ingestion_job_id(
+        value
+            .as_object_mut()
+            .and_then(|object| object.remove("job_id"))
+            .as_ref(),
+    )?;
     let selector: OptionSelector = serde_json::from_value(value)
         .map_err(|e| ApiError::validation_error("selector", e.to_string()))?;
     let as_of = selector
@@ -25,7 +36,16 @@ pub(crate) async fn resolve(
             "option resolution is not configured",
         )
     })?;
-    Ok(Json(resolver(selector).await.map_err(|e| match e {
+    let result = resolver(selector, job_id).await;
+    if let Err(lake_contracts::DataError::PendingJob(id)) = &result {
+        return Ok((
+            StatusCode::ACCEPTED,
+            [("Location", format!("../jobs/{id}"))],
+            Json(serde_json::json!({"job_id":id,"state":"queued"})),
+        )
+            .into_response());
+    }
+    Ok(Json(result.map_err(|e| match e {
         lake_contracts::DataError::NotFound(message) => ApiError::new(
             StatusCode::NOT_FOUND,
             "option_selection_unavailable",
@@ -39,5 +59,6 @@ pub(crate) async fn resolve(
             "option_resolution_failed",
             other.to_string(),
         ),
-    })?))
+    })?)
+    .into_response())
 }

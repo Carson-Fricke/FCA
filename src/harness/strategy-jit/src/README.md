@@ -56,3 +56,5 @@ SDK reference identity includes the canonical SDK, harness contracts, num, and
 lake contracts Cargo/source
 hashes; JIT compiler provenance additionally covers its own build and toolchain
 environment. These identities have different owners and are not interchangeable.
+
+Managed workspaces embed the harness `rust-toolchain.toml`; authored builds use the same pinned compiler shipped in the container.

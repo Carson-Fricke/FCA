@@ -6,6 +6,9 @@ license.workspace = true
 publish.workspace = true
 description = "Equity and crypto ingest transactions, record validation, and the committer boundary."
 [dependencies]
+harness-market-reader = { path = "../../harness/market-reader" }
+arrow-array.workspace = true
+bytes.workspace = true
 lake-configuration.workspace = true
 lake-contracts.workspace = true
 lake-catalog.workspace = true

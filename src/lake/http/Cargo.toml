@@ -7,6 +7,8 @@ publish.workspace = true
 description = "Axum boundary publishing the market-lake catalog, ensure, query, and raw routes."
 
 [dependencies]
+harness-market-reader = { path = "../../harness/market-reader" }
+arrow-ipc.workspace = true
 lake-contracts.workspace = true
 lake-catalog.workspace = true
 lake-coverage.workspace = true
@@ -14,6 +16,7 @@ lake-query.workspace = true
 lake-storage.workspace = true
 axum.workspace = true
 futures-util.workspace = true
+futures-executor = "0.3"
 hex.workspace = true
 jsonwebtoken.workspace = true
 percent-encoding.workspace = true

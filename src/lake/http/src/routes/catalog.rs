@@ -10,9 +10,9 @@ use crate::models::{
     CatalogCoverageResponse, CoverageQuery, CoverageQueryRaw, CoverageResponseBody,
     OptionCatalogCoverageResponse, OptionCoverageEntryResponse,
 };
-use crate::selection::{contracts_or_default, option_coverage, OptionRequestLike, OptionSelection};
 use crate::state::ApiContext;
 use crate::validate::StrictQuery;
+use lake_coverage::{contracts_or_default, option_coverage, OptionRequestLike, OptionSelection};
 
 /// Return computed coverage statuses without starting ingest work.
 pub(crate) async fn coverage(

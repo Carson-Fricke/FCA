@@ -8,7 +8,7 @@
 //! the `harness-strategy-jit` seam — the same entry point the `backtest-job`
 //! command uses.
 //!
-//! Market data streams from the market-lake HTTP routes through
+//! Market data uses pinned manifests and shared verified Parquet reads through
 //! `harness-lakeclient`; the endpoint resolves from `LAKE_API_URL` /
 //! `LAKE_API_BASE_URL` and `LAKE_API__BEARER_TOKEN`. A run without a
 //! configured lake fails loudly and never falls back to local files or a
@@ -134,6 +134,7 @@ pub struct NativeScreenRunner {
     pub output_root: Option<PathBuf>,
     /// Optional managed JIT workspace root.
     pub workspace_root: Option<PathBuf>,
+    pub lake_client: Option<Arc<BlockingLakeClient>>,
 }
 
 impl NativeScreenRunner {
@@ -143,6 +144,7 @@ impl NativeScreenRunner {
         Self {
             output_root: Some(output_root),
             workspace_root: None,
+            lake_client: None,
         }
     }
 }
@@ -169,8 +171,11 @@ impl ScreeningRunner for NativeScreenRunner {
         let options = harness_strategy_jit::ScreenRunOptions {
             workspace_root: self.workspace_root.clone(),
         };
-        let source = harness_strategy_jit::LakeScreeningSource::from_env()
-            .map_err(|error| error.to_string())?;
+        let source = match &self.lake_client {
+            Some(client) => harness_strategy_jit::LakeScreeningSource::new(client.clone()),
+            None => harness_strategy_jit::LakeScreeningSource::from_env()
+                .map_err(|error| error.to_string())?,
+        };
         let (outcome, _artifact_path) = harness_strategy_jit::run_screening_configuration(
             configuration,
             &source,

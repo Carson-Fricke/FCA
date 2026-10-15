@@ -131,7 +131,11 @@ impl ApiError {
     #[must_use]
     pub fn from_coverage(error: &CoverageRequestError) -> Self {
         Self::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
+            match error.code.as_str() {
+                "internal_error" => StatusCode::INTERNAL_SERVER_ERROR,
+                "invalid_acknowledgement" => StatusCode::BAD_GATEWAY,
+                _ => StatusCode::UNPROCESSABLE_ENTITY,
+            },
             error.code.clone(),
             error.message.clone(),
         )

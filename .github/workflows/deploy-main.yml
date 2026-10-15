@@ -55,6 +55,7 @@ jobs:
     env:
       IMAGE_REFERENCE: ${{ needs.publish-image.outputs.image-reference }}
       IMAGE_DIGEST: ${{ needs.publish-image.outputs.image-digest }}
+      INGESTION_DIGEST: ${{ needs.publish-image.outputs.ingestion-digest }}
       AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -65,8 +66,6 @@ jobs:
       BUDGET_START_DATE: ${{ vars.BUDGET_START_DATE }}
       ALLOW_PUBLIC_NETWORK_ACCESS: ${{ vars.ALLOW_PUBLIC_NETWORK_ACCESS }}
       ENABLE_EXTERNAL_API_INGRESS: ${{ vars.ENABLE_EXTERNAL_API_INGRESS }}
-      INGEST_CRON_EXPRESSION: ${{ vars.INGEST_CRON_EXPRESSION }}
-      INGEST_REPLICA_TIMEOUT_SECONDS: ${{ vars.INGEST_REPLICA_TIMEOUT_SECONDS }}
       ENABLE_CRYPTO_TRADER: ${{ vars.ENABLE_CRYPTO_TRADER }}
       RTH_TRADER_CREDENTIAL_MODE: ${{ vars.RTH_TRADER_CREDENTIAL_MODE }}
       CRYPTO_TRADER_CREDENTIAL_MODE: ${{ vars.CRYPTO_TRADER_CREDENTIAL_MODE }}
@@ -109,8 +108,6 @@ jobs:
             BUDGET_ALERT_CONTACT_EMAIL
             ALLOW_PUBLIC_NETWORK_ACCESS
             ENABLE_EXTERNAL_API_INGRESS
-            INGEST_CRON_EXPRESSION
-            INGEST_REPLICA_TIMEOUT_SECONDS
             ENABLE_CRYPTO_TRADER
             RTH_TRADER_CREDENTIAL_MODE
             CRYPTO_TRADER_CREDENTIAL_MODE
@@ -191,6 +188,11 @@ jobs:
           set -euo pipefail
 
           az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+          aci_registration="$(az provider show --namespace Microsoft.ContainerInstance --query registrationState -o tsv)"
+          if [[ "$aci_registration" != Registered ]]; then
+            echo "::error::Register Microsoft.ContainerInstance as a subscription operator before this cutover; the deployer intentionally has no subscription administration rights"
+            exit 1
+          fi
           acr_name="$(az acr list \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --query "[?tags.product=='market-lake' && tags.environment=='${DEPLOYMENT_ENVIRONMENT}'].name | [0]" \
@@ -231,11 +233,18 @@ jobs:
             --output tsv)"
           runtime_image_reference="${acr_login_server}/${mirror_repository}@${IMAGE_DIGEST}"
 
+          ingestion_repository="${GITHUB_REPOSITORY_NAME,,}-ingestion"
+          az acr import --name "$acr_name" --source "ghcr.io/${GITHUB_OWNER,,}/${GITHUB_REPOSITORY_NAME,,}-ingestion@${INGESTION_DIGEST}" --username "$GITHUB_ACTOR" --password "$GHCR_TOKEN" --image "${ingestion_repository}:${GITHUB_SHA}" --force --only-show-errors --output none
+          imported_ingestion_digest="$(az acr repository show --name "$acr_name" --image "${ingestion_repository}:${GITHUB_SHA}" --query digest -o tsv)"
+          [[ "$imported_ingestion_digest" == "$INGESTION_DIGEST" ]] || { echo "::error::Ingestion image digest mismatch"; exit 1; }
+          ingestion_image_reference="${acr_login_server}/${ingestion_repository}@${INGESTION_DIGEST}"
+
           deployment_parameters=(
             "location=$AZURE_LOCATION"
             "resourceNamePrefix=$RESOURCE_NAME_PREFIX"
             "environmentName=$DEPLOYMENT_ENVIRONMENT"
             "sharedImageReference=$runtime_image_reference"
+            "ingestionImageReference=$ingestion_image_reference"
             "githubOwner=$GITHUB_OWNER"
             "githubOwnerId=$GITHUB_OWNER_ID"
             "githubRepository=$GITHUB_REPOSITORY_NAME"
@@ -246,8 +255,6 @@ jobs:
             "assignGithubDeployerRoles=false"
             "allowPublicNetworkAccess=$ALLOW_PUBLIC_NETWORK_ACCESS"
             "enableExternalApiIngress=$ENABLE_EXTERNAL_API_INGRESS"
-            "ingestCronExpression=$INGEST_CRON_EXPRESSION"
-            "ingestReplicaTimeoutSeconds=$INGEST_REPLICA_TIMEOUT_SECONDS"
             "enableCryptoTrader=$ENABLE_CRYPTO_TRADER"
             "rthTraderMode=$RTH_TRADER_CREDENTIAL_MODE"
             "cryptoTraderMode=$CRYPTO_TRADER_CREDENTIAL_MODE"
@@ -267,6 +274,16 @@ jobs:
             --only-show-errors \
             --output none
 
+          # Validate first; stop retired writers before activating the single current host.
+          retired_api="${RESOURCE_NAME_PREFIX,,}-${DEPLOYMENT_ENVIRONMENT,,}-api"
+          retired_ingest="${RESOURCE_NAME_PREFIX,,}-${DEPLOYMENT_ENVIRONMENT,,}-ingest"
+          if az containerapp show --name "$retired_api" --resource-group "$AZURE_RESOURCE_GROUP" --output none 2>/dev/null; then
+            az containerapp delete --name "$retired_api" --resource-group "$AZURE_RESOURCE_GROUP" --yes --output none
+          fi
+          if az containerapp job show --name "$retired_ingest" --resource-group "$AZURE_RESOURCE_GROUP" --output none 2>/dev/null; then
+            az containerapp job delete --name "$retired_ingest" --resource-group "$AZURE_RESOURCE_GROUP" --yes --output none
+          fi
+
           az deployment group create \
             --name "$DEPLOYMENT_NAME" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -283,8 +300,7 @@ jobs:
 
           normalized_prefix="${RESOURCE_NAME_PREFIX,,}"
           normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
-          api_app_name="${normalized_prefix}-${normalized_environment}-api"
-          ingest_job_name="${normalized_prefix}-${normalized_environment}-ingest"
+          api_app_name="${normalized_prefix}-${normalized_environment}-quant-api"
           quant_api_app_name="${normalized_prefix}-${normalized_environment}-quant-api"
           rth_trader_app_name="${normalized_prefix}-${normalized_environment}-rth-trader"
           crypto_trader_app_name="${normalized_prefix}-${normalized_environment}-crypto-trader"
@@ -303,20 +319,16 @@ jobs:
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --query "properties.template.containers[?name=='api'].image | [0]" \
             --output tsv)"
-          ingest_image="$(az containerapp job show \
-            --name "$ingest_job_name" \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --query "properties.template.containers[?name=='ingest'].image | [0]" \
-            --output tsv)"
-
           if [[ "$api_image" != "$expected_runtime_image" ]]; then
-            echo "::error::The API does not use the published immutable image reference"
+            echo "::error::Combined API image does not match the published image"
             exit 1
           fi
-          if [[ "$ingest_image" != "$expected_runtime_image" ]]; then
-            echo "::error::The ingest job does not use the published immutable image reference"
-            exit 1
-          fi
+          ingestion_image="$(az containerapp show --name "$api_app_name" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.template.containers[?name=='api'].env[?name=='LAKE_INGEST_IMAGE'].value | [0][0]" -o tsv)"
+          expected_ingestion_image="${acr_login_server}/${GITHUB_REPOSITORY_NAME,,}-ingestion@${INGESTION_DIGEST}"
+          [[ "$ingestion_image" == "$expected_ingestion_image" ]] || { echo "::error::ACI ingestion image configuration mismatch"; exit 1; }
+
+          dispatcher_image="$(az containerapp job show --name "${quant_api_app_name}-ingestion-dispatcher" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.template.containers[?name=='dispatcher'].image | [0]" -o tsv)"
+          [[ "$dispatcher_image" == "$expected_ingestion_image" ]] || { echo "::error::Dispatcher image configuration mismatch"; exit 1; }
 
           quant_api_image="$(az containerapp show \
             --name "$quant_api_app_name" \
@@ -370,7 +382,7 @@ jobs:
             exit 1
           fi
 
-          api_url="https://${api_fqdn}/health"
+          api_url="https://${api_fqdn}/market-data/health"
           printf 'api-url=%s\n' "$api_url" >> "$GITHUB_OUTPUT"
           {
             echo "### Deployment"
@@ -405,7 +417,7 @@ jobs:
           else
             normalized_prefix="${RESOURCE_NAME_PREFIX,,}"
             normalized_environment="${DEPLOYMENT_ENVIRONMENT,,}"
-            api_app_name="${normalized_prefix}-${normalized_environment}-api"
+            api_app_name="${normalized_prefix}-${normalized_environment}-quant-api"
 
             restore_scale_to_zero() {
               az containerapp update \

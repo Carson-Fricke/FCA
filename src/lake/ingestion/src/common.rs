@@ -171,6 +171,7 @@ pub(crate) fn data_error_message(error: &DataError) -> String {
         DataError::Incomplete(_) => "IncompleteError",
         DataError::Unsupported(_) => "UnsupportedError",
         DataError::EnsureJob(_) => "EnsureJobError",
+        DataError::PendingJob(_) => "PendingJob",
         DataError::Arithmetic(_) => "ArithmeticError",
         DataError::Protocol(_) => "ProtocolError",
         DataError::NotFound(_) => "NotFoundError",

@@ -16,8 +16,6 @@ param assignGithubDeployerRoles = false
 // Public access is explicit for dev because no private endpoint module is composed here.
 param allowPublicNetworkAccess = true
 param enableExternalApiIngress = false
-param ingestCronExpression = '0 1 * * *'
-param ingestReplicaTimeoutSeconds = 3600
 // Crypto compute stays absent in dev until the always-on trader is enabled explicitly.
 param enableCryptoTrader = false
 // Dev traders consume the paper credential pair only; live is enabled per environment.

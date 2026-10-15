@@ -6,6 +6,9 @@ on:
       - image-build
   workflow_call:
     outputs:
+      ingestion-digest:
+        description: Finite ACI ingestion image digest
+        value: ${{ jobs.publish.outputs.ingestion-digest }}
       image-reference:
         description: Immutable GHCR image reference
         value: ${{ jobs.publish.outputs.image-reference }}
@@ -28,6 +31,7 @@ jobs:
       contents: read
       packages: write
     outputs:
+      ingestion-digest: ${{ steps.ingestion.outputs.digest }}
       image-reference: ${{ format('{0}@{1}', steps.image.outputs.name, steps.build.outputs.digest) }}
       image-digest: ${{ steps.build.outputs.digest }}
       image-tag: ${{ steps.image.outputs.tag }}
@@ -74,3 +78,16 @@ jobs:
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Build and publish finite ingestion image
+        id: ingestion
+        uses: docker/build-push-action@ee4ca427a2f43b6a16632044ca514c076267da23
+        with:
+          context: .
+          file: Dockerfile
+          target: ingestion-runtime
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.name }}-ingestion:${{ github.sha }}
+          cache-from: type=gha,scope=fca-ingestion-image
+          cache-to: type=gha,mode=max,scope=fca-ingestion-image

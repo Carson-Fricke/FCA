@@ -1,9 +1,8 @@
-//! Test support: a local fake of the frozen market-lake routes.
+//! Test support: a local fake of the current market-data routes.
 //!
 //! Enabled by the `test-support` feature. The server binds loopback, requires
 //! the configured bearer token, records every request (method, path, decoded
-//! query, authorization header, body), and serves programmable JSON and Arrow
-//! IPC bodies. No network and no lake files are involved.
+//! query, authorization header, body), and serves programmable JSON and canonical Parquet bodies. No production services are contacted.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -53,10 +52,10 @@ pub struct FakeLakeConfig {
     pub job_bodies: Vec<(u16, Value)>,
     /// `GET /v1/catalog/coverage` responses as `(status, body)`.
     pub coverage_bodies: Vec<(u16, Value)>,
-    /// `GET /v1/read` responses as `(status, body)`.
-    pub read_bodies: Vec<(u16, Vec<u8>)>,
-    /// `GET /v1/read` bodies keyed by `data_type`; preferred over the sequence.
-    pub read_bodies_by_type: BTreeMap<String, Vec<u8>>,
+    /// Snapshot partition responses as `(status, body)`.
+    pub partition_bodies: Vec<(u16, Vec<u8>)>,
+    /// Partition bodies keyed by `data_type`; preferred over the sequence.
+    pub partitions_by_type: BTreeMap<String, Vec<u8>>,
     /// `GET /v1/reference/universe` response body.
     pub universe_body: Value,
     /// `GET /v1/reference/facts` response body.
@@ -88,8 +87,8 @@ impl FakeLakeConfig {
                     }]
                 }),
             )],
-            read_bodies: vec![(404, no_data_body())],
-            read_bodies_by_type: BTreeMap::new(),
+            partition_bodies: vec![(404, no_data_body())],
+            partitions_by_type: BTreeMap::new(),
             universe_body: json!({"as_of": "2024-01-02", "symbols": []}),
             facts_body: json!({"as_of": "2024-01-02", "facts": {}}),
             option_resolution: None,
@@ -188,6 +187,7 @@ struct FakeState {
     job_index: AtomicUsize,
     coverage_index: AtomicUsize,
     read_index: AtomicUsize,
+    objects: Mutex<BTreeMap<String, Vec<u8>>>,
 }
 
 impl FakeState {
@@ -199,6 +199,7 @@ impl FakeState {
             job_index: AtomicUsize::new(0),
             coverage_index: AtomicUsize::new(0),
             read_index: AtomicUsize::new(0),
+            objects: Default::default(),
         }
     }
 
@@ -247,7 +248,8 @@ fn router(state: Arc<FakeState>) -> Router {
         .route("/v1/options/resolve", post(resolve_option))
         .route("/v1/jobs/{job_id}", get(job))
         .route("/v1/catalog/coverage", get(coverage))
-        .route("/v1/read", get(read))
+        .route("/v1/snapshot", get(snapshot))
+        .route("/objects/{checksum}", get(object))
         .route("/v1/reference/universe", get(universe))
         .route("/v1/reference/facts", get(facts))
         .with_state(state)
@@ -344,23 +346,100 @@ async fn coverage(
     json_response(status, body)
 }
 
-async fn read(
+async fn snapshot(
     State(state): State<Arc<FakeState>>,
     headers: HeaderMap,
     Query(query): Query<BTreeMap<String, String>>,
 ) -> Response {
+    use harness_market_reader::{MarketDataSnapshot, Partition, SnapshotRequest};
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+    use sha2::{Digest, Sha256};
     if !state.authorized(&headers) {
         return unauthorized();
     }
-    state.record("GET", "/v1/read", query.clone(), &headers, None);
-    if let Some(data_type) = query.get("data_type") {
-        if let Some(body) = state.config.read_bodies_by_type.get(data_type) {
-            return raw_response(200, body.clone());
-        }
+    state.record("GET", "/v1/snapshot", query.clone(), &headers, None);
+    let request = SnapshotRequest {
+        asset_class: query["asset_class"].clone(),
+        data_type: query["data_type"].clone(),
+        symbol: query["symbol"].clone(),
+        start_date: query["start_date"].clone(),
+        end_date: query["end_date"].clone(),
+        interval: query.get("interval").cloned(),
+    };
+    let (status, body) = state
+        .config
+        .partitions_by_type
+        .get(&request.data_type)
+        .map(|body| (200, body.clone()))
+        .unwrap_or_else(|| {
+            sequence_item(&state.config.partition_bodies, &state.read_index)
+                .unwrap_or_else(|| (404, no_data_body()))
+        });
+    let mut files = Vec::new();
+    let mut locations = BTreeMap::new();
+    if status == 200 {
+        let checksum = hex::encode(Sha256::digest(&body));
+        let rows = match ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(body.clone()))
+        {
+            Ok(builder) => builder.metadata().file_metadata().num_rows() as u64,
+            Err(_) => return json_response(500, json!({"error":{"code":"invalid_partition"}})),
+        };
+        let path = lake_contracts::partition_path(
+            lake_contracts::Date::parse(&request.start_date).unwrap(),
+            lake_contracts::AssetClass::from_value(&request.asset_class).unwrap(),
+            lake_contracts::DataType::from_value(&request.data_type).unwrap(),
+            request.interval.as_deref(),
+            &request.symbol,
+        )
+        .unwrap();
+        files.push(Partition {
+            session_date: request.start_date.clone(),
+            object_path: path,
+            checksum: checksum.clone(),
+            row_count: rows,
+            byte_size: body.len() as u64,
+        });
+        state.objects.lock().unwrap().insert(checksum.clone(), body);
+        locations.insert(
+            checksum.clone(),
+            format!(
+                "http://{}/objects/{checksum}",
+                headers.get("host").unwrap().to_str().unwrap()
+            ),
+        );
+    } else if status != 404 {
+        return raw_response(status, body);
     }
-    let (status, body) = sequence_item(&state.config.read_bodies, &state.read_index)
-        .unwrap_or_else(|| (404, no_data_body()));
-    raw_response(status, body)
+    match MarketDataSnapshot::new(request, files) {
+        Ok(snapshot) => Json(json!({"snapshot":snapshot,"locations":locations})).into_response(),
+        Err(error) => json_response(
+            422,
+            json!({"error":{"code":"invalid_snapshot","message":error.to_string()}}),
+        ),
+    }
+}
+
+async fn object(
+    State(state): State<Arc<FakeState>>,
+    headers: HeaderMap,
+    Path(checksum): Path<String>,
+) -> Response {
+    state.record(
+        "GET",
+        &format!("/objects/{checksum}"),
+        BTreeMap::new(),
+        &headers,
+        None,
+    );
+    assert!(
+        headers.get(AUTHORIZATION).is_none(),
+        "API bearer leaked to object storage"
+    );
+    let body = state.objects.lock().unwrap().get(&checksum).cloned();
+    match body {
+        Some(body) => Body::from(body).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 async fn universe(
@@ -508,12 +587,12 @@ pub fn equity_bars_batch(symbol: &str, rows: &[FakeBarRow]) -> RecordBatch {
     RecordBatch::try_new(schema, arrays).expect("fixture bars batch")
 }
 
-/// Encode one `equity.bars` batch as an Arrow IPC stream.
+/// Encode one `equity.bars` batch as canonical Parquet.
 #[must_use]
-pub fn bars_stream(symbol: &str, rows: &[FakeBarRow]) -> Vec<u8> {
+pub fn bars_parquet(symbol: &str, rows: &[FakeBarRow]) -> Vec<u8> {
     let batch = equity_bars_batch(symbol, rows);
     let schema = batch.schema();
-    ipc_stream_bytes(schema.as_ref(), &[batch])
+    parquet_bytes(schema.as_ref(), &[batch])
 }
 
 /// One synthetic equity quote row for the fake quote stream.
@@ -734,20 +813,56 @@ pub fn equity_trade_batch(symbol: &str, rows: &[FakeTradeRow]) -> RecordBatch {
     RecordBatch::try_new(schema, arrays).expect("fixture trade batch")
 }
 
-/// Encode one `equity.quote` batch as an Arrow IPC stream.
+/// Encode one `equity.quote` batch as canonical Parquet.
 #[must_use]
-pub fn quote_stream(symbol: &str, rows: &[FakeQuoteRow]) -> Vec<u8> {
+pub fn quote_parquet(symbol: &str, rows: &[FakeQuoteRow]) -> Vec<u8> {
     let batch = equity_quote_batch(symbol, rows);
     let schema = batch.schema();
-    ipc_stream_bytes(schema.as_ref(), &[batch])
+    parquet_bytes(schema.as_ref(), &[batch])
 }
 
-/// Encode one `equity.trade` batch as an Arrow IPC stream.
+/// Encode one `equity.trade` batch as canonical Parquet.
 #[must_use]
-pub fn trade_stream(symbol: &str, rows: &[FakeTradeRow]) -> Vec<u8> {
+pub fn trade_parquet(symbol: &str, rows: &[FakeTradeRow]) -> Vec<u8> {
     let batch = equity_trade_batch(symbol, rows);
     let schema = batch.schema();
-    ipc_stream_bytes(schema.as_ref(), &[batch])
+    parquet_bytes(schema.as_ref(), &[batch])
+}
+
+/// Canonical option fixtures share values with equity fixtures but use the option contract's fields.
+fn option_partition(batch: RecordBatch, kind: lake_contracts::DataType) -> Vec<u8> {
+    let schema = lake_contracts::schema_for(lake_contracts::AssetClass::Option, kind).unwrap();
+    let arrays = schema
+        .fields()
+        .iter()
+        .map(|field| {
+            if field.name() == "condition" {
+                Arc::new(StringArray::from(vec!["R"; batch.num_rows()])) as ArrayRef
+            } else {
+                batch.column_by_name(field.name()).unwrap().clone()
+            }
+        })
+        .collect();
+    let batch = RecordBatch::try_new(Arc::new(schema), arrays).unwrap();
+    parquet_bytes(batch.schema().as_ref(), std::slice::from_ref(&batch))
+}
+pub fn option_quote_parquet(symbol: &str, rows: &[FakeQuoteRow]) -> Vec<u8> {
+    option_partition(
+        equity_quote_batch(symbol, rows),
+        lake_contracts::DataType::Quote,
+    )
+}
+pub fn option_trade_parquet(symbol: &str, rows: &[FakeTradeRow]) -> Vec<u8> {
+    option_partition(
+        equity_trade_batch(symbol, rows),
+        lake_contracts::DataType::Trade,
+    )
+}
+pub fn option_bars_parquet(symbol: &str, rows: &[FakeBarRow]) -> Vec<u8> {
+    option_partition(
+        equity_bars_batch(symbol, rows),
+        lake_contracts::DataType::Bars,
+    )
 }
 
 /// Build one empty-list `conditions` column matching the frozen `List<Utf8>`.
@@ -760,17 +875,18 @@ fn empty_string_lists(count: usize) -> arrow_array::ListArray {
     builder.finish()
 }
 
-/// Encode record batches as one Arrow IPC stream.
+/// Encode record batches as canonical Parquet.
 #[must_use]
-pub fn ipc_stream_bytes(schema: &Schema, batches: &[RecordBatch]) -> Vec<u8> {
+pub fn parquet_bytes(schema: &Schema, batches: &[RecordBatch]) -> Vec<u8> {
     let mut bytes = Vec::new();
     {
-        let mut writer = arrow_ipc::writer::StreamWriter::try_new(&mut bytes, schema)
-            .expect("fixture IPC writer");
+        let mut writer =
+            parquet::arrow::ArrowWriter::try_new(&mut bytes, Arc::new(schema.clone()), None)
+                .expect("fixture Parquet writer");
         for batch in batches {
-            writer.write(batch).expect("fixture IPC batch");
+            writer.write(batch).expect("fixture Parquet batch");
         }
-        writer.finish().expect("fixture IPC finish");
+        writer.close().expect("fixture Parquet finish");
     }
     bytes
 }

@@ -8,8 +8,7 @@ Runs scripts/local/dev_tokens.py first so LAKE_API__BEARER_TOKEN,
 HARNESS_API_BEARER_TOKEN, THESIS_API__BEARER_TOKEN, and the derived
 PUBLIC_THESIS_API_BEARER_TOKEN exist in the ignored .env file, loads that file
 into the process environment, stops the selected servers' existing listeners,
-builds the selected native servers whose sources changed (market-lake release
-or debug, harness debug), and launches them detached with logs under
+builds optimized harness and ingestion worker binaries when their sources changed, and launches them detached with logs under
 .local\logs.  Builds run after the old listener stops, so a changed binary is
 never blocked by the running executable it replaces.
 
@@ -28,18 +27,12 @@ layer otherwise survives a plain `docker start`.  Docker Desktop is started
 automatically when the daemon is not running.
 
 .PARAMETER Servers
-Subset of cosmos, lake, harness, thesis, ui to launch. Defaults to all five. The
+Subset of cosmos, harness, thesis, ui to launch. Defaults to all four. The
 Cosmos emulator is a dependency of the Thesis API's conversation store, so it
-is normally left in the default set. The harness uses the Azure market lake by
-default. The local lake is available when LAKE_API_URL selects port 8002.
+is normally left in the default set. The harness includes local market-data storage and finite local ingestion workers.
 
 .PARAMETER Rotate
 Mint fresh managed tokens instead of reusing the values already in .env.
-
-.PARAMETER LakeDebug
-Build and launch the market-lake debug binary instead of the release binary.
-The lake always runs an optimized build otherwise, because the debug parse
-path is several times slower on real quote volumes.
 
 .PARAMETER NoStop
 Do not stop existing listeners; launch only.  A rebuild of a running binary
@@ -59,9 +52,8 @@ powershell -File scripts/local/start-stack.ps1
 #>
 [CmdletBinding()]
 param(
-    [string[]]$Servers = @('cosmos', 'lake', 'harness', 'thesis', 'ui'),
+    [string[]]$Servers = @('cosmos', 'harness', 'thesis', 'ui'),
     [switch]$Rotate,
-    [switch]$LakeDebug,
     [switch]$NoStop,
     [string]$EnvFile,
     [switch]$Foreground,
@@ -88,12 +80,12 @@ $Servers = @(
         Where-Object { $_ }
 )
 foreach ($server in $Servers) {
-    if ($server -notin @('cosmos', 'lake', 'harness', 'thesis', 'ui')) {
+    if ($server -notin @('cosmos', 'harness', 'thesis', 'ui')) {
         throw "Unknown server '$server'"
     }
 }
 
-$ports = @{ cosmos = 8080; lake = 8002; harness = 8001; thesis = 8000; ui = 5173 }
+$ports = @{ cosmos = 8080; harness = 8001; thesis = 8000; ui = 5173 }
 $cargoExe = (Get-Command cargo -ErrorAction SilentlyContinue).Source
 
 function Get-PortOwners {
@@ -175,23 +167,15 @@ function Build-NativeServer {
 
     if ($Name -eq 'harness') {
         if (-not $cargoExe) { throw 'cargo is required to build the harness binary' }
-        Write-Host '==> Building the harness debug binary'
-        & $cargoExe build --locked --manifest-path (Join-Path $repo 'src\harness\Cargo.toml') -p api --bin harness
+        $taskToolchain = (Select-String -LiteralPath (Join-Path $repo 'src\harness\rust-toolchain.toml') -Pattern '^channel = "([^"]+)"').Matches[0].Groups[1].Value
+        Write-Host '==> Building optimized harness and ingestion worker binaries'
+        & $cargoExe "+$taskToolchain" build --release --locked --manifest-path (Join-Path $repo 'src\harness\Cargo.toml') -p api --bin harness
         if ($LASTEXITCODE -ne 0) { throw "cargo build for harness failed (exit $LASTEXITCODE)" }
+        & $cargoExe "+$taskToolchain" build --release --locked --manifest-path (Join-Path $repo 'src\lake\Cargo.toml') -p lake-ingest-worker --bin lake-ingest-worker
+        if ($LASTEXITCODE -ne 0) { throw "cargo build for the local ingestion worker failed (exit $LASTEXITCODE)" }
         return
     }
-    if ($Name -eq 'lake') {
-        if (-not $cargoExe) { throw 'cargo is required to build the market-lake binary' }
-        $cargoArguments = @(
-            'build', '--locked', '--manifest-path', (Join-Path $repo 'src\lake\Cargo.toml'),
-            '-p', 'lake-cli'
-        )
-        if (-not $LakeDebug) { $cargoArguments += '--release' }
-        $profile = if ($LakeDebug) { 'debug' } else { 'release' }
-        Write-Host "==> Building the market-lake $profile binary"
-        & $cargoExe @cargoArguments
-        if ($LASTEXITCODE -ne 0) { throw "cargo build for market-lake failed (exit $LASTEXITCODE)" }
-    }
+
 }
 
 if ($Worker -and $WorkerLog) {
@@ -211,7 +195,6 @@ if (-not $Foreground -and -not $Worker) {
         '-DelaySeconds', [string]$DelaySeconds
     )
     if ($Rotate) { $arguments += '-Rotate' }
-    if ($LakeDebug) { $arguments += '-LakeDebug' }
     if ($NoStop) { $arguments += '-NoStop' }
     # WMI creates the worker under the system provider instead of the calling
     # shell, so the shell tool can terminate immediately while the detached
@@ -242,7 +225,6 @@ if ($Foreground -and -not $Worker) {
         '-DelaySeconds', [string]$DelaySeconds
     )
     if ($Rotate) { $arguments += '-Rotate' }
-    if ($LakeDebug) { $arguments += '-LakeDebug' }
     if ($NoStop) { $arguments += '-NoStop' }
     $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
         CommandLine = ($arguments -join ' ')
@@ -392,7 +374,6 @@ Get-Content -LiteralPath $EnvFile | ForEach-Object {
 # theirs on every request.  A missing token would otherwise surface as a 401
 # long after the restart reported success.
 $requiredTokens = @()
-if ($Servers -contains 'lake') { $requiredTokens += 'LAKE_API__BEARER_TOKEN' }
 if ($Servers -contains 'harness') { $requiredTokens += 'HARNESS_API_BEARER_TOKEN' }
 if ($Servers -contains 'thesis') { $requiredTokens += 'THESIS_API__BEARER_TOKEN' }
 if ($Servers -contains 'ui') { $requiredTokens += 'PUBLIC_THESIS_API_BEARER_TOKEN' }
@@ -401,54 +382,24 @@ if ($missingTokens.Count -gt 0) {
     throw ('the environment is missing required bearer tokens: ' + ($missingTokens -join ', '))
 }
 
-# The local lake keeps its generated loopback token. Only the harness child
-# receives the Azure lake credential, fetched into memory rather than .env.
-# A custom URL uses its configured LAKE_API__BEARER_TOKEN unless a Key Vault
-# secret URI is explicitly supplied. Resolve before stopping any old server.
+# A workstation runs the complete harness, including its catalog and finite local workers.
 $harnessLakeBearer = $env:LAKE_API__BEARER_TOKEN
 if ($Servers -contains 'harness') {
-    $lakeUrl = if (-not [string]::IsNullOrWhiteSpace($env:LAKE_API_URL)) {
-        $env:LAKE_API_URL.Trim()
-    } elseif (-not [string]::IsNullOrWhiteSpace($env:LAKE_API_BASE_URL)) {
-        $env:LAKE_API_BASE_URL.Trim()
-    } else { $null }
-    $secretUri = $env:HARNESS_LAKE_BEARER_SECRET_URI
-    if (-not $secretUri -and (-not $lakeUrl -or
-            ([uri]$lakeUrl).Host -eq 'fca-ml-dev-api.lemonhill-3b437822.westus2.azurecontainerapps.io')) {
-        $secretUri = 'https://fca-ml-dev-kv-obj3kww.vault.azure.net/secrets/api-bearer-token'
-    }
-    if ($secretUri) {
-        Write-Host '==> Loading the harness lake credential from Key Vault (memory only)'
-        $harnessLakeBearer = & az keyvault secret show --id $secretUri --query value -o tsv --only-show-errors
-        if ($LASTEXITCODE -ne 0 -or -not $harnessLakeBearer) {
-            throw 'Could not read the harness lake bearer; sign in with az login and verify Key Vault access'
-        }
-        $harnessLakeBearer = $harnessLakeBearer.Trim()
-    }
+    $env:HARNESS_MARKET_DATA_MODE = 'local'
+    $env:LAKE_API_URL = 'http://127.0.0.1:8001/market-data'
+    $env:LAKE_LOCAL_WORKER_EXECUTABLE = Join-Path $repo 'src\lake\target\release\lake-ingest-worker.exe'
+    $env:LAKE_LOCAL_PROVIDER_ENV = $EnvFile
 }
 
-# The harness and lake products are native Rust binaries launched from their
-# build outputs, so a restart compiles the selected servers before binding
-# them.  Thesis and the UI still run through uv/npm.  The market-lake always
-# launches its release build unless -LakeDebug is passed: the debug parse path
-# is several times slower on real quote volumes.
+# Optimized native binaries are rebuilt before launch. Thesis and UI use uv/npm.
 $uvExe = (Get-Command uv).Source
 $npmExe = (Get-Command npm.cmd -ErrorAction SilentlyContinue).Source
 if (-not $npmExe) { $npmExe = (Get-Command npm).Source }
 
 $specs = @{
-    lake = [pscustomobject]@{
-        Name = 'lake'; Port = 8002; Match = 'lake'
-        FilePath = Join-Path $repo $(if ($LakeDebug) {
-            'src\lake\target\debug\lake.exe'
-        } else {
-            'src\lake\target\release\lake.exe'
-        })
-        Arguments = @('local', 'api', '--host', '127.0.0.1', '--port', '8002')
-    }
     harness = [pscustomobject]@{
         Name = 'harness'; Port = 8001; Match = 'harness'
-        FilePath = Join-Path $repo 'src\harness\target\debug\harness.exe'
+        FilePath = Join-Path $repo 'src\harness\target\release\harness.exe'
         Arguments = @('api', '--config', 'config/harness/api.yaml')
     }
     thesis = [pscustomobject]@{

@@ -5,7 +5,7 @@ use axum::extract::State;
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use lake_contracts::{partition_path, AssetClass, DataType, Date, DateTime};
+use lake_contracts::{AssetClass, DataType, Date, DateTime};
 use lake_coverage::{CoverageReport, SessionCoverage};
 use lake_query::{
     execute_file_query, execute_sql_query, BoundedQueryError, BoundedQueryOutput,
@@ -16,9 +16,9 @@ use serde::Serialize;
 
 use crate::error::ApiError;
 use crate::models::{parse_query_body, FileQueryBody, QueryBody, SqlOutput, SqlQueryBody};
-use crate::selection::{contracts_or_default, option_coverage, OptionRequestLike};
 use crate::state::ApiContext;
 use crate::validate::StrictJson;
+use lake_coverage::{classify_option, contracts_or_default, option_coverage, OptionRequestLike};
 
 /// Return files or a bounded result over the requested complete files.
 pub(crate) async fn query(
@@ -411,41 +411,6 @@ async fn invoke_option_ensure(
         .map_err(|_| ensure_failed())?;
     }
     Ok(())
-}
-
-/// Split option entries into usable complete files and incomplete sessions.
-pub(crate) fn classify_option(
-    report: &CoverageReport,
-    data_type: DataType,
-) -> (Vec<SessionCoverage>, Vec<SessionCoverage>) {
-    let mut usable = Vec::new();
-    let mut incomplete = Vec::new();
-    for entry in &report.entries {
-        if entry.is_complete() && option_expected_path(entry, data_type) {
-            usable.push(entry.clone());
-        } else {
-            incomplete.push(entry.clone());
-        }
-    }
-    (usable, incomplete)
-}
-
-/// Require complete option rows to point at their canonical OSI object.
-fn option_expected_path(entry: &SessionCoverage, data_type: DataType) -> bool {
-    let Some(record) = entry.record.as_ref() else {
-        return false;
-    };
-    let Some(object_path) = record.object_path.as_deref() else {
-        return false;
-    };
-    partition_path(
-        entry.session_date(),
-        AssetClass::Option,
-        data_type,
-        record.interval.as_deref(),
-        &entry.symbol,
-    )
-    .is_ok_and(|expected| object_path == expected)
 }
 
 /// Map complete option entries to the bounded executor's file contract,

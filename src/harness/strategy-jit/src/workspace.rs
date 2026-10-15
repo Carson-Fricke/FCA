@@ -8,12 +8,7 @@ use serde_json::Value as Json;
 use crate::error::JitError;
 
 /// The toolchain pin copied into every managed workspace.
-const TOOLCHAIN_FILE: &str = r#"# Managed harness JIT workspace: toolchain pinned to the harness channel.
-[toolchain]
-channel = "stable"
-components = ["rustfmt", "clippy"]
-profile = "minimal"
-"#;
+const TOOLCHAIN_FILE: &str = include_str!("../../rust-toolchain.toml");
 
 /// The managed-workspace manifest file name.
 pub const MANIFEST_FILE: &str = "manifest.json";

@@ -1,20 +1,10 @@
-//! The published API process composition.
-//!
-//! Mirrors `lake.hosted.runtime.hosted_overrides` plus the Python
-//! `lake.app.create_app` wiring: with `LAKE_STORAGE_ACCOUNT_NAME` present the
-//! router carries the hosted Azure boundaries; without it, the in-memory
-//! composition is used instead.
+//! Compose the authenticated market-data router over required Azure control/read adapters.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axum::Router;
-use lake_catalog::{
-    MemoryCatalogRepository, MemoryContractRepository, MemoryDailyFrontSetRepository,
-    MemoryJobRepository,
-};
 use lake_configuration::LakeSettings;
-use lake_contracts::DateTime;
 use lake_http::{create_app, LakeApiConfig, LakeApiState};
 
 use crate::runtime::{hosted_overrides, HostedEnsureError};
@@ -38,73 +28,72 @@ fn bearer_token(environ: &BTreeMap<String, String>, settings: &LakeSettings) -> 
     })
 }
 
-/// Build the published API router, selecting the Azure composition when
-/// `LAKE_STORAGE_ACCOUNT_NAME` is present and the in-memory one otherwise.
+/// Build the market-data router; incomplete Azure configuration fails startup.
 pub fn create_api_router(
     environ: &BTreeMap<String, String>,
     now: Arc<dyn Fn() -> lake_contracts::DateTime + Send + Sync>,
 ) -> Result<Router, HostedEnsureError> {
-    let overrides = hosted_overrides(environ, None)?;
-    let settings = LakeSettings::load(None, environ)?;
-    let deadline = f64::from(settings.api.ensure_wait_deadline_seconds);
-    let bearer_token = bearer_token(environ, &settings);
-
-    let entra = entra_authenticator(&settings)?;
-    let state = match overrides {
-        Some(hosted) => Arc::new(LakeApiState {
-            catalog: hosted.catalog,
-            jobs: hosted.jobs,
-            listings: None,
-            contracts: Some(hosted.contracts),
-            front_sets: None,
-            option_resolver: Some(hosted.option_resolver),
-            sas_issuer: Some(hosted.sas_issuer),
-            read_store: Some(hosted.read_store),
-            ensure_launcher: Some(hosted.job_launcher),
-            ensure_callback: Some(hosted.ensure_callback),
-            bounded_query: None,
-            authorized_force_override: settings.api.sql.authorized_force_override_default,
-            ensure_wait_deadline_seconds: deadline,
-            bearer_token,
-            entra: entra_authenticator(&settings)?,
-            now,
-        }),
-        None => Arc::new(in_memory_state(settings, bearer_token, entra, now)?),
-    };
-    Ok(create_app(
-        state,
-        LakeApiConfig {
-            bearer_token: None,
-            ensure_wait_deadline_seconds: deadline,
-        },
-    ))
+    Ok(create_host(environ, now, "http://127.0.0.1:8001/market-data")?.router)
 }
 
-/// The in-memory fallback state, mirroring the bare Python `create_app`.
-fn in_memory_state(
-    settings: LakeSettings,
-    bearer_token: Option<String>,
-    entra: Option<Arc<lake_http::auth::EntraJwtAuthenticator>>,
-    now: Arc<dyn Fn() -> DateTime + Send + Sync>,
-) -> Result<LakeApiState, HostedEnsureError> {
-    let deadline = f64::from(settings.api.ensure_wait_deadline_seconds);
-    Ok(LakeApiState {
-        catalog: Arc::new(MemoryCatalogRepository::new()),
-        jobs: Arc::new(MemoryJobRepository::new()),
+pub struct MarketHost {
+    pub router: Router,
+    pub access: Arc<dyn harness_lakeclient::MarketAccess>,
+}
+pub fn create_host(
+    environ: &BTreeMap<String, String>,
+    now: Arc<dyn Fn() -> lake_contracts::DateTime + Send + Sync>,
+    local_base: &str,
+) -> Result<MarketHost, HostedEnsureError> {
+    let settings = LakeSettings::load(None, environ)?;
+    let token = bearer_token(environ, &settings)
+        .ok_or_else(|| HostedEnsureError::new("LAKE_API__BEARER_TOKEN is required"))?;
+    let (hosted, objects) = match environ
+        .get("HARNESS_MARKET_DATA_MODE")
+        .map(String::as_str)
+        .unwrap_or("local")
+    {
+        "local" => crate::local::local_overrides(environ, local_base, &token)?,
+        "azure" => (hosted_overrides(environ)?, Router::new()),
+        _ => {
+            return Err(HostedEnsureError::new(
+                "HARNESS_MARKET_DATA_MODE must be local or azure",
+            ))
+        }
+    };
+    let access = Arc::new(crate::access::NativeMarketAccess {
+        catalog: hosted.catalog.clone(),
+        jobs: hosted.jobs.clone(),
+        contracts: hosted.contracts.clone(),
+        admission: hosted.job_admission.clone(),
+        options: hosted.option_resolver.clone(),
+        source: crate::access::StoredObjects(hosted.read_store.clone()),
+        now: now.clone(),
+    });
+
+    let settings = LakeSettings::load(None, environ)?;
+    let bearer_token = Some(token);
+
+    let state = Arc::new(LakeApiState {
+        catalog: hosted.catalog,
+        jobs: hosted.jobs,
         listings: None,
-        contracts: Some(Arc::new(MemoryContractRepository::new())),
-        front_sets: Some(Arc::new(MemoryDailyFrontSetRepository::new())),
-        option_resolver: None,
-        sas_issuer: None,
-        read_store: None,
-        ensure_launcher: None,
-        ensure_callback: None,
+        contracts: Some(hosted.contracts),
+        front_sets: None,
+        option_resolver: Some(hosted.option_resolver),
+        sas_issuer: Some(hosted.sas_issuer),
+        read_store: Some(hosted.read_store),
+        ensure_admission: Some(hosted.job_admission),
+        ensure_callback: Some(hosted.ensure_callback),
         bounded_query: None,
         authorized_force_override: settings.api.sql.authorized_force_override_default,
-        ensure_wait_deadline_seconds: deadline,
         bearer_token,
-        entra,
+        entra: entra_authenticator(&settings)?,
         now,
+    });
+    Ok(MarketHost {
+        router: create_app(state, LakeApiConfig { bearer_token: None }).merge(objects),
+        access,
     })
 }
 

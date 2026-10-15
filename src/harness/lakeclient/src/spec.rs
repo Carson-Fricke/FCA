@@ -125,7 +125,7 @@ impl ReadSpec {
         self
     }
 
-    /// The `GET /v1/read` query parameters.
+    /// The `GET /v1/snapshot` query parameters.
     pub(crate) fn query_params(&self) -> Vec<(&'static str, String)> {
         let mut params = vec![
             ("asset_class", self.asset_class.clone()),

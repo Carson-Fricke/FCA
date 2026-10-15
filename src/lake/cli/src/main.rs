@@ -1,4 +1,4 @@
-//! The `lake` binary: local api, ingest, and reset commands.
+//! The lake development-data cleanup entrypoint.
 
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();

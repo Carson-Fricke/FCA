@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 pub use error::ConfigError;
 pub use settings::{
     ApiSettings, AuthSettings, BackfillSettings, ColdSettings, IngestSettings, LakeSettings,
-    LifecycleSettings, OperationsSettings, ParquetSettings, ProviderSettings, QueueSettings,
-    RequestSettings, RetrySettings, SasSettings, SqlSettings, StorageSettings,
+    LifecycleSettings, OperationsSettings, ParquetSettings, ProviderSettings, RequestSettings,
+    RetrySettings, SasSettings, SqlSettings, StorageSettings,
 };
 pub use universes::{
     CryptoRollout, CryptoUniverse, EquityHistory, EquityUniverse, HistoryPolicy, OptionSelection,

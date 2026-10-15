@@ -124,10 +124,11 @@ it unchanged to the study configuration. Tick-only studies require no global
 interval. Studies ensure/read exactly the declared union. Backtests always add
 quotes and trades for every input symbol for `simple_touch` execution, recorded
 separately in the manifest without expanding consumer callbacks or the echo.
-The local harness defaults to the Azure development lake; `LAKE_API_URL`, then
-`LAKE_API_BASE_URL`, override the endpoint, including the loopback lake on port
-8002. The stack launcher loads the Azure bearer from Key Vault into the harness
-child only; the local lake retains its separate loopback bearer.
+The local harness defaults to the Azure combined endpoint; `LAKE_API_URL`, then
+`LAKE_API_BASE_URL`, override the endpoint. Local hosting uses the same harness's
+`/market-data` prefix on port 8001 when Azure/ACI configuration is supplied.
+The stack launcher loads the Azure bearer from Key Vault into the harness child
+only and starts no separate lake process.
 Mixed ticks and completed frames use one causal availability-ordered queue.
 The older native built-in indicator registry remains separate; the shared
 interface applies to authored SDK indicators composed into programs.
@@ -284,19 +285,22 @@ snapshots require no `.git` directory in the deployed image.
 
 | Boundary | Path | Responsibility |
 | --- | --- | --- |
-| `market-lake` | `src/lake` | The lake service (Rust workspace) and the retained Python library surface: provider ingestion, stable lake schemas, storage and catalog access, coverage planning, and the lake API/client surface. |
-| `quant-harness` | `src/harness` | Deterministic simulation, OMS and portfolio behavior, results, paper and shadow runtimes, and capability-gated live execution. |
+| `market-lake` | `src/lake` | Separate acquisition, catalog, query, storage, HTTP and ACI execution capabilities, plus retained Python value libraries. The harness composes HTTP hosting and owns market-data reading. |
+| `quant-harness` | `src/harness` | Deterministic simulation, OMS and portfolio behavior, results, paper/shadow/live runtimes, and the shared read-only market-data reader/cache. Its API composes market-data HTTP hosting. |
 | `lakeclient` | `src/lakeclient` | Consumer-facing authenticated ensure, polling, file-query, and Parquet access without provider or Azure credentials. |
 | `thesis` | `src/thesis` | FCA research, workspace services, concrete tools/workflows, HTTP transport and application composition. |
 | `thesis_runtime` | `src/thesis_runtime` | Generic host for sessions, conversations, tools, workflows, subagents and durable execution, without FCA imports. |
 | Authored programs | `config/harness/*.rs` and inline `parameters.source` | User-authored Rust strategies, indicators, studies, and screening programs compiled against the authoring SDK. |
 
-Dependency direction is from the harness and strategies toward published
-contracts, never from the lake into harness runtime code. The harness consumes
-the lake only through its HTTP routes — ensure, coverage, jobs, read, and
-reference — via the `harness-lakeclient` crate; it never reads lake files or
-links lake storage, and the lake must remain operable without the harness.
-Strategies depend on the harness contract rather than engine internals.
+The harness owns the read-only `market-reader` service. Native execution,
+HTTP read encoding and ingestion derivation share checksum/schema verification
+and bounded caches. `harness-lakeclient` composes availability, execution-scoped
+snapshots and signed Parquet transport; provider acquisition runs only in finite
+ACI workers. The harness API hosts the catalog/read/control HTTP capability at
+`/market-data`. Engine and authored-program contracts do not depend on Azure,
+provider clients or ingestion control. The current boundaries, job lifecycle,
+cache semantics and deployment cutover are specified in
+[Harness market-data runtime](market-data-runtime.md).
 
 ## Market-Lake Packages
 
@@ -309,7 +313,9 @@ phase-6 deletion removed every service-shaped Python package the Rust
 workspace replaced (local, http, ingestion, storage, query, queue, hosted,
 operations, reference, tools, the coverage/catalog service machinery, and the
 top-level `app`/`crypto`/`options` modules); those directories now contain
-only their Rust crates.
+only their Rust crates where those capabilities remain. The unused Rust queue
+worker is now removed; ingestion execution is admitted through `lake-ingest-jobs`
+and performed by `lake-ingest-worker` in ACI.
 
 | Package | Responsibility |
 | --- | --- |
@@ -331,7 +337,8 @@ The lake service Python packages (`lake.local`, `lake.http`, `lake.ingestion`,
 `lake.reference`, `lake.tools`, the coverage/catalog service machinery, and
 the top-level `lake.app`/`lake.crypto`/`lake.options` modules) were deleted in
 phase 6; their behavior is native Rust in the `lake-*` crates, and their
-directories now contain only Rust crate content.
+remaining directories now contain only Rust crate content. The queue capability
+was subsequently retired by the harness market-data cutover.
 
 The event ordering contract is timestamp, source sequence, fixed serialized
 event-class priority, then incoming feed order. `SimClock` advances only from
@@ -383,7 +390,8 @@ src/harness/
 |-- contracts/                 Dependency-light subscription vocabulary and configuration hashing
 |-- strategy-sdk/              Authoring SDK: traits, versioned C ABI, entry-point macros
 |-- strategy-jit/              JIT seam: managed workspace, cargo build, libloading, engine adapters
-|-- lakeclient/                Async lake HTTP client: ensure, coverage, jobs, Arrow reads, reference
+|-- lakeclient/                Availability, execution-scoped snapshots, signed Parquet transport
+|-- market-reader/             Read-only snapshot verification, Parquet decoding and bounded caches
 `-- config/                    Authoritative document parser, shell/replay schemas, typed normalization
 ```
 
@@ -435,66 +443,32 @@ src/harness/
   generations are not automatically garbage-collected. This requires Rust 1.89
   or newer for standard-library file locks. Linux behavior has not been tested
   in this change. `build.rs` embeds the JIT source-tree build identity.
-- `lakeclient` is the harness's only lake boundary: an async `reqwest` client
-  (with a blocking facade for the JIT screening path) covering ensure,
-  coverage, job status, streaming Arrow IPC reads, and the reference
-  universe/facts views over the published lake routes. It replaces the
-  retired `LakeEnsureClient`; there is no local lake path or data directory.
-  `ensure_many` acquires symbol windows concurrently under a fixed fetch
-  bound; the lake's provider lane remains the rate limit. Study and tick jobs
-  then consume `visit_arrow` batches one window at a time, releasing Arrow
-  batches after conversion to replay events. Replay events remain in memory.
-  Arrow transfers have a 60-second connect/read inactivity limit, without a
-  whole-response buffer or overall transfer deadline. `read_arrow` and
-  `read_many` collect batches only for callers requiring a batch list.
-- `contracts::progress` defines harness execution stages and observed dataset
-  counters with a caller-injected reporting port. The shared MCP job store
-  retains the latest stage/dataset snapshots, timestamps and errors under the
-  admitted `job_id`, including on failure and after restart. Terminal jobs
-  reject late telemetry. HTTP and local MCP study/backtest runners inject the
-  same persistence adapter. Thesis's existing job-status passthrough exposes
-  these observations; workflow orchestration does not own telemetry or acquire
-  another submission or polling service.
-- `config` owns the non-executable YAML/JSON document parser, shell models,
-  replay validation, and exact decimal/time normalization used by API, MCP,
-  CLI, and engine projection. `backtest` projects those validated documents into
-  engine types rather than maintaining another parser or replay schema.
-  Shared hashing explicitly preserves both shipped v1 encodings: submitted
-  document and sweep identities use UTF-8; resolved engine configuration uses
-  historical ASCII escaping. Submission and resolved identities are intentionally
-  distinct, with golden coverage rather than re-pinning persisted hashes.
-  The contracts interval vocabulary accepts canonical positive units; engine
-  support remains a separate policy limited to `1min`/`1d` and one bars interval.
-- `marketdata`, `backtest`, and `live` are engine ports with
-  focused unit tests. `marketdata` path-depends on `lake-contracts` and
-  re-exports its `time`, `symbol`, `AssetClass`, `DataType` (including
-  `Bars`), `ExchangeSession`, `partition_path` (with the interval dimension),
-  and session calendars, so the harness and the lake share one value layer;
-  the duplicated harness holiday tables were deleted and the harness honors
-  the lake's ad-hoc closures and early closes. `backtest` backs the flipped
-  `backtest-job` and acquires exact consumer requirements for studies, adding
-  quote/trade execution feeds for backtests; `live` provides the
-  deterministic live core and the supervision runner the `trader` binary drives.
-
-The workspace is gated by `cargo fmt --all --check`, `cargo clippy --workspace
---all-targets -- -D warnings`, and `cargo test --workspace`; no Python
-interpreter is required.
+- `market-reader` owns verified Parquet decoding, immutable snapshot contracts,
+  concurrent read coalescing and bounded decoded/disk caches. It depends only
+  on value contracts and data libraries.
+- `lakeclient` composes availability and caller-owned waiting, pins manifests
+  per execution, downloads compressed objects using signed URLs and delegates
+  all market-data decoding to `market-reader`. API bearer tokens never travel
+  to object storage. Reference and option-selection calls remain control APIs.
 
 ## Market-Lake Rust Workspace
 
 `src/lake/` is a Cargo workspace at the product root whose `Cargo.toml` and the
-Python package `lake/` coexist, exactly as `src/harness/` does. The lake
-service is authoritative: the `lake` binary serves the published catalog,
-ensure, jobs, read, reference, query, and raw routes, and the `lake` console
-script is a thin Python shim (`lake.cli`) that execs it, with binary discovery
-through `LAKE_RUST_BINARY_DIR` and `src/lake/target/{release,debug}`.
+Python package `lake/` coexist, exactly as `src/harness/` does. The harness API
+composes its catalog, ensure, jobs, snapshot, read, reference, query and raw routes
+under `/market-data`; finite ACI workers execute provider ingestion. The `lake`
+binary owns only explicit workstation-data cleanup. Its Python console shim
+discovers that binary through `LAKE_RUST_BINARY_DIR` and
+`src/lake/target/{release,debug}`.
 
 The lake's data types are `trade`, `quote`, and `bars`, plus the reference
 snapshots. `bars` partitions carry the `interval=1min|1d` dimension and are
 fetched provider-first, falling back to derivation from stored trades; a trade
 partition revision invalidates its derived bars, and provider bars replace
 derived bars when available. `GET /v1/read` streams `trade`, `quote`, and
-`bars` partitions as Arrow IPC, and `GET /v1/reference/universe` /
+`bars` partitions as Arrow IPC through the shared reader. Harness executions use
+checksum-pinned `/v1/snapshot` manifests and compressed Parquet directly.
+`GET /v1/reference/universe` /
 `GET /v1/reference/facts` serve the point-in-time classification universe and
 facts.
 
@@ -517,11 +491,15 @@ src/lake/
 |-- coverage/                  Coverage classification, gap planning, ensure application
 |-- providers/                 Alpaca client, paging, retry, request-budget governor
 |-- storage/                   Arrow/Parquet writer, atomic object replace, capacity guard, lease ports
-|-- ingestion/                 Equity and crypto ingest transactions, committer boundary
+|-- ingestion/                 Equity, option and crypto transactions, bar derivation, committer boundary
 |-- query/                     Bounded file queries
+|-- reference/                 Reference snapshots and point-in-time classification
 |-- http/                      Axum boundary publishing the lake contract
-|-- local/                     Local layout, ingest/backfill, ensure launcher, local composition
-`-- cli/                       The `lake` binary
+|-- ingest-jobs/               Durable admission, lease-fenced state and ACI reconciliation
+|-- ingest-worker/             Finite provider acquisition process
+|-- hosted/                    Azure adapter composition for harness-hosted market-data HTTP
+|-- local/                     Owned workstation data cleanup
+`-- cli/                       Explicit `lake local reset --yes` cleanup
 ```
 
 Crate conventions follow `.github/instructions/rust.instructions.md`: unit
@@ -907,20 +885,22 @@ real consumer.
 market data providers
         |
         v
-market-lake ingest jobs --> Azure lake + catalog --> market-lake API/client
-                                      |                       |
-                                      +-----------+-----------+
-                                                  v
-                                quant-harness backtest jobs
+ACI ingestion workers --> Azure objects + catalog --> shared harness market-data reader
+                                      ^                         |
+                                      |                         v
+                         durable ingestion control       harness execution workers
+                         in the combined harness API
 
 live market feeds --> quant-harness paper/shadow/live runtime --> broker API
 ```
 
-Market-lake APIs and ingest jobs, harness backtest jobs, and harness trading
-runtimes are separate commands from the shared image. Azure resources use
-managed identity and least-privilege access. GitHub Actions uses OIDC and
-immutable image references; secrets remain in environment-specific secret
-stores rather than source control.
+The combined harness API publishes `/market-data` and owns no provider client.
+A separate small, digest-pinned image executes finite ACI ingestion jobs in Azure. Local mode uses filesystem adapters and content-pinned finite child workers through the same ingestion ports. Native execution receives catalog and reader access directly; HTTP serves separate clients.
+Resources, concurrent-worker limits and timeouts are configurable. The API scales to zero; a small scheduled coordination job runs the same
+dispatcher for unattended recovery. Active API replicas coordinate through the
+same dispatcher lease. Standalone lake API and scheduled
+Container Apps ingestion entrypoints are removed. GitHub Actions deploys the
+current composition using OIDC, managed identities and environment-owned secrets.
 
 ## Delivery Rules
 

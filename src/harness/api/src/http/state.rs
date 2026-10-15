@@ -147,6 +147,36 @@ impl AppConfig {
         Self::durable(results_root_from_env())
     }
 
+    pub fn with_market_access(
+        mut self,
+        access: Arc<dyn harness_lakeclient::MarketAccess>,
+    ) -> Result<Self, String> {
+        let client = Arc::new(
+            harness_lakeclient::BlockingLakeClient::from_access(access.clone())
+                .map_err(|e| e.to_string())?,
+        );
+        self.launcher = Arc::new(InProcessLauncher::new(
+            self.job_store.clone(),
+            Arc::new(NativeBacktestRunner {
+                lake_client: Some(client.clone()),
+                ..Default::default()
+            }),
+            self.clock.clone(),
+        ));
+        self.screener_launcher = Arc::new(InProcessScreenLauncher::new(
+            self.job_store.clone(),
+            Arc::new(NativeScreenRunner {
+                lake_client: Some(client),
+                ..Default::default()
+            }),
+            self.clock.clone(),
+        ));
+        self.mcp_server = Some(
+            super::mcp::compose_server(self.job_store.clone(), Some(access))
+                .map_err(|e| e.to_string())?,
+        );
+        Ok(self)
+    }
     pub(crate) fn into_state(self, bearer_token: Option<String>) -> AppState {
         let mcp_server = match self.mcp_server {
             Some(server) => Some(server),

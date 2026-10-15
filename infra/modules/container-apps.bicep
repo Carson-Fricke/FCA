@@ -9,17 +9,24 @@ param logAnalyticsWorkspaceName string
 @minLength(2)
 param containerAppsEnvironmentName string
 
-@description('Name of the market-lake FastAPI Container App.')
-@minLength(2)
-param apiAppName string
-
-@description('Name of the market-lake ingest Container Apps job.')
-@minLength(1)
-param ingestJobName string
-
 @description('Immutable private ACR image reference used by both workloads.')
 @minLength(1)
 param sharedImageReference string
+
+@description('Digest-pinned image containing only the finite ingestion worker.')
+param ingestionImageReference string
+@description('ACI vCPU per ingestion group; larger allocations may require regional quota approval.')
+param ingestionCpu string = '4'
+@description('ACI memory per ingestion group (Azure memoryInGB).')
+param ingestionMemoryGb string = '8'
+@minValue(1)
+param ingestionSessionConcurrency int = 1
+@minValue(1)
+@maxValue(16)
+param ingestionMaxWorkers int = 2
+@minValue(60)
+@maxValue(604800)
+param ingestionTimeoutSeconds int = 86400
 
 @description('Private Azure Container Registry login server. Both workloads authenticate image pulls with the runtime managed identity.')
 @minLength(1)
@@ -52,15 +59,6 @@ param tags object = {}
 @minValue(4)
 @maxValue(730)
 param logRetentionDays int = 30
-
-@description('Five-field UTC cron expression for scheduled ingest. A scheduled Container Apps job can also be started on demand.')
-@minLength(9)
-param ingestCronExpression string = '0 1 * * *'
-
-@description('Maximum seconds allowed for one ingest replica execution.')
-@minValue(60)
-@maxValue(86400)
-param ingestReplicaTimeoutSeconds int = 3600
 
 @description('Whether Log Analytics queries may use its public endpoint. Azure Monitor diagnostic settings use a secure Microsoft channel, so public ingestion remains disabled; local key authentication is always disabled.')
 param allowPublicLogQuery bool = false
@@ -140,76 +138,6 @@ param rthTraderReplicas int = 1
 param backtestReplicaTimeoutSeconds int = 3600
 
 var consumptionProfileName = 'Consumption'
-var apiContainerPort = 8000
-var apiContainerName = 'api'
-var ingestContainerName = 'ingest'
-var providerSecrets = [
-  {
-    name: 'alpaca-api-key'
-    keyVaultUrl: '${keyVaultUri}secrets/alpaca-api-key'
-    identity: runtimeIdentityResourceId
-  }
-  {
-    name: 'alpaca-api-secret'
-    keyVaultUrl: '${keyVaultUri}secrets/alpaca-api-secret'
-    identity: runtimeIdentityResourceId
-  }
-]
-var apiSecrets = concat(providerSecrets, [
-  {
-    name: 'api-bearer-token'
-    keyVaultUrl: '${keyVaultUri}secrets/api-bearer-token'
-    identity: runtimeIdentityResourceId
-  }
-])
-var baseRuntimeEnvironment = [
-  {
-    name: 'AZURE_CLIENT_ID'
-    value: runtimeIdentityClientId
-  }
-  {
-    name: 'LAKE_STORAGE_ACCOUNT_NAME'
-    value: storageAccountName
-  }
-  {
-    name: 'LAKE_STORAGE_CONTAINER'
-    value: 'lake'
-  }
-  {
-    name: 'LAKE_COVERAGE_TABLE'
-    value: 'coverage'
-  }
-]
-var providerEnvironment = concat(baseRuntimeEnvironment, [
-  {
-    name: 'LAKE_PROVIDER__API_KEY'
-    secretRef: 'alpaca-api-key'
-  }
-  {
-    name: 'LAKE_PROVIDER__API_SECRET'
-    secretRef: 'alpaca-api-secret'
-  }
-])
-// Entra configuration is non-secret; both variables are set together only
-// when an audience is configured. An empty audience keeps the API on the
-// static bearer token for local development and transition.
-var apiEntraEnvironment = empty(lakeApiAudience) ? [] : [
-  {
-    name: 'LAKE_API__AUTH__ENTRA_TENANT_ID'
-    value: lakeApiTenantId
-  }
-  {
-    name: 'LAKE_API__AUTH__ENTRA_AUDIENCE'
-    value: lakeApiAudience
-  }
-]
-var apiEnvironment = concat(providerEnvironment, apiEntraEnvironment, [
-  {
-    name: 'LAKE_API__BEARER_TOKEN'
-    secretRef: 'api-bearer-token'
-  }
-])
-
 // Quant-harness workloads share the Container Apps environment and Log
 // Analytics workspace with the lake but run under the dedicated quant
 // identity and consume their own Key Vault secret names.
@@ -265,7 +193,30 @@ var quantBaseEnvironment = [
     value: killSwitchTableName
   }
 ]
-var quantApiEnvironment = concat(backtestEnvironment, [
+var ingestionEnvironment = [
+  { name: 'HARNESS_MARKET_DATA_MODE', value: 'azure' }
+  { name: 'HARNESS_MARKET_DATA_CACHE_MEMORY_BYTES', value: '134217728' }
+  { name: 'HARNESS_MARKET_DATA_CACHE_DISK_BYTES', value: '1073741824' }
+  { name: 'AZURE_SUBSCRIPTION_ID', value: subscription().subscriptionId }
+  { name: 'LAKE_STORAGE_CONTAINER', value: 'lake' }
+  { name: 'LAKE_COVERAGE_TABLE', value: 'coverage' }
+  { name: 'LAKE_INGEST_IMAGE', value: ingestionImageReference }
+  { name: 'LAKE_INGEST_RESOURCE_GROUP', value: resourceGroup().name }
+  { name: 'LAKE_INGEST_LOCATION', value: location }
+  { name: 'LAKE_INGEST_IDENTITY_ID', value: runtimeIdentityResourceId }
+  { name: 'LAKE_INGEST_IDENTITY_CLIENT_ID', value: runtimeIdentityClientId }
+  { name: 'LAKE_INGEST_REGISTRY', value: registryLoginServer }
+  { name: 'LAKE_INGEST_SESSION_CONCURRENCY', value: string(ingestionSessionConcurrency) }
+  { name: 'LAKE_INGEST_CPU', value: ingestionCpu }
+  { name: 'LAKE_INGEST_MEMORY_GB', value: ingestionMemoryGb }
+  { name: 'LAKE_INGEST_MAX_WORKERS', value: string(ingestionMaxWorkers) }
+  { name: 'LAKE_INGEST_TIMEOUT_SECONDS', value: string(ingestionTimeoutSeconds) }
+  { name: 'LAKE_PROVIDER_KEY_VAULT_URL', value: keyVaultUri }
+]
+var quantApiEnvironment = concat(backtestEnvironment, ingestionEnvironment, empty(lakeApiAudience) ? [] : [
+  { name: 'LAKE_API__AUTH__ENTRA_TENANT_ID', value: lakeApiTenantId }
+  { name: 'LAKE_API__AUTH__ENTRA_AUDIENCE', value: lakeApiAudience }
+], [
   {
     name: 'HARNESS_API_BEARER_TOKEN'
     secretRef: 'harness-api-bearer-token'
@@ -301,11 +252,11 @@ var backtestSecrets = [
     identity: quantIdentityResourceId
   }
 ]
-// External ingress serves TLS on 443 and never exposes the container target
-// port; internal ingress is reached directly on the container port.
+// Both ingress modes terminate TLS on 443. Internal app FQDNs include the
+// internal segment; the container target port is never the ingress port.
 var apiBaseUrl = enableExternalApiIngress
-  ? 'https://${apiApp.properties.configuration.ingress.fqdn}'
-  : 'http://${apiApp.properties.configuration.ingress.fqdn}:${apiContainerPort}'
+  ? 'https://${quantApiAppName}.${containerAppsEnvironment.properties.defaultDomain}/market-data'
+  : 'https://${quantApiAppName}.internal.${containerAppsEnvironment.properties.defaultDomain}/market-data'
 var backtestEnvironment = concat(quantBaseEnvironment, [
   {
     name: 'LAKE_API_URL'
@@ -378,178 +329,35 @@ resource environmentDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-0
   }
 }
 
-resource apiApp 'Microsoft.App/containerApps@2025-07-01' = {
-  name: apiAppName
+// Coordination is finite and provider-free. The API can scale to zero without stranding durable work.
+resource ingestionDispatcher 'Microsoft.App/jobs@2025-07-01' = {
+  name: '${quantApiAppName}-ingestion-dispatcher'
   location: location
   tags: tags
   identity: {
     type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${runtimeIdentityResourceId}': {}
-    }
-  }
-  properties: {
-    environmentId: containerAppsEnvironment.id
-    workloadProfileName: consumptionProfileName
-    configuration: {
-      activeRevisionsMode: 'Single'
-      registries: [
-        {
-          server: registryLoginServer
-          identity: runtimeIdentityResourceId
-        }
-      ]
-      secrets: apiSecrets
-      identitySettings: [
-        {
-          identity: runtimeIdentityResourceId
-          lifecycle: 'Main'
-        }
-      ]
-      ingress: {
-        external: enableExternalApiIngress
-        allowInsecure: false
-        targetPort: apiContainerPort
-        transport: 'http'
-        traffic: [
-          {
-            latestRevision: true
-            weight: 100
-          }
-        ]
-      }
-    }
-    template: {
-      containers: [
-        {
-          name: apiContainerName
-          image: sharedImageReference
-          // azure_identity 0.21 selects only the system identity by default.
-          // ACA requires client_id for this user-assigned runtime identity.
-          // Preserve the platform endpoint/header; select the identity in
-          // the child process endpoint before the native API starts.
-          command: [
-            '/bin/sh'
-            '-c'
-          ]
-          args: [
-            'export IDENTITY_ENDPOINT="$IDENTITY_ENDPOINT?client_id=$AZURE_CLIENT_ID"; exec lake api'
-          ]
-          env: apiEnvironment
-          resources: {
-            // Hosted ensure materializes a complete SIP session before its
-            // atomic Parquet commit; 512 MiB was killed during MSFT ingest.
-            cpu: json('2.0')
-            memory: '4Gi'
-          }
-          probes: [
-            {
-              type: 'Startup'
-              httpGet: {
-                path: '/health'
-                port: apiContainerPort
-                scheme: 'HTTP'
-              }
-              failureThreshold: 10
-              initialDelaySeconds: 1
-              periodSeconds: 3
-              timeoutSeconds: 1
-            }
-            {
-              type: 'Liveness'
-              httpGet: {
-                path: '/health'
-                port: apiContainerPort
-                scheme: 'HTTP'
-              }
-              failureThreshold: 3
-              periodSeconds: 30
-              timeoutSeconds: 2
-            }
-            {
-              type: 'Readiness'
-              httpGet: {
-                path: '/health'
-                port: apiContainerPort
-                scheme: 'HTTP'
-              }
-              failureThreshold: 3
-              periodSeconds: 10
-              timeoutSeconds: 2
-            }
-          ]
-        }
-      ]
-      scale: {
-        minReplicas: 0
-        maxReplicas: 2
-        rules: [
-          {
-            name: 'http-requests'
-            http: {
-              metadata: {
-                concurrentRequests: '25'
-              }
-            }
-          }
-        ]
-      }
-    }
-  }
-}
-
-resource ingestJob 'Microsoft.App/jobs@2025-07-01' = {
-  name: ingestJobName
-  location: location
-  tags: tags
-  identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${runtimeIdentityResourceId}': {}
-    }
+    userAssignedIdentities: { '${quantIdentityResourceId}': {} }
   }
   properties: {
     environmentId: containerAppsEnvironment.id
     workloadProfileName: consumptionProfileName
     configuration: {
       triggerType: 'Schedule'
-      registries: [
-        {
-          server: registryLoginServer
-          identity: runtimeIdentityResourceId
-        }
-      ]
-      secrets: providerSecrets
-      scheduleTriggerConfig: {
-        cronExpression: ingestCronExpression
-        parallelism: 1
-        replicaCompletionCount: 1
-      }
-      replicaRetryLimit: 1
-      replicaTimeout: ingestReplicaTimeoutSeconds
-      identitySettings: [
-        {
-          identity: runtimeIdentityResourceId
-          lifecycle: 'Main'
-        }
-      ]
+      scheduleTriggerConfig: { cronExpression: '* * * * *', parallelism: 1, replicaCompletionCount: 1 }
+      replicaRetryLimit: 0
+      replicaTimeout: 600
+      registries: [{ server: registryLoginServer, identity: quantIdentityResourceId }]
+      identitySettings: [{ identity: quantIdentityResourceId, lifecycle: 'Main' }]
     }
     template: {
-      containers: [
-        {
-          name: ingestContainerName
-          image: sharedImageReference
-          // Scheduled jobs retain their schedule when started manually.
-          args: [
-            'ingest'
-          ]
-          env: providerEnvironment
-          resources: {
-            cpu: json('0.25')
-            memory: '0.5Gi'
-          }
-        }
-      ]
+      containers: [{
+        name: 'dispatcher'
+        image: ingestionImageReference
+        command: ['/bin/sh', '-c']
+        args: ['export IDENTITY_ENDPOINT="$IDENTITY_ENDPOINT?client_id=$AZURE_CLIENT_ID"; exec /usr/local/bin/lake-ingest-dispatcher']
+        env: concat(quantBaseEnvironment, ingestionEnvironment)
+        resources: { cpu: json('0.25'), memory: '0.5Gi' }
+      }]
     }
   }
 }
@@ -603,21 +411,12 @@ resource quantApiApp 'Microsoft.App/containerApps@2025-07-01' = {
           // The harness console scripts are sibling entrypoints in the shared
           // image. The `api` console script execs the Rust axum boundary
           // directly; the `harness` facade no longer fronts every group.
-          command: [
-            'api'
-          ]
-          args: [
-            '--config'
-            'config/harness/api.yaml'
-            '--host'
-            '0.0.0.0'
-            '--port'
-            string(quantContainerPort)
-          ]
+          command: ['/bin/sh', '-c']
+          args: ['export IDENTITY_ENDPOINT="$IDENTITY_ENDPOINT?client_id=$AZURE_CLIENT_ID"; exec api --config config/harness/api.yaml --host 0.0.0.0 --port ${quantContainerPort}']
           env: quantApiEnvironment
           resources: {
-            cpu: json('0.25')
-            memory: '0.5Gi'
+            cpu: json('1.0')
+            memory: '2Gi'
           }
           probes: [
             {
@@ -881,18 +680,15 @@ output containerAppsEnvironment object = {
   workloadProfile: consumptionProfileName
 }
 
-output api object = {
-  name: apiApp.name
-  resourceId: apiApp.id
-  fqdn: apiApp.properties.configuration.ingress.fqdn
-  port: apiContainerPort
+output marketData object = {
+  fqdn: quantApiApp.properties.configuration.ingress.fqdn
+  basePath: '/market-data'
 }
 
-@description('Use this name or resource ID with the Container Apps job start operation for an on-demand ingest execution.')
-output ingest object = {
-  name: ingestJob.name
-  resourceId: ingestJob.id
-  cronExpression: ingestCronExpression
+output ingestionCoordination object = {
+  jobName: ingestionDispatcher.name
+  image: ingestionImageReference
+  schedule: '* * * * *'
 }
 
 @description('Scale-to-zero quant-harness results and job API.')

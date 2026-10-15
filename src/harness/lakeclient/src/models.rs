@@ -61,10 +61,9 @@ pub struct JobStatus {
 /// The `POST /v1/catalog/ensure` union response.
 ///
 /// The route answers either a satisfied coverage report or an accepted job; a
-/// body without either still polls coverage, exactly like the historical
-/// client.
+/// body must contain either coverage or a retained job ID.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-pub(crate) struct EnsureResponse {
+pub struct EnsureResponse {
     /// Present when the route answered coverage directly.
     #[serde(default)]
     pub entries: Option<Vec<CoverageEntry>>,

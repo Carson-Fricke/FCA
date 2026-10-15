@@ -92,7 +92,7 @@ The one-time Bicep bootstrap creates or confirms:
 - Registry-scoped `AcrPull` for the runtime and deployer identities.
 - Resource-group `Contributor` for the deployer.
 - A resource-group `Role Based Access Control Administrator` assignment whose
-  condition permits only `AcrPull`, Storage Blob/Queue/Table data roles, and
+  condition permits only `AcrPull`, Container Instances Contributor, Managed Identity Operator, Storage Blob/Queue/Table data roles, and
   `Key Vault Secrets User`, for any workload principal in the resource group.
   The scope is the resource group so the grant also covers resources later
   deployments create, such as the dedicated Thesis workspace storage account.
@@ -905,7 +905,8 @@ deployment fails with `roleAssignments/write` authorization errors at that
 scope. The `rebootstrapWhen` rule in `access.bicep` names this condition. The
 grant is a single resource-group-scoped Role Based Access Control Administrator
 assignment whose condition allows only the allow-listed data roles
-(`AcrPull`, Storage Blob/Queue/Table, and `Key Vault Secrets User`) for any
+(`AcrPull`, Storage Blob/Queue/Table, `Key Vault Secrets User`,
+`Azure Container Instances Contributor Role`, and `Managed Identity Operator`) for any
 workload principal; the resource-group scope is what covers new accounts. Its
 resource name matches the standalone bootstrap, so re-running either
 `bootstrap-github-oidc.bicep` or `main.bicep` with
@@ -913,11 +914,12 @@ resource name matches the standalone bootstrap, so re-running either
 condition is baked into the deployed role assignment, a code merge alone cannot
 refresh it: an authorized maintainer must deploy `main.bicep` once from an
 Owner identity with `assignGithubDeployerRoles=true`, then never again;
-recurring runs keep the flag `false`. The quant-runtime `AcrPull` assignment is
-still not templated anywhere, but the resource-group scope plus the `AcrPull`
-role in the condition now lets the rebootstrap create it instead of a separate
-manual step. Recreate it the same way only if the registry or the quant-runtime
-identity is rebuilt.
+recurring runs keep the flag `false`. The quant-runtime `AcrPull` assignment is now declared in
+`infra/modules/container-registry.bicep`; its deterministic identity matches the
+existing deployment assignment. The two ingestion-control roles are included in
+the conditioned allow-list. Rerun the authorized OIDC bootstrap before the first
+deployment that grants those roles.
+
 
 The KEDA cron custom scaler requires `desiredReplicas` metadata and rejects
 unknown metadata keys, so `container-apps.bicep` sets `desiredReplicas` and no
@@ -973,3 +975,21 @@ Never print Environment secrets, Azure access tokens, Key Vault values,
 provider responses containing account data, or bearer tokens while diagnosing
 a run. Avoid `--debug`, shell tracing, PowerShell transcripts, unfiltered ARM
 outputs, and `gh run view --log` around secret operations.
+
+## Harness market-data and ACI cutover
+
+The combined quant API hosts `/market-data`; the old standalone lake API and
+scheduled Container Apps ingestion job are retired by `deploy-main.yml` before
+the new host is deployed. Canonical Parquet and coverage are retained. A separate
+small image runs finite ACI jobs; image, CPU, memory, worker cap and deadline are
+explicit Bicep inputs. See `../architecture/market-data-runtime.md` for the current
+contracts and verification paths. The deployer's conditioned role allow-list must
+include Container Instances Contributor and Managed Identity Operator; use this
+runbook's existing authorized bootstrap procedure to update it.
+
+Before that release, a subscription operator must register
+`Microsoft.ContainerInstance` (`az provider register --namespace
+Microsoft.ContainerInstance --wait`) and confirm regional core/group quota for
+the configured worker pool. The recurring deploy checks registration before
+retiring either workload; it cannot register providers itself. Deploy main
+before the first Thesis deployment using the combined-host contract.

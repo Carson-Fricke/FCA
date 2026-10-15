@@ -25,7 +25,7 @@ use axum::http::{header, HeaderMap, Request, StatusCode};
 use axum::Router;
 use chrono::{TimeZone, Utc};
 use harness_lakeclient::testing::{
-    bars_stream, quote_stream, trade_stream, FakeBarRow, FakeLakeConfig, FakeLakeServer,
+    bars_parquet, quote_parquet, trade_parquet, FakeBarRow, FakeLakeConfig, FakeLakeServer,
     FakeQuoteRow, FakeTradeRow,
 };
 use harness_lakeclient::{BlockingLakeClient, LakeClientConfig};
@@ -105,10 +105,10 @@ fn spy_bar_rows() -> Vec<FakeBarRow> {
 
 fn spy_lake() -> FakeLakeServer {
     FakeLakeServer::start(FakeLakeConfig {
-        read_bodies_by_type: BTreeMap::from([
-            ("quote".to_string(), quote_stream("SPY", &spy_quote_rows())),
-            ("trade".to_string(), trade_stream("SPY", &spy_trade_rows())),
-            ("bars".to_string(), bars_stream("SPY", &spy_bar_rows())),
+        partitions_by_type: BTreeMap::from([
+            ("quote".to_string(), quote_parquet("SPY", &spy_quote_rows())),
+            ("trade".to_string(), trade_parquet("SPY", &spy_trade_rows())),
+            ("bars".to_string(), bars_parquet("SPY", &spy_bar_rows())),
         ]),
         ..FakeLakeConfig::new(LAKE_TOKEN)
     })
@@ -1557,7 +1557,7 @@ fn authored_subscription_studies_validate_then_launch_exact_lake_inputs() {
                 assert_eq!(body["start_date"], "2024-01-02");
                 assert_eq!(body["end_date"], "2024-01-04");
             }
-            if request.path == "/v1/read" {
+            if request.path == "/v1/snapshot" {
                 read.push(request.query["data_type"].clone());
             }
         }

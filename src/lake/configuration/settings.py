@@ -120,16 +120,8 @@ class BackfillSettings(_StrictModel):
         return self
 
 
-class QueueSettings(_StrictModel):
-    visibility_timeout_seconds: PositiveInteger
-    visibility_renewal_seconds: PositiveInteger
-    max_delivery_attempts: PositiveInteger
-    dead_letter_on_exhaustion: bool
-
-
 class IngestSettings(_StrictModel):
     backfill: BackfillSettings
-    queue: QueueSettings
 
 
 class SasSettings(_StrictModel):
@@ -178,7 +170,6 @@ class AuthSettings(_StrictModel):
 
 
 class ApiSettings(_StrictModel):
-    ensure_wait_deadline_seconds: PositiveInteger
     sas: SasSettings
     sql: SqlSettings
     auth: AuthSettings = Field(default_factory=AuthSettings)

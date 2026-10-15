@@ -54,7 +54,7 @@ fn rust_api_and_mcp_entrypoints_run() {
 fn backtest_job_binary_runs_the_native_engine() {
     use backtest::backtest::errors::ONE_DAY_NS;
     use harness_lakeclient::testing::{
-        quote_stream, trade_stream, FakeLakeConfig, FakeLakeServer, FakeQuoteRow, FakeTradeRow,
+        quote_parquet, trade_parquet, FakeLakeConfig, FakeLakeServer, FakeQuoteRow, FakeTradeRow,
     };
     use marketdata::Date;
     use std::collections::BTreeMap;
@@ -86,9 +86,9 @@ fn backtest_job_binary_runs_the_native_engine() {
         ));
     }
     let server = FakeLakeServer::start(FakeLakeConfig {
-        read_bodies_by_type: BTreeMap::from([
-            ("quote".to_string(), quote_stream("SPY", &quotes)),
-            ("trade".to_string(), trade_stream("SPY", &trades)),
+        partitions_by_type: BTreeMap::from([
+            ("quote".to_string(), quote_parquet("SPY", &quotes)),
+            ("trade".to_string(), trade_parquet("SPY", &trades)),
         ]),
         ..FakeLakeConfig::new(TOKEN)
     });

@@ -1,6 +1,3 @@
-# Behavior verification
+# Local cleanup verification
 
-Tests exercise the public application and acquisition boundaries; fake transports replace external services. Pure numerical tests cover pricing arithmetic. Production implementation belongs to the sibling source folder.
-
-- `ensure.rs` — Public ensure behavior: bars never fetch ticks, quote/trade requests fetch only their dataset, and terminal sessions are skipped when extending a window.
-- `options.rs` — Individual option resolution and all three datasets through the real local HTTP composition.
+The former local provider/API acceptance tests are removed with those entrypoints. Current ingestion behavior is verified by ingestion transactions and durable ACI boundary tests. This directory contains no test code.

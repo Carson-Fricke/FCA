@@ -74,7 +74,7 @@ pub enum LakeClientError {
     /// One symbol/data-type window could not be completed.
     #[error("{0}")]
     EnsureFailed(Box<EnsureFailure>),
-    /// The Arrow IPC response could not be decoded.
-    #[error("market-lake Arrow IPC could not be decoded: {0}")]
+    /// Verified market data could not be decoded or its pinned metadata failed integrity checks.
+    #[error("market-data read failed: {0}")]
     Decode(String),
 }

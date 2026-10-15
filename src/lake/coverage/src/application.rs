@@ -6,10 +6,9 @@
 //! after the caller's wait deadline expires.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use futures_util::future::BoxFuture;
-use lake_catalog::{JobRecord, JobRepository, JobState};
+use lake_catalog::{JobRecord, JobRepository};
 use lake_contracts::{AssetClass, DataError, DataType, Date, DateTime};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -74,7 +73,7 @@ impl EnsureSpec {
     }
 }
 
-/// Work description passed to an injected ensure launcher.
+/// A worker's current gap plan, rebuilt from committed coverage after claiming the job.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EnsureJob {
     /// Stable job identifier.
@@ -85,9 +84,16 @@ pub struct EnsureJob {
     pub gaps: Vec<SessionCoverage>,
 }
 
-/// An injected ensure launcher: it fills the job's gaps and reports success.
-pub type EnsureJobLauncher =
-    Arc<dyn Fn(EnsureJob) -> BoxFuture<'static, Result<(), DataError>> + Send + Sync>;
+/// Immutable selected input admitted before external execution; progress cannot change it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnsureSubmission {
+    pub job_id: String,
+    pub requests: Vec<EnsureSpec>,
+}
+
+/// An injected durable admission port. Acknowledgement is not ingestion completion.
+pub type EnsureAdmission =
+    Arc<dyn Fn(EnsureSubmission) -> BoxFuture<'static, Result<(), DataError>> + Send + Sync>;
 
 /// The result of one ensure request.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -146,108 +152,51 @@ pub fn requested_coverage(
     )
 }
 
-/// Return satisfied coverage or launch one stable asynchronous job.
-///
-/// A persisted job record short-circuits repeated calls while it is still in
-/// flight. A terminal record whose coverage remains unsatisfied is superseded
-/// and the work is relaunched, so re-ensuring the same spec repairs sessions
-/// that ended in error or partial states. The record is marked running while
-/// the launcher works and reaches a terminal state (`complete` or `failed`) as
-/// soon as it returns, even when the caller's wait deadline expires. Ensure
-/// requests are unbounded: the spec may span any window, including full
-/// history.
-///
-/// The job repository is a shared [`Arc`] rather than a plain reference
-/// because the launched work deliberately outlives this call: after the wait
-/// deadline the task keeps running on the runtime and settles the job record
-/// when the launcher returns, which a borrowed handle could not soundly do.
-/// Launching requires a Tokio runtime; without one the request is rejected
-/// with an `internal_error` instead of panicking.
+/// Return existing coverage or durably admit external ingestion. Callers wait; workers settle.
 pub async fn ensure_coverage(
     catalog: &dyn lake_catalog::CatalogRepository,
     jobs: &Arc<dyn JobRepository>,
     listings: Option<&dyn lake_catalog::ListingRepository>,
-    launcher: EnsureJobLauncher,
+    admit: EnsureAdmission,
     spec: &EnsureSpec,
     as_of: DateTime,
-    wait_deadline_seconds: f64,
+    explicit_job_id: Option<&str>,
 ) -> Result<EnsureOutcome, CoverageRequestError> {
     let report = requested_coverage(catalog, listings, spec, as_of, "ensure")?;
     if report.is_satisfied() {
         return Ok(EnsureOutcome::Covered(report));
     }
 
-    let job_id = ensure_job_id(spec)?;
-    let existing = jobs.get(&job_id).map_err(CoverageRequestError::from)?;
-    if let Some(record) = &existing {
-        if matches!(record.state, JobState::Queued | JobState::Running) {
-            return Ok(EnsureOutcome::Accepted(record.clone()));
-        }
-    }
-
-    let runtime = tokio::runtime::Handle::try_current().map_err(|_| {
-        CoverageRequestError::new(
-            "internal_error",
-            "ensure_coverage requires a Tokio runtime",
-            None,
-        )
-    })?;
-
-    let created_at = existing.map_or(as_of, |record| record.created_at);
-    let accepted = JobRecord::new(job_id.clone(), JobState::Running, created_at, as_of, None)
-        .map_err(CoverageRequestError::from)?;
-    jobs.upsert(&accepted).map_err(CoverageRequestError::from)?;
-
-    let job = EnsureJob {
-        job_id: job_id.clone(),
-        request: spec.clone(),
-        gaps: report.gap_plan().gaps,
+    let job_id = match explicit_job_id {
+        Some(id) => id.to_string(),
+        None => ensure_job_id(spec)?,
     };
-    let jobs_for_task = Arc::clone(jobs);
-    let task_job_id = job_id.clone();
-    let handle = runtime.spawn(async move {
-        let result = launcher(job).await;
-        let state = if result.is_ok() {
-            JobState::Complete
-        } else {
-            JobState::Failed
-        };
-        let error_message = result.as_ref().err().map(ToString::to_string);
-        if let Ok(record) = JobRecord::new(task_job_id, state, created_at, as_of, error_message) {
-            let _ = jobs_for_task.upsert(&record);
-        }
-        result
-    });
-
-    // A panicked task or an expired deadline falls through to the persisted
-    // record, which the task settles itself. A launcher error has already
-    // settled the record as failed; mirroring Python, the failed row is the
-    // fallback when the repository no longer holds it.
-    let deadline = Duration::from_secs_f64(normalized_deadline(wait_deadline_seconds));
-    let mut fallback = accepted;
-    match tokio::time::timeout(deadline, handle).await {
-        Ok(Ok(Ok(()))) => {
-            let refreshed = requested_coverage(catalog, listings, spec, as_of, "ensure")?;
-            if refreshed.is_satisfied() {
-                return Ok(EnsureOutcome::Covered(refreshed));
-            }
-        }
-        Ok(Ok(Err(error))) => {
-            if let Ok(record) = JobRecord::new(
-                job_id.clone(),
-                JobState::Failed,
-                created_at,
-                as_of,
-                Some(error.to_string()),
-            ) {
-                fallback = record;
-            }
-        }
-        Ok(Err(_)) | Err(_) => {}
+    // The external execution adapter owns durable admission and settlement.
+    // HTTP acceptance never runs provider work or marks a launched container complete.
+    admit(EnsureSubmission {
+        job_id: job_id.clone(),
+        requests: vec![spec.canonical()],
+    })
+    .await
+    .map_err(CoverageRequestError::from)?;
+    let accepted = jobs
+        .get(&job_id)
+        .map_err(CoverageRequestError::from)?
+        .ok_or_else(|| {
+            CoverageRequestError::new(
+                "invalid_acknowledgement",
+                "ingestion admission did not retain the requested job ID",
+                None,
+            )
+        })?;
+    if accepted.job_id != job_id {
+        return Err(CoverageRequestError::new(
+            "invalid_acknowledgement",
+            "ingestion acknowledgement ID mismatch",
+            None,
+        ));
     }
-
-    let current = jobs.get(&job_id).map_err(CoverageRequestError::from)?;
-    Ok(EnsureOutcome::Accepted(current.unwrap_or(fallback)))
+    Ok(EnsureOutcome::Accepted(accepted))
 }
 
 /// Return the stable identifier for a logically equivalent ensure request.
@@ -286,15 +235,6 @@ pub fn ensure_job_id(spec: &EnsureSpec) -> Result<String, CoverageRequestError> 
     })?;
     let digest = Sha256::digest(python_ascii_json(&encoded).as_bytes());
     Ok(format!("ensure-{}", hex::encode(digest)))
-}
-
-/// Clamp a caller-supplied deadline to a usable, non-negative duration.
-fn normalized_deadline(seconds: f64) -> f64 {
-    if seconds.is_finite() && seconds > 0.0 {
-        seconds
-    } else {
-        0.0
-    }
 }
 
 /// Escape non-ASCII characters exactly like Python's `json.dumps(ensure_ascii=True)`.

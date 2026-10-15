@@ -9,7 +9,7 @@ use lake_catalog::{
     ListingRepository,
 };
 use lake_contracts::DateTime;
-use lake_coverage::EnsureJobLauncher;
+use lake_coverage::EnsureAdmission;
 use lake_query::{BoundedDuckDbQuery, EnsureCallback, FileUrlIssuer};
 use lake_storage::ReadableBlobStore;
 
@@ -18,6 +18,7 @@ pub type ApiClock = Arc<dyn Fn() -> DateTime + Send + Sync>;
 pub type OptionResolver = Arc<
     dyn Fn(
             lake_contracts::OptionSelector,
+            Option<String>,
         ) -> futures_util::future::BoxFuture<
             'static,
             Result<lake_contracts::ResolvedOption, lake_contracts::DataError>,
@@ -47,16 +48,14 @@ pub struct LakeApiState {
     pub sas_issuer: Option<Arc<dyn FileUrlIssuer>>,
     /// Optional blob-read seam backing the streaming read and reference routes.
     pub read_store: Option<Arc<dyn ReadableBlobStore>>,
-    /// Optional ensure launcher; a provider-free no-op when absent.
-    pub ensure_launcher: Option<EnsureJobLauncher>,
+    /// Durable ingestion admission; unavailable acquisition fails when absent.
+    pub ensure_admission: Option<EnsureAdmission>,
     /// Optional coverage-ensure callback used by the query route.
     pub ensure_callback: Option<EnsureCallback>,
     /// Optional bounded DuckDB engine backing SQL-mode queries.
     pub bounded_query: Option<Arc<BoundedDuckDbQuery>>,
     /// Whether `force=true` is authorized for SQL queries.
     pub authorized_force_override: bool,
-    /// Maximum seconds one ensure request waits for its launcher.
-    pub ensure_wait_deadline_seconds: f64,
     /// Static bearer token; `None` fails every protected request closed.
     pub bearer_token: Option<String>,
     /// Optional Entra JWT validator; a JWT-shaped credential is validated
@@ -75,14 +74,10 @@ impl std::fmt::Debug for LakeApiState {
             .field("front_sets", &self.front_sets.is_some())
             .field("sas_issuer", &self.sas_issuer.is_some())
             .field("read_store", &self.read_store.is_some())
-            .field("ensure_launcher", &self.ensure_launcher.is_some())
+            .field("ensure_admission", &self.ensure_admission.is_some())
             .field("ensure_callback", &self.ensure_callback.is_some())
             .field("bounded_query", &self.bounded_query.is_some())
             .field("authorized_force_override", &self.authorized_force_override)
-            .field(
-                "ensure_wait_deadline_seconds",
-                &self.ensure_wait_deadline_seconds,
-            )
             .field("bearer_token", &self.bearer_token.is_some())
             .field("entra", &self.entra.is_some())
             .finish_non_exhaustive()
@@ -90,25 +85,11 @@ impl std::fmt::Debug for LakeApiState {
 }
 
 /// Request-boundary configuration resolved when the router is built.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct LakeApiConfig {
     /// Static bearer token; `None` fails every protected request closed.
     pub bearer_token: Option<String>,
-    /// Maximum seconds one ensure request waits for its launcher.
-    pub ensure_wait_deadline_seconds: f64,
 }
-
-impl Default for LakeApiConfig {
-    fn default() -> Self {
-        Self {
-            bearer_token: None,
-            ensure_wait_deadline_seconds: DEFAULT_ENSURE_WAIT_DEADLINE_SECONDS,
-        }
-    }
-}
-
-/// The Python deployment default from `config/market-lake/settings.yaml`.
-pub(crate) const DEFAULT_ENSURE_WAIT_DEADLINE_SECONDS: f64 = 20.0;
 
 /// The state passed to every handler and the auth middleware.
 #[derive(Clone)]
@@ -119,8 +100,6 @@ pub(crate) struct ApiContext {
     pub bearer_token: Option<String>,
     /// Optional Entra JWT validator.
     pub entra: Option<Arc<auth::EntraJwtAuthenticator>>,
-    /// Effective launcher wait deadline in seconds.
-    pub ensure_wait_deadline_seconds: f64,
 }
 
 impl ApiContext {
@@ -134,19 +113,11 @@ impl ApiContext {
             .clone()
             .or_else(|| state.bearer_token.clone())
             .filter(|token| !token.trim().is_empty());
-        let deadline = if is_valid_deadline(config.ensure_wait_deadline_seconds) {
-            config.ensure_wait_deadline_seconds
-        } else if is_valid_deadline(state.ensure_wait_deadline_seconds) {
-            state.ensure_wait_deadline_seconds
-        } else {
-            DEFAULT_ENSURE_WAIT_DEADLINE_SECONDS
-        };
         let entra = state.entra.clone();
         Self {
             state,
             bearer_token,
             entra,
-            ensure_wait_deadline_seconds: deadline,
         }
     }
 
@@ -165,8 +136,4 @@ impl ApiContext {
             )
         })
     }
-}
-
-fn is_valid_deadline(seconds: f64) -> bool {
-    seconds.is_finite() && seconds > 0.0
 }

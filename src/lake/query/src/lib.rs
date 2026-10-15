@@ -7,7 +7,7 @@
 //! for it, and returns the complete partitions with their read URLs. SQL mode
 //! runs one bounded SELECT over only those ensured Parquet files through an
 //! in-memory DuckDB connection, under byte limits and read-only guards. The
-//! streaming read mode plans the same ensured files for the Arrow IPC route,
+//! snapshot mode plans the same ensured files for native and remote readers,
 //! and the reference mode shapes point-in-time classification and fundamentals
 //! facts for the published reference routes.
 
@@ -29,6 +29,6 @@ pub use models::{
     EnsureCallback, FileQueryContext, FileQueryFile, FileQueryRequest, FileQueryResponse,
     FileQueryResults, FileUrlIssuer,
 };
-pub use read::{plan_from_entries, plan_read, ReadFile, ReadPlan, ReadRequest};
+pub use read::{plan_from_entries, plan_read, plan_snapshot, ReadFile, ReadPlan, ReadRequest};
 pub use reference::{symbol_facts, universe_symbols};
 pub use sql::{execute_sql_query, SqlQueryError, SqlQueryRequest, SqlQueryResult};

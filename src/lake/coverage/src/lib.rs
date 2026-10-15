@@ -14,11 +14,16 @@
 
 mod application;
 mod error;
+mod selection;
 mod service;
+pub use selection::{
+    classify_option, contracts_or_default, option_coverage, resolve_option_selection,
+    OptionRequestLike, OptionSelection,
+};
 
 pub use application::{
-    ensure_coverage, ensure_job_id, requested_coverage, EnsureJob, EnsureJobLauncher,
-    EnsureOutcome, EnsureSpec,
+    ensure_coverage, ensure_job_id, requested_coverage, EnsureAdmission, EnsureJob, EnsureOutcome,
+    EnsureSpec, EnsureSubmission,
 };
 pub use error::CoverageRequestError;
 pub use service::{

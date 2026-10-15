@@ -121,7 +121,13 @@ impl BlobStore for LocalFilesystemStore {
 
 impl ReadableBlobStore for LocalFilesystemStore {
     fn read(&self, relative_path: &str) -> Result<Vec<u8>, DataError> {
-        Ok(fs::read(self.target(relative_path)?)?)
+        fs::read(self.target(relative_path)?).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                DataError::NotFound(relative_path.into())
+            } else {
+                error.into()
+            }
+        })
     }
 
     fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, DataError> {

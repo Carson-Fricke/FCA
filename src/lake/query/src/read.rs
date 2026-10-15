@@ -1,12 +1,12 @@
-//! Request planning for the streaming Arrow IPC read route.
+//! Snapshot planning shared by native and remote readers.
 //!
 //! The route validates its query parameters at the HTTP boundary, then plans
 //! through the same coverage classification the file query uses: an entry is a
 //! readable file only when its state is `complete` and its object path is the
 //! canonical `date=/asset_class=/data_type=[interval=]/SYMBOL.parquet`
 //! partition. Empty, delisted, missing, partial, and foreign-path entries are
-//! never read. The plan keeps only catalog metadata: the HTTP boundary streams
-//! the objects through the injected blob store.
+//! never read. The plan keeps only catalog metadata; the shared reader loads
+//! verified objects through its injected byte source.
 
 use lake_contracts::{AssetClass, DataType, Date};
 use lake_coverage::{EnsureSpec, SessionCoverage};
@@ -39,6 +39,9 @@ pub struct ReadFile {
     pub session_date: Date,
     /// Canonical Hive object path.
     pub object_path: String,
+    pub checksum: Option<String>,
+    pub row_count: u64,
+    pub byte_size: u64,
 }
 
 /// The ordered files one read stream serves, in session order.
@@ -109,6 +112,9 @@ pub fn plan_from_entries(
         files.push(ReadFile {
             session_date: entry.session_date(),
             object_path: object_path.to_string(),
+            checksum: record.checksum.clone(),
+            row_count: record.row_count,
+            byte_size: record.byte_size,
         });
     }
     Ok(ReadPlan {
@@ -118,4 +124,41 @@ pub fn plan_from_entries(
         interval,
         files,
     })
+}
+
+/// Plan current equity, crypto and option manifests through one selection policy.
+pub fn plan_snapshot(
+    context: &FileQueryContext<'_>,
+    contracts: Option<&dyn lake_catalog::ContractRepository>,
+    front_sets: Option<&dyn lake_catalog::DailyFrontSetRepository>,
+    request: &ReadRequest,
+) -> Result<ReadPlan, QueryApplicationError> {
+    if request.asset_class != AssetClass::Option {
+        return plan_read(context, request);
+    }
+    let like = lake_coverage::OptionRequestLike {
+        data_type: request.data_type,
+        interval: request.interval.as_deref(),
+        symbol: Some(&request.symbol),
+        underlying: None,
+        contract_symbols: None,
+        start_date: request.start_date,
+        end_date: request.end_date,
+    };
+    let (report, _) = lake_coverage::option_coverage(
+        context.catalog,
+        &like,
+        Some(lake_coverage::contracts_or_default(contracts)),
+        front_sets,
+        context.as_of,
+    )
+    .map_err(|e| QueryApplicationError::new(e.code, e.message, e.details))?;
+    let (usable, _) = lake_coverage::classify_option(&report, request.data_type);
+    plan_from_entries(
+        AssetClass::Option,
+        request.data_type,
+        &request.symbol,
+        request.interval.clone(),
+        &usable,
+    )
 }

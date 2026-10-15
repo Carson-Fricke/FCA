@@ -8,3 +8,7 @@
   It never accepts a previously healthy revision as evidence of a new rollout.
 
 Build and deployment checks belong here, outside the pytest behavior suite.
+
+- `merge_cargo_recipes.py` composes the pinned cargo-chef recipes for both Rust
+  workspaces. All local crates become dependency-build stubs together; the
+  harness lockfile stays authoritative, and real sources are restored afterward.

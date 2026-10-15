@@ -6,8 +6,8 @@ use backtest::backtest::{
 };
 use harness_lakeclient::{
     testing::{
-        bars_stream, quote_stream, trade_stream, FakeBarRow, FakeLakeConfig, FakeLakeServer,
-        FakeQuoteRow, FakeTradeRow,
+        option_bars_parquet, option_quote_parquet, option_trade_parquet, FakeBarRow,
+        FakeLakeConfig, FakeLakeServer, FakeQuoteRow, FakeTradeRow,
     },
     BlockingLakeClient, LakeClientConfig,
 };
@@ -40,21 +40,24 @@ fn both_selectors_feed_quotes_trades_and_bars_through_the_same_program_input() {
             option_resolution: Some(
                 json!({"symbol":CONTRACT,"underlying":"SPY","expiration":"2024-02-16","strike":"100","right":"call","multiplier":100,"as_of":"2024-01-18T21:00:00Z","delta":if delta {Some("0.51")}else{None},"quote_time":"2024-01-18T20:59:00Z","method":"test"}),
             ),
-            read_bodies_by_type: BTreeMap::from([
+            partitions_by_type: BTreeMap::from([
                 (
                     "quote".into(),
-                    quote_stream(
+                    option_quote_parquet(
                         CONTRACT,
                         &[FakeQuoteRow::new(start, "2.3", "2.4", 10, 10, "OPRA")],
                     ),
                 ),
                 (
                     "trade".into(),
-                    trade_stream(CONTRACT, &[FakeTradeRow::new(start, 1, "2.4", 3, "OPRA")]),
+                    option_trade_parquet(
+                        CONTRACT,
+                        &[FakeTradeRow::new(start, 1, "2.4", 3, "OPRA")],
+                    ),
                 ),
                 (
                     "bars".into(),
-                    bars_stream(
+                    option_bars_parquet(
                         CONTRACT,
                         &[FakeBarRow::new(start, "2.4", "2.5", "2.3", "2.45", "7")],
                     ),
@@ -92,7 +95,7 @@ fn both_selectors_feed_quotes_trades_and_bars_through_the_same_program_input() {
             assert_eq!(body["asset_class"], "option");
             assert_eq!(body["symbol"], CONTRACT);
         }
-        for request in requests.iter().filter(|r| r.path == "/v1/read") {
+        for request in requests.iter().filter(|r| r.path == "/v1/snapshot") {
             assert_eq!(request.query["asset_class"], "option");
             assert_eq!(request.query["symbol"], CONTRACT);
         }
@@ -112,9 +115,9 @@ fn bare_contract_symbols_are_classified_as_options() {
     config.shell = "study".into();
     config.symbols = vec![CONTRACT.into()];
     let server = FakeLakeServer::start(FakeLakeConfig {
-        read_bodies_by_type: BTreeMap::from([(
+        partitions_by_type: BTreeMap::from([(
             "quote".into(),
-            quote_stream(
+            option_quote_parquet(
                 CONTRACT,
                 &[FakeQuoteRow::new(start, "2.3", "2.4", 10, 10, "OPRA")],
             ),
