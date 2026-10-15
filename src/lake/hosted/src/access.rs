@@ -23,7 +23,7 @@ fn error(e: impl std::fmt::Display) -> LakeClientError {
     LakeClientError::Protocol(e.to_string())
 }
 fn spec(value: &EnsureSpec) -> Result<lake_coverage::EnsureSpec, LakeClientError> {
-    Ok(lake_coverage::EnsureSpec {
+    let request = lake_coverage::EnsureSpec {
         asset_class: AssetClass::from_value(&value.asset_class)
             .ok_or_else(|| error("unknown asset class"))?,
         data_type: DataType::from_value(&value.data_type)
@@ -32,7 +32,9 @@ fn spec(value: &EnsureSpec) -> Result<lake_coverage::EnsureSpec, LakeClientError
         start_date: date(&value.start_date)?,
         end_date: date(&value.end_date)?,
         interval: value.interval.clone(),
-    })
+    };
+    request.validate_interval().map_err(error)?;
+    Ok(request)
 }
 fn date(value: &str) -> Result<Date, LakeClientError> {
     Date::parse(value).ok_or_else(|| error("invalid date"))
@@ -53,12 +55,18 @@ impl MarketAccess for NativeMarketAccess {
         let catalog = self.catalog.clone();
         let jobs = self.jobs.clone();
         let admission = self.admission.clone();
+        let contracts = self.contracts.clone();
         let objects = self.source.0.clone();
         let runtime = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || match request {
             MarketRequest::Ensure(value)=>{
                 let spec=spec(&value)?;
-                let outcome=runtime.block_on(lake_coverage::ensure_coverage(catalog.as_ref(),&jobs,None,admission,&spec,as_of,None)).map_err(error)?;
+                let option_id=if spec.asset_class==AssetClass::Option {
+                    let like=option_request(&spec);
+                    let (_, selection)=lake_coverage::option_coverage(catalog.as_ref(),&like,Some(contracts.as_ref()),None,as_of).map_err(error)?;
+                    Some(lake_coverage::option_ensure_job_id(&like,&selection.symbols()))
+                } else { None };
+                let outcome=runtime.block_on(lake_coverage::ensure_coverage(catalog.as_ref(),&jobs,None,admission,&spec,as_of,option_id.as_deref())).map_err(error)?;
                 match outcome {
                     EnsureOutcome::Covered(report)=>serde_json::to_value(lake_http::models::CatalogCoverageResponse::from_report(&report,spec.data_type,&spec.symbol)).map_err(error),
                     EnsureOutcome::Accepted(job)=>Ok(json!({"job_id":job.job_id})),
@@ -66,7 +74,9 @@ impl MarketAccess for NativeMarketAccess {
             }
             MarketRequest::Coverage(value)=>{
                 let spec=spec(&value)?;
-                let report=lake_coverage::requested_coverage(catalog.as_ref(),None,&spec,as_of,"coverage").map_err(error)?;
+                let report=if spec.asset_class==AssetClass::Option {
+                    lake_coverage::option_coverage(catalog.as_ref(),&option_request(&spec),Some(contracts.as_ref()),None,as_of).map_err(error)?.0
+                } else { lake_coverage::requested_coverage(catalog.as_ref(),None,&spec,as_of,"coverage").map_err(error)? };
                 serde_json::to_value(lake_http::models::CatalogCoverageResponse::from_report(&report,spec.data_type,&spec.symbol)).map_err(error)
             }
             MarketRequest::Job(id)=>{
@@ -158,5 +168,17 @@ impl PartitionSource for StoredObjects {
             .await
             .map_err(|e| ReaderError::Source(e.to_string()))?
         })
+    }
+}
+
+fn option_request(spec: &lake_coverage::EnsureSpec) -> lake_coverage::OptionRequestLike<'_> {
+    lake_coverage::OptionRequestLike {
+        data_type: spec.data_type,
+        interval: spec.interval.as_deref(),
+        symbol: Some(&spec.symbol),
+        underlying: None,
+        contract_symbols: None,
+        start_date: spec.start_date,
+        end_date: spec.end_date,
     }
 }

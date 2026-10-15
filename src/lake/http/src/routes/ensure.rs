@@ -9,7 +9,6 @@ use axum::Json;
 use lake_catalog::JobRecord;
 use lake_contracts::{AssetClass, DateTime};
 use lake_coverage::{ensure_coverage, EnsureOutcome, EnsureSpec, EnsureSubmission};
-use serde_json::{json, Value};
 
 use crate::error::ApiError;
 use crate::models::{
@@ -20,7 +19,6 @@ use crate::routes::catalog::option_response;
 use crate::state::ApiContext;
 use crate::validate::StrictJson;
 use lake_coverage::{contracts_or_default, option_coverage, OptionRequestLike};
-use sha2::{Digest, Sha256};
 
 /// Return existing coverage or launch asynchronous ensure work.
 pub(crate) async fn ensure(
@@ -132,7 +130,7 @@ async fn ensure_option(
     let job_id = request
         .job_id
         .clone()
-        .unwrap_or_else(|| option_job_id(request, &selection.symbols()));
+        .unwrap_or_else(|| lake_coverage::option_ensure_job_id(&like, &selection.symbols()));
     let launcher = context
         .state
         .ensure_admission
@@ -167,66 +165,6 @@ async fn ensure_option(
         return Err(ApiError::internal("ingestion acknowledgement ID mismatch"));
     }
     Ok(accepted_response(&accepted))
-}
-
-/// Return the stable identifier for one option ensure membership.
-fn option_job_id(request: &OptionEnsureRequest, symbols: &[String]) -> String {
-    let mut payload = serde_json::Map::new();
-    if let Some(interval) = &request.interval {
-        payload.insert("interval".to_string(), json!(interval));
-    }
-    payload.insert("asset_class".to_string(), json!("option"));
-    payload.insert("data_type".to_string(), json!(request.data_type.value()));
-    payload.insert(
-        "symbol".to_string(),
-        json!(request
-            .symbol
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .to_uppercase()),
-    );
-    payload.insert(
-        "underlying".to_string(),
-        json!(request
-            .underlying
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .to_uppercase()),
-    );
-    payload.insert("contracts".to_string(), json!(symbols));
-    payload.insert(
-        "start_date".to_string(),
-        json!(request.start_date.isoformat()),
-    );
-    payload.insert("end_date".to_string(), json!(request.end_date.isoformat()));
-    let encoded = serde_json::to_string(&Value::Object(payload)).expect("plain JSON payload");
-    format!(
-        "ensure-{}",
-        hex::encode(Sha256::digest(python_ascii_json(&encoded).as_bytes()))
-    )
-}
-
-/// Escape non-ASCII characters exactly like Python's `json.dumps`.
-fn python_ascii_json(text: &str) -> String {
-    if text.is_ascii() {
-        return text.to_string();
-    }
-    use std::fmt::Write as _;
-
-    let mut escaped = String::with_capacity(text.len());
-    let mut units = [0u16; 2];
-    for character in text.chars() {
-        if (character as u32) < 0x80 {
-            escaped.push(character);
-        } else {
-            for unit in character.encode_utf16(&mut units) {
-                let _ = write!(escaped, "\\u{unit:04x}");
-            }
-        }
-    }
-    escaped
 }
 
 /// Render the asynchronous acceptance with its `Location` header.

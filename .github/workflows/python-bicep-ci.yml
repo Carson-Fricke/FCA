@@ -91,7 +91,7 @@ jobs:
   rust:
     name: Rust format, lint, and tests
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: src/harness
@@ -106,7 +106,13 @@ jobs:
           rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
           rustup show
 
-      - name: Check formatting
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src/harness -> target
+          cache-on-failure: true
+
+      - name: Check harness formatting
         run: cargo fmt --all --check
 
       - name: Clippy
@@ -118,7 +124,7 @@ jobs:
   lake-rust:
     name: Market-lake Rust format, lint, and tests
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: src/lake
@@ -132,6 +138,12 @@ jobs:
         run: |
           rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
           rustup show
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src/lake -> target
+          cache-on-failure: true
 
       - name: Check formatting
         run: cargo fmt --all --check

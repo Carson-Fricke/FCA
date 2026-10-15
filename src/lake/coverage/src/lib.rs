@@ -17,8 +17,8 @@ mod error;
 mod selection;
 mod service;
 pub use selection::{
-    classify_option, contracts_or_default, option_coverage, resolve_option_selection,
-    OptionRequestLike, OptionSelection,
+    classify_option, contracts_or_default, option_coverage, option_ensure_job_id,
+    resolve_option_selection, OptionRequestLike, OptionSelection,
 };
 
 pub use application::{

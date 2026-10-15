@@ -177,6 +177,19 @@ async fn local_worker_publishes_all_datasets_and_retained_admission_survives_hos
         assert!(!direct_rows.is_empty());
         assert_eq!(direct_rows, remote_rows);
     }
+    let invalid_option = harness_lakeclient::EnsureSpec::new(
+        "option",
+        "quote",
+        "AAPL240119C00100000",
+        "2024-01-18",
+        "2024-01-18",
+    );
+    for client in [&direct, &http] {
+        assert!(
+            client.admit_ensure(&invalid_option).await.is_err(),
+            "unknown option contracts must fail before admission"
+        );
+    }
     let unsigned = reqwest::get(format!("{base}/v1/objects/date=2024-01-18/anything"))
         .await
         .unwrap();

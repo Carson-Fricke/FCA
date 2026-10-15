@@ -242,7 +242,7 @@ pub fn ensure_job_id(spec: &EnsureSpec) -> Result<String, CoverageRequestError> 
 /// `serde_json` already escapes control characters and quotes; the only
 /// difference for `ensure_job_id` payloads is that Python renders every
 /// non-ASCII character as one or two lowercase `\uXXXX` escapes.
-fn python_ascii_json(text: &str) -> String {
+pub(crate) fn python_ascii_json(text: &str) -> String {
     if text.is_ascii() {
         return text.to_string();
     }

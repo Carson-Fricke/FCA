@@ -1,4 +1,6 @@
 //! Deterministic option membership and coverage over injected catalog ports.
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
@@ -413,4 +415,35 @@ fn option_expected_path(entry: &SessionCoverage, data_type: DataType) -> bool {
         &entry.symbol,
     )
     .is_ok_and(|expected| object_path == expected)
+}
+
+/// Return the stable identifier for one option ensure membership.
+pub fn option_ensure_job_id(request: &OptionRequestLike<'_>, symbols: &[String]) -> String {
+    let mut payload = serde_json::Map::new();
+    if let Some(interval) = request.interval {
+        payload.insert("interval".to_string(), json!(interval));
+    }
+    payload.insert("asset_class".to_string(), json!("option"));
+    payload.insert("data_type".to_string(), json!(request.data_type.value()));
+    payload.insert(
+        "symbol".to_string(),
+        json!(request.symbol.unwrap_or("").trim().to_uppercase()),
+    );
+    payload.insert(
+        "underlying".to_string(),
+        json!(request.underlying.unwrap_or("").trim().to_uppercase()),
+    );
+    payload.insert("contracts".to_string(), json!(symbols));
+    payload.insert(
+        "start_date".to_string(),
+        json!(request.start_date.isoformat()),
+    );
+    payload.insert("end_date".to_string(), json!(request.end_date.isoformat()));
+    let encoded = serde_json::to_string(&Value::Object(payload)).expect("plain JSON payload");
+    format!(
+        "ensure-{}",
+        hex::encode(Sha256::digest(
+            crate::application::python_ascii_json(&encoded).as_bytes()
+        ))
+    )
 }
