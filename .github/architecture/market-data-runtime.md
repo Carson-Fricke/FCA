@@ -178,4 +178,3 @@ The synchronous Blob and Table SDK bridges yield multithreaded Tokio scheduler w
 
 The Linux runtime supplies a writable local data root and the bundled worker path. Local signed-object transport accepts an explicit public base URL for forwarded ports and LAN clients. The ingestion image imports the shared build cache as well as its own cache, retaining the narrow runtime image while reusing already-built worker artifacts.
 
-The finite-worker builder cooks dependencies from the lake Cargo recipe before restoring application sources. Source-only changes therefore reuse its dependency compilation layer as well as the harness's.
