@@ -327,7 +327,7 @@ jobs:
             exit 1
           fi
 
-          ingestion_image_reference="$(az containerapp show --name "$api_app_name" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.template.containers[?name=='api'].env[?name=='LAKE_INGEST_IMAGE'].value | [0][0]" -o tsv)"
+          ingestion_image_reference="$(az containerapp show --name "$api_app_name" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.template.containers[?name=='api'] | [0].env[?name=='LAKE_INGEST_IMAGE'].value | [0]" -o tsv)"
           [[ "$ingestion_image_reference" == *@sha256:* ]] || { echo "::error::Deployed ACI image configuration is missing"; exit 1; }
           printf 'ingestion-image-reference=%s\n' "$ingestion_image_reference" >> "$GITHUB_OUTPUT"
           printf 'lake-image-reference=%s\n' "$lake_image_reference" >> "$GITHUB_OUTPUT"

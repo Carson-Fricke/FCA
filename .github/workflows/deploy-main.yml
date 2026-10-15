@@ -323,7 +323,7 @@ jobs:
             echo "::error::Combined API image does not match the published image"
             exit 1
           fi
-          ingestion_image="$(az containerapp show --name "$api_app_name" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.template.containers[?name=='api'].env[?name=='LAKE_INGEST_IMAGE'].value | [0][0]" -o tsv)"
+          ingestion_image="$(az containerapp show --name "$api_app_name" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.template.containers[?name=='api'] | [0].env[?name=='LAKE_INGEST_IMAGE'].value | [0]" -o tsv)"
           expected_ingestion_image="${acr_login_server}/${GITHUB_REPOSITORY_NAME,,}-ingestion@${INGESTION_DIGEST}"
           [[ "$ingestion_image" == "$expected_ingestion_image" ]] || { echo "::error::ACI ingestion image configuration mismatch"; exit 1; }
 
