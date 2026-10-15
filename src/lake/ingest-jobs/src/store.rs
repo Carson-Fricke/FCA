@@ -67,7 +67,7 @@ impl JobStore {
             .send()
             .await
             .map_err(io)?;
-        if response.status().as_u16() == 412 {
+        if already_exists(&response) {
             let existing = self.get(&job.record.job_id).await?;
             if existing.requests != job.requests {
                 return Err(DataError::Conflict(
@@ -110,7 +110,7 @@ impl JobStore {
             .send()
             .await
             .map_err(io)?;
-        if response.status().as_u16() != 412 {
+        if !already_exists(&response) {
             success(response).await?;
         }
         self.acquire(path.into()).await
@@ -230,6 +230,16 @@ impl JobStore {
             lease,
         })
     }
+}
+
+/// Azure conditional creation can report either an unmet condition or an existing block blob.
+fn already_exists(response: &reqwest::Response) -> bool {
+    response.status().as_u16() == 412
+        || (response.status().as_u16() == 409
+            && response
+                .headers()
+                .get("x-ms-error-code")
+                .is_some_and(|v| v == "BlobAlreadyExists"))
 }
 pub struct OwnedJob {
     store: JobStore,

@@ -40,6 +40,7 @@ struct Azure {
     interrupt: AtomicBool,
     mismatch: AtomicBool,
     stall_listing: AtomicBool,
+    conditional_precondition: AtomicBool,
     listing_entered: tokio::sync::Notify,
     listing_release: tokio::sync::Notify,
     lease_renewed: tokio::sync::Notify,
@@ -108,7 +109,14 @@ async fn azure(
                 .unwrap_or_else(|| StatusCode::NOT_FOUND.into_response());
         }
         if headers.contains_key("if-none-match") && blobs.contains_key(key) {
-            return StatusCode::PRECONDITION_FAILED.into_response();
+            if state.conditional_precondition.load(Ordering::SeqCst) {
+                return StatusCode::PRECONDITION_FAILED.into_response();
+            }
+            return (
+                StatusCode::CONFLICT,
+                [("x-ms-error-code", "BlobAlreadyExists")],
+            )
+                .into_response();
         }
         if let Some(lease) = leases.get(key) {
             if Some(lease.as_str()) != headers.get("x-ms-lease-id").and_then(|v| v.to_str().ok()) {
@@ -379,5 +387,27 @@ async fn slow_control_plane_keeps_ownership_and_lost_lease_cancels_dispatch() {
     state.listing_release.notify_one();
     jobs.reconcile().await.unwrap();
     assert_eq!(state.starts.load(Ordering::SeqCst), 1);
+    server.abort();
+}
+
+#[tokio::test]
+async fn conditional_preconditions_join_existing_input_and_reuse_dispatch_ownership() {
+    let (jobs, azure, server) = fixture().await;
+    azure.conditional_precondition.store(true, Ordering::SeqCst);
+    jobs.submit("conditional-412".into(), work("AAPL"))
+        .await
+        .unwrap();
+    let joined = jobs
+        .submit("conditional-412".into(), work("AAPL"))
+        .await
+        .unwrap();
+    assert_eq!(joined.record.job_id, "conditional-412");
+    assert!(jobs
+        .submit("conditional-412".into(), work("MSFT"))
+        .await
+        .is_err());
+    jobs.reconcile().await.unwrap();
+    jobs.reconcile().await.unwrap();
+    assert_eq!(azure.starts.load(Ordering::SeqCst), 1);
     server.abort();
 }

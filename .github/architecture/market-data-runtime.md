@@ -169,3 +169,5 @@ Option membership and canonical option-file classification live in `lake-coverag
 Local process reconciliation runs at 250 ms; Azure control-plane reconciliation runs at 2 s. Caller-owned completion observation caps polling at 500 ms. These bounds avoid multi-second local completion/handoff delays without copying execution policy.
 
 Native and HTTP option acquisition validate the same contract membership and use one canonical option job identity. Unknown contracts fail before admission in both transports.
+
+Azure conditional blob creation treats `412` and the specific `409 BlobAlreadyExists` response as existing-resource outcomes. Admission validates retained input before joining; coordinator-lock creation then acquires the existing lock. Other conflicts retain their failure/ownership semantics.
