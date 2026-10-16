@@ -57,6 +57,7 @@ printed or included in benchmark artifacts.
   harness verification. This cold Windows Rust/JIT verification is **not** a
   claim that the complete native test workload fits under three minutes; the
   Python full-suite timings above remain below that threshold.
+  Final harness workspace documentation tests also passed.
 - The finite local-worker test exercises real child execution against fake
   external provider HTTP, all three dataset publications, concurrent duplicate
   admission, conflicting input, ownership fencing, immutable terminal results,
@@ -232,6 +233,10 @@ effects, and the workstation is not restricted to the ACI CPU allocation.
 ### Deployment and cleanup checks
 
 - Both deployed health endpoints returned 200.
+- The API retains its zero-minimum-replica setting. A final probe after an
+  idle period first exceeded a 15-second deadline during activation; subsequent
+  probes returned 200 and Azure reported a healthy running replica. The warm-API
+  acquisition benchmark excludes this separate scale-from-zero latency.
 - Bounded backtest execution **`fca-ml-dev-backtest-twdvwdq`** succeeded on the
   final shared image, using the repository's in-image smoke configuration.
 - The retired standalone lake API and old ACA ingestion job are absent.
