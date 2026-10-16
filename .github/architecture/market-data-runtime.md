@@ -2,9 +2,12 @@
 
 ## Status
 
-The source implements one harness-hosted HTTP composition, a shared read-only
-reader, durable partitioned local/ACA ingestion, native catalog access, and snapshot/cache reuse. Azure rollout is a
-separate release operation; source verification is not proof of deployment.
+The runtime implements one harness-hosted HTTP composition, a shared read-only
+reader, durable partitioned local/ACA ingestion, native catalog access, and
+snapshot/cache reuse. Local and Azure execution were verified at source
+`81162c3`; the [rollout record](../verification/ingestion-fleet-rollout-2026-10-15.md)
+documents deployed image pins, measured performance and the GitHub billing
+block. Later source changes still require their own release verification.
 
 ## Boundaries
 
