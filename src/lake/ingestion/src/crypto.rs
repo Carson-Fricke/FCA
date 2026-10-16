@@ -10,13 +10,13 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use arrow_array::RecordBatch;
 use futures_util::future::{join_all, BoxFuture};
 use lake_catalog::{CoverageRecord, CoverageStatus};
 use lake_contracts::{symbol_filename, AssetClass, DataError, DataType, Date, DateTime};
 use lake_coverage::CoverageSession;
 use lake_providers::{NormalizedCryptoQuote, NormalizedCryptoTrade, ProviderError};
 use lake_storage::{ParquetMetadata, StorageCapGuard};
-use serde_json::Value;
 
 use crate::common::{
     data_error_message, failures_all_transient, fetch_error_message, fetch_with_transient_retry,
@@ -45,6 +45,7 @@ pub struct CryptoIngestResult {
 }
 
 /// Fetch, stage, and atomically publish one crypto pair-day.
+#[derive(Clone)]
 pub struct CryptoIngestTransaction {
     provider: Arc<dyn CryptoDataProvider>,
     writer: Arc<dyn PartitionWriter>,
@@ -163,6 +164,23 @@ impl CryptoIngestTransaction {
             .map(|result| result.expect("a successful gather has no provider error"))
             .collect();
 
+        let transaction = self.clone();
+        let session = *session;
+        crate::common::cpu_stage(move || {
+            transaction.finish(pair, &session, selected, records, query_end)
+        })
+        .await
+    }
+
+    /// Stage and publish on a bounded blocking thread, leaving fetch I/O free.
+    fn finish(
+        &self,
+        pair: String,
+        session: &CoverageSession,
+        selected: Vec<DataType>,
+        records: Vec<CryptoRecords>,
+        query_end: DateTime,
+    ) -> Result<CryptoIngestResult, DataError> {
         let staged = match self.stage(&pair, session, &selected, &records, query_end) {
             Ok(staged) => staged,
             Err(error) => {
@@ -369,14 +387,14 @@ fn trade_rows(
     pair: &str,
     session: &CoverageSession,
     query_end: DateTime,
-) -> Result<Vec<Value>, DataError> {
+) -> Result<RecordBatch, DataError> {
     let mut validated = Vec::with_capacity(records.len());
     for record in records {
         validate_trade(record, pair, session, query_end)?;
         validated.push(record);
     }
     validated.sort_by(|left, right| compare_trades(left, right));
-    Ok(validated.iter().map(|record| record.to_row()).collect())
+    crate::columnar::crypto_trades(&validated, pair)
 }
 
 /// Validate and canonically order crypto quotes.
@@ -385,14 +403,14 @@ fn quote_rows(
     pair: &str,
     session: &CoverageSession,
     query_end: DateTime,
-) -> Result<Vec<Value>, DataError> {
+) -> Result<RecordBatch, DataError> {
     let mut validated = Vec::with_capacity(records.len());
     for record in records {
         validate_quote(record, pair, session, query_end)?;
         validated.push(record);
     }
     validated.sort_by(|left, right| compare_quotes(left, right));
-    Ok(validated.iter().map(|record| record.to_row()).collect())
+    crate::columnar::crypto_quotes(&validated, pair)
 }
 
 /// Compare two crypto trades on the pinned `(timestamp, trade_id or -1,
@@ -455,7 +473,7 @@ fn validate_trade(
     query_end: DateTime,
 ) -> Result<(), DataError> {
     validate_record_timestamp(record.timestamp, pair, session, query_end)?;
-    if canonical_pair(&record.symbol)? != pair {
+    if record.symbol != pair && canonical_pair(&record.symbol)? != pair {
         return Err(DataError::value(
             "trade symbol does not match the requested pair",
         ));
@@ -471,7 +489,7 @@ fn validate_quote(
     query_end: DateTime,
 ) -> Result<(), DataError> {
     validate_record_timestamp(record.timestamp, pair, session, query_end)?;
-    if canonical_pair(&record.symbol)? != pair {
+    if record.symbol != pair && canonical_pair(&record.symbol)? != pair {
         return Err(DataError::value(
             "quote symbol does not match the requested pair",
         ));

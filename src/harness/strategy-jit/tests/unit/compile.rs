@@ -3,6 +3,77 @@ use super::*;
 use super::fixture::{artifact_value, replace_preserving_mtime, Fixture};
 
 #[test]
+fn distinct_authored_sources_reuse_dependencies_and_keep_loaded_artifacts_immutable() {
+    let fixture = Fixture::new();
+    let first = compile_with_sdk(
+        &fixture.workspace,
+        fixture::SOURCE,
+        ProgramKind::Study,
+        &fixture.sdk,
+    )
+    .unwrap();
+    let loaded = unsafe { libloading::Library::new(&first.artifact_path).unwrap() };
+    let fingerprint = fixture.workspace.read_manifest()[&first.digest]
+        .compiler_fingerprint
+        .clone();
+    let dependency_target = fixture
+        .workspace
+        .target_dir()
+        .join(format!("deps-{}", &fingerprint[..32]));
+    let dependencies = || {
+        let mut found = std::collections::BTreeMap::new();
+        let mut pending = vec![dependency_target.clone()];
+        while let Some(directory) = pending.pop() {
+            for entry in std::fs::read_dir(directory).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else if path
+                    .extension()
+                    .is_some_and(|extension| extension == "rlib")
+                {
+                    let metadata = path.metadata().unwrap();
+                    found.insert(path, (metadata.modified().unwrap(), metadata.len()));
+                }
+            }
+        }
+        found
+    };
+    let before = dependencies();
+    assert!(!before.is_empty());
+    let changed_source = fixture::SOURCE.replace(
+        "harness_strategy_sdk::value()",
+        "harness_strategy_sdk::value() + 1",
+    );
+    let second = compile_with_sdk(
+        &fixture.workspace,
+        &changed_source,
+        ProgramKind::Study,
+        &fixture.sdk,
+    )
+    .unwrap();
+    assert!(!first.cached && !second.cached);
+    assert_ne!(first.artifact_path, second.artifact_path);
+    assert_eq!(artifact_value(&first), 2);
+    assert_eq!(artifact_value(&second), 3);
+    assert_eq!(
+        dependencies(),
+        before,
+        "unchanged dependencies must not rebuild"
+    );
+    std::fs::write(dependency_target.join("identity"), "different compiler").unwrap();
+    let error = compile_with_sdk(
+        &fixture.workspace,
+        "pub fn another_source() {}",
+        ProgramKind::Study,
+        &fixture.sdk,
+    )
+    .unwrap_err();
+    assert!(matches!(error, JitError::Invalid(detail) if detail.contains("identity mismatch")));
+    drop(loaded);
+}
+
+#[test]
 fn transitive_contract_change_rebuilds_immutable_artifact_and_workspace_key() {
     let fixture = Fixture::new();
     replace_preserving_mtime(

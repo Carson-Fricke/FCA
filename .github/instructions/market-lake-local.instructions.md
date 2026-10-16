@@ -4,11 +4,13 @@ applyTo: "src/lake/local/**,src/lake/cli/**,src/harness/market-reader/**,src/lak
 
 # Harness Market-Data Deployment Instructions
 
-Run the complete harness in the selected environment. `HARNESS_MARKET_DATA_MODE=local` composes local filesystem catalog/objects/jobs and finite local worker processes. Azure composes storage adapters and finite ACI workers. Never make the default local harness depend on a remote lake service. Local Thesis/UI can instead select the entire remote harness.
+Run the complete harness in the selected environment. `HARNESS_MARKET_DATA_MODE=local` composes local filesystem catalog/objects/jobs and finite local worker processes. Azure composes storage adapters and finite ACA workers. Never make the default local harness depend on a remote lake service. Local Thesis/UI can instead select the entire remote harness.
 
 Admission, immutable job identity, ownership, reconciliation, transactions and reading use shared application contracts. Native execution receives catalog/acquisition and reader ports directly. HTTP exists for separate clients/processes. Never add HTTP self-calls, inline API-owned provider work, local/remote algorithm copies, or legacy format fallbacks.
 
-The main Azure API uses 1 vCPU / 2 GiB; ACI ingestion defaults to 4 vCPU / 8 GiB. Keep allocations configurable. The workstation launcher builds optimized binaries and configures local workers; `lake local reset --yes` remains explicit marker-protected cleanup.
+The main Azure API uses 1 vCPU / 2 GiB; ACA ingestion defaults to 4 vCPU / 8 GiB. Keep allocations configurable. The workstation launcher builds optimized binaries and configures local workers; `lake local reset --yes` remains explicit marker-protected cleanup.
+
+Long ingestion plans are partitioned into disjoint date ranges under one retained job ID. Each finite ACA Job execution or local child owns one partition. Preserve unknown-start reconciliation and never replay ACA start POSTs after a possible dispatch. All workers in an environment share the hard 10,000-request/minute ledger, including retries. Local and Azure currently must not ingest simultaneously with the same Alpaca allowance; keep local independent of remote coordination.
 
 Provider credentials belong to the worker: managed identity/Key Vault in Azure, explicit environment or ignored provider file locally. Never print, persist in job documents, hard-code or commit credentials, bearer tokens or signed object URLs. API and object transports must not forward credentials to one another.
 

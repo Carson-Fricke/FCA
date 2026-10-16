@@ -1,4 +1,4 @@
-//! Azure catalog, durable ingestion admission, ACI reconciliation, and signed read composition. No provider clients run here.
+//! Azure catalog, durable ingestion admission, ACA reconciliation, and signed read composition. No provider clients run here.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -8,7 +8,7 @@ use lake_configuration::{ConfigError, LakeSettings};
 use lake_contracts::DataError;
 use lake_coverage::{EnsureAdmission, EnsureSpec, EnsureSubmission};
 use lake_ingest_jobs::{
-    AciConfig, AciRunner, BlobJobRepository, IngestionJobs, JobStore, WorkRequest,
+    AcaConfig, AcaRunner, BlobJobRepository, IngestionJobs, JobStore, WorkRequest,
 };
 use lake_query::{EnsureCallback, FileUrlIssuer, QueryApplicationError};
 use lake_storage::{
@@ -137,7 +137,7 @@ impl HostedRuntime {
         let jobs: Arc<dyn JobRepository> = Arc::new(BlobJobRepository::new(read_store.clone()));
         let ingestion = Arc::new(IngestionJobs {
             store: JobStore::new(format!("{blob_url}/{container_name}"), credential.clone())?,
-            runner: AciRunner::new(AciConfig::from_environment(environ)?, credential.clone())?,
+            runner: AcaRunner::new(AcaConfig::from_environment(environ)?, credential.clone())?,
         });
         ingestion
             .clone()
@@ -204,7 +204,7 @@ impl HostedRuntime {
         query_ensure(self.ingestion.clone())
     }
 
-    /// Persist work; the independent reconciler dispatches the retained job to ACI.
+    /// Persist work; the independent reconciler dispatches the retained job to ACA.
     pub fn job_admission(self: &Arc<Self>) -> EnsureAdmission {
         admission(self.ingestion.clone())
     }

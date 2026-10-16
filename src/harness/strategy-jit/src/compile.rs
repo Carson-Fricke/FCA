@@ -78,7 +78,9 @@ pub struct CompiledArtifact {
 /// Compile or reuse one authored program, serialized per compiler/source across processes.
 ///
 /// Cache reuse requires matching kind, compiler, SDK and ABI provenance and an existing
-/// artifact. Returned artifacts are never replaced by subsequent builds.
+/// artifact. Distinct authored programs reuse Cargo dependency artifacts under the
+/// exact compiler fingerprint, with target mutations serialized separately. Returned
+/// libraries live in immutable generations and are never replaced by later builds.
 ///
 /// # Errors
 /// Returns [`JitError`] for workspace, compiler, or artifact failures.
@@ -140,7 +142,39 @@ fn compile_with_sdk(
     let crate_dir = workspace.crate_dir(&generation);
     let manifest = write_authored_crate(&crate_dir, &crate_name, &source, &sdk)?;
     let target_dir = workspace.target_dir().join(&generation);
-    let artifact_path = run_build(workspace.root(), &manifest, &digest, &target_dir)?;
+    // Cargo may replace files in its target directory. Reuse dependency builds
+    // only under the exact content/toolchain/configuration identity and keep the
+    // emitted library locked until it has been copied to an immutable generation.
+    // A new fingerprint uses a new cache even when SDK mtimes were preserved.
+    // Keep Windows MSVC build-script paths below MAX_PATH. The compact directory
+    // key is not identity authority: its full fingerprint is checked under the
+    // same OS lock before Cargo can reuse or mutate any dependency artifact.
+    let dependency_name = format!("deps-{}", &compiler_fingerprint[..32]);
+    let dependency_target = workspace.target_dir().join(&dependency_name);
+    let build_lock = workspace.lock(&dependency_name)?;
+    match std::fs::create_dir(&dependency_target) {
+        Ok(()) => std::fs::write(dependency_target.join("identity"), &compiler_fingerprint)?,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            if std::fs::read_to_string(dependency_target.join("identity"))? != compiler_fingerprint
+            {
+                return Err(JitError::Invalid(
+                    "dependency cache identity mismatch; remove the invalid cache directory".into(),
+                ));
+            }
+        }
+        Err(error) => return Err(error.into()),
+    }
+    let built = run_build(workspace.root(), &manifest, &digest, &dependency_target)?;
+    let relative = built.strip_prefix(&dependency_target).map_err(|error| {
+        JitError::Io(format!("Cargo artifact outside dependency target: {error}"))
+    })?;
+    let artifact_path = target_dir.join(relative);
+    let parent = artifact_path
+        .parent()
+        .ok_or_else(|| artifact_missing(&digest, &artifact_path))?;
+    std::fs::create_dir_all(parent)?;
+    std::fs::copy(&built, &artifact_path)?;
+    drop(build_lock);
     let artifact_relpath = artifact_path
         .strip_prefix(workspace.target_dir())
         .map_err(|error| JitError::Io(format!("Cargo artifact outside managed target: {error}")))?;

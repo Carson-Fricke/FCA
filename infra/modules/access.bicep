@@ -8,9 +8,6 @@ param enableGitea bool = false
 @maxLength(36)
 param runtimePrincipalId string
 
-@description('Identity the dispatcher may attach to ingestion groups.')
-param runtimeIdentityResourceId string
-
 @description('Object/principal ID of the quant-harness runtime user-assigned managed identity.')
 @minLength(36)
 @maxLength(36)
@@ -92,12 +89,12 @@ resource roleBasedAccessControlAdministratorRole 'Microsoft.Authorization/roleDe
   name: 'f58310d9-a9f6-439a-9e8d-f62e7b41a168'
 }
 
-// The condition bounds role-assignment writes/deletes to the seven allow-listed
+// The condition bounds role-assignment writes/deletes to the six allow-listed
 // data/control-plane role definitions. The principal is intentionally NOT restricted:
 // the deployment creates workload identities (the quant-harness and Thesis
 // user-assigned identities) whose principal IDs are unknown at bootstrap time,
 // and those identities legitimately receive these data roles.
-var githubDeployerRbacCondition = '((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/write\'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {7f951dda-4ed3-4680-a7ca-43fe172d538d, ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3, 4633458b-17de-408a-b874-0445c86b69e6, 5d977122-f97e-4b4d-a52f-6b43003ddb4d, f1a07417-d97a-45cb-824c-7a7467783830})) AND ((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/delete\'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {7f951dda-4ed3-4680-a7ca-43fe172d538d, ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3, 4633458b-17de-408a-b874-0445c86b69e6, 5d977122-f97e-4b4d-a52f-6b43003ddb4d, f1a07417-d97a-45cb-824c-7a7467783830}))'
+var githubDeployerRbacCondition = '((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/write\'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {7f951dda-4ed3-4680-a7ca-43fe172d538d, ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3, 4633458b-17de-408a-b874-0445c86b69e6, b9a307c4-5aa3-4b52-ba60-2b17c136cd7b})) AND ((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/delete\'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {7f951dda-4ed3-4680-a7ca-43fe172d538d, ba92f5b4-2d11-453d-a403-e96b0029c9fe, 974c5e8b-45b9-4653-ba55-5f855dd0fb88, 0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3, 4633458b-17de-408a-b874-0445c86b69e6, b9a307c4-5aa3-4b52-ba60-2b17c136cd7b}))'
 
 resource runtimeBlobAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: storageAccount
@@ -189,7 +186,7 @@ resource githubDeployerRbacAccess 'Microsoft.Authorization/roleAssignments@2022-
   properties: {
     condition: githubDeployerRbacCondition
     conditionVersion: '2.0'
-    description: 'Permit the GitHub deployer to manage only the allow-listed data-role assignments (AcrPull, Storage Blob/Queue/Table, and Key Vault Secrets User) for any workload principal in this resource group.'
+    description: 'Permit the GitHub deployer to manage only the allow-listed data-role assignments (AcrPull, Storage Blob/Queue/Table, Key Vault Secrets User, and Container Apps Jobs Operator) for any workload principal in this resource group.'
     principalId: githubDeployerPrincipalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: roleBasedAccessControlAdministratorRole.id
@@ -219,7 +216,7 @@ output runtimeRoleAssignments object = {
   ]
 }
 
-@description('Least-privilege data roles for the quant-harness runtime identity. Blob covers results and state artifacts, tables cover the kill-switch and run-catalog tables, and Key Vault Secrets User covers trader credential reads. Queue access is intentionally not granted.')
+@description('Quant-harness runtime data and finite-job execution roles. Blob covers results/state, tables cover catalog/kill-switch state, Key Vault covers runtime secrets, and Jobs Operator permits finite execution control without compute-definition or identity-attachment rights. Queue access is not granted.')
 output quantRoleAssignments object = {
   storageAccountId: storageAccount.id
   keyVaultId: keyVault.id
@@ -235,6 +232,11 @@ output quantRoleAssignments object = {
     {
       roleName: 'Key Vault Secrets User'
       roleAssignmentId: quantSecretAccess.id
+    }
+    {
+      roleName: 'Container Apps Jobs Operator'
+      roleAssignmentId: ingestionJobsAccess.id
+      scope: resourceGroup().id
     }
   ]
 }
@@ -260,23 +262,13 @@ output githubDeployerBootstrap object = {
   rebootstrapWhen: 'A wave adds a new role-assignment scope (such as a new storage account) or a new workload principal, or the allow-listed data roles change'
 }
 
-resource ingestionIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' existing = {
-  name: last(split(runtimeIdentityResourceId, '/'))
-}
-resource aciDispatcherAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, quantPrincipalId, '5d977122-f97e-4b4d-a52f-6b43003ddb4d')
+// Dispatch can start, inspect and stop finite Job executions, but cannot create
+// compute definitions or attach a managed identity to arbitrary containers.
+resource ingestionJobsAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, quantPrincipalId, 'b9a307c4-5aa3-4b52-ba60-2b17c136cd7b')
   properties: {
     principalId: quantPrincipalId
     principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5d977122-f97e-4b4d-a52f-6b43003ddb4d')
-  }
-}
-resource ingestionIdentityAttachment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(ingestionIdentity.id, quantPrincipalId, 'f1a07417-d97a-45cb-824c-7a7467783830')
-  scope: ingestionIdentity
-  properties: {
-    principalId: quantPrincipalId
-    principalType: 'ServicePrincipal'
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'f1a07417-d97a-45cb-824c-7a7467783830')
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b9a307c4-5aa3-4b52-ba60-2b17c136cd7b')
   }
 }

@@ -25,9 +25,11 @@ pub struct DurableJob {
     pub record: JobRecord,
     pub requests: Vec<WorkRequest>,
     pub execution: crate::WorkerSpec,
+    /// Internal partition identity; every partition retains the execution's job_id.
+    pub partition: Option<String>,
     pub dispatch_started: bool,
     pub dispatched_at: Option<i64>,
-    pub group_deleted: bool,
+    pub execution_deleted: bool,
     pub result: Option<serde_json::Value>,
 }
 impl DurableJob {
@@ -40,6 +42,15 @@ impl DurableJob {
         if requests.is_empty() {
             return Err(DataError::value("ingestion work is empty"));
         }
+        if requests.len() > 1
+            && requests
+                .iter()
+                .any(|request| matches!(request, WorkRequest::OptionSelection { .. }))
+        {
+            return Err(DataError::value(
+                "option selection is one standalone ingestion operation",
+            ));
+        }
         for (index, request) in requests.iter().enumerate() {
             request.validate()?;
             if requests[..index].contains(request) {
@@ -47,15 +58,43 @@ impl DurableJob {
                     "ingestion work contains duplicate requests",
                 ));
             }
+            for previous in &requests[..index] {
+                if let (
+                    WorkRequest::Dataset {
+                        asset_class: a,
+                        data_type: d,
+                        symbol: s,
+                        interval: i,
+                        start_date: start,
+                        end_date: end,
+                    },
+                    WorkRequest::Dataset {
+                        asset_class: pa,
+                        data_type: pd,
+                        symbol: ps,
+                        interval: pi,
+                        start_date: pstart,
+                        end_date: pend,
+                    },
+                ) = (request, previous)
+                {
+                    if (a, d, s, i) == (pa, pd, ps, pi) && start <= pend && pstart <= end {
+                        return Err(DataError::value(
+                            "ingestion work contains overlapping dataset ranges",
+                        ));
+                    }
+                }
+            }
         }
         let now = now();
         Ok(Self {
             record: JobRecord::new(job_id, JobState::Queued, now, now, None)?,
             requests,
             execution: execution.into(),
+            partition: None,
             dispatch_started: false,
             dispatched_at: None,
-            group_deleted: false,
+            execution_deleted: false,
             result: None,
         })
     }
@@ -63,15 +102,90 @@ impl DurableJob {
         matches!(self.record.state, JobState::Complete | JobState::Failed)
     }
 
+    pub fn reference(&self) -> WorkRef {
+        WorkRef {
+            job_id: self.record.job_id.clone(),
+            partition: self.partition.clone(),
+        }
+    }
+
+    /// Deterministic, disjoint calendar ranges. Reconciliation persists each before dispatch.
+    pub fn partitions(&self) -> Result<Vec<Self>, DataError> {
+        use lake_contracts::Date;
+        use sha2::{Digest, Sha256};
+        if self.partition.is_some() {
+            return Err(DataError::value("a partition cannot be partitioned again"));
+        }
+        let days = self.execution.partition_days();
+        if days == 0 {
+            return Err(DataError::value("partition days must be positive"));
+        }
+        let mut work = Vec::new();
+        let mut keys = std::collections::BTreeSet::new();
+        for request in &self.requests {
+            let mut parts = Vec::new();
+            match request {
+                WorkRequest::Dataset {
+                    start_date,
+                    end_date,
+                    ..
+                } => {
+                    let mut start = Date::parse(start_date)
+                        .ok_or_else(|| DataError::value("invalid start date"))?;
+                    let last = Date::parse(end_date)
+                        .ok_or_else(|| DataError::value("invalid end date"))?;
+                    loop {
+                        let end = start.add_days(i32::from(days) - 1).min(last);
+                        let mut part = request.clone();
+                        if let WorkRequest::Dataset {
+                            start_date,
+                            end_date,
+                            ..
+                        } = &mut part
+                        {
+                            *start_date = start.isoformat();
+                            *end_date = end.isoformat();
+                        }
+                        parts.push(part);
+                        if end == last {
+                            break;
+                        }
+                        start = end.add_days(1);
+                    }
+                }
+                WorkRequest::OptionSelection { .. } => parts.push(request.clone()),
+            }
+            for request in parts {
+                let bytes = serde_json::to_vec(&request).map_err(DataError::io)?;
+                let mut partition = self.clone();
+                partition.partition = Some(hex::encode(Sha256::digest(bytes)));
+                partition.requests = vec![request];
+                partition.record.state = JobState::Queued;
+                partition.record.updated_at = self.record.created_at;
+                partition.record.progress = None;
+                partition.record.error_message = None;
+                partition.dispatch_started = false;
+                partition.dispatched_at = None;
+                partition.execution_deleted = false;
+                partition.result = None;
+                if keys.insert(partition.partition.clone()) {
+                    work.push(partition);
+                }
+            }
+        }
+        Ok(work)
+    }
+
     /// Ownership permits lifecycle progress, never mutation of accepted input or terminal outcomes.
     pub fn validate_update(&self, next: &Self) -> Result<(), DataError> {
         if self.requests != next.requests
+            || self.partition != next.partition
             || self.execution != next.execution
             || self.record.job_id != next.record.job_id
             || self.record.created_at != next.record.created_at
             || (self.dispatch_started && !next.dispatch_started)
             || (self.dispatched_at.is_some() && self.dispatched_at != next.dispatched_at)
-            || (self.group_deleted && !next.group_deleted)
+            || (self.execution_deleted && !next.execution_deleted)
             || (self.terminal() && (self.record != next.record || self.result != next.result))
         {
             return Err(DataError::Conflict(
@@ -79,6 +193,41 @@ impl DurableJob {
             ));
         }
         Ok(())
+    }
+}
+
+/// A storage/worker address, never an additional execution job ID.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkRef {
+    pub job_id: String,
+    pub partition: Option<String>,
+}
+impl WorkRef {
+    pub fn root(job_id: &str) -> Self {
+        Self {
+            job_id: job_id.into(),
+            partition: None,
+        }
+    }
+    pub fn path(&self) -> Result<String, DataError> {
+        validate_id(&self.job_id)?;
+        match &self.partition {
+            None => Ok(format!("ingestion/jobs/{}.json", self.job_id)),
+            Some(key)
+                if key.len() == 64
+                    && key
+                        .bytes()
+                        .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) =>
+            {
+                Ok(format!("ingestion/partitions/{}/{}.json", self.job_id, key))
+            }
+            _ => Err(DataError::value("invalid ingestion partition key")),
+        }
+    }
+    pub fn worker_key(&self) -> Result<String, DataError> {
+        use sha2::{Digest, Sha256};
+        Ok(hex::encode(Sha256::digest(self.path()?.as_bytes())))
     }
 }
 impl WorkRequest {

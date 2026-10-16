@@ -9,7 +9,7 @@
 //! provider records, stages one Parquet object per data type, and publishes the
 //! objects together with their coverage rows through exactly one
 //! caller-supplied atomic commit. Option transactions work at the OSI
-//! symbol-day boundary and are composed by the finite ACI worker.
+//! symbol-day boundary and are composed by the finite ACA worker.
 //!
 //! Two semantics are load-bearing and reproduced exactly:
 //!
@@ -22,6 +22,7 @@
 //!    belongs to its session.
 
 mod bars;
+mod columnar;
 mod common;
 mod crypto;
 mod ensure;

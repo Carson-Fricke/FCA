@@ -7,14 +7,56 @@
 //! failures ([`ProviderError::Transport`] and [`ProviderError::Timeout`]) are
 //! retried; every other failure propagates on its first occurrence.
 
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use arrow_array::RecordBatch;
 use futures_util::future::BoxFuture;
 use lake_catalog::CoverageRecord;
 use lake_contracts::{symbol_filename, AssetClass, DataError, DataType, Date};
 use lake_providers::ProviderError;
 use lake_storage::ParquetMetadata;
-use serde_json::Value;
+
+/// Bound blocking ingest stages to the process's actual CPU allocation.
+///
+/// Independent sessions can fetch while another session validates, builds
+/// columns, encodes and publishes. Each stage uses one blocking thread and no
+/// nested OS threads. The caller separately bounds fetched sessions in memory.
+pub(crate) async fn cpu_stage<T: Send + 'static>(
+    stage: impl FnOnce() -> Result<T, DataError> + Send + 'static,
+) -> Result<T, DataError> {
+    static SLOTS: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
+    let slots = SLOTS.get_or_init(|| {
+        Arc::new(tokio::sync::Semaphore::new(
+            std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get),
+        ))
+    });
+    let permit = slots.clone().acquire_owned().await.map_err(DataError::io)?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        stage()
+    })
+    .await
+    .map_err(DataError::io)?
+}
+
+/// Validate records once and sort borrowed references in canonical stable order.
+///
+/// A session uses its one CPU-stage permit, rather than starting per-pass or
+/// per-column OS threads that multiply with concurrent sessions.
+pub(crate) fn ordered_records<T>(
+    records: &[T],
+    validate: impl Fn(&T) -> Result<(), DataError>,
+    compare: impl Fn(&T, &T) -> std::cmp::Ordering,
+) -> Result<Vec<&T>, DataError> {
+    let mut ordered = Vec::with_capacity(records.len());
+    for record in records {
+        validate(record)?;
+        ordered.push(record);
+    }
+    ordered.sort_by(|left, right| compare(left, right));
+    Ok(ordered)
+}
 
 /// An immutable, fully written Parquet payload waiting for one atomic commit.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,7 +80,7 @@ pub trait PartitionWriter: Send + Sync {
     /// their canonical token and every other data type passes `None`.
     fn write(
         &self,
-        records: &[Value],
+        records: &RecordBatch,
         session_date: Date,
         asset_class: AssetClass,
         data_type: DataType,

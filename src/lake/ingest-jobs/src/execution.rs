@@ -1,5 +1,5 @@
 //! Current deployment specifications, independent of admission and reconciliation.
-use crate::AciConfig;
+use crate::AcaConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
     deny_unknown_fields
 )]
 pub enum WorkerSpec {
-    Aci(AciConfig),
+    Aca(AcaConfig),
     Local(LocalConfig),
 }
 
@@ -22,25 +22,33 @@ pub struct LocalConfig {
     pub root: std::path::PathBuf,
     pub max_workers: usize,
     pub timeout_seconds: u64,
+    pub partition_days: u16,
+    pub session_concurrency: usize,
 }
 
 impl WorkerSpec {
     pub fn max_workers(&self) -> usize {
         match self {
-            Self::Aci(v) => v.max_workers,
+            Self::Aca(v) => v.max_workers,
             Self::Local(v) => v.max_workers,
         }
     }
     pub fn timeout_seconds(&self) -> u64 {
         match self {
-            Self::Aci(v) => v.timeout_seconds,
+            Self::Aca(v) => v.timeout_seconds,
             Self::Local(v) => v.timeout_seconds,
         }
     }
+    pub fn partition_days(&self) -> u16 {
+        match self {
+            Self::Aca(v) => v.partition_days,
+            Self::Local(v) => v.partition_days,
+        }
+    }
 }
-impl From<AciConfig> for WorkerSpec {
-    fn from(value: AciConfig) -> Self {
-        Self::Aci(value)
+impl From<AcaConfig> for WorkerSpec {
+    fn from(value: AcaConfig) -> Self {
+        Self::Aca(value)
     }
 }
 impl From<LocalConfig> for WorkerSpec {
@@ -50,25 +58,31 @@ impl From<LocalConfig> for WorkerSpec {
 }
 
 #[async_trait::async_trait]
-impl crate::WorkerRunner for crate::AciRunner {
+impl crate::WorkerRunner for crate::AcaRunner {
+    fn begin_reconcile(&self) {
+        self.begin_reconcile();
+    }
     fn configuration(&self) -> WorkerSpec {
         self.config.clone().into()
     }
     fn for_work(&self, spec: &WorkerSpec) -> Result<Self, lake_contracts::DataError> {
         match spec {
-            WorkerSpec::Aci(config) => Ok(self.for_execution(config.clone())),
+            WorkerSpec::Aca(config) => Ok(self.for_execution(config.clone())),
             _ => Err(lake_contracts::DataError::value(
-                "ACI runner cannot execute local work",
+                "ACA runner cannot execute local work",
             )),
         }
     }
-    async fn inspect(&self, id: &str) -> Result<crate::GroupState, lake_contracts::DataError> {
-        self.inspect(id).await
+    async fn inspect(
+        &self,
+        work: &crate::WorkRef,
+    ) -> Result<crate::ExecutionState, lake_contracts::DataError> {
+        self.inspect(work).await
     }
-    async fn start(&self, id: &str) -> Result<(), lake_contracts::DataError> {
-        self.start(id).await
+    async fn start(&self, work: &crate::WorkRef) -> Result<(), lake_contracts::DataError> {
+        self.start(work).await
     }
-    async fn delete(&self, id: &str) -> Result<(), lake_contracts::DataError> {
-        self.delete(id).await
+    async fn delete(&self, work: &crate::WorkRef) -> Result<(), lake_contracts::DataError> {
+        self.delete(work).await
     }
 }

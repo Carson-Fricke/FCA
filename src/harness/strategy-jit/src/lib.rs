@@ -1,7 +1,7 @@
 //! JIT compile/load seam for [`harness-strategy-sdk`] authored programs.
 //!
 //! On submit the platform writes the authored source into a managed cargo
-//! workspace with isolated build generations under `target/`, runs `cargo build --release` against
+//! workspace with reusable fingerprinted dependency targets and immutable library generations under `target/`, runs `cargo build --release` against
 //! the pinned toolchain, and loads the produced `cdylib` through `libloading`
 //! behind the existing [`StrategyRuntime`](backtest::backtest::engine_core::StrategyRuntime)
 //! engine seam. Identical source, SDK version, and toolchain produce an

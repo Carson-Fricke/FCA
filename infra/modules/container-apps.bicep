@@ -15,15 +15,21 @@ param sharedImageReference string
 
 @description('Digest-pinned image containing only the finite ingestion worker.')
 param ingestionImageReference string
-@description('ACI vCPU per ingestion group; larger allocations may require regional quota approval.')
+@description('vCPU per finite ingestion Job execution on the Consumption profile.')
+@allowed(['4'])
 param ingestionCpu string = '4'
-@description('ACI memory per ingestion group (Azure memoryInGB).')
-param ingestionMemoryGb string = '8'
-@minValue(1)
-param ingestionSessionConcurrency int = 1
+@description('GiB per finite ingestion Job execution on the Consumption profile.')
+@allowed(['8'])
+param ingestionMemoryGiB string = '8'
 @minValue(1)
 @maxValue(16)
-param ingestionMaxWorkers int = 2
+param ingestionSessionConcurrency int = 2
+@minValue(1)
+@maxValue(64)
+param ingestionMaxWorkers int = 8
+@minValue(1)
+@maxValue(366)
+param ingestionPartitionDays int = 7
 @minValue(60)
 @maxValue(604800)
 param ingestionTimeoutSeconds int = 86400
@@ -202,14 +208,13 @@ var ingestionEnvironment = [
   { name: 'LAKE_COVERAGE_TABLE', value: 'coverage' }
   { name: 'LAKE_INGEST_IMAGE', value: ingestionImageReference }
   { name: 'LAKE_INGEST_RESOURCE_GROUP', value: resourceGroup().name }
-  { name: 'LAKE_INGEST_LOCATION', value: location }
-  { name: 'LAKE_INGEST_IDENTITY_ID', value: runtimeIdentityResourceId }
-  { name: 'LAKE_INGEST_IDENTITY_CLIENT_ID', value: runtimeIdentityClientId }
-  { name: 'LAKE_INGEST_REGISTRY', value: registryLoginServer }
-  { name: 'LAKE_INGEST_SESSION_CONCURRENCY', value: string(ingestionSessionConcurrency) }
+  { name: 'LAKE_INGEST_JOB_NAME', value: '${quantApiAppName}-ingest' }
+  { name: 'LAKE_INGEST_WORKER_CLIENT_ID', value: runtimeIdentityClientId }
   { name: 'LAKE_INGEST_CPU', value: ingestionCpu }
-  { name: 'LAKE_INGEST_MEMORY_GB', value: ingestionMemoryGb }
+  { name: 'LAKE_INGEST_MEMORY_GIB', value: ingestionMemoryGiB }
+  { name: 'LAKE_INGEST_SESSION_CONCURRENCY', value: string(ingestionSessionConcurrency) }
   { name: 'LAKE_INGEST_MAX_WORKERS', value: string(ingestionMaxWorkers) }
+  { name: 'LAKE_INGEST_PARTITION_DAYS', value: string(ingestionPartitionDays) }
   { name: 'LAKE_INGEST_TIMEOUT_SECONDS', value: string(ingestionTimeoutSeconds) }
   { name: 'LAKE_PROVIDER_KEY_VAULT_URL', value: keyVaultUri }
 ]
@@ -357,6 +362,47 @@ resource ingestionDispatcher 'Microsoft.App/jobs@2025-07-01' = {
         args: ['export IDENTITY_ENDPOINT="$IDENTITY_ENDPOINT?client_id=$AZURE_CLIENT_ID"; exec /usr/local/bin/lake-ingest-dispatcher']
         env: concat(quantBaseEnvironment, ingestionEnvironment)
         resources: { cpu: json('0.25'), memory: '0.5Gi' }
+      }]
+    }
+  }
+}
+
+// Only the finite worker owns provider acquisition and the provider credential
+// identity. The coordinator starts executions of this fixed job definition.
+resource ingestionJob 'Microsoft.App/jobs@2025-07-01' = {
+  name: '${quantApiAppName}-ingest'
+  location: location
+  tags: tags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: { '${runtimeIdentityResourceId}': {} }
+  }
+  properties: {
+    environmentId: containerAppsEnvironment.id
+    workloadProfileName: consumptionProfileName
+    configuration: {
+      triggerType: 'Manual'
+      manualTriggerConfig: { parallelism: 1, replicaCompletionCount: 1 }
+      replicaRetryLimit: 0
+      replicaTimeout: ingestionTimeoutSeconds
+      registries: [{ server: registryLoginServer, identity: runtimeIdentityResourceId }]
+      identitySettings: [{ identity: runtimeIdentityResourceId, lifecycle: 'Main' }]
+    }
+    template: {
+      containers: [{
+        name: 'ingest'
+        image: ingestionImageReference
+        command: ['/usr/local/bin/lake-ingest-worker']
+        env: [
+          { name: 'AZURE_CLIENT_ID', value: runtimeIdentityClientId }
+          { name: 'LAKE_STORAGE_ACCOUNT_NAME', value: storageAccountName }
+          { name: 'LAKE_STORAGE_CONTAINER', value: 'lake' }
+          { name: 'LAKE_COVERAGE_TABLE', value: 'coverage' }
+          { name: 'LAKE_PROVIDER_KEY_VAULT_URL', value: keyVaultUri }
+          { name: 'LAKE_INGEST_SESSION_CONCURRENCY', value: string(ingestionSessionConcurrency) }
+          { name: 'LAKE_INGEST_TIMEOUT_SECONDS', value: string(ingestionTimeoutSeconds) }
+        ]
+        resources: { cpu: json(ingestionCpu), memory: '${ingestionMemoryGiB}Gi' }
       }]
     }
   }
@@ -689,6 +735,17 @@ output ingestionCoordination object = {
   jobName: ingestionDispatcher.name
   image: ingestionImageReference
   schedule: '* * * * *'
+}
+
+output ingestion object = {
+  jobName: ingestionJob.name
+  resourceId: ingestionJob.id
+  image: ingestionImageReference
+  cpu: ingestionCpu
+  memoryGiB: ingestionMemoryGiB
+  maxWorkers: ingestionMaxWorkers
+  partitionDays: ingestionPartitionDays
+  sessionConcurrency: ingestionSessionConcurrency
 }
 
 @description('Scale-to-zero quant-harness results and job API.')

@@ -23,7 +23,7 @@ impl JobStore {
                 .map_err(io)?,
         })
     }
-    async fn request(
+    pub(crate) async fn request(
         &self,
         method: reqwest::Method,
         path: &str,
@@ -51,7 +51,10 @@ impl JobStore {
             ))
     }
     pub async fn admit(&self, job: DurableJob) -> Result<DurableJob, DataError> {
-        let path = job_path(&job.record.job_id)?;
+        self.admit_work(job).await
+    }
+    pub async fn admit_work(&self, job: DurableJob) -> Result<DurableJob, DataError> {
+        let path = job.reference().path()?;
         let response = self
             .request(reqwest::Method::PUT, &path)
             .await?
@@ -68,8 +71,11 @@ impl JobStore {
             .await
             .map_err(io)?;
         if already_exists(&response) {
-            let existing = self.get(&job.record.job_id).await?;
-            if existing.requests != job.requests {
+            let existing = self.get_work(&job.reference()).await?;
+            if existing.requests != job.requests
+                || existing.partition != job.partition
+                || (job.partition.is_some() && existing.execution != job.execution)
+            {
                 return Err(DataError::Conflict(
                     "job ID already has different ingestion input".into(),
                 ));
@@ -80,15 +86,18 @@ impl JobStore {
         Ok(job)
     }
     pub async fn get(&self, id: &str) -> Result<DurableJob, DataError> {
+        self.get_work(&crate::WorkRef::root(id)).await
+    }
+    pub async fn get_work(&self, work: &crate::WorkRef) -> Result<DurableJob, DataError> {
         let response = self
-            .request(reqwest::Method::GET, &job_path(id)?)
+            .request(reqwest::Method::GET, &work.path()?)
             .await?
             .send()
             .await
             .map_err(io)?;
         let response = success(response).await?;
         let job: DurableJob = response.json().await.map_err(io)?;
-        if job.record.job_id != id {
+        if job.reference() != *work {
             return Err(DataError::Protocol(
                 "stored ingestion job ID mismatch".into(),
             ));
@@ -96,8 +105,10 @@ impl JobStore {
         Ok(job)
     }
     pub async fn own(&self, id: &str) -> Result<OwnedJob, DataError> {
-        let path = job_path(id)?;
-        self.acquire(path).await
+        self.own_work(&crate::WorkRef::root(id)).await
+    }
+    pub async fn own_work(&self, work: &crate::WorkRef) -> Result<OwnedJob, DataError> {
+        self.acquire(work.path()?).await
     }
     pub async fn dispatch_lock(&self) -> Result<OwnedJob, DataError> {
         let path = "ingestion/control/dispatcher.lock";
@@ -291,11 +302,11 @@ impl OwnedJob {
         .map(|_| ())
     }
     pub async fn save(&self, job: &DurableJob) -> Result<(), DataError> {
-        if self.path != job_path(&job.record.job_id)? {
+        if self.path != job.reference().path()? {
             return Err(DataError::Conflict("lease is for another job".into()));
         }
         self.store
-            .get(&job.record.job_id)
+            .get_work(&job.reference())
             .await?
             .validate_update(job)?;
         success(
@@ -304,7 +315,7 @@ impl OwnedJob {
                 .await?
                 .header("x-ms-lease-id", &self.lease)
                 .header("x-ms-blob-type", "BlockBlob")
-                .header("x-ms-meta-active", (!job.group_deleted).to_string())
+                .header("x-ms-meta-active", (!job.execution_deleted).to_string())
                 .header("x-ms-meta-dispatched", job.dispatch_started.to_string())
                 .header(
                     "x-ms-meta-created",
@@ -417,6 +428,23 @@ impl crate::JobPersistence for JobStore {
     }
     async fn get(&self, id: &str) -> Result<DurableJob, DataError> {
         self.get(id).await
+    }
+    async fn admit_work(&self, job: DurableJob) -> Result<DurableJob, DataError> {
+        self.admit_work(job).await
+    }
+    async fn get_work(&self, work: &crate::WorkRef) -> Result<DurableJob, DataError> {
+        self.get_work(work).await
+    }
+    async fn own_work(&self, work: &crate::WorkRef) -> Result<OwnedJob, DataError> {
+        self.own_work(work).await
+    }
+    async fn reserve_requests(
+        &self,
+        scope: &str,
+        limit: u32,
+        count: u32,
+    ) -> Result<crate::BudgetGrant, DataError> {
+        self.reserve_requests(scope, limit, count).await
     }
     async fn own(&self, id: &str) -> Result<OwnedJob, DataError> {
         self.own(id).await

@@ -1,10 +1,12 @@
 //! Durable ingestion admission and external execution. No providers or dataset decoding.
-mod aci;
+mod aca;
+mod budget;
 mod model;
 mod service;
 mod store;
-pub use aci::{AciConfig, AciRunner, GroupState};
-pub use model::{DurableJob, WorkRequest};
+pub use aca::{AcaConfig, AcaRunner, ExecutionState};
+pub use budget::{budget_scope, BudgetGrant, BudgetState};
+pub use model::{DurableJob, WorkRef, WorkRequest};
 pub use service::IngestionJobs;
 pub use store::{BlobJobRepository, JobStore, OwnedJob};
 

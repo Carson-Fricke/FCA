@@ -17,31 +17,112 @@ on:
       - uv.lock
       - config/**
       - infra/**
-      - src/**
-
-concurrency:
-  # Shared across every workflow that deploys infra/main.bicep (deploy-main,
-  # deploy-thesis, deploy-bicep) so overlapping runs cannot collide on the same
-  # nested resource deployments (e.g. market-lake-storage -> DeploymentActive).
-  group: fca-deployment-${{ github.ref }}
-  cancel-in-progress: false
-  queue: max
+      - src/harness/**
+      - src/lake/**
+      - src/lakeclient/**
+      - src/thesis/**
+      - src/thesis_runtime/**
+      - scripts/ci/merge_cargo_recipes.py
+      - scripts/ci/prepare_python_sources.py
+      - scripts/ci/installed_sdk_smoke.py
+      - scripts/ci/changes.mjs
 
 permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Select affected harness inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      main_image: ${{ steps.changes.outputs.main_image }}
+      main_deploy: ${{ steps.changes.outputs.main_deploy }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select changed products
+        id: changes
+        env:
+          CHANGE_BASE: ${{ github.event.before }}
+          CHANGE_HEAD: ${{ github.sha }}
+          CHANGE_EVENT: ${{ github.event_name }}
+        run: node scripts/ci/changes.mjs
+
   publish-image:
     name: Publish immutable image
+    needs: changes
+    if: needs.changes.outputs.main_image == 'true'
     uses: ./.github/workflows/publish-image.yml
     permissions:
       contents: read
       packages: write
 
+  existing-images:
+    name: Reuse deployed images for infrastructure-only changes
+    needs: changes
+    if: needs.changes.outputs.main_deploy == 'true' && needs.changes.outputs.main_image != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image-reference: ${{ steps.images.outputs.image-reference }}
+      image-digest: ${{ steps.images.outputs.image-digest }}
+      ingestion-digest: ${{ steps.images.outputs.ingestion-digest }}
+      ingestion-reference: ${{ steps.images.outputs.ingestion-reference }}
+    steps:
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Retain deployed immutable image digests
+        id: images
+        shell: bash
+        env:
+          AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          RESOURCE_NAME_PREFIX: ${{ vars.RESOURCE_NAME_PREFIX }}
+          DEPLOYMENT_ENVIRONMENT: ${{ vars.DEPLOYMENT_ENVIRONMENT }}
+        run: |
+          set -euo pipefail
+          app="${RESOURCE_NAME_PREFIX,,}-${DEPLOYMENT_ENVIRONMENT,,}-quant-api"
+          shared_image="$(az containerapp show --resource-group "$AZURE_RESOURCE_GROUP" --name "$app" \
+            --query 'properties.template.containers[0].image' --output tsv)"
+          ingestion_image="$(az containerapp show --resource-group "$AZURE_RESOURCE_GROUP" --name "$app" \
+            --query "properties.template.containers[0].env[?name=='LAKE_INGEST_IMAGE'].value | [0]" --output tsv)"
+          shared_digest="${shared_image##*@}"
+          ingestion_digest="${ingestion_image##*@}"
+          for digest in "$shared_digest" "$ingestion_digest"; do
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::Deployed runtime image is not digest-pinned"; exit 1; }
+          done
+          printf 'image-reference=%s\n' "$shared_image" >> "$GITHUB_OUTPUT"
+          printf 'image-digest=%s\n' "$shared_digest" >> "$GITHUB_OUTPUT"
+          printf 'ingestion-digest=%s\n' "$ingestion_digest" >> "$GITHUB_OUTPUT"
+          printf 'ingestion-reference=%s\n' "$ingestion_image" >> "$GITHUB_OUTPUT"
+
   deploy:
     name: Deploy and smoke test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    needs: publish-image
+    # Only mutation holds the environment lock. Image builds can overlap and
+    # cancel obsolete builds without interrupting an infrastructure deployment.
+    concurrency:
+      group: fca-deployment-${{ vars.DEPLOYMENT_ENVIRONMENT }}
+      cancel-in-progress: false
+      queue: max
+    if: >-
+      always() && !failure() && !cancelled() &&
+      github.event_name == 'push' && github.ref == 'refs/heads/master' &&
+      needs.changes.outputs.main_deploy == 'true'
+    needs:
+      - changes
+      - publish-image
+      - existing-images
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Environment protection and branch policy are evaluated before this job.
@@ -53,9 +134,11 @@ jobs:
       id-token: write
       packages: read
     env:
-      IMAGE_REFERENCE: ${{ needs.publish-image.outputs.image-reference }}
-      IMAGE_DIGEST: ${{ needs.publish-image.outputs.image-digest }}
-      INGESTION_DIGEST: ${{ needs.publish-image.outputs.ingestion-digest }}
+      IMAGE_REFERENCE: ${{ needs.publish-image.outputs.image-reference || needs.existing-images.outputs.image-reference }}
+      IMAGE_DIGEST: ${{ needs.publish-image.outputs.image-digest || needs.existing-images.outputs.image-digest }}
+      INGESTION_DIGEST: ${{ needs.publish-image.outputs.ingestion-digest || needs.existing-images.outputs.ingestion-digest }}
+      REUSE_DEPLOYED_IMAGES: ${{ needs.changes.outputs.main_image != 'true' }}
+      CURRENT_INGESTION_REFERENCE: ${{ needs.existing-images.outputs.ingestion-reference }}
       AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
@@ -132,7 +215,11 @@ jobs:
             echo "::error::The image job did not return a valid immutable digest"
             exit 1
           fi
-          if [[ ! "$IMAGE_REFERENCE" =~ ^ghcr\.io/[^@[:space:]]+@sha256:[0-9a-f]{64}$ ]]; then
+          if [[ "$REUSE_DEPLOYED_IMAGES" == true ]]; then
+            for reference in "$IMAGE_REFERENCE" "$CURRENT_INGESTION_REFERENCE"; do
+              [[ "$reference" =~ ^[a-z0-9]+\.azurecr\.io/[^@[:space:]]+@sha256:[0-9a-f]{64}$ ]] || { echo "::error::The deployed image is not a digest-addressed private ACR reference"; exit 1; }
+            done
+          elif [[ ! "$IMAGE_REFERENCE" =~ ^ghcr\.io/[^@[:space:]]+@sha256:[0-9a-f]{64}$ ]]; then
             echo "::error::The image job did not return a digest-addressed GHCR reference"
             exit 1
           fi
@@ -188,11 +275,6 @@ jobs:
           set -euo pipefail
 
           az account set --subscription "$AZURE_SUBSCRIPTION_ID"
-          aci_registration="$(az provider show --namespace Microsoft.ContainerInstance --query registrationState -o tsv)"
-          if [[ "$aci_registration" != Registered ]]; then
-            echo "::error::Register Microsoft.ContainerInstance as a subscription operator before this cutover; the deployer intentionally has no subscription administration rights"
-            exit 1
-          fi
           acr_name="$(az acr list \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --query "[?tags.product=='market-lake' && tags.environment=='${DEPLOYMENT_ENVIRONMENT}'].name | [0]" \
@@ -202,6 +284,10 @@ jobs:
             exit 1
           fi
 
+          if [[ "$REUSE_DEPLOYED_IMAGES" == true ]]; then
+            runtime_image_reference="$IMAGE_REFERENCE"
+            ingestion_image_reference="$CURRENT_INGESTION_REFERENCE"
+          else
           # The shared runtime image is the quant-harness engine and its process
           # interfaces; the private ACR mirror repository is named `<repo>-harness`
           # to distinguish it from the additive `<repo>-thesis` image.
@@ -238,6 +324,7 @@ jobs:
           imported_ingestion_digest="$(az acr repository show --name "$acr_name" --image "${ingestion_repository}:${GITHUB_SHA}" --query digest -o tsv)"
           [[ "$imported_ingestion_digest" == "$INGESTION_DIGEST" ]] || { echo "::error::Ingestion image digest mismatch"; exit 1; }
           ingestion_image_reference="${acr_login_server}/${ingestion_repository}@${INGESTION_DIGEST}"
+          fi
 
           deployment_parameters=(
             "location=$AZURE_LOCATION"
@@ -325,7 +412,11 @@ jobs:
           fi
           ingestion_image="$(az containerapp show --name "$api_app_name" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.template.containers[?name=='api'] | [0].env[?name=='LAKE_INGEST_IMAGE'].value | [0]" -o tsv)"
           expected_ingestion_image="${acr_login_server}/${GITHUB_REPOSITORY_NAME,,}-ingestion@${INGESTION_DIGEST}"
-          [[ "$ingestion_image" == "$expected_ingestion_image" ]] || { echo "::error::ACI ingestion image configuration mismatch"; exit 1; }
+          [[ "$ingestion_image" == "$expected_ingestion_image" ]] || { echo "::error::Ingestion image configuration mismatch"; exit 1; }
+
+          ingestion_job="$(az containerapp job show --name "${quant_api_app_name}-ingest" --resource-group "$AZURE_RESOURCE_GROUP" --output json)"
+          [[ "$(jq -r '.properties.template.containers[] | select(.name == "ingest") | .image' <<<"$ingestion_job")" == "$expected_ingestion_image" ]] || { echo "::error::Ingestion Job image configuration mismatch"; exit 1; }
+          jq --exit-status '.properties.template.containers[] | select(.name == "ingest") | (.resources.cpu == 4 and .resources.memory == "8Gi")' <<<"$ingestion_job" >/dev/null || { echo "::error::Ingestion Job must use 4 vCPU / 8 GiB"; exit 1; }
 
           dispatcher_image="$(az containerapp job show --name "${quant_api_app_name}-dispatch" --resource-group "$AZURE_RESOURCE_GROUP" --query "properties.template.containers[?name=='dispatcher'].image | [0]" -o tsv)"
           [[ "$dispatcher_image" == "$expected_ingestion_image" ]] || { echo "::error::Dispatcher image configuration mismatch"; exit 1; }
@@ -339,6 +430,9 @@ jobs:
             echo "::error::The quant API does not use the published immutable image reference"
             exit 1
           fi
+          az containerapp show --name "$quant_api_app_name" --resource-group "$AZURE_RESOURCE_GROUP" --output json \
+            | jq --exit-status '.properties.template.containers[] | select(.name == "api") | (.resources.cpu == 1 and .resources.memory == "2Gi")' >/dev/null \
+            || { echo "::error::Harness API must use 1 vCPU / 2 GiB"; exit 1; }
 
           rth_trader_image="$(az containerapp show \
             --name "$rth_trader_app_name" \
@@ -479,9 +573,10 @@ jobs:
 
   quant-smoke:
     name: Quant runtime smoke test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: always() && needs.deploy.result == 'success'
     needs:
       - publish-image
+      - existing-images
       - deploy
     uses: ./.github/workflows/quant-smoke.yml
     permissions:
@@ -492,13 +587,14 @@ jobs:
       # trader, backtest job) deploy the same shared digest-pinned image as
       # the lake; this pins their smoke verification to the exact published
       # digest. See .github/runbooks/h5-quant-smoke.md.
-      image-digest: ${{ needs.publish-image.outputs.image-digest }}
+      image-digest: ${{ needs.publish-image.outputs.image-digest || needs.existing-images.outputs.image-digest }}
 
   acr-retention:
     name: ACR image retention
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: always() && needs.deploy.result == 'success'
     needs:
       - publish-image
+      - existing-images
       - deploy
     uses: ./.github/workflows/prune-acr.yml
     permissions:
@@ -508,4 +604,4 @@ jobs:
       # The prune keeps the newest and previous mirrored digest per service and
       # treats the just-deployed digest as retained regardless of survey
       # ordering. See .github/runbooks/e1-ghcr-retention.md.
-      image-digest: ${{ needs.publish-image.outputs.image-digest }}
+      image-digest: ${{ needs.publish-image.outputs.image-digest || needs.existing-images.outputs.image-digest }}

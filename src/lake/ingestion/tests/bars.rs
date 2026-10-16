@@ -8,6 +8,7 @@
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use arrow_array::{Decimal128Array, RecordBatch, TimestampNanosecondArray};
 use futures_util::future::BoxFuture;
 use lake_catalog::{CoverageRecord, CoverageStatus};
 use lake_contracts::{
@@ -20,7 +21,6 @@ use lake_ingestion::{
 };
 use lake_providers::{NormalizedBar, ProviderError};
 use lake_storage::ParquetMetadata;
-use serde_json::Value;
 
 fn guard<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
@@ -85,7 +85,7 @@ impl TradePartitionReader for EmptyTradeReader {
 
 #[derive(Clone, Debug)]
 struct WriteCall {
-    records: Vec<Value>,
+    records: RecordBatch,
 }
 
 #[derive(Default)]
@@ -103,7 +103,7 @@ impl RecordingWriter {
 impl PartitionWriter for RecordingWriter {
     fn write(
         &self,
-        records: &[Value],
+        records: &RecordBatch,
         session_date: Date,
         asset_class: AssetClass,
         data_type: DataType,
@@ -111,15 +111,15 @@ impl PartitionWriter for RecordingWriter {
         symbol: &str,
     ) -> Result<ParquetMetadata, DataError> {
         let path = partition_path(session_date, asset_class, data_type, interval, symbol)?;
-        let payload = serde_json::to_vec(records).map_err(DataError::io)?;
+        let payload = Vec::new();
         let metadata = ParquetMetadata {
             path,
-            rows: records.len() as u64,
+            rows: records.num_rows() as u64,
             bytes: payload.len() as u64,
             checksum: "test-checksum".to_string(),
         };
         guard(&self.writes).push(WriteCall {
-            records: records.to_vec(),
+            records: records.clone(),
         });
         guard(&self.staged).push(StagedParquetObject {
             metadata: metadata.clone(),
@@ -199,16 +199,20 @@ async fn provider_bars_at_the_session_close_are_excluded() {
     let writes = writer.writes();
     assert_eq!(writes.len(), 1);
     let records = &writes[0].records;
-    assert_eq!(records.len(), 2, "only regular-session minutes are kept");
     assert_eq!(
-        records[0]["timestamp"].as_i64(),
+        records.num_rows(),
+        2,
+        "only regular-session minutes are kept"
+    );
+    assert_eq!(
+        Some(timestamp(records, 0)),
         Some(instant(2025, 5, 30, 13, 30).to_nanos_i64())
     );
     assert_eq!(
-        records[1]["timestamp"].as_i64(),
+        Some(timestamp(records, 1)),
         Some(instant(2025, 5, 30, 19, 59).to_nanos_i64())
     );
-    assert_eq!(records[1]["close"], Value::String("519.13".to_string()));
+    assert_eq!(close(records, 1), Decimal18::parse("519.13").unwrap());
     assert_eq!(result.coverage[0].row_count, 2);
     assert_eq!(committer.commit_count(), 1);
 }
@@ -267,13 +271,34 @@ async fn each_session_in_a_union_window_drops_its_own_close_bar() {
         .all(|record| record.status == CoverageStatus::Complete));
     let writes = writer.writes();
     assert_eq!(writes.len(), 2);
-    assert!(writes.iter().all(|write| write.records.len() == 2));
+    assert!(writes.iter().all(|write| write.records.num_rows() == 2));
     assert_eq!(
-        writes[0].records[1]["timestamp"].as_i64(),
+        Some(timestamp(&writes[0].records, 1)),
         Some(instant(2025, 5, 30, 19, 59).to_nanos_i64())
     );
     assert_eq!(
-        writes[1].records[1]["timestamp"].as_i64(),
+        Some(timestamp(&writes[1].records, 1)),
         Some(instant(2025, 6, 2, 19, 59).to_nanos_i64())
     );
+}
+
+fn timestamp(batch: &RecordBatch, row: usize) -> i64 {
+    batch
+        .column_by_name("timestamp")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<TimestampNanosecondArray>()
+        .unwrap()
+        .value(row)
+}
+
+fn close(batch: &RecordBatch, row: usize) -> Decimal18 {
+    let value = batch
+        .column_by_name("close")
+        .unwrap()
+        .as_any()
+        .downcast_ref::<Decimal128Array>()
+        .unwrap()
+        .value(row);
+    Decimal18::from_unscaled(value).unwrap()
 }

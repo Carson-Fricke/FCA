@@ -9,14 +9,11 @@
 !scripts/ci/
 !scripts/ci/installed_sdk_smoke.py
 !scripts/ci/merge_cargo_recipes.py
-!strategies/
-!strategies/**
+!scripts/ci/prepare_python_sources.py
 src/harness/target/
 src/lake/target/
 **/.local/
-src/ui/node_modules/
-src/ui/.svelte-kit/
-src/ui/build/
+src/ui/
 **/__pycache__/
 **/*.py[cod]
 **/*.egg-info/

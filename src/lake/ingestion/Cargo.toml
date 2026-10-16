@@ -8,6 +8,7 @@ description = "Equity and crypto ingest transactions, record validation, and the
 [dependencies]
 harness-market-reader = { path = "../../harness/market-reader" }
 arrow-array.workspace = true
+arrow-schema.workspace = true
 bytes.workspace = true
 lake-configuration.workspace = true
 lake-contracts.workspace = true

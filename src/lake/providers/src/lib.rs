@@ -19,7 +19,7 @@ pub mod transport;
 pub use client::{plan_time_slices, AlpacaClient};
 pub use config::ProviderConfig;
 pub use error::ProviderError;
-pub use governor::RequestGovernor;
+pub use governor::{RequestBudget, RequestGovernor};
 pub use lane::{lane_for, Lane, LanePermit, LaneTuning};
 pub use records::{
     NormalizedBar, NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedOptionQuote,

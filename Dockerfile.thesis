@@ -1,6 +1,13 @@
 FROM ghcr.io/astral-sh/uv:0.12.6 AS uv
 
-FROM python:3.12-slim AS builder
+FROM python:3.12-slim-trixie AS python-sources
+WORKDIR /build
+COPY pyproject.toml ./
+COPY scripts/ci/prepare_python_sources.py /tmp/prepare_python_sources.py
+COPY src/ ./src/
+RUN python /tmp/prepare_python_sources.py /build /wheel-inputs
+
+FROM python:3.12-slim-trixie AS builder
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -12,13 +19,13 @@ COPY --from=uv /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project
 
-COPY src/ ./src/
+COPY --from=python-sources /wheel-inputs/src/ ./src/
 RUN uv sync --locked --no-dev --no-editable
 COPY scripts/ci/installed_sdk_smoke.py /tmp/installed_sdk_smoke.py
 RUN uv run --no-sync python -I /tmp/installed_sdk_smoke.py
 RUN test -x /opt/venv/bin/thesis
 
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim-trixie AS runtime
 
 ENV PATH="/opt/venv/bin:$PATH" \
     THESIS_CONFIG_ROOT=/app \

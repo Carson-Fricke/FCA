@@ -900,8 +900,8 @@ impl AlpacaClient {
         params: &[(String, String)],
     ) -> Result<TransportResponse, ProviderError> {
         for attempt in 1..=self.config.max_attempts {
-            self.governor.acquire().await;
             let permit = self.lane.acquire().await;
+            self.governor.before_request().await?;
             let started = std::time::Instant::now();
             let outcome = self.transport.get(url, params, &self.headers).await;
             let elapsed = started.elapsed();

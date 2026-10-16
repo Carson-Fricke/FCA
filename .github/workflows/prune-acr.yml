@@ -17,8 +17,8 @@ on:
         default: ''
       repository-name:
         description: >-
-          Optional single ACR repository override. Empty prunes the paired
-          `<repo>-harness` and `<repo>-thesis` repositories with their own
+          Optional single ACR repository override. Empty prunes the runtime
+          images and Thesis build-cache repository with their own
           reference sets.
         required: false
         type: string
@@ -34,15 +34,11 @@ on:
         default: ''
       repository-name:
         description: >-
-          Optional single ACR repository override. Empty prunes the paired
-          `<repo>-harness` and `<repo>-thesis` repositories.
+          Optional single ACR repository override. Empty prunes the runtime
+          images and Thesis build-cache repository.
         required: false
         type: string
         default: ''
-
-concurrency:
-  group: fca-acr-prune-${{ github.ref }}
-  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -50,6 +46,10 @@ permissions:
 jobs:
   prune:
     name: Delete unretained mirrored digests
+    concurrency:
+      group: fca-deployment-${{ vars.DEPLOYMENT_ENVIRONMENT }}
+      cancel-in-progress: false
+      queue: max
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The prune deletes only private ACR manifests; it never touches the GHCR
@@ -153,9 +153,10 @@ jobs:
 
           harness_repository="${github_repo_lc}-harness"
           thesis_repository="${github_repo_lc}-thesis"
+          ingestion_repository="${github_repo_lc}-ingestion"
+          thesis_cache_repository="${github_repo_lc}-thesis-buildcache"
 
           harness_app_names=(
-            "${normalized_prefix}-${normalized_environment}-api"
             "${normalized_prefix}-${normalized_environment}-quant-api"
             "${normalized_prefix}-${normalized_environment}-rth-trader"
           )
@@ -163,8 +164,11 @@ jobs:
             harness_app_names+=("${normalized_prefix}-${normalized_environment}-crypto-trader")
           fi
           harness_job_names=(
-            "${normalized_prefix}-${normalized_environment}-ingest"
             "${normalized_prefix}-${normalized_environment}-backtest"
+          )
+          ingestion_job_names=(
+            "${normalized_prefix}-${normalized_environment}-quant-api-ingest"
+            "${normalized_prefix}-${normalized_environment}-quant-api-dispatch"
           )
           thesis_app_names=(
             "${normalized_prefix}-${normalized_environment}-thesis-api"
@@ -174,7 +178,7 @@ jobs:
             repository_list=("${REPOSITORY_NAME_INPUT,,}")
             override_single_repo=1
           else
-            repository_list=("$harness_repository" "$thesis_repository")
+            repository_list=("$harness_repository" "$thesis_repository" "$ingestion_repository" "$thesis_cache_repository")
             override_single_repo=0
           fi
 
@@ -259,12 +263,20 @@ jobs:
 
             if (( override_single_repo == 1 )); then
               active_app_names=("${harness_app_names[@]}" "${thesis_app_names[@]}")
-              active_job_names=("${harness_job_names[@]}")
+              active_job_names=("${harness_job_names[@]}" "${ingestion_job_names[@]}")
               repo_deployed_digest="$IMAGE_DIGEST"
             elif [[ "$repository_name" == "$harness_repository" ]]; then
               active_app_names=("${harness_app_names[@]}")
               active_job_names=("${harness_job_names[@]}")
               repo_deployed_digest="$IMAGE_DIGEST"
+            elif [[ "$repository_name" == "$ingestion_repository" ]]; then
+              active_app_names=()
+              active_job_names=("${ingestion_job_names[@]}")
+              repo_deployed_digest=""
+            elif [[ "$repository_name" == "$thesis_cache_repository" ]]; then
+              active_app_names=()
+              active_job_names=()
+              repo_deployed_digest=""
             else
               active_app_names=("${thesis_app_names[@]}")
               active_job_names=()
@@ -284,7 +296,7 @@ jobs:
               continue
             fi
 
-            REPO_DEPLOYED_DIGEST="$repo_deployed_digest" node -e '
+            REPO_DEPLOYED_DIGEST="$repo_deployed_digest" REPO_IS_CACHE="$([[ "$repository_name" == "$thesis_cache_repository" ]] && echo true || echo false)" node -e '
               const fs = require("fs");
               const tmp = process.argv[1];
               const manifests = JSON.parse(fs.readFileSync(tmp + "/manifests.json", "utf8"));
@@ -313,7 +325,9 @@ jobs:
               rows
                 .filter((r) => r.tags.some((t) => !/^[0-9a-f]{40}$/.test(t)))
                 .forEach((r) => keep.add(r.digest));
-              const candidates = rows.filter((r) => !keep.has(r.digest));
+              const cacheCutoff = Date.now() - 7 * 24 * 3600 * 1000;
+              const candidates = rows.filter((r) => !keep.has(r.digest) &&
+                (process.env.REPO_IS_CACHE !== "true" || r.created < cacheCutoff));
               // Oldest candidates go first so a large backlog drains over
               // multiple bounded runs; nothing in the keep set is ever sliced.
               candidates.sort((a, b) => a.created - b.created);

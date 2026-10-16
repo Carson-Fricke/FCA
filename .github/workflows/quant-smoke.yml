@@ -22,16 +22,16 @@ on:
         type: string
         default: ''
 
-concurrency:
-  group: fca-quant-smoke-${{ github.ref }}
-  cancel-in-progress: false
-
 permissions:
   contents: read
 
 jobs:
   quant-smoke:
     name: Verify deployed quant runtime
+    concurrency:
+      group: fca-deployment-${{ vars.DEPLOYMENT_ENVIRONMENT }}
+      cancel-in-progress: false
+      queue: max
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # The smoke is non-destructive: it is read-only except for the bounded

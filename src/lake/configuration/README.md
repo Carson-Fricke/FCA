@@ -2,7 +2,7 @@
 
 Strict configuration values shared by retained Python libraries and native
 capabilities. Configuration does not construct providers, host services or
-execute ingestion. ACI execution resources belong to `ingest-jobs` and deployment
+execute ingestion. ACA execution resources belong to `ingest-jobs` and deployment
 inputs; retired queue-delivery settings are rejected.
 
 - `__init__.py` exports the Python configuration facade.

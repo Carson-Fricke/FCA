@@ -10,9 +10,9 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use arrow_array::RecordBatch;
 use lake_contracts::{AssetClass, DataError, DataType, Date};
 use lake_storage::{BlobStore, ParquetMetadata, ParquetWriter};
-use serde_json::Value;
 
 use crate::common::{PartitionWriter, StagedParquetObject};
 
@@ -70,7 +70,7 @@ impl Default for StagingPartitionWriter {
 impl PartitionWriter for StagingPartitionWriter {
     fn write(
         &self,
-        records: &[Value],
+        records: &RecordBatch,
         session_date: Date,
         asset_class: AssetClass,
         data_type: DataType,

@@ -1,4 +1,4 @@
-//! Explicit cleanup of owned development data; the harness API hosts market data and ACI workers own ingestion.
+//! Explicit cleanup of owned development data; the harness API hosts market data and ACA workers own ingestion.
 
 use clap::{Parser, Subcommand};
 use lake_local::LocalLayout;

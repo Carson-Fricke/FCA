@@ -1,5 +1,5 @@
 //! Option ingestion: front-set selection, symbol-day transactions, backfill
-//! planning. Provider execution is composed only by the finite ACI worker.
+//! planning. Provider execution is composed only by the finite ACA worker.
 //!
 //! Ports `lake.ingestion.options`. Option work is deliberately kept at the OSI
 //! symbol-day boundary: the option client can batch provider requests

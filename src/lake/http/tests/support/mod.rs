@@ -9,7 +9,8 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use arrow_array::{
-    BooleanArray, Decimal128Array, RecordBatch, StringArray, TimestampNanosecondArray, UInt64Array,
+    ArrayRef, BooleanArray, Decimal128Array, RecordBatch, StringArray, TimestampNanosecondArray,
+    UInt32Array, UInt64Array,
 };
 use arrow_schema::{DataType as ArrowType, Field, Schema};
 use axum::body::Body;
@@ -405,9 +406,78 @@ pub fn write_market_partition(
     session_date: Date,
     records: &[Value],
 ) -> ParquetMetadata {
+    let schema = lake_contracts::schema_for(asset_class, data_type).expect("schema");
+    let timestamps = TimestampNanosecondArray::from_iter_values(records.iter().map(|record| {
+        DateTime::parse_iso_utc(record["timestamp"].as_str().expect("timestamp"))
+            .expect("timestamp")
+            .to_nanos()
+    }))
+    .with_timezone("UTC");
+    let decimal = |field: &str| -> ArrayRef {
+        Arc::new(
+            Decimal128Array::from_iter_values(records.iter().map(|record| {
+                Decimal18::parse(record[field].as_str().expect("decimal"))
+                    .expect("decimal")
+                    .unscaled()
+            }))
+            .with_precision_and_scale(38, 18)
+            .expect("decimal column"),
+        )
+    };
+    let string = |field: &str| -> ArrayRef {
+        Arc::new(StringArray::from_iter_values(
+            records
+                .iter()
+                .map(|record| record[field].as_str().expect("string")),
+        ))
+    };
+    let mut columns: Vec<ArrayRef> = vec![
+        Arc::new(timestamps),
+        Arc::new(StringArray::from_iter_values(std::iter::repeat_n(
+            symbol,
+            records.len(),
+        ))),
+    ];
+    match (asset_class, data_type) {
+        (_, DataType::Bars) => {
+            columns.extend(["open", "high", "low", "close", "volume"].map(decimal));
+        }
+        (AssetClass::Equity, DataType::Trade) => {
+            let mut conditions =
+                arrow_array::builder::ListBuilder::new(arrow_array::builder::StringBuilder::new())
+                    .with_field(Arc::new(Field::new("item", ArrowType::Utf8, false)));
+            for record in records {
+                for value in record["conditions"].as_array().expect("conditions") {
+                    conditions
+                        .values()
+                        .append_value(value.as_str().expect("condition"));
+                }
+                conditions.append(true);
+            }
+            columns.extend([
+                Arc::new(UInt64Array::from_iter_values(
+                    records
+                        .iter()
+                        .map(|record| record["trade_id"].as_u64().expect("trade id")),
+                )) as ArrayRef,
+                string("exchange"),
+                decimal("price"),
+                Arc::new(UInt32Array::from_iter_values(records.iter().map(
+                    |record| u32::try_from(record["size"].as_u64().expect("size")).expect("size"),
+                ))),
+                Arc::new(conditions.finish()),
+                string("tape"),
+                Arc::new(StringArray::from_iter(
+                    records.iter().map(|record| record["update"].as_str()),
+                )),
+            ]);
+        }
+        _ => panic!("unsupported test fixture dataset"),
+    }
+    let batch = RecordBatch::try_new(Arc::new(schema), columns).expect("fixture batch");
     ParquetWriter::new(Arc::clone(store))
         .write(
-            records,
+            &batch,
             session_date,
             asset_class,
             data_type,

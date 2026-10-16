@@ -8,7 +8,12 @@ subscription filtering, including direct runtime calls in tests.
 - `lib.rs` exposes compilation, loading, runtime, and configuration entrypoints.
 - `compile.rs` coordinates cache reuse and compilation under per-compiler/source
   OS file locks. Each build attempt uses unique crate and artifact directories;
-  returned libraries are never replaced or removed by later builds.
+  returned libraries are never replaced or removed by later builds. Cargo
+  dependency artifacts are reused in a target directory keyed by the complete
+  compiler fingerprint. An additional OS lock serializes writes to that target;
+  the final library is copied into its immutable generation before releasing
+  ownership. Changed SDK content, tools, configuration or ABI provenance select
+  a different dependency target, including changes that preserve mtimes.
 - `compiler.rs` writes authored crates and invokes Cargo, resolving the emitted
   library from Cargo artifact records even when a build target is configured.
 - `diagnostics.rs` classifies typed Cargo JSON records and retains compact

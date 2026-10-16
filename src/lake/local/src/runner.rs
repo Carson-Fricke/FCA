@@ -1,7 +1,7 @@
 //! Finite local worker processes; launch receipts prohibit replay after unknown outcomes.
 use crate::LocalJobStore;
 use lake_contracts::DataError;
-use lake_ingest_jobs::{GroupState, LocalConfig, WorkerRunner, WorkerSpec};
+use lake_ingest_jobs::{ExecutionState, LocalConfig, WorkRef, WorkerRunner, WorkerSpec};
 use std::{
     collections::BTreeMap,
     fs::OpenOptions,
@@ -16,7 +16,12 @@ pub struct LocalRunner {
 }
 impl LocalRunner {
     pub fn new(mut config: LocalConfig) -> Result<Self, DataError> {
-        if !config.executable.is_file() || config.max_workers == 0 || config.timeout_seconds < 60 {
+        if !config.executable.is_file()
+            || config.max_workers == 0
+            || config.timeout_seconds < 60
+            || config.partition_days == 0
+            || config.session_concurrency == 0
+        {
             return Err(DataError::value(
                 "local worker executable and valid execution limits are required",
             ));
@@ -56,6 +61,7 @@ impl LocalRunner {
 }
 #[async_trait::async_trait]
 impl WorkerRunner for LocalRunner {
+    fn begin_reconcile(&self) {}
     fn configuration(&self) -> WorkerSpec {
         self.config.clone().into()
     }
@@ -65,34 +71,40 @@ impl WorkerRunner for LocalRunner {
                 config: config.clone(),
                 children: self.children.clone(),
             }),
-            _ => Err(DataError::value("local runner cannot execute ACI work")),
+            _ => Err(DataError::value("local runner cannot execute ACA work")),
         }
     }
-    async fn inspect(&self, id: &str) -> Result<GroupState, DataError> {
+    async fn inspect(&self, work: &WorkRef) -> Result<ExecutionState, DataError> {
+        let id = work.worker_key()?;
         if let Some(child) = self
             .children
             .lock()
             .map_err(|e| DataError::Io(e.to_string()))?
-            .get_mut(id)
+            .get_mut(&id)
         {
             return Ok(if child.try_wait()?.is_some() {
-                GroupState::Stopped
+                ExecutionState::Stopped
             } else {
-                GroupState::Active
+                ExecutionState::Active
             });
         }
         let store = LocalJobStore::new(self.config.root.clone());
-        if store.is_owned(id)? {
-            return Ok(GroupState::Active);
+        if store.is_owned(work)? {
+            return Ok(ExecutionState::Active);
         }
-        Ok(if self.receipt(id).exists() {
-            GroupState::Stopped
+        Ok(if self.receipt(&id).exists() {
+            ExecutionState::Stopped
         } else {
-            GroupState::Absent
+            ExecutionState::Absent
         })
     }
-    async fn start(&self, id: &str) -> Result<(), DataError> {
-        let path = self.receipt(id);
+    async fn start(&self, work: &WorkRef) -> Result<(), DataError> {
+        let id = work.worker_key()?;
+        let partition = work
+            .partition
+            .as_ref()
+            .ok_or_else(|| DataError::value("only an admitted partition can start"))?;
+        let path = self.receipt(&id);
         std::fs::create_dir_all(
             path.parent()
                 .ok_or_else(|| DataError::value("invalid receipt path"))?,
@@ -110,7 +122,8 @@ impl WorkerRunner for LocalRunner {
             .open(logs.join(format!("{id}.log")))?;
         let mut command = Command::new(&self.config.executable);
         command
-            .arg(id)
+            .arg(&work.job_id)
+            .arg(partition)
             .env("HARNESS_MARKET_DATA_MODE", "local")
             .env("LAKE_LOCAL_DATA_DIR", &self.config.root)
             .env(
@@ -120,6 +133,10 @@ impl WorkerRunner for LocalRunner {
             .env(
                 "LAKE_INGEST_TIMEOUT_SECONDS",
                 self.config.timeout_seconds.to_string(),
+            )
+            .env(
+                "LAKE_INGEST_SESSION_CONCURRENCY",
+                self.config.session_concurrency.to_string(),
             )
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
@@ -136,27 +153,28 @@ impl WorkerRunner for LocalRunner {
         self.children
             .lock()
             .map_err(|e| DataError::Io(e.to_string()))?
-            .insert(id.into(), child);
+            .insert(id, child);
         Ok(())
     }
-    async fn delete(&self, id: &str) -> Result<(), DataError> {
+    async fn delete(&self, work: &WorkRef) -> Result<(), DataError> {
+        let id = work.worker_key()?;
         if let Some(mut child) = self
             .children
             .lock()
             .map_err(|e| DataError::Io(e.to_string()))?
-            .remove(id)
+            .remove(&id)
         {
             if child.try_wait()?.is_none() {
                 child.kill()?;
             }
             child.wait()?;
         }
-        if LocalJobStore::new(self.config.root.clone()).is_owned(id)? {
+        if LocalJobStore::new(self.config.root.clone()).is_owned(work)? {
             return Err(DataError::Conflict(
                 "local worker still owns execution".into(),
             ));
         }
-        let path = self.receipt(id);
+        let path = self.receipt(&id);
         if path.exists() {
             std::fs::remove_file(path)?;
         }

@@ -5,7 +5,7 @@ Alpaca transport, pacing, parsing, and acquisition. The option contract master i
 - `client.rs` — Paginated Alpaca REST client over an injectable transport.
 - `config.rs` — Alpaca endpoint, credential, retry, and budget settings.
 - `error.rs` — Provider error taxonomy.
-- `governor.rs` — Process-wide request-budget governor.
+- `governor.rs` — Request pacing and the injected fleet-budget admission port, acquired for every transport attempt.
 - `lane.rs` — Adaptive per-key request lane.
 - `lib.rs` — Alpaca market-data client for the market lake.
 - `parse.rs` — Alpaca response page and row parsing.

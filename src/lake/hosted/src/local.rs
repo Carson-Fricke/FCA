@@ -49,7 +49,12 @@ pub fn local_overrides(
         .map(|v| v.parse())
         .transpose()
         .map_err(|e| crate::HostedEnsureError::new(format!("invalid worker limit: {e}")))?
-        .unwrap_or(2);
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map_or(2, std::num::NonZeroUsize::get)
+                .div_ceil(2)
+                .clamp(1, 8)
+        });
     let timeout_seconds = env
         .get("LAKE_INGEST_TIMEOUT_SECONDS")
         .map(|v| v.parse())
@@ -66,6 +71,18 @@ pub fn local_overrides(
             root: layout.root().into(),
             max_workers,
             timeout_seconds,
+            partition_days: env
+                .get("LAKE_INGEST_PARTITION_DAYS")
+                .map(|v| v.parse())
+                .transpose()
+                .map_err(|e| error(DataError::io(e)))?
+                .unwrap_or(7),
+            session_concurrency: env
+                .get("LAKE_INGEST_SESSION_CONCURRENCY")
+                .map(|v| v.parse())
+                .transpose()
+                .map_err(|e| error(DataError::io(e)))?
+                .unwrap_or(2),
         })
         .map_err(error)?,
     });

@@ -28,7 +28,7 @@ fn required(env: &BTreeMap<String, String>, name: &str) -> Result<String, DataEr
         .ok_or_else(|| DataError::value(format!("{name} is required")))
 }
 
-pub async fn run(id: &str) -> Result<(), DataError> {
+pub async fn run(id: &str, partition: &str) -> Result<(), DataError> {
     let mut env: BTreeMap<String, String> = std::env::vars().collect();
     if env.get("HARNESS_MARKET_DATA_MODE").map(String::as_str) == Some("local") {
         if let Ok(path) = std::env::var("LAKE_LOCAL_PROVIDER_ENV") {
@@ -62,6 +62,7 @@ pub async fn run(id: &str) -> Result<(), DataError> {
         run_owned(
             lake_local::LocalJobStore::new(layout.root().into()),
             id,
+            partition,
             env,
             None,
             deps,
@@ -79,7 +80,7 @@ pub async fn run(id: &str) -> Result<(), DataError> {
         let blob_url = format!("https://{account}.blob.core.windows.net");
         let store = JobStore::new(format!("{blob_url}/{container}"), credential.clone())?;
         let deps = azure_dependencies(&env, &account, &container, &blob_url, credential.clone())?;
-        run_owned(store, id, env, Some(credential), deps).await
+        run_owned(store, id, partition, env, Some(credential), deps).await
     }
 }
 
@@ -92,6 +93,7 @@ struct WorkerDependencies {
 async fn run_owned<S: JobPersistence>(
     store: S,
     id: &str,
+    partition: &str,
     mut env: BTreeMap<String, String>,
     credential: Option<Arc<dyn azure_core::auth::TokenCredential>>,
     deps: WorkerDependencies,
@@ -101,9 +103,14 @@ async fn run_owned<S: JobPersistence>(
         "{}",
         serde_json::json!({"event":"worker_started","job_id":id,"at_micros":now().micros()})
     );
+    let reference = lake_ingest_jobs::WorkRef {
+        job_id: id.into(),
+        partition: Some(partition.into()),
+    };
+    reference.path()?;
     let mut retries = 0;
     let owner = loop {
-        match store.own(id).await {
+        match store.own_work(&reference).await {
             Ok(owner) => break owner,
             Err(DataError::Conflict(_)) if retries < 13 => {
                 retries += 1;
@@ -112,12 +119,20 @@ async fn run_owned<S: JobPersistence>(
             Err(error) => return Err(error),
         }
     };
-    let mut job = store.get(id).await?;
+    let mut job = store.get_work(&reference).await?;
     if job.terminal() {
         owner.release().await?;
         return Ok(());
     }
+    if job.record.state == JobState::Running {
+        owner.release().await?;
+        return Err(DataError::Conflict(
+            "partition already started; unknown provider/publication outcomes must not be replayed"
+                .into(),
+        ));
+    }
     if !job.dispatch_started {
+        owner.release().await?;
         return Err(DataError::Conflict(
             "worker has no durable dispatch intent".into(),
         ));
@@ -144,10 +159,11 @@ async fn run_owned<S: JobPersistence>(
         }));
     });
     let requests = job.requests.clone();
+    let budget_store = store.clone();
     let work_owner = owner.clone();
     let worker_id = id.to_string();
     let work = async move {
-        // Provider secrets never enter API configuration, ACI command arguments, or durable work.
+        // Provider secrets never enter API configuration, execution arguments, or durable work.
         if let Some(credential) = credential {
             let vault = required(&env, "LAKE_PROVIDER_KEY_VAULT_URL")?;
             let token = credential
@@ -158,58 +174,14 @@ async fn run_owned<S: JobPersistence>(
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .map_err(io)?;
-            for (variable, secret) in [
-                ("LAKE_PROVIDER__API_KEY", "alpaca-api-key"),
-                ("LAKE_PROVIDER__API_SECRET", "alpaca-api-secret"),
-            ] {
-                let response = http
-                    .get(format!(
-                        "{}/secrets/{secret}?api-version=7.4",
-                        vault.trim_end_matches('/')
-                    ))
-                    .bearer_auth(token.token.secret())
-                    .send()
-                    .await
-                    .map_err(|_| DataError::Io("provider secret request failed".into()))?;
-                if !response.status().is_success() {
-                    return Err(DataError::Io(format!(
-                        "provider secret access failed: {}",
-                        response.status()
-                    )));
-                }
-                let value: serde_json::Value = response
-                    .json()
-                    .await
-                    .map_err(|_| DataError::Io("invalid provider secret response".into()))?;
-                env.insert(
-                    variable.into(),
-                    value
-                        .get("value")
-                        .and_then(serde_json::Value::as_str)
-                        .filter(|s| !s.is_empty())
-                        .ok_or_else(|| DataError::value("empty provider secret"))?
-                        .into(),
-                );
-            }
+            let (key, secret) = tokio::try_join!(
+                provider_secret(&http, &vault, token.token.secret(), "alpaca-api-key"),
+                provider_secret(&http, &vault, token.token.secret(), "alpaca-api-secret")
+            )?;
+            env.insert("LAKE_PROVIDER__API_KEY".into(), key);
+            env.insert("LAKE_PROVIDER__API_SECRET".into(), secret);
         }
         let settings = lake_configuration::LakeSettings::load(None, &env).map_err(io)?;
-        let workers = env
-            .get("LAKE_INGEST_MAX_WORKERS")
-            .map(|s| s.parse::<u32>().map_err(io))
-            .transpose()?
-            .unwrap_or(2);
-        if workers == 0
-            || settings.provider.request.max_concurrency < workers
-            || settings
-                .provider
-                .request
-                .requests_per_minute
-                .is_some_and(|budget| budget < workers)
-        {
-            return Err(DataError::value(
-                "worker count exceeds the configured provider budget",
-            ));
-        }
         let mut config = lake_providers::ProviderConfig::new(
             env.get("LAKE_PROVIDER__BASE_URL")
                 .map(String::as_str)
@@ -217,24 +189,37 @@ async fn run_owned<S: JobPersistence>(
             settings.provider.api_key.clone(),
             settings.provider.api_secret.clone(),
         );
-        config.max_concurrency =
-            (settings.provider.request.max_concurrency / workers).max(1) as usize;
+        config.max_concurrency = settings.provider.request.max_concurrency as usize;
         config.timeout_seconds = settings.provider.request.timeout_seconds;
         config.max_attempts = settings.provider.retry.max_attempts;
         config.requests_per_minute = settings
             .provider
             .request
             .requests_per_minute
-            .map(|budget| (budget / workers).max(1));
+            .or(Some(10_000));
         config.honor_retry_after = settings.provider.retry.honor_retry_after;
-        let governor = lake_providers::RequestGovernor::new(config.requests_per_minute);
+        let limit = config
+            .requests_per_minute
+            .expect("worker budget is required");
+        if !(1..=10_000).contains(&limit) {
+            return Err(DataError::value(
+                "provider request budget exceeds 10000 per minute",
+            ));
+        }
+        let budget = crate::budget::SharedBudget::new(
+            budget_store,
+            &config.base_url,
+            config.api_key.as_deref().unwrap_or(""),
+            limit,
+        );
+        let governor = lake_providers::RequestGovernor::with_budget(limit, budget).map_err(io)?;
         let client =
             Arc::new(lake_providers::AlpacaClient::with_reqwest(config, governor).map_err(io)?);
         let max_sessions = env
             .get("LAKE_INGEST_SESSION_CONCURRENCY")
             .map(|v| v.parse::<usize>().map_err(io))
             .transpose()?
-            .unwrap_or(1);
+            .unwrap_or(2);
         let WorkerDependencies {
             catalog,
             contracts,
@@ -349,6 +334,38 @@ async fn run_owned<S: JobPersistence>(
         serde_json::json!({"event":"worker_settled","job_id":id,"seconds":execution_started.elapsed().as_secs_f64(),"state":job.record.state.value(),"rows":job.record.progress.as_ref().map(|p|p.rows)})
     );
     result.map(|_| ())
+}
+async fn provider_secret(
+    http: &reqwest::Client,
+    vault: &str,
+    token: &str,
+    name: &str,
+) -> Result<String, DataError> {
+    let response = http
+        .get(format!(
+            "{}/secrets/{name}?api-version=7.4",
+            vault.trim_end_matches('/')
+        ))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|_| DataError::Io("provider secret request failed".into()))?;
+    if !response.status().is_success() {
+        return Err(DataError::Io(format!(
+            "provider secret access failed: {}",
+            response.status()
+        )));
+    }
+    let value: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|_| DataError::Io("invalid provider secret response".into()))?;
+    value
+        .get("value")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| DataError::value("empty provider secret"))
 }
 
 fn azure_dependencies(

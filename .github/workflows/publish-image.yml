@@ -7,7 +7,7 @@ on:
   workflow_call:
     outputs:
       ingestion-digest:
-        description: Finite ACI ingestion image digest
+        description: Finite ingestion Job image digest
         value: ${{ jobs.publish.outputs.ingestion-digest }}
       image-reference:
         description: Immutable GHCR image reference
@@ -22,6 +22,9 @@ on:
 jobs:
   publish:
     name: Build and publish shared image
+    concurrency:
+      group: image-build-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     # The first build after a cargo-chef recipe change recompiles the Rust
     # dependency layers cold (the lake cook includes DuckDB). One long run
@@ -69,12 +72,9 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.image.outputs.tag }}
-          # Reuse the BuildKit cache across runs. `mode=max` caches the
-          # intermediate `rust`/`builder` stages, so the pinned toolchain,
-          # apt layers, `uv sync`, and the cooked Rust dependency layer are
-          # skipped when their inputs are unchanged.
-          cache-from: type=gha,scope=fca-shared-image
-          cache-to: type=gha,mode=max,scope=fca-shared-image
+          # Keep large Rust/BuildKit layers outside the Actions cache quota.
+          cache-from: type=registry,ref=${{ steps.image.outputs.name }}-buildcache:harness
+          cache-to: type=registry,ref=${{ steps.image.outputs.name }}-buildcache:harness,mode=max,image-manifest=true,oci-mediatypes=true
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -90,6 +90,6 @@ jobs:
           push: true
           tags: ${{ steps.image.outputs.name }}-ingestion:${{ github.sha }}
           cache-from: |
-            type=gha,scope=fca-shared-image
-            type=gha,scope=fca-ingestion-image
-          cache-to: type=gha,mode=max,scope=fca-ingestion-image
+            type=registry,ref=${{ steps.image.outputs.name }}-buildcache:harness
+            type=registry,ref=${{ steps.image.outputs.name }}-buildcache:ingestion
+          cache-to: type=registry,ref=${{ steps.image.outputs.name }}-buildcache:ingestion,mode=max,image-manifest=true,oci-mediatypes=true

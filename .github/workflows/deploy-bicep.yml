@@ -30,13 +30,6 @@ on:
         default: true
         type: boolean
 
-concurrency:
-  # Shared with deploy-main/deploy-thesis so no two infra deployments targeting
-  # infra/main.bicep overlap for the same ref.
-  group: fca-deployment-${{ github.ref }}
-  cancel-in-progress: false
-  queue: max
-
 permissions:
   contents: read
   id-token: write
@@ -44,6 +37,10 @@ permissions:
 jobs:
   deploy:
     name: Validate and deploy Bicep
+    concurrency:
+      group: fca-deployment-${{ inputs.environment }}
+      cancel-in-progress: false
+      queue: max
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:

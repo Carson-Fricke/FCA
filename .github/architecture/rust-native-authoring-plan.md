@@ -173,7 +173,7 @@ and status query flows through the hosted MCP tools or the REST routes.
   boundaries; the SDK owns a C-ABI factory plus a stable vtable shape, and
   the SDK crate version is compiled into every authored artifact.
 * **Compile latency and disk growth** — provenance-matched artifacts can be
-  reused, but every cache miss builds in a distinct crate/target generation.
+  reused, but every cache miss builds a distinct authored crate. A compiler-identity-specific, exclusively locked Cargo target reuses unchanged dependency artifacts; only the final library is copied to its unique immutable generation before the lock is released. Compact directory names retain full identity validation and reject prefix collisions.
   This protects libraries already in use at the cost of additional builds and
   disk use. Generations are not automatically garbage-collected.
 * **Capability leakage** — the SDK must not re-export engine internals that

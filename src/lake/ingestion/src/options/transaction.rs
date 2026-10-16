@@ -4,7 +4,7 @@
 //! kept at the OSI symbol-day boundary: the option client can batch provider
 //! requests internally, while each selected contract gets deterministic trade
 //! and quote objects plus matching coverage rows. Job execution and ownership
-//! belong to the finite ACI worker, outside this transaction.
+//! belong to the finite ACA worker, outside this transaction.
 //!
 //! Semantics preserved exactly:
 //!
@@ -22,13 +22,13 @@
 use std::cmp::Ordering;
 use std::sync::Arc;
 
+use arrow_array::RecordBatch;
 use futures_util::future::{join_all, BoxFuture};
 use lake_catalog::{ContractRecord, CoverageRecord, CoverageStatus};
 use lake_contracts::{AssetClass, DataError, DataType, Date, DateTime, Decimal18};
 use lake_coverage::CoverageSession;
 use lake_providers::{NormalizedOptionQuote, NormalizedOptionTrade, ProviderError};
 use lake_storage::ParquetMetadata;
-use serde_json::Value;
 
 use crate::common::{
     data_error_message, fetch_error_message, AtomicIngestCommitter, PartitionWriter,
@@ -80,6 +80,7 @@ impl OptionIngestResult {
 }
 
 /// Fetch and atomically publish one selected OSI symbol-day.
+#[derive(Clone)]
 pub struct OptionIngestTransaction {
     client: Arc<dyn OptionMarketDataClient>,
     writer: Arc<dyn PartitionWriter>,
@@ -134,6 +135,20 @@ impl OptionIngestTransaction {
             .map(|result| result.expect("a successful gather has no provider error"))
             .collect();
 
+        let transaction = self.clone();
+        let session = *session;
+        crate::common::cpu_stage(move || transaction.finish(contract, &session, requested, records))
+            .await
+    }
+
+    /// Stage and publish on a bounded blocking thread, leaving fetch I/O free.
+    fn finish(
+        &self,
+        contract: ContractRecord,
+        session: &CoverageSession,
+        requested: Vec<DataType>,
+        records: Vec<OptionRecords>,
+    ) -> Result<OptionIngestResult, DataError> {
         let staged = match self.stage(&contract, session, &requested, &records) {
             Ok(staged) => staged,
             Err(error) => {
@@ -359,7 +374,7 @@ fn trade_rows(
     records: &[NormalizedOptionTrade],
     contract: &ContractRecord,
     session: &CoverageSession,
-) -> Result<Vec<Value>, DataError> {
+) -> Result<RecordBatch, DataError> {
     let mut validated = Vec::with_capacity(records.len());
     for record in records {
         validate_record(
@@ -375,7 +390,7 @@ fn trade_rows(
         validated.push(record);
     }
     validated.sort_by(|left, right| compare_option_trades(left, right));
-    Ok(validated.iter().map(|record| record.to_row()).collect())
+    crate::columnar::option_trades(&validated, &contract.symbol)
 }
 
 /// Validate and canonically order option quotes.
@@ -383,7 +398,7 @@ fn quote_rows(
     records: &[NormalizedOptionQuote],
     contract: &ContractRecord,
     session: &CoverageSession,
-) -> Result<Vec<Value>, DataError> {
+) -> Result<RecordBatch, DataError> {
     let mut validated = Vec::with_capacity(records.len());
     for record in records {
         validate_record(
@@ -399,7 +414,7 @@ fn quote_rows(
         validated.push(record);
     }
     validated.sort_by(|left, right| compare_option_quotes(left, right));
-    Ok(validated.iter().map(|record| record.to_row()).collect())
+    crate::columnar::option_quotes(&validated, &contract.symbol)
 }
 
 /// Compare two option trades on the pinned `(timestamp, exchange, price, size,
@@ -454,7 +469,7 @@ fn validate_record(
             contract.symbol, session.session_date
         )));
     }
-    if symbol.trim().to_uppercase() != contract.symbol {
+    if symbol != contract.symbol && symbol.trim().to_uppercase() != contract.symbol {
         return Err(DataError::value(
             "option record symbol does not match the requested symbol",
         ));

@@ -52,7 +52,6 @@ use lake_contracts::{AssetClass, BarInterval, DataError, DataType, Date, DateTim
 use lake_coverage::CoverageSession;
 use lake_providers::{NormalizedBar, NormalizedCryptoTrade, NormalizedTrade, ProviderError};
 use lake_storage::{ParquetMetadata, ReadableBlobStore, StorageCapGuard};
-use serde_json::Value;
 
 use crate::common::{
     canonical_symbol, data_error_message, fetch_with_transient_retry, provider_error_message,
@@ -217,6 +216,7 @@ impl PartitionSource for TradeObjects {
 }
 
 /// Fetch, derive, stage, and atomically publish one bars window.
+#[derive(Clone)]
 pub struct BarsIngestTransaction {
     provider: Arc<dyn BarsDataProvider>,
     reader: Arc<dyn TradePartitionReader>,
@@ -325,7 +325,20 @@ impl BarsIngestTransaction {
                 if !bars.is_empty()
                     || (asset_class == AssetClass::Option && provider_failure.is_none())
                 {
-                    match self.stage_provider(asset_class, &symbol, interval, session, &bars) {
+                    let transaction = self.clone();
+                    let partition_symbol = symbol.clone();
+                    let partition_session = *session;
+                    let staged = crate::common::cpu_stage(move || {
+                        transaction.stage_provider(
+                            asset_class,
+                            &partition_symbol,
+                            interval,
+                            &partition_session,
+                            &bars,
+                        )
+                    })
+                    .await;
+                    match staged {
                         Ok((metadata, rows, revision)) => {
                             coverage.push(bar_coverage(
                                 asset_class,
@@ -395,6 +408,30 @@ impl BarsIngestTransaction {
         }
 
         let staged = self.writer.drain_staged();
+        let retryable = provider_failure
+            .as_ref()
+            .is_some_and(ProviderError::is_transient)
+            && coverage
+                .iter()
+                .any(|record| record.status == CoverageStatus::Error);
+        let result = BarsIngestResult {
+            symbol,
+            asset_class,
+            interval,
+            coverage,
+            objects,
+            retryable,
+        };
+        let transaction = self.clone();
+        crate::common::cpu_stage(move || transaction.finish(staged, result)).await
+    }
+
+    /// Publish without blocking concurrent provider I/O on the async runtime.
+    fn finish(
+        &self,
+        staged: Vec<crate::StagedParquetObject>,
+        result: BarsIngestResult,
+    ) -> Result<BarsIngestResult, DataError> {
         if let Some(guard) = &self.cap_guard {
             let additional_bytes = staged
                 .iter()
@@ -405,23 +442,10 @@ impl BarsIngestTransaction {
                 return Err(error);
             }
         }
-        let outcome = self.committer.commit(&staged, &coverage);
+        let outcome = self.committer.commit(&staged, &result.coverage);
         self.writer.reset_staged();
         outcome?;
-        let retryable = provider_failure
-            .as_ref()
-            .is_some_and(ProviderError::is_transient)
-            && coverage
-                .iter()
-                .any(|record| record.status == CoverageStatus::Error);
-        Ok(BarsIngestResult {
-            symbol,
-            asset_class,
-            interval,
-            coverage,
-            objects,
-            retryable,
-        })
+        Ok(result)
     }
 
     /// Stage one provider-served session, re-stamped onto the fixed buckets.
@@ -433,9 +457,10 @@ impl BarsIngestTransaction {
         session: &CoverageSession,
         bars: &[NormalizedBar],
     ) -> Result<(ParquetMetadata, u64, String), DataError> {
-        let rows = provider_bar_rows(symbol, bars, interval, session)?;
+        let bars = provider_bar_records(symbol, bars, interval, session)?;
+        let batch = crate::columnar::bars(&bars, asset_class, symbol)?;
         let metadata = self.writer.write(
-            &rows,
+            &batch,
             session.session_date,
             asset_class,
             DataType::Bars,
@@ -443,7 +468,7 @@ impl BarsIngestTransaction {
             symbol,
         )?;
         let revision = metadata.checksum.clone();
-        Ok((metadata, rows.len() as u64, revision))
+        Ok((metadata, bars.len() as u64, revision))
     }
 
     /// Stage one derived session, or report that its trades are unavailable.
@@ -466,6 +491,25 @@ impl BarsIngestTransaction {
         else {
             return Ok(None);
         };
+        let transaction = self.clone();
+        let symbol = symbol.to_string();
+        let session = *session;
+        crate::common::cpu_stage(move || {
+            transaction.stage_trade_partition(asset_class, &symbol, interval, &session, partition)
+        })
+        .await
+        .map(Some)
+    }
+
+    /// Derive and encode stored ticks within the shared CPU-stage budget.
+    fn stage_trade_partition(
+        &self,
+        asset_class: AssetClass,
+        symbol: &str,
+        interval: BarInterval,
+        session: &CoverageSession,
+        partition: StoredTradePartition,
+    ) -> Result<(ParquetMetadata, u64, String), DataError> {
         let bars = match asset_class {
             AssetClass::Equity => {
                 let records = equity_records(partition.records)?;
@@ -481,16 +525,16 @@ impl BarsIngestTransaction {
                 )))
             }
         };
-        let rows: Vec<Value> = bars.iter().map(NormalizedBar::to_row).collect();
+        let batch = crate::columnar::bars(&bars, asset_class, symbol)?;
         let metadata = self.writer.write(
-            &rows,
+            &batch,
             session.session_date,
             asset_class,
             DataType::Bars,
             Some(interval.value()),
             symbol,
         )?;
-        Ok(Some((metadata, rows.len() as u64, partition.revision)))
+        Ok((metadata, bars.len() as u64, partition.revision))
     }
 }
 
@@ -585,12 +629,12 @@ fn aggregate_bars(
 /// open-aligned window start (a bar exactly at the close lands in the final
 /// window). Two provider bars landing on the same bucket are a provider
 /// protocol failure for that session.
-fn provider_bar_rows(
+fn provider_bar_records(
     symbol: &str,
     bars: &[NormalizedBar],
     interval: BarInterval,
     session: &CoverageSession,
-) -> Result<Vec<Value>, DataError> {
+) -> Result<Vec<NormalizedBar>, DataError> {
     let mut normalized: Vec<NormalizedBar> = bars
         .iter()
         .map(|bar| NormalizedBar {
@@ -613,7 +657,7 @@ fn provider_bar_rows(
             )));
         }
     }
-    Ok(normalized.iter().map(NormalizedBar::to_row).collect())
+    Ok(normalized)
 }
 
 /// The session-open-aligned bucket start one timestamp belongs to.

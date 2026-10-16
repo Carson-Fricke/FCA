@@ -40,6 +40,12 @@ jobs:
           PACKAGE_NAME="${PACKAGE_NAME##*/}"
           PACKAGE_NAME="${PACKAGE_NAME,,}"
 
+          # BuildKit cache manifests live in a separate package so they cannot
+          # evict Cargo caches. Retain moving cache tags and bound old untagged
+          # versions with the same rollback window as published runtime images.
+          package_names=("$PACKAGE_NAME" "${PACKAGE_NAME}-ingestion" "${PACKAGE_NAME}-buildcache")
+          for PACKAGE_NAME in "${package_names[@]}"; do
+
           # Collect every version id + created_at (paginated). mktemp -d for a
           # scratch DIRECTORY (plain mktemp yields a file, not a directory).
           page=1
@@ -105,3 +111,4 @@ jobs:
 
           echo "::notice::GHCR prune complete: surveyed ${total} version(s); deleted ${deleted}/${delete_count}; newest ${KEEP_NEWEST} and anything younger than ${MIN_AGE_DAYS} days retained"
           rm -rf "$tmp"
+          done

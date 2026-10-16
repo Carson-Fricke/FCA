@@ -76,7 +76,7 @@ async fn ensure_equity(
         .state
         .ensure_admission
         .clone()
-        .ok_or_else(|| ApiError::internal("ACI ingestion is not configured"))?;
+        .ok_or_else(|| ApiError::internal("external ingestion is not configured"))?;
     let outcome = ensure_coverage(
         context.state.catalog.as_ref(),
         &jobs,
@@ -135,7 +135,7 @@ async fn ensure_option(
         .state
         .ensure_admission
         .clone()
-        .ok_or_else(|| ApiError::internal("ACI ingestion is not configured"))?;
+        .ok_or_else(|| ApiError::internal("external ingestion is not configured"))?;
     let spec = EnsureSpec {
         asset_class: AssetClass::Option,
         data_type: request.data_type,

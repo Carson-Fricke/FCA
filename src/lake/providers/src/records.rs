@@ -1,13 +1,11 @@
 //! Normalized provider records independent of HTTP transport.
 //!
-//! Ports `lake.providers.alpaca.records` for the equity, option, and crypto
-//! payloads the Rust ingest path consumes. `to_row` renders the exact
-//! ingestion row the Python writer produced: nanosecond integer timestamps,
-//! canonical decimal strings, and the provider field names.
+//! Exact records for equity, option and crypto acquisition. Ingestion owns
+//! canonical ordering and direct Arrow projection; providers do not render
+//! persistence rows or convert fixed-point values to intermediate text.
 
 use lake_catalog::OptionType;
 use lake_contracts::{Date, DateTime, Decimal18};
-use serde_json::{json, Value};
 
 /// One equity trade.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,23 +28,6 @@ pub struct NormalizedTrade {
     pub tape: String,
     /// Update marker (`u`); absent when the provider omits it.
     pub update: Option<String>,
-}
-
-impl NormalizedTrade {
-    /// The canonical ingestion row.
-    pub fn to_row(&self) -> Value {
-        json!({
-            "timestamp": self.timestamp.to_nanos(),
-            "symbol": self.symbol,
-            "trade_id": self.trade_id,
-            "exchange": self.exchange,
-            "price": self.price.to_canonical_string(),
-            "size": self.size,
-            "conditions": self.conditions,
-            "tape": self.tape,
-            "update": self.update,
-        })
-    }
 }
 
 /// One equity quote.
@@ -72,24 +53,6 @@ pub struct NormalizedQuote {
     pub conditions: Vec<String>,
     /// Tape (`z`).
     pub tape: String,
-}
-
-impl NormalizedQuote {
-    /// The canonical ingestion row.
-    pub fn to_row(&self) -> Value {
-        json!({
-            "timestamp": self.timestamp.to_nanos(),
-            "symbol": self.symbol,
-            "bid_exchange": self.bid_exchange,
-            "bid_price": self.bid_price.to_canonical_string(),
-            "bid_size": self.bid_size,
-            "ask_exchange": self.ask_exchange,
-            "ask_price": self.ask_price.to_canonical_string(),
-            "ask_size": self.ask_size,
-            "conditions": self.conditions,
-            "tape": self.tape,
-        })
-    }
 }
 
 /// One option trade for a selected OSI contract.
@@ -119,20 +82,6 @@ pub struct NormalizedOptionTrade {
     pub size: u32,
     /// Sale condition (`c`): one string for options, not an array.
     pub condition: String,
-}
-
-impl NormalizedOptionTrade {
-    /// The canonical ingestion row for the pinned `option.trade` schema.
-    pub fn to_row(&self) -> Value {
-        json!({
-            "timestamp": self.timestamp.to_nanos(),
-            "symbol": self.symbol,
-            "exchange": self.exchange,
-            "price": self.price.to_canonical_string(),
-            "size": self.size,
-            "condition": self.condition,
-        })
-    }
 }
 
 /// One option quote for a selected OSI contract.
@@ -166,23 +115,6 @@ pub struct NormalizedOptionQuote {
     pub condition: String,
 }
 
-impl NormalizedOptionQuote {
-    /// The canonical ingestion row for the pinned `option.quote` schema.
-    pub fn to_row(&self) -> Value {
-        json!({
-            "timestamp": self.timestamp.to_nanos(),
-            "symbol": self.symbol,
-            "bid_exchange": self.bid_exchange,
-            "bid_price": self.bid_price.to_canonical_string(),
-            "bid_size": self.bid_size,
-            "ask_exchange": self.ask_exchange,
-            "ask_price": self.ask_price.to_canonical_string(),
-            "ask_size": self.ask_size,
-            "condition": self.condition,
-        })
-    }
-}
-
 /// One crypto trade.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NormalizedCryptoTrade {
@@ -200,21 +132,6 @@ pub struct NormalizedCryptoTrade {
     pub size: Decimal18,
     /// Taker side (`tks`); absent when the provider omits it.
     pub taker_side: Option<String>,
-}
-
-impl NormalizedCryptoTrade {
-    /// The canonical ingestion row.
-    pub fn to_row(&self) -> Value {
-        json!({
-            "timestamp": self.timestamp.to_nanos(),
-            "symbol": self.symbol,
-            "trade_id": self.trade_id,
-            "exchange": self.exchange,
-            "price": self.price.to_canonical_string(),
-            "size": self.size.to_canonical_string(),
-            "taker_side": self.taker_side,
-        })
-    }
 }
 
 /// One crypto quote.
@@ -238,22 +155,6 @@ pub struct NormalizedCryptoQuote {
     pub ask_size: Decimal18,
 }
 
-impl NormalizedCryptoQuote {
-    /// The canonical ingestion row.
-    pub fn to_row(&self) -> Value {
-        json!({
-            "timestamp": self.timestamp.to_nanos(),
-            "symbol": self.symbol,
-            "bid_exchange": self.bid_exchange,
-            "bid_price": self.bid_price.to_canonical_string(),
-            "bid_size": self.bid_size.to_canonical_string(),
-            "ask_exchange": self.ask_exchange,
-            "ask_price": self.ask_price.to_canonical_string(),
-            "ask_size": self.ask_size.to_canonical_string(),
-        })
-    }
-}
-
 /// One session-aligned OHLCV bar.
 ///
 /// The lake convention fixes the row timestamp to the bucket start in UTC:
@@ -275,21 +176,6 @@ pub struct NormalizedBar {
     pub close: Decimal18,
     /// Exact volume.
     pub volume: Decimal18,
-}
-
-impl NormalizedBar {
-    /// The canonical ingestion row.
-    pub fn to_row(&self) -> Value {
-        json!({
-            "timestamp": self.timestamp.to_nanos(),
-            "symbol": self.symbol,
-            "open": self.open.to_canonical_string(),
-            "high": self.high.to_canonical_string(),
-            "low": self.low.to_canonical_string(),
-            "close": self.close.to_canonical_string(),
-            "volume": self.volume.to_canonical_string(),
-        })
-    }
 }
 
 /// The parseable record timestamp used by the time-sliced planner.

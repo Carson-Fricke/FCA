@@ -17,15 +17,21 @@ param environmentName string = 'dev'
 @minLength(1)
 param sharedImageReference string
 
-@description('Digest-pinned finite ACI ingestion worker image.')
+@description('Digest-pinned finite Container Apps ingestion Job worker image.')
 param ingestionImageReference string = sharedImageReference
+@allowed(['4'])
 param ingestionCpu string = '4'
-param ingestionMemoryGb string = '8'
-@minValue(1)
-param ingestionSessionConcurrency int = 1
+@allowed(['8'])
+param ingestionMemoryGiB string = '8'
 @minValue(1)
 @maxValue(16)
-param ingestionMaxWorkers int = 2
+param ingestionSessionConcurrency int = 2
+@minValue(1)
+@maxValue(64)
+param ingestionMaxWorkers int = 8
+@minValue(1)
+@maxValue(366)
+param ingestionPartitionDays int = 7
 @minValue(60)
 @maxValue(604800)
 param ingestionTimeoutSeconds int = 86400
@@ -308,7 +314,6 @@ module access './modules/access.bicep' = {
   params: {
     enableGitea: enableGitea
     runtimePrincipalId: identities.outputs.runtimeIdentity.principalId
-    runtimeIdentityResourceId: identities.outputs.runtimeIdentity.resourceId
     quantPrincipalId: identities.outputs.quantRuntimeIdentity.principalId
     githubDeployerPrincipalId: identities.outputs.githubDeployerIdentity.principalId
     githubDeployerIdentityName: githubDeployerIdentityName
@@ -329,9 +334,10 @@ module containerApps './modules/container-apps.bicep' = {
     sharedImageReference: sharedImageReference
     ingestionImageReference: ingestionImageReference
     ingestionCpu: ingestionCpu
-    ingestionMemoryGb: ingestionMemoryGb
+    ingestionMemoryGiB: ingestionMemoryGiB
     ingestionSessionConcurrency: ingestionSessionConcurrency
     ingestionMaxWorkers: ingestionMaxWorkers
+    ingestionPartitionDays: ingestionPartitionDays
     ingestionTimeoutSeconds: ingestionTimeoutSeconds
     registryLoginServer: containerRegistry.outputs.registry.loginServer
     storageAccountName: storage.outputs.storageAccountName

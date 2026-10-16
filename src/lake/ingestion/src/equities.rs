@@ -11,18 +11,18 @@
 use std::cmp::Ordering;
 use std::sync::Arc;
 
+use arrow_array::RecordBatch;
 use futures_util::future::{join_all, BoxFuture};
 use lake_catalog::{CoverageRecord, CoverageStatus};
 use lake_contracts::{AssetClass, DataError, DataType, Date};
 use lake_coverage::CoverageSession;
 use lake_providers::{NormalizedQuote, NormalizedTrade, ProviderError};
 use lake_storage::{ParquetMetadata, StorageCapGuard};
-use serde_json::Value;
 
 use crate::common::{
     canonical_symbol, data_error_message, failures_all_transient, fetch_error_message,
-    fetch_with_transient_retry, normalize_data_types, AtomicIngestCommitter, PartitionWriter,
-    TransientRetry,
+    fetch_with_transient_retry, normalize_data_types, ordered_records, AtomicIngestCommitter,
+    PartitionWriter, TransientRetry,
 };
 use crate::providers::EquityDataProvider;
 
@@ -43,6 +43,7 @@ pub struct EquityIngestResult {
 }
 
 /// Fetch, stage, and atomically publish one equity symbol session.
+#[derive(Clone)]
 pub struct EquityIngestTransaction {
     provider: Arc<dyn EquityDataProvider>,
     writer: Arc<dyn PartitionWriter>,
@@ -145,20 +146,22 @@ impl EquityIngestTransaction {
             .map(|result| result.expect("a successful gather has no provider error"))
             .collect();
 
+        let transaction = self.clone();
+        let session = *session;
+        crate::common::cpu_stage(move || transaction.finish(symbol, &session, selected, records))
+            .await
+    }
+
+    /// Stage and publish on a bounded blocking thread, leaving fetch I/O free.
+    fn finish(
+        &self,
+        symbol: String,
+        session: &CoverageSession,
+        selected: Vec<DataType>,
+        records: Vec<EquityRecords>,
+    ) -> Result<EquityIngestResult, DataError> {
         let stage_started = std::time::Instant::now();
-        // Staging is CPU-bound (validation, sort, row conversion, Arrow
-        // normalization). Run it on the blocking pool under a multi-thread
-        // runtime so a staging session never occupies a runtime worker that
-        // concurrent sessions need for their fetch I/O. Single-thread test
-        // runtimes cannot block in place, so they stage inline.
-        let offload = tokio::runtime::Handle::try_current().is_ok_and(|handle| {
-            handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread
-        });
-        let staged_result = if offload {
-            tokio::task::block_in_place(|| self.stage(&symbol, session, &selected, &records))
-        } else {
-            self.stage(&symbol, session, &selected, &records)
-        };
+        let staged_result = self.stage(&symbol, session, &selected, &records);
         let staged = match staged_result {
             Ok(staged) => staged,
             Err(error) => {
@@ -243,7 +246,7 @@ impl EquityIngestTransaction {
                 "PROFILE stage-part symbol={symbol} session={} data_type={} rows={} convert_seconds={convert_seconds:.3} write_seconds={:.3}",
                 session.session_date.isoformat(),
                 data_type.value(),
-                rows.len(),
+                rows.num_rows(),
                 write_started.elapsed().as_secs_f64()
             );
         }
@@ -365,13 +368,13 @@ fn trade_rows(
     records: &[NormalizedTrade],
     symbol: &str,
     session: &CoverageSession,
-) -> Result<Vec<Value>, DataError> {
-    normalized_rows(
+) -> Result<RecordBatch, DataError> {
+    let ordered = ordered_records(
         records,
         |record| validate_trade(record, symbol, session),
         compare_trades,
-        NormalizedTrade::to_row,
-    )
+    )?;
+    crate::columnar::equity_trades(&ordered, symbol)
 }
 
 /// Validate and canonically order equity quotes.
@@ -379,82 +382,13 @@ fn quote_rows(
     records: &[NormalizedQuote],
     symbol: &str,
     session: &CoverageSession,
-) -> Result<Vec<Value>, DataError> {
-    normalized_rows(
+) -> Result<RecordBatch, DataError> {
+    let ordered = ordered_records(
         records,
         |record| validate_quote(record, symbol, session),
         compare_quotes,
-        NormalizedQuote::to_row,
-    )
-}
-
-/// Validate, canonically sort, and convert one session's records.
-///
-/// Validation and JSON row conversion are row-granular and independent, so
-/// each runs across scoped OS threads while the concatenation and the single
-/// sort keep the pinned deterministic order. Million-row partitions spend
-/// most of their staging time here; the parallel passes are byte-for-byte
-/// equivalent to the serial loop.
-fn normalized_rows<T, V, C>(
-    records: &[T],
-    validate: V,
-    compare: C,
-    to_row: fn(&T) -> Value,
-) -> Result<Vec<Value>, DataError>
-where
-    T: Sync,
-    V: Fn(&T) -> Result<(), DataError> + Sync,
-    C: Fn(&T, &T) -> Ordering + Sync,
-{
-    let workers = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
-    let mut validated: Vec<&T> = std::thread::scope(|scope| {
-        let chunk = records.len().div_ceil(workers).max(1);
-        let handles: Vec<_> = records
-            .chunks(chunk)
-            .map(|slice| {
-                let validate = &validate;
-                scope.spawn(move || -> Result<Vec<&T>, DataError> {
-                    let mut chunk_records = Vec::with_capacity(slice.len());
-                    for record in slice {
-                        validate(record)?;
-                        chunk_records.push(record);
-                    }
-                    Ok(chunk_records)
-                })
-            })
-            .collect();
-        let mut merged = Vec::with_capacity(records.len());
-        for handle in handles {
-            let part = handle
-                .join()
-                .map_err(|_| DataError::value("row validation worker panicked"))?;
-            merged.extend(part?);
-        }
-        Ok::<Vec<&T>, DataError>(merged)
-    })?;
-    validated.sort_by(|left, right| compare(left, right));
-    std::thread::scope(|scope| {
-        let chunk = validated.len().div_ceil(workers).max(1);
-        let handles: Vec<_> = validated
-            .chunks(chunk)
-            .map(|slice| {
-                scope.spawn(move || {
-                    slice
-                        .iter()
-                        .map(|record| to_row(record))
-                        .collect::<Vec<Value>>()
-                })
-            })
-            .collect();
-        let mut rows = Vec::with_capacity(validated.len());
-        for handle in handles {
-            let part = handle
-                .join()
-                .map_err(|_| DataError::value("row conversion worker panicked"))?;
-            rows.extend(part);
-        }
-        Ok(rows)
-    })
+    )?;
+    crate::columnar::equity_quotes(&ordered, symbol)
 }
 
 /// Compare two trades on the pinned `(timestamp, trade_id, exchange, price,
@@ -498,7 +432,7 @@ fn validate_trade(
     session: &CoverageSession,
 ) -> Result<(), DataError> {
     validate_record_timestamp(record.timestamp, symbol, session)?;
-    if record.symbol.trim().to_uppercase() != symbol {
+    if record.symbol != symbol && record.symbol.trim().to_uppercase() != symbol {
         return Err(DataError::value(
             "trade symbol does not match the requested symbol",
         ));
@@ -513,7 +447,7 @@ fn validate_quote(
     session: &CoverageSession,
 ) -> Result<(), DataError> {
     validate_record_timestamp(record.timestamp, symbol, session)?;
-    if record.symbol.trim().to_uppercase() != symbol {
+    if record.symbol != symbol && record.symbol.trim().to_uppercase() != symbol {
         return Err(DataError::value(
             "quote symbol does not match the requested symbol",
         ));

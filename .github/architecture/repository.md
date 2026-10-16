@@ -126,7 +126,7 @@ quotes and trades for every input symbol for `simple_touch` execution, recorded
 separately in the manifest without expanding consumer callbacks or the echo.
 The local harness defaults to the Azure combined endpoint; `LAKE_API_URL`, then
 `LAKE_API_BASE_URL`, override the endpoint. Local hosting uses the same harness's
-`/market-data` prefix on port 8001 when Azure/ACI configuration is supplied.
+`/market-data` prefix on port 8001 when Azure/ACA configuration is supplied.
 The stack launcher loads the Azure bearer from Key Vault into the harness child
 only and starts no separate lake process.
 Mixed ticks and completed frames use one causal availability-ordered queue.
@@ -285,7 +285,7 @@ snapshots require no `.git` directory in the deployed image.
 
 | Boundary | Path | Responsibility |
 | --- | --- | --- |
-| `market-lake` | `src/lake` | Separate acquisition, catalog, query, storage, HTTP and ACI execution capabilities, plus retained Python value libraries. The harness composes HTTP hosting and owns market-data reading. |
+| `market-lake` | `src/lake` | Separate acquisition, catalog, query, storage, HTTP and ACA execution capabilities, plus retained Python value libraries. The harness composes HTTP hosting and owns market-data reading. |
 | `quant-harness` | `src/harness` | Deterministic simulation, OMS and portfolio behavior, results, paper/shadow/live runtimes, and the shared read-only market-data reader/cache. Its API composes market-data HTTP hosting. |
 | `lakeclient` | `src/lakeclient` | Consumer-facing authenticated ensure, polling, file-query, and Parquet access without provider or Azure credentials. |
 | `thesis` | `src/thesis` | FCA research, workspace services, concrete tools/workflows, HTTP transport and application composition. |
@@ -296,7 +296,7 @@ The harness owns the read-only `market-reader` service. Native execution,
 HTTP read encoding and ingestion derivation share checksum/schema verification
 and bounded caches. `harness-lakeclient` composes availability, execution-scoped
 snapshots and signed Parquet transport; provider acquisition runs only in finite
-ACI workers. The harness API hosts the catalog/read/control HTTP capability at
+ACA workers. The harness API hosts the catalog/read/control HTTP capability at
 `/market-data`. Engine and authored-program contracts do not depend on Azure,
 provider clients or ingestion control. The current boundaries, job lifecycle,
 cache semantics and deployment cutover are specified in
@@ -315,7 +315,7 @@ operations, reference, tools, the coverage/catalog service machinery, and the
 top-level `app`/`crypto`/`options` modules); those directories now contain
 only their Rust crates where those capabilities remain. The unused Rust queue
 worker is now removed; ingestion execution is admitted through `lake-ingest-jobs`
-and performed by `lake-ingest-worker` in ACI.
+and performed by `lake-ingest-worker` in ACA.
 
 | Package | Responsibility |
 | --- | --- |
@@ -456,7 +456,7 @@ src/harness/
 `src/lake/` is a Cargo workspace at the product root whose `Cargo.toml` and the
 Python package `lake/` coexist, exactly as `src/harness/` does. The harness API
 composes its catalog, ensure, jobs, snapshot, read, reference, query and raw routes
-under `/market-data`; finite ACI workers execute provider ingestion. The `lake`
+under `/market-data`; finite ACA workers execute provider ingestion. The `lake`
 binary owns only explicit workstation-data cleanup. Its Python console shim
 discovers that binary through `LAKE_RUST_BINARY_DIR` and
 `src/lake/target/{release,debug}`.
@@ -495,7 +495,7 @@ src/lake/
 |-- query/                     Bounded file queries
 |-- reference/                 Reference snapshots and point-in-time classification
 |-- http/                      Axum boundary publishing the lake contract
-|-- ingest-jobs/               Durable admission, lease-fenced state and ACI reconciliation
+|-- ingest-jobs/               Durable admission, lease-fenced state and ACA reconciliation
 |-- ingest-worker/             Finite provider acquisition process
 |-- hosted/                    Azure adapter composition for harness-hosted market-data HTTP
 |-- local/                     Owned workstation data cleanup
@@ -885,7 +885,7 @@ real consumer.
 market data providers
         |
         v
-ACI ingestion workers --> Azure objects + catalog --> shared harness market-data reader
+ACA ingestion workers --> Azure objects + catalog --> shared harness market-data reader
                                       ^                         |
                                       |                         v
                          durable ingestion control       harness execution workers
@@ -895,11 +895,12 @@ live market feeds --> quant-harness paper/shadow/live runtime --> broker API
 ```
 
 The combined harness API publishes `/market-data` and owns no provider client.
-A separate small, digest-pinned image executes finite ACI ingestion jobs in Azure. Local mode uses filesystem adapters and content-pinned finite child workers through the same ingestion ports. Native execution receives catalog and reader access directly; HTTP serves separate clients.
+A separate small, digest-pinned image executes finite ACA ingestion jobs in Azure. Local mode uses filesystem adapters and content-pinned finite child workers through the same ingestion ports. Native execution receives catalog and reader access directly; HTTP serves separate clients.
 Resources, concurrent-worker limits and timeouts are configurable. The API scales to zero; a small scheduled coordination job runs the same
 dispatcher for unattended recovery. Active API replicas coordinate through the
-same dispatcher lease. Standalone lake API and scheduled
-Container Apps ingestion entrypoints are removed. GitHub Actions deploys the
+same dispatcher lease. The standalone lake API and retired scheduled ingestion
+entrypoint are removed; finite manual ACA Job executions now process disjoint
+partitions under each retained ingestion job ID. GitHub Actions deploys the
 current composition using OIDC, managed identities and environment-owned secrets.
 
 ## Delivery Rules
@@ -987,3 +988,20 @@ Hypothesis development 5.0.0 and research investigation 2.0.0 retain their exist
 phase flows, prompts and tool policies; research still has one critic. Old runtime
 records are rejected rather than inferred or upgraded. See
 [the bounded implementation contract](thesis-fixed-workflow-graph-plan.md).
+
+
+## Build and verification execution
+
+Actions classify changed paths into Python, harness Rust, lake Rust, UI, Bicep,
+and image/deployment inputs. Cross-workspace edges trigger both Rust jobs;
+mandated architecture and behavior suites remain in their owning jobs. UI-only
+changes skip backend images, and infrastructure-only releases reuse the deployed
+immutable image digests. Obsolete verification/image builds are cancellable;
+shared environment locks cover infrastructure mutations, smoke and retention.
+
+Docker images use registry-backed intermediate caches and manifest-based Cargo
+dependency layers. Filtered Python input trees reproduce the canonical wheel
+contents. The JIT uses a compiler/SDK/configuration identity-specific Cargo target
+under an exclusive lock, then copies the final library to an immutable generation;
+loaded libraries are never replaced by subsequent program compilation. Tests
+retain real compilation, ABI rejection, concurrency and provenance assertions.

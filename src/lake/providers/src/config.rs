@@ -85,9 +85,11 @@ impl ProviderConfig {
         }
         if self
             .requests_per_minute
-            .is_some_and(|requests| requests < 1)
+            .is_some_and(|requests| !(1..=10_000).contains(&requests))
         {
-            return Err(configuration("requests_per_minute must be at least 1"));
+            return Err(configuration(
+                "requests_per_minute must be between 1 and 10000",
+            ));
         }
         Ok(())
     }

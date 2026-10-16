@@ -4,32 +4,71 @@ use lake_contracts::{AssetClass, DataType, Date};
 use lake_ingest_jobs::{
     IngestionJobs, JobOwnership, JobPersistence, LocalConfig, WorkRequest, WorkerRunner,
 };
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::Duration,
+};
+
+#[derive(Default)]
+struct ProviderConcurrency {
+    active_kinds: Mutex<BTreeMap<String, usize>>,
+    parallel_partitions: AtomicBool,
+    changed: tokio::sync::Notify,
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn local_worker_publishes_all_datasets_and_retained_admission_survives_host_restart() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let provider = format!("http://{}", listener.local_addr().unwrap());
-    let fake=axum::Router::new().route("/{*path}",axum::routing::get(|axum::extract::Path(path):axum::extract::Path<String>,axum::extract::Query(params):axum::extract::Query<BTreeMap<String,String>>|async move{
+    let concurrency = Arc::new(ProviderConcurrency::default());
+    let fake=axum::Router::new().route("/{*path}",axum::routing::get(|
+        axum::extract::State(concurrency): axum::extract::State<Arc<ProviderConcurrency>>,
+        axum::extract::Path(path):axum::extract::Path<String>,
+        axum::extract::Query(params):axum::extract::Query<BTreeMap<String,String>>
+    |async move{
         let kind=path.rsplit('/').next().unwrap();
+        let entered = concurrency.changed.notified();
+        {
+            let mut active = concurrency.active_kinds.lock().unwrap();
+            *active.entry(kind.into()).or_default() += 1;
+            if active.len() >= 2 {
+                concurrency.parallel_partitions.store(true, Ordering::SeqCst);
+                concurrency.changed.notify_waiters();
+            }
+        }
+        if !concurrency.parallel_partitions.load(Ordering::SeqCst) {
+            let _ = tokio::time::timeout(Duration::from_secs(2), entered).await;
+        }
         let time=params.get("start").unwrap();
         let row=if kind=="trades"{serde_json::json!({"t":time,"p":100.5,"s":100,"x":"V","c":["@"],"i":1,"z":"C"})}else if kind=="quotes"{serde_json::json!({"t":time,"bp":100,"bs":100,"bx":"V","ap":101,"as":100,"ax":"V","c":[],"z":"C"})}else{serde_json::json!({"t":time,"o":100,"h":101,"l":99,"c":100.5,"v":100,"n":1,"vw":100.5})};
         let rows=if path.contains("/AAPL/"){serde_json::json!([row])}else{serde_json::json!({"AAPL":[row]})};
         let mut body=serde_json::Map::new();body.insert(kind.into(),rows);body.insert("next_page_token".into(),serde_json::Value::Null);
+        {
+            let mut active = concurrency.active_kinds.lock().unwrap();
+            let count = active.get_mut(kind).unwrap();
+            *count -= 1;
+            if *count == 0 { active.remove(kind); }
+        }
         axum::Json(serde_json::Value::Object(body))
-    }));
+    })).with_state(concurrency.clone());
     let server = tokio::spawn(async move { axum::serve(listener, fake).await.unwrap() });
     let dir = tempfile::tempdir().unwrap();
     let env_file = dir.path().join("provider.env");
-    std::fs::write(&env_file,format!("LAKE_PROVIDER__API_KEY=fake\nLAKE_PROVIDER__API_SECRET=fake\nLAKE_PROVIDER__BASE_URL={provider}\nLAKE_PROVIDER__REQUEST__MAX_CONCURRENCY=8\nLAKE_PROVIDER__REQUEST__REQUESTS_PER_MINUTE=100000\n")).unwrap();
+    std::fs::write(&env_file,format!("LAKE_PROVIDER__API_KEY=fake\nLAKE_PROVIDER__API_SECRET=fake\nLAKE_PROVIDER__BASE_URL={provider}\nLAKE_PROVIDER__REQUEST__MAX_CONCURRENCY=8\nLAKE_PROVIDER__REQUEST__REQUESTS_PER_MINUTE=10000\n")).unwrap();
     let layout = lake_local::LocalLayout::new(dir.path().join("data"));
     layout.initialize().unwrap();
     let configuration = LocalConfig {
         executable: env!("CARGO_BIN_EXE_lake-ingest-worker").into(),
         provider_env: Some(env_file),
         root: layout.root().into(),
-        max_workers: 1,
+        max_workers: 2,
         timeout_seconds: 60,
+        partition_days: 1,
+        session_concurrency: 2,
     };
     let store = lake_local::LocalJobStore::new(layout.root().into());
     let controller = IngestionJobs {
@@ -53,9 +92,19 @@ async fn local_worker_publishes_all_datasets_and_retained_admission_survives_hos
     );
     assert_eq!(first.unwrap().record.job_id, second.unwrap().record.job_id);
     controller.reconcile().await.unwrap();
-    controller.runner.start("local-worker").await.unwrap();
+    let partitions = store
+        .get("local-worker")
+        .await
+        .unwrap()
+        .partitions()
+        .unwrap();
+    assert_eq!(partitions.len(), 3);
+    assert!(partitions
+        .iter()
+        .all(|partition| partition.record.job_id == "local-worker"));
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     loop {
+        controller.reconcile().await.unwrap();
         let job = store.get("local-worker").await.unwrap();
         if job.terminal() {
             assert_eq!(
@@ -72,6 +121,23 @@ async fn local_worker_publishes_all_datasets_and_retained_admission_survives_hos
             layout.root()
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        concurrency.parallel_partitions.load(Ordering::SeqCst),
+        "independent finite worker processes must fetch different partitions concurrently"
+    );
+    for partition in &partitions {
+        let reference = partition.reference();
+        let persisted = store.get_work(&reference).await.unwrap();
+        assert!(persisted.terminal());
+        assert!(persisted.execution_deleted);
+        let log = layout
+            .root()
+            .join("ingestion/logs")
+            .join(format!("{}.log", reference.worker_key().unwrap()));
+        assert!(std::fs::read_to_string(log)
+            .unwrap()
+            .contains("worker_started"));
     }
     let catalog = Arc::new(lake_local::FileCatalog::new(
         layout.state_dir().join("catalog"),
@@ -219,6 +285,12 @@ async fn local_worker_publishes_all_datasets_and_retained_admission_survives_hos
             > 0
     );
     api.abort();
-    controller.runner.delete("local-worker").await.unwrap();
+    for partition in partitions {
+        controller
+            .runner
+            .delete(&partition.reference())
+            .await
+            .unwrap();
+    }
     server.abort();
 }

@@ -22,33 +22,6 @@ fn temp_dir(name: &str) -> PathBuf {
 }
 
 #[test]
-fn compile_failures_report_the_build_error() {
-    let directory = temp_dir("failure");
-    let workspace = ManagedWorkspace::open(&directory).expect("workspace");
-    let error =
-        compile(&workspace, "this is not rust", ProgramKind::Study).expect_err("must not compile");
-    match error {
-        harness_strategy_jit::JitError::Compile {
-            detail,
-            diagnostics,
-            ..
-        } => {
-            assert!(
-                !diagnostics.is_empty(),
-                "authored error must carry rustc JSON diagnostics"
-            );
-            assert_eq!(diagnostics[0]["level"], "error");
-            assert!(
-                detail.contains("error"),
-                "expected the compiler detail, got {detail}"
-            );
-        }
-        other => panic!("expected a compile failure, got {other:?}"),
-    }
-    let _ = std::fs::remove_dir_all(&directory);
-}
-
-#[test]
 fn an_empty_source_is_rejected_before_any_build() {
     let directory = temp_dir("empty-source");
     let workspace = ManagedWorkspace::open(&directory).expect("workspace");
@@ -61,10 +34,35 @@ fn an_empty_source_is_rejected_before_any_build() {
 }
 
 #[test]
-fn the_workspace_records_provenance_for_every_artifact() {
+fn compilation_load_cache_and_abi_rebuild_preserve_the_current_contract() {
     let directory = temp_dir("manifest");
     let workspace = ManagedWorkspace::open(&directory).expect("workspace");
+    let error =
+        compile(&workspace, "this is not rust", ProgramKind::Study).expect_err("must not compile");
+    match error {
+        harness_strategy_jit::JitError::Compile {
+            detail,
+            diagnostics,
+            ..
+        } => {
+            assert!(
+                !diagnostics.is_empty(),
+                "authored error must carry rustc JSON diagnostics: {detail}"
+            );
+            assert_eq!(diagnostics[0]["level"], "error");
+            assert!(
+                detail.contains("error"),
+                "expected the compiler detail, got {detail}"
+            );
+        }
+        other => panic!("expected a compile failure, got {other:?}"),
+    }
     let compiled = compile(&workspace, STUDY_SOURCE, ProgramKind::Study).expect("compile");
+    assert!(!compiled.cached);
+    let cached = compile(&workspace, STUDY_SOURCE, ProgramKind::Study).expect("cached compile");
+    assert!(cached.cached);
+    assert_eq!(cached.digest, compiled.digest);
+    assert_eq!(cached.artifact_path, compiled.artifact_path);
     let entries = workspace.read_manifest();
     let entry = entries.get(&compiled.digest).expect("manifest entry");
     assert_eq!(entry.kind, "study");
@@ -148,13 +146,6 @@ fn the_workspace_records_provenance_for_every_artifact() {
     assert_eq!(metrics["study_missing_count"], "1");
     assert_eq!(metrics["study_bar_mismatches"], "0");
     drop(runtime);
-    let _ = std::fs::remove_dir_all(&directory);
-}
-
-#[test]
-fn persisted_raw_bar_study_source_fails_to_build() {
-    let directory = temp_dir("old-study-source");
-    let workspace = ManagedWorkspace::open(&directory).expect("workspace");
     let old_source = STUDY_SOURCE.replace(
         "fn on_bar(&mut self, frame: &BarFrame, _: &mut ObservationContext)",
         "fn on_bar_frame(&mut self, frame: &BarFrame)",
@@ -170,43 +161,17 @@ fn persisted_raw_bar_study_source_fails_to_build() {
         }
         other => panic!("expected compile failure, got {other:?}"),
     }
-    let _ = std::fs::remove_dir_all(&directory);
-}
-
-#[test]
-fn a_matching_manifest_is_a_cache_hit() {
-    let directory = temp_dir("cache-hit");
-    let workspace = ManagedWorkspace::open(&directory).expect("workspace");
-    let first = compile(&workspace, STUDY_SOURCE, ProgramKind::Study).expect("initial compile");
-    assert!(!first.cached);
-    let second = compile(&workspace, STUDY_SOURCE, ProgramKind::Study).expect("cached compile");
-    assert!(second.cached);
-    assert_eq!(second.digest, first.digest);
-    assert_eq!(second.artifact_path, first.artifact_path);
-    assert_eq!(
-        second.sdk_version,
-        harness_strategy_sdk::SDK_VERSION.to_string()
-    );
-    let _ = std::fs::remove_dir_all(&directory);
-}
-
-#[test]
-fn an_older_manifest_abi_version_forces_a_rebuild() {
-    let directory = temp_dir("stale-abi");
-    let workspace = ManagedWorkspace::open(&directory).expect("workspace");
-    let first = compile(&workspace, STUDY_SOURCE, ProgramKind::Study).expect("initial compile");
-    assert!(!first.cached);
-
     let mut entries = workspace.read_manifest();
-    let entry = entries.get_mut(&first.digest).expect("manifest entry");
+    let entry = entries.get_mut(&compiled.digest).expect("manifest entry");
     entry.sdk_abi_version = harness_strategy_sdk::SDK_ABI_VERSION - 1;
     workspace.write_manifest(&entries).expect("manifest write");
 
     let rebuilt = compile(&workspace, STUDY_SOURCE, ProgramKind::Study).expect("rebuild");
     assert!(!rebuilt.cached);
-    assert_eq!(rebuilt.digest, first.digest);
+    assert_eq!(rebuilt.digest, compiled.digest);
+    assert_ne!(rebuilt.artifact_path, compiled.artifact_path);
     let entries = workspace.read_manifest();
-    let entry = entries.get(&first.digest).expect("manifest entry");
+    let entry = entries.get(&compiled.digest).expect("manifest entry");
     assert_eq!(entry.sdk_abi_version, harness_strategy_sdk::SDK_ABI_VERSION);
     let _ = std::fs::remove_dir_all(&directory);
 }

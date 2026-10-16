@@ -2393,6 +2393,7 @@ name = "lake-ingestion"
 version = "0.1.0"
 dependencies = [
  "arrow-array 59.3.0",
+ "arrow-schema 59.3.0",
  "async-trait",
  "axum",
  "bytes",
@@ -2423,11 +2424,13 @@ dependencies = [
  "lake-contracts",
  "lake-ingest-jobs",
  "lake-storage",
+ "libc",
  "serde",
  "serde_json",
  "sha2",
  "tempfile",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

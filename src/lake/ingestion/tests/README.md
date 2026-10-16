@@ -4,3 +4,5 @@ Tests exercise the public application and acquisition boundaries; fake transport
 
 - `bars.rs` — Regression coverage for provider-bar session grouping.
 - `options_delta.rs` — Pure numerical model checks complement the HTTP option-selection behavior suite.
+
+- `columnar.rs` — All-six tick-schema transaction round trips through the canonical writer and verified reader; exact decimals, unsigned IDs, nullable values, deterministic ordering, and fetch progress during publication.

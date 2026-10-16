@@ -3,7 +3,7 @@
 ## Status
 
 The source implements one harness-hosted HTTP composition, a shared read-only
-reader, durable local/ACI ingestion, native catalog access, and snapshot/cache reuse. Azure rollout is a
+reader, durable partitioned local/ACA ingestion, native catalog access, and snapshot/cache reuse. Azure rollout is a
 separate release operation; source verification is not proof of deployment.
 
 ## Boundaries
@@ -14,7 +14,7 @@ separate release operation; source verification is not proof of deployment.
 | Harness data acquisition adapter | `src/harness/lakeclient` | Ensure/wait policy, execution-scoped manifest pinning, signed-object transport, progress, and reference/option API calls. |
 | Catalog and availability | `src/lake/catalog`, `coverage`, `query` | Classify committed data and plan availability. No provider work occurs during reads. |
 | HTTP | `src/lake/http` | Authenticated catalog, admission, snapshot, read and reference routes, composed under the harness API's `/market-data` prefix. |
-| Ingestion execution control | `src/lake/ingest-jobs` | Conditional durable admission, immutable worker specifications, lease-fenced job state, ACI reconciliation and aggregate worker limits. |
+| Ingestion execution control | `src/lake/ingest-jobs` | Conditional durable admission, immutable worker specifications, lease-fenced job state, ACA execution reconciliation and aggregate worker limits. |
 | Finite ingestion process | `src/lake/ingest-worker` | Claim one job, fetch provider secrets using its identity, run shared transactions, publish progress/results, settle and exit. |
 | Provider acquisition/publication | `src/lake/providers`, `ingestion`, `storage` | Provider paging/governance, staging, canonical Parquet writing and symbol-day publication leases. |
 | Local deployment adapters | `src/lake/local` | Partition-indexed filesystem catalog, durable job documents, kernel ownership and content-pinned finite worker processes. |
@@ -59,89 +59,117 @@ object has been replaced, an old snapshot can use previously verified cached
 bytes; otherwise checksum validation rejects the replacement. A snapshot pins
 content identity, not perpetual retention of historical objects.
 
-## Durable ingestion
+## Durable partitioned ingestion
 
-`EnsureSubmission` retains immutable requests; `EnsureJob` is the worker's fresh
-gap plan. The admission port never accepts mutable progress/gap selections.
-Admission atomically creates `ingestion/jobs/<job_id>.json` with immutable work
-and a digest-pinned worker image, destination, identity, resource allocation,
-timeout and non-secret environment. Identical requests join the retained ID;
-different requests conflict. The document is the job authority, rather than a
-second Table projection. Terminal outcomes are immutable.
+Admission retains immutable requests and the accepted executor specification in
+`ingestion/jobs/<job_id>.json`. Identical inputs join the retained execution;
+different inputs conflict and terminal outcomes are immutable. Option selection
+is one standalone operation; dataset batches may contain multiple requirements.
+The API admits and observes work without fetching provider data.
 
-Ensure returns satisfied coverage or immediate queued acceptance. The acceptance
-`Location` resolves relative to the admission route, preserving the host's
-`/market-data` mount prefix. An optional
-explicit `job_id` on ensure and option resolution permits an intentional fresh
-attempt without overwriting a failed job. Ordinary repeated requests join the
-canonical ID. Callers retain IDs and own waiting; option selection may return
-202 while its provider acquisition runs externally.
+The planner deterministically divides dataset date ranges into disjoint calendar
+partitions (seven days by default). Each partition keeps the original execution
+`job_id` and an internal content-derived partition key. Its authoritative state
+lives at `ingestion/partitions/<job_id>/<key>.json`. These are work identities,
+not additional execution job IDs. The root plan and every partition document
+are durable before any external start. Partition size and worker specifications
+remain immutable after admission.
 
-Every API replica may reconcile, but one renewable dispatcher lease controls
-admission to the shared worker budget. Dispatch intent is saved before an ACI
-mutation. Group names derive from retained IDs. Ambiguous starts are inspected
-at that resource identity, never replayed under a replacement ID. Lifecycle metadata
-is written atomically with each authoritative document; listing it avoids downloading
-completed history and limits queued-document reads to available worker slots. Worker leases
-fence progress and settlement. After a process restart, workers recalculate
-remaining gaps from committed coverage. A missing group for already-running
-work becomes a visible failure rather than an automatic replay.
+A renewable dispatcher lease bounds the aggregate fleet across all API replicas
+and the scheduled coordinator. Existing partition records are read with bounded
+storage concurrency; conditional creation happens only for absent work. Workers
+own separate partition leases, so a long plan can execute in several containers
+without sharing a mutable progress document. The coordinator aggregates session
+progress, failures, completion and cleanup onto the original job. Each worker
+rechecks committed coverage before executing its accepted partition.
 
-ACI deletion is asynchronous: a group occupies its slot until Azure confirms
-its absence. Terminal groups are removed. Worker and reconciler deadlines bound
-execution; failed/lost ownership stops settlement. Provider request and in-flight
-ceilings are divided across the configured worker count. Old worker budgets
-drain conservatively when deployment configuration changes.
+Azure uses manual ACA Job executions of `<quant-api-name>-ingest`; local mode
+uses content-pinned finite child processes through the same ports. Dispatch
+intent precedes the non-idempotent ACA start POST. A lost acknowledgement is
+reconciled by the existing execution template's exact job, partition and image
+attribution. It never authorizes another POST. Missing/running work times out
+visibly; a replacement worker cannot replay a partition already marked running.
+Duplicate/conflicting admission, mismatched acknowledgements and lost leases
+remain executable behavior contracts. Terminal execution history is retained;
+active replicas are stopped before their occupied slots are released.
+
+The provider governor acquires its fleet permit after its adaptive in-flight
+lane and before each transport attempt, including retries. One shared rolling
+10,000-request/minute reservation authority is scoped by a non-secret hash of
+the endpoint and credentials. Azure uses conditional Blob ETags and the storage
+service's HTTP Date; local processes use kernel-locked atomic files and shared
+OS monotonic uptime. A local reboot holds capacity for a full window. Worker
+permit lifetimes use monotonic time anchored before the reservation RPC, so
+delayed responses cannot extend grants. Workers reserve short batches of permits. Unused,
+expired and ambiguously acknowledged grants remain charged through sixty seconds
+after their last permitted use; restart never refunds possible provider requests.
+Budget errors fail closed. There is no fixed division by maximum worker count,
+so idle slots do not strand another worker's budget. Local and Azure have
+independent authorities and must not ingest simultaneously with the same Alpaca
+allowance; this is the operator's current execution policy.
+
+Provider decoding returns typed records. Ingestion validates and canonically
+orders them, then builds Arrow batches directly with exact decimal values.
+Storage accepts only the pinned schema and serializes canonical Parquet; no JSON
+row normalization facade remains. A shared CPU-stage semaphore bounds blocking
+validation, encoding and publication, while bounded sessions overlap provider
+I/O. No per-column or per-pass thread fan-out multiplies with concurrent sessions.
 
 ## Deployment and cutover
 
-The combined quant API hosts `/market-data`; the standalone lake API and old
-scheduled Container Apps ingestion job are retired through `deploy-main.yml`.
-There is no inline API-owned ingestion or standalone local lake service. Local mode runs the same finite worker against filesystem ports; Azure mode dispatches ACI.
-The unused Azure Queue worker, option queue payloads and enqueue interfaces
-are removed; Blob-backed admission is the only ingestion execution controller.
-`lake local reset --yes` remains explicit cleanup of an owned development tree.
+The combined quant API hosts `/market-data` at 1 vCPU / 2 GiB. Azure's finite
+ingestion Job uses the narrow worker image at 4 vCPU / 8 GiB on Consumption,
+with platform replica retries disabled. Defaults are eight concurrent worker
+executions, two sessions per worker, seven-day partitions and an 86,400-second
+execution deadline. Bicep exposes `ingestionMaxWorkers`,
+`ingestionSessionConcurrency`, `ingestionPartitionDays`, `ingestionCpu`,
+`ingestionMemoryGiB`, `ingestionTimeoutSeconds` and `ingestionImageReference`.
+Runtime controls are the corresponding `LAKE_INGEST_*` settings; the job name,
+worker identity, image, resource group and provider Key Vault are explicit inputs.
 
-The dedicated ingestion image contains the worker and non-secret market-lake
-configuration, without the JIT toolchain or DuckDB. ACI pulls it using the
-ingester identity and retrieves provider secrets directly from Key Vault.
-The combined host's cargo-chef recipe includes manifests from both Rust
-workspaces, with the harness lockfile authoritative. All local crates are
-skeletonized together during dependency cooking, then restored from current
-sources. This keeps the cross-workspace reader dependency buildable and allows
-source-only changes to reuse native dependency layers.
-The dispatcher has Container Instances administration in its resource group and
-identity-assignment permission scoped to the ingester identity. Updating the
-conditioned GitHub deployer's role allow-list requires the repository's authorized
-OIDC bootstrap before the first deployment with these assignments.
-The subscription must also have `Microsoft.ContainerInstance` registered;
-the release checks this before retiring workloads. Subscription provider
-registration stays an operator responsibility, outside the deployer grant.
+The coordinator and API use the quant identity for control. The worker uses the
+separately declared runtime identity attached to the ACA Job; coordinator identity
+configuration must never override it. The worker retrieves its two provider
+secrets concurrently and caches resource-specific ACA managed-identity tokens.
+No credentials enter durable work or command arguments.
 
-Defaults are 4 vCPU, 8 GiB, two concurrent groups and an 86,400-second timeout.
-Bicep exposes `ingestionImageReference`, `ingestionCpu`, `ingestionMemoryGb`,
-`ingestionMaxWorkers` and `ingestionTimeoutSeconds`. Runtime equivalents are
-`LAKE_INGEST_IMAGE`, `LAKE_INGEST_CPU`, `LAKE_INGEST_MEMORY_GB`,
-`LAKE_INGEST_MAX_WORKERS` and `LAKE_INGEST_TIMEOUT_SECONDS`; destination,
-identity, registry and Key Vault settings are explicit deployment inputs.
-Larger ACI allocations depend on regional quota. The quant API uses 1 vCPU and
-2 GiB per replica and scales to zero. A scheduled 0.25-vCPU/0.5-GiB coordination job
-runs the same dispatcher once per minute, while active APIs also reconcile for
-fast dispatch. It never acquires provider data; ingestion compute runs only in
-finite ACI groups. The coordination job has its own small execution cost.
+The 0.25-vCPU / 0.5-GiB scheduled coordinator remains provider-free, reconciling
+once per minute when the API is scaled to zero. Active APIs reconcile every two
+seconds; local processes reconcile at 250 milliseconds. Caller-owned observation
+caps polling at 500 milliseconds. The coordinator receives Jobs Operator access;
+the retired ACI administration and identity-attachment grants are removed at
+operator cutover. Conditioned GitHub deployer role changes require the authorized
+OIDC bootstrap before recurring releases can create the new grant.
 
-Existing canonical Parquet and coverage records are retained. Readers reject
-outdated metadata rather than reconstruct checksums. The new job authority uses
-a fresh prefix; retired API process-owned job records are not interpreted or
-upgraded. The cutover stops retired writers before deploying the new host.
+ACA replaces the ACI adapter completely. Old ACI job documents are obsolete and
+must be drained and deleted before deploying current writers. There is no old
+executor decoder or runtime migration. Canonical Parquet and coverage remain
+unchanged, including byte-identical output for the retained replay benchmark.
+Local reset remains an explicit marker-protected operation; reads never delete
+or upgrade outdated data.
 
-`HARNESS_MARKET_DATA_MODE` selects the complete deployment: `local` defaults to filesystem adapters and finite local processes; `azure` requires explicit Azure storage/identity/ACI inputs. The workstation launcher builds optimized binaries and starts the complete local harness. To use Azure, local Thesis/UI select the entire remote harness.
+`HARNESS_MARKET_DATA_MODE` selects the complete local or Azure composition.
+Local mode needs no Azure service. Local Thesis/UI can select the entire remote
+harness instead. Native execution receives catalog/acquisition and reader ports
+directly; HTTP and signed object URLs serve separate clients. Worker binaries are
+content-pinned locally, and per-record catalog writes avoid whole-catalog rewrites.
 
-Native HTTP/MCP execution receives catalog/acquisition and object ports directly through `MarketAccess`. There are no self-HTTP reads, ensures, reference queries or option resolution. Separate execution containers and clients explicitly configure the remote control URL; the standalone client defaults to the local combined endpoint. `/v1/read` is removed because it had no production consumer. Remote readers obtain pinned manifests and compressed objects; local download URLs are path-scoped, expiry-bounded HMAC capabilities.
+The shared reader prepares up to two partitions ahead while visiting batches in
+snapshot order. Four global preparation slots and a separate speculative budget
+protect required head reads. Flight coalescing, checksum/schema/row validation,
+bounded disk and decoded caches, and oversized streaming remain shared across
+native execution, HTTP clients and bar derivation. Objects above 64 MiB compressed
+are read only as required heads, keeping large payloads out of speculative memory.
+Cancellation drops speculative
+source futures and closes decode channels without retaining a multi-year snapshot.
 
-Local job and publication ownership uses kernel locks, released automatically on process death. Worker executables are pinned under the owned data root by content hash, so admitted jobs retain the accepted binary and running workers do not lock the build output. Per-record atomic catalog files isolate concurrent publications and avoid whole-catalog rewrites. Local/provider credentials never enter durable job specifications.
-
-Azure registration and the conditioned OIDC bootstrap are completed. The combined Azure host and finite ACI execution are deployed and verified against real trades, quotes and bars. The provider-free coordinator is named `<quant-api-name>-dispatch`, within ACA job naming limits.
+The finite ingestion image contains neither Python, JIT tools nor DuckDB. Docker
+cooks complete symmetric cross-workspace Cargo recipes into stable dependency
+layers before restoring sources. The harness branch can reuse compatible lake
+artifacts without sharing mutable target mounts with concurrent branches. Python
+image inputs preserve the canonical wheel contents while excluding unrelated UI
+and non-SDK Rust source. Registry-backed intermediate caches isolate image builds
+from Actions' dependency-cache storage allowance.
 
 ## Executable verification
 
@@ -176,4 +204,4 @@ Empty Blob and lease PUTs explicitly send `Content-Length: 0`, as required by Az
 
 The synchronous Blob and Table SDK bridges yield multithreaded Tokio scheduler workers while waiting for their dedicated SDK executors. A one-worker API must remain live while storage operations and shared credential I/O complete. The SDK HTTP concurrency behavior tests run on a single Tokio worker and verify overlapping operations with independent outcomes.
 
-The Linux runtime supplies a writable local data root and the bundled worker path. Local signed-object transport accepts an explicit public base URL for forwarded ports and LAN clients. The ingestion image imports the shared build cache as well as its own cache, retaining the narrow runtime image while reusing already-built worker artifacts.
+The Linux runtime supplies a writable local data root and the bundled worker path. Local signed-object transport accepts an explicit public base URL for forwarded ports and LAN clients. The ingestion image imports the shared registry cache as well as its own cache, retaining the narrow runtime image while reusing already-built worker artifacts.

@@ -1,5 +1,5 @@
 //! Finite coordination process: reconcile durable work without acquiring provider data.
-use lake_ingest_jobs::{AciConfig, AciRunner, IngestionJobs, JobStore};
+use lake_ingest_jobs::{AcaConfig, AcaRunner, IngestionJobs, JobStore};
 use std::{collections::BTreeMap, sync::Arc};
 
 #[tokio::main]
@@ -26,7 +26,7 @@ async fn main() {
                 format!("https://{account}.blob.core.windows.net/{container}"),
                 credential.clone(),
             )?,
-            runner: AciRunner::new(AciConfig::from_environment(&env)?, credential)?,
+            runner: AcaRunner::new(AcaConfig::from_environment(&env)?, credential)?,
         };
         jobs.reconcile().await
     }
