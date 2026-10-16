@@ -174,6 +174,11 @@ image inputs preserve the canonical wheel contents while excluding unrelated UI
 and non-SDK Rust source. Registry-backed intermediate caches isolate image builds
 from Actions' dependency-cache storage allowance.
 
+The harness dependency cook is an immutable `harness-deps` stage. Runtime Cargo
+files come from that stage and Rustup from `rust-base`, never from a source build
+that mutates toolchain/cache metadata. Linked payload copies keep unrelated image
+layers reusable when an earlier payload changes.
+
 ## Executable verification
 
 - `harness/market-reader/tests/snapshots.rs`: content identities, corruption
