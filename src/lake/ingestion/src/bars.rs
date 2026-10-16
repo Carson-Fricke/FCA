@@ -5,13 +5,14 @@
 //! Bars are session-aligned OHLCV with exact decimals end to end:
 //!
 //! * **Daily** (`1d`) buckets equal one exchange session, `[open, close]`
-//!   inclusive. The row timestamp is the session open in UTC, so an equity
+//!   inclusive for equities and `[open, close)` for crypto UTC days. The row timestamp is the session open in UTC, so an equity
 //!   daily row is stamped 14:30Z (13:30Z on early closes) and a crypto daily
 //!   row is stamped 00:00Z.
 //! * **1-minute** (`1min`) buckets are session-open-aligned minute windows.
 //!   Bucket `k` starts at `open + k * 60s`; a trade stamped exactly at the
 //!   session close belongs to the final window, so the union of the windows
-//!   covers `[open, close]` inclusively with no orphaned closing print.
+//!   covers the equity session inclusively with no orphaned closing print.
+//!   Crypto midnight belongs to the following UTC day.
 //!
 //! XNYS sessions come from the lake session calendars and crypto sessions are
 //! UTC calendar days, exactly as the coverage planner produces them. Provider
@@ -21,7 +22,8 @@
 //! by construction. Provider bars are start-stamped, so a provider session is
 //! the half-open `[open, close)` window: the row stamped exactly at the close
 //! starts the following extended-hours period and never belongs to the
-//! session, while event prints keep the closed `[open, close]` window.
+//! session. Equity event prints keep the closed `[open, close]` window;
+//! crypto event prints belong to half-open UTC days.
 //! Derived bars aggregate the stored trades in the canonical
 //! trade sort order, so the OHLCV is deterministic and independent of trade
 //! arrival order: open is the first trade price, high/low are the running
@@ -36,8 +38,8 @@
 //! (empty or permanently unsupported old ranges) are derived from the stored
 //! trade partitions for those sessions; a session whose trades cannot be read
 //! publishes error coverage. Empty sessions still write a valid empty Parquet
-//! object with terminal `empty` coverage. Every object and coverage row of the
-//! run publishes through exactly one atomic commit.
+//! object with terminal `empty` coverage. Acquisition is batched over the
+//! window; each session publishes through one atomic symbol-day commit.
 
 use std::sync::Arc;
 
@@ -262,8 +264,8 @@ impl BarsIngestTransaction {
     /// Provider bars are used wherever the provider returns them; a session
     /// with no provider bars falls back to stored-trade derivation after the
     /// caller has ensured trades for the window. Per-session failures surface
-    /// as error coverage and never fail the run; the single commit carries
-    /// every staged object and every coverage row.
+    /// as error coverage. Each session's object and coverage publish atomically;
+    /// a persistence failure propagates without replaying earlier publications.
     pub async fn run(
         &self,
         asset_class: AssetClass,
@@ -442,7 +444,47 @@ impl BarsIngestTransaction {
                 return Err(error);
             }
         }
-        let outcome = self.committer.commit(&staged, &result.coverage);
+        // A range fetch can span many sessions, but the publication/lease unit
+        // is one symbol-day. Validate the full mapping before publishing any
+        // day, then move its payload into its one commit without cloning bytes.
+        let mut objects = std::collections::BTreeMap::new();
+        for object in staged {
+            if objects
+                .insert(object.metadata.path.clone(), object)
+                .is_some()
+            {
+                return Err(DataError::value("bars staged a duplicate partition"));
+            }
+        }
+        let mut dates = std::collections::BTreeSet::new();
+        for record in &result.coverage {
+            if !dates.insert(record.session_date) {
+                return Err(DataError::value("bars coverage repeats a session"));
+            }
+            if let Some(path) = &record.object_path {
+                if !objects.contains_key(path) {
+                    return Err(DataError::value("bars coverage has no staged object"));
+                }
+            }
+        }
+        if objects.len()
+            != result
+                .coverage
+                .iter()
+                .filter(|record| record.object_path.is_some())
+                .count()
+        {
+            return Err(DataError::value("bars staged an unreferenced object"));
+        }
+        let outcome = result.coverage.iter().try_for_each(|record| {
+            let object: Vec<_> = record
+                .object_path
+                .as_ref()
+                .and_then(|path| objects.remove(path))
+                .into_iter()
+                .collect();
+            self.committer.commit(&object, std::slice::from_ref(record))
+        });
         self.writer.reset_staged();
         outcome?;
         Ok(result)
@@ -562,7 +604,7 @@ pub fn derive_equity_bars(
     aggregate_bars(symbol, &points, interval, session)
 }
 
-/// Derive crypto session bars from stored trades.
+/// Derive crypto UTC-day bars, excluding the following day's midnight.
 pub fn derive_crypto_bars(
     symbol: &str,
     trades: &[CryptoTradeRecord],
@@ -573,6 +615,9 @@ pub fn derive_crypto_bars(
     normalized.sort_by(compare_crypto_trades);
     let points: Vec<TradePoint> = normalized
         .iter()
+        // Crypto owns [UTC midnight, next midnight); equity retains its
+        // inclusive closing auction convention in the shared aggregator.
+        .filter(|trade| trade.timestamp != session.close_time)
         .map(|trade| TradePoint {
             timestamp: trade.timestamp,
             price: trade.price,

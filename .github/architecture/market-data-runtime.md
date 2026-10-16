@@ -68,7 +68,7 @@ is one standalone operation; dataset batches may contain multiple requirements.
 The API admits and observes work without fetching provider data.
 
 The planner deterministically divides dataset date ranges into disjoint calendar
-partitions (seven days by default). Each partition keeps the original execution
+partitions (31 days by default). Each partition keeps the original execution
 `job_id` and an internal content-derived partition key. Its authoritative state
 lives at `ingestion/partitions/<job_id>/<key>.json`. These are work identities,
 not additional execution job IDs. The root plan and every partition document
@@ -118,17 +118,29 @@ row normalization facade remains. A shared CPU-stage semaphore bounds blocking
 validation, encoding and publication, while bounded sessions overlap provider
 I/O. No per-column or per-pass thread fan-out multiplies with concurrent sessions.
 
+Publication remains atomic within one symbol/day. Competing dataset writers wait
+up to 75 seconds for that publication lease before any mutation; only acquisition
+conflicts are retried. Publication, provider acquisition and uncertain ACA starts
+are never replayed by this wait. Bar ingestion keeps its bounded range fetch and
+publishes each session separately rather than attempting a multi-day commit under
+one symbol/day lease. Closed crypto days use half-open tick membership
+`[open, close)` so adjacent days cannot duplicate a midnight event; an unfinished
+day includes its current query endpoint when that endpoint precedes the close.
+
 ## Deployment and cutover
 
 The combined quant API hosts `/market-data` at 1 vCPU / 2 GiB. Azure's finite
 ingestion Job uses the narrow worker image at 4 vCPU / 8 GiB on Consumption,
 with platform replica retries disabled. Defaults are eight concurrent worker
-executions, two sessions per worker, seven-day partitions and an 86,400-second
+executions, two sessions per worker, 31-day partitions and an 86,400-second
 execution deadline. Bicep exposes `ingestionMaxWorkers`,
 `ingestionSessionConcurrency`, `ingestionPartitionDays`, `ingestionCpu`,
 `ingestionMemoryGiB`, `ingestionTimeoutSeconds` and `ingestionImageReference`.
 Runtime controls are the corresponding `LAKE_INGEST_*` settings; the job name,
 worker identity, image, resource group and provider Key Vault are explicit inputs.
+The partition default amortizes worker startup over month/year requests. Smaller
+partitions favor short-plan fan-out; larger partitions reduce startup waves for
+bulk history. Changing the setting affects new admissions only.
 
 The coordinator and API use the quant identity for control. The worker uses the
 separately declared runtime identity attached to the ACA Job; coordinator identity

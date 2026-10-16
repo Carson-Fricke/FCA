@@ -3,7 +3,8 @@
 use std::sync::{Arc, Mutex};
 
 use arrow_array::{
-    Array, Decimal128Array, Int64Array, ListArray, RecordBatch, StringArray, UInt64Array,
+    Array, Decimal128Array, Int64Array, ListArray, RecordBatch, StringArray,
+    TimestampNanosecondArray, UInt64Array,
 };
 use futures_util::future::BoxFuture;
 use harness_market_reader::{
@@ -227,19 +228,23 @@ async fn read(
     data_type: DataType,
     symbol: &str,
 ) -> RecordBatch {
+    read_at(published, asset, data_type, symbol, date()).await
+}
+async fn read_at(
+    published: &Published,
+    asset: AssetClass,
+    data_type: DataType,
+    symbol: &str,
+    session_date: Date,
+) -> RecordBatch {
+    let path =
+        lake_contracts::partition_path(session_date, asset, data_type, None, symbol).unwrap();
     let metadata = published
         .0
         .lock()
         .unwrap()
         .iter()
-        .find(|o| {
-            o.metadata
-                .path
-                .contains(&format!("data_type={}/", data_type.value()))
-                && o.metadata
-                    .path
-                    .contains(&format!("asset_class={}/", asset.value()))
-        })
+        .find(|o| o.metadata.path == path)
         .unwrap()
         .metadata
         .clone();
@@ -248,12 +253,12 @@ async fn read(
             asset_class: asset.value().into(),
             data_type: data_type.value().into(),
             symbol: symbol.into(),
-            start_date: date().isoformat(),
-            end_date: date().isoformat(),
+            start_date: session_date.isoformat(),
+            end_date: session_date.isoformat(),
             interval: None,
         },
         vec![Partition {
-            session_date: date().isoformat(),
+            session_date: session_date.isoformat(),
             object_path: metadata.path,
             checksum: metadata.checksum,
             row_count: metadata.rows,
@@ -391,6 +396,197 @@ async fn transactions_publish_exact_canonical_arrow_for_every_tick_schema() {
     )
     .await;
     exact(&option_quote, "ask_price", "2.1");
+}
+
+struct CryptoBoundaryProvider {
+    timestamps: Vec<DateTime>,
+    requests: Mutex<Vec<(DateTime, DateTime)>>,
+}
+
+impl CryptoDataProvider for CryptoBoundaryProvider {
+    fn fetch_crypto_trades<'a>(
+        &'a self,
+        symbols: &'a [String],
+        start: DateTime,
+        end: DateTime,
+    ) -> BoxFuture<'a, Result<Vec<NormalizedCryptoTrade>, ProviderError>> {
+        Box::pin(async move {
+            self.requests.lock().unwrap().push((start, end));
+            let template = Provider
+                .fetch_crypto_trades(symbols, start, end)
+                .await?
+                .remove(0);
+            Ok(self
+                .timestamps
+                .iter()
+                .filter(|&&t| t >= start && t <= end)
+                .map(|&timestamp| NormalizedCryptoTrade {
+                    timestamp,
+                    ..template.clone()
+                })
+                .collect())
+        })
+    }
+
+    fn fetch_crypto_quotes<'a>(
+        &'a self,
+        symbols: &'a [String],
+        start: DateTime,
+        end: DateTime,
+    ) -> BoxFuture<'a, Result<Vec<NormalizedCryptoQuote>, ProviderError>> {
+        Box::pin(async move {
+            self.requests.lock().unwrap().push((start, end));
+            let template = Provider
+                .fetch_crypto_quotes(symbols, start, end)
+                .await?
+                .remove(0);
+            Ok(self
+                .timestamps
+                .iter()
+                .filter(|&&t| t >= start && t <= end)
+                .map(|&timestamp| NormalizedCryptoQuote {
+                    timestamp,
+                    ..template.clone()
+                })
+                .collect())
+        })
+    }
+}
+
+#[derive(Default)]
+struct CryptoPublished(Published);
+
+impl AtomicIngestCommitter for CryptoPublished {
+    fn commit(
+        &self,
+        objects: &[StagedParquetObject],
+        coverage: &[CoverageRecord],
+    ) -> Result<(), DataError> {
+        assert_eq!(objects.len(), coverage.len());
+        for (object, row) in objects.iter().zip(coverage) {
+            assert_eq!(object.metadata.rows, row.row_count);
+        }
+        self.0 .0.lock().unwrap().extend_from_slice(objects);
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn crypto_ticks_publish_midnight_once_and_keep_the_partial_fetch_end() {
+    let first = session();
+    let next = CoverageSession {
+        session_date: first.session_date.add_days(1),
+        open_time: first.close_time,
+        close_time: DateTime::midnight(first.session_date.add_days(2)),
+        is_partial: false,
+    };
+    let provider = Arc::new(CryptoBoundaryProvider {
+        timestamps: vec![first.open_time, first.close_time, next.close_time],
+        requests: Mutex::new(Vec::new()),
+    });
+    let published = Arc::new(CryptoPublished::default());
+    for day in [&first, &next] {
+        let result = CryptoIngestTransaction::new(
+            provider.clone(),
+            Arc::new(StagingPartitionWriter::new()),
+            published.clone(),
+        )
+        .run("BTC/USD", day, None)
+        .await
+        .unwrap();
+        assert!(result
+            .coverage
+            .iter()
+            .all(|row| row.row_count == 1 && row.status == CoverageStatus::Complete));
+        for data_type in [DataType::Trade, DataType::Quote] {
+            let batch = read_at(
+                &published.0,
+                AssetClass::Crypto,
+                data_type,
+                "BTC/USD",
+                day.session_date,
+            )
+            .await;
+            assert_eq!(batch.num_rows(), 1);
+            assert_eq!(
+                batch
+                    .column_by_name("timestamp")
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<TimestampNanosecondArray>()
+                    .unwrap()
+                    .value(0),
+                day.open_time.to_nanos()
+            );
+        }
+    }
+    assert_eq!(
+        *provider.requests.lock().unwrap(),
+        vec![
+            (first.open_time, first.close_time),
+            (first.open_time, first.close_time),
+            (next.open_time, next.close_time),
+            (next.open_time, next.close_time),
+        ]
+    );
+
+    let query_end = DateTime::from_micros(first.open_time.micros() + 1_000_000);
+    let provider = Arc::new(CryptoBoundaryProvider {
+        timestamps: vec![query_end],
+        requests: Mutex::new(Vec::new()),
+    });
+    let published = Arc::new(CryptoPublished::default());
+    let partial = CoverageSession {
+        is_partial: true,
+        ..first
+    };
+    let result = CryptoIngestTransaction::new(
+        provider.clone(),
+        Arc::new(StagingPartitionWriter::new()),
+        published.clone(),
+    )
+    .with_clock(Arc::new(move || query_end))
+    .run("BTC/USD", &partial, None)
+    .await
+    .unwrap();
+    assert!(result
+        .coverage
+        .iter()
+        .all(|row| row.row_count == 1 && row.status == CoverageStatus::Partial));
+    assert_eq!(
+        *provider.requests.lock().unwrap(),
+        vec![(first.open_time, query_end); 2]
+    );
+    for data_type in [DataType::Trade, DataType::Quote] {
+        let batch = read(&published.0, AssetClass::Crypto, data_type, "BTC/USD").await;
+        assert_eq!(
+            batch
+                .column_by_name("timestamp")
+                .unwrap()
+                .as_any()
+                .downcast_ref::<TimestampNanosecondArray>()
+                .unwrap()
+                .value(0),
+            query_end.to_nanos()
+        );
+    }
+
+    let result = CryptoIngestTransaction::new(
+        Arc::new(CryptoBoundaryProvider {
+            timestamps: vec![first.close_time],
+            requests: Mutex::new(Vec::new()),
+        }),
+        Arc::new(StagingPartitionWriter::new()),
+        Arc::new(CryptoPublished::default()),
+    )
+    .run("BTC/USD", &first, None)
+    .await
+    .unwrap();
+    assert!(result
+        .coverage
+        .iter()
+        .all(|row| row.row_count == 0 && row.status == CoverageStatus::Empty));
+    assert!(result.objects.iter().all(|metadata| metadata.rows == 0));
 }
 
 struct InvalidQuotes;

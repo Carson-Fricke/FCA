@@ -76,7 +76,7 @@ pub fn local_overrides(
                 .map(|v| v.parse())
                 .transpose()
                 .map_err(|e| error(DataError::io(e)))?
-                .unwrap_or(7),
+                .unwrap_or(31),
             session_concurrency: env
                 .get("LAKE_INGEST_SESSION_CONCURRENCY")
                 .map(|v| v.parse())

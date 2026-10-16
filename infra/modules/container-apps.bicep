@@ -29,7 +29,7 @@ param ingestionSessionConcurrency int = 2
 param ingestionMaxWorkers int = 8
 @minValue(1)
 @maxValue(366)
-param ingestionPartitionDays int = 7
+param ingestionPartitionDays int = 31
 @minValue(60)
 @maxValue(604800)
 param ingestionTimeoutSeconds int = 86400

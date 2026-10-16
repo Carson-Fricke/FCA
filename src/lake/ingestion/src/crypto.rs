@@ -3,7 +3,8 @@
 //! Ports `lake.ingestion.crypto.transaction`. One transaction covers exactly
 //! one UTC calendar day: the session bounds must be midnight to midnight UTC,
 //! a partial day is fetched only through the injected clock's current instant
-//! (inclusive, like Alpaca's `end`), and the staged trade and quote objects
+//! (inclusive, like Alpaca's `end`). Closed days publish only `[open, close)`
+//! so a midnight print belongs exclusively to the following day. Staged objects
 //! plus their coverage rows publish through one injected commit boundary.
 
 use std::cmp::Ordering;
@@ -118,8 +119,8 @@ impl CryptoIngestTransaction {
         let selected = normalize_data_types(data_types, true)?;
         validate_session(session)?;
         // Alpaca's `end` parameter is inclusive, so the fetch window ends at
-        // query_end itself: a raw print stamped exactly at that bound (the UTC
-        // day close for a closed session) belongs to this day's data.
+        // query_end itself. Publication excludes the next UTC day's opening;
+        // a partial fetch ending before midnight still includes query_end.
         let query_end = if session.is_partial {
             self.now().min(session.close_time)
         } else {
@@ -207,8 +208,7 @@ impl CryptoIngestTransaction {
             }
         }
 
-        let coverage = match coverage_records(&pair, session, &selected, &records, &staged.metadata)
-        {
+        let coverage = match coverage_records(&pair, session, &selected, &staged.metadata) {
             Ok(coverage) => coverage,
             Err(error) => {
                 self.writer.reset_staged();
@@ -335,24 +335,18 @@ async fn fetch_records(
 
 /// Build the coverage rows for one staged transaction.
 ///
-/// The crypto port counts the fetched records for `row_count`, exactly like
-/// the Python transaction.
+/// Counts reflect the published rows after UTC day membership filtering.
 fn coverage_records(
     pair: &str,
     session: &CoverageSession,
     selected: &[DataType],
-    records: &[CryptoRecords],
     metadata: &[ParquetMetadata],
 ) -> Result<Vec<CoverageRecord>, DataError> {
     selected
         .iter()
-        .zip(records)
         .zip(metadata)
-        .map(|((data_type, records), metadata)| {
-            let row_count = match records {
-                CryptoRecords::Trades(trades) => trades.len() as u64,
-                CryptoRecords::Quotes(quotes) => quotes.len() as u64,
-            };
+        .map(|(data_type, metadata)| {
+            let row_count = metadata.rows;
             CoverageRecord::new(
                 AssetClass::Crypto,
                 *data_type,
@@ -391,7 +385,9 @@ fn trade_rows(
     let mut validated = Vec::with_capacity(records.len());
     for record in records {
         validate_trade(record, pair, session, query_end)?;
-        validated.push(record);
+        if record.timestamp < session.close_time {
+            validated.push(record);
+        }
     }
     validated.sort_by(|left, right| compare_trades(left, right));
     crate::columnar::crypto_trades(&validated, pair)
@@ -407,7 +403,9 @@ fn quote_rows(
     let mut validated = Vec::with_capacity(records.len());
     for record in records {
         validate_quote(record, pair, session, query_end)?;
-        validated.push(record);
+        if record.timestamp < session.close_time {
+            validated.push(record);
+        }
     }
     validated.sort_by(|left, right| compare_quotes(left, right));
     crate::columnar::crypto_quotes(&validated, pair)
@@ -499,8 +497,8 @@ fn validate_quote(
 
 /// Validate one record timestamp against the inclusive fetch window.
 ///
-/// The fetch end bound is inclusive, so the final print at exactly `query_end`
-/// belongs to this session and must not be rejected.
+/// The fetch end bound is inclusive, so a print at exactly `query_end` is a
+/// valid response. UTC day membership is applied separately before staging.
 fn validate_record_timestamp(
     timestamp: DateTime,
     symbol: &str,

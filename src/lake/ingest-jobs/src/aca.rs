@@ -39,7 +39,7 @@ impl AcaConfig {
         let memory_gib = number("LAKE_INGEST_MEMORY_GIB", 8.0)?;
         let workers = number("LAKE_INGEST_MAX_WORKERS", 8.0)?;
         let timeout = number("LAKE_INGEST_TIMEOUT_SECONDS", 86400.0)?;
-        let days = number("LAKE_INGEST_PARTITION_DAYS", 7.0)?;
+        let days = number("LAKE_INGEST_PARTITION_DAYS", 31.0)?;
         if !cpu.is_finite()
             || cpu <= 0.0
             || !memory_gib.is_finite()

@@ -302,3 +302,280 @@ fn close(batch: &RecordBatch, row: usize) -> Decimal18 {
         .value(row);
     Decimal18::from_unscaled(value).unwrap()
 }
+
+#[derive(Default)]
+struct PublicationLeases(Mutex<Vec<lake_storage::SymbolDayScope>>);
+struct PublicationLease;
+impl lake_storage::Lease for PublicationLease {
+    fn lease_id(&self) -> Option<&str> {
+        None
+    }
+    fn renew(&self) -> Result<(), DataError> {
+        Ok(())
+    }
+    fn release(&self) -> Result<(), DataError> {
+        Ok(())
+    }
+}
+impl lake_storage::LeaseProvider for PublicationLeases {
+    fn acquire(
+        &self,
+        scope: &lake_storage::SymbolDayScope,
+    ) -> Result<Box<dyn lake_storage::Lease>, DataError> {
+        guard(&self.0).push(scope.clone());
+        Ok(Box::new(PublicationLease))
+    }
+}
+struct CountingProvider {
+    provider: FakeBarsProvider,
+    calls: std::sync::atomic::AtomicUsize,
+}
+impl BarsDataProvider for CountingProvider {
+    fn fetch_bars<'a>(
+        &'a self,
+        asset: AssetClass,
+        symbol: &'a str,
+        interval: BarInterval,
+        start: DateTime,
+        end: DateTime,
+    ) -> BoxFuture<'a, Result<Vec<NormalizedBar>, ProviderError>> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.provider
+            .fetch_bars(asset, symbol, interval, start, end)
+    }
+}
+
+#[tokio::test]
+async fn week_partitions_fetch_once_per_range_and_publish_every_session_under_its_own_lease() {
+    use lake_catalog::{CatalogRepository, MemoryCatalogRepository};
+    use lake_coverage::{requested_coverage, EnsureJob, EnsureSpec};
+    use lake_ingestion::{
+        EnsureIngest, EnsureProviders, LeasedAtomicIngestCommitter, ObjectCatalogCommitter,
+    };
+    use lake_storage::ReadableBlobStore;
+
+    let start = Date::from_ymd(2025, 5, 27).unwrap();
+    let provider = Arc::new(CountingProvider {
+        provider: FakeBarsProvider {
+            bars: (0..14)
+                .map(|offset| {
+                    let date = start.add_days(offset);
+                    let timestamp =
+                        DateTime::parse_iso_utc(&format!("{}T13:30:00Z", date.isoformat()))
+                            .unwrap();
+                    bar(timestamp, "519.13")
+                })
+                .collect(),
+        },
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let objects = Arc::new(lake_storage::LocalFilesystemStore::new(directory.path()));
+    let catalog = Arc::new(MemoryCatalogRepository::new());
+    let leases = Arc::new(PublicationLeases::default());
+    let as_of = DateTime::parse_iso_utc("2025-06-10T00:00:00Z").unwrap();
+    let application = EnsureIngest {
+        providers: EnsureProviders {
+            bars: Some(provider.clone()),
+            ..EnsureProviders::default()
+        },
+        contracts: None,
+        committer: Arc::new(LeasedAtomicIngestCommitter::new(
+            Arc::new(ObjectCatalogCommitter::new(
+                objects.clone(),
+                catalog.clone(),
+            )),
+            leases.clone(),
+        )),
+        trades: Arc::new(EmptyTradeReader),
+        clock: Arc::new(move || as_of),
+    };
+    let mut expected = Vec::new();
+    for offset in [0, 7] {
+        let request = EnsureSpec {
+            asset_class: AssetClass::Equity,
+            data_type: DataType::Bars,
+            symbol: "QQQ".into(),
+            start_date: start.add_days(offset),
+            end_date: start.add_days(offset + 6),
+            interval: Some("1min".into()),
+        };
+        let gaps = requested_coverage(catalog.as_ref(), None, &request, as_of, "ensure")
+            .unwrap()
+            .gap_plan()
+            .gaps;
+        assert!(
+            gaps.len() > 1,
+            "this seven-day partition contains multiple sessions"
+        );
+        expected.extend(gaps.iter().map(|gap| gap.session.session_date));
+        application
+            .run(
+                &EnsureJob {
+                    job_id: "multi-week-bars".into(),
+                    request,
+                    gaps,
+                },
+                None,
+                2,
+            )
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        provider.calls.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "provider acquisition stays batched by range"
+    );
+    assert_eq!(
+        guard(&leases.0)
+            .iter()
+            .map(|scope| scope.session_date)
+            .collect::<Vec<_>>(),
+        expected
+    );
+    for date in expected {
+        let record = catalog
+            .get(
+                AssetClass::Equity,
+                DataType::Bars,
+                Some("1min"),
+                "QQQ",
+                date,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.status, CoverageStatus::Complete);
+        assert_eq!(record.row_count, 1);
+        assert_eq!(record.bar_source, Some(lake_catalog::BarSource::Provider));
+        assert_eq!(record.source_revision, record.checksum);
+        assert_eq!(
+            objects
+                .read(record.object_path.as_deref().unwrap())
+                .unwrap()
+                .len() as u64,
+            record.byte_size
+        );
+    }
+}
+
+#[test]
+fn derived_crypto_midnight_belongs_only_to_the_following_utc_day() {
+    let date = Date::from_ymd(2025, 1, 5).unwrap();
+    let first = CoverageSession {
+        session_date: date,
+        open_time: DateTime::midnight(date),
+        close_time: DateTime::midnight(date.add_days(1)),
+        is_partial: false,
+    };
+    let second = CoverageSession {
+        session_date: date.add_days(1),
+        open_time: first.close_time,
+        close_time: DateTime::midnight(date.add_days(2)),
+        is_partial: false,
+    };
+    let records: Vec<_> = [(&first, "100", "1"), (&second, "200", "2")]
+        .into_iter()
+        .map(|(session, price, size)| lake_ingestion::CryptoTradeRecord {
+            timestamp: session.open_time,
+            symbol: "BTC/USD".into(),
+            trade_id: None,
+            exchange: None,
+            price: Decimal18::parse(price).unwrap(),
+            size: Decimal18::parse(size).unwrap(),
+            taker_side: None,
+        })
+        .collect();
+    for (session, price, volume) in [(first, "100", "1"), (second, "200", "2")] {
+        let bars =
+            lake_ingestion::derive_crypto_bars("BTC/USD", &records, BarInterval::OneDay, &session)
+                .unwrap();
+        assert_eq!(bars.len(), 1);
+        assert_eq!(bars[0].timestamp, session.open_time);
+        assert_eq!(bars[0].open, Decimal18::parse(price).unwrap());
+        assert_eq!(bars[0].close, Decimal18::parse(price).unwrap());
+        assert_eq!(bars[0].volume, Decimal18::parse(volume).unwrap());
+    }
+}
+
+struct UncertainSecondWrite {
+    inner: lake_storage::LocalFilesystemStore,
+    calls: std::sync::atomic::AtomicUsize,
+}
+impl lake_storage::BlobStore for UncertainSecondWrite {
+    fn replace(&self, path: &str, payload: &[u8]) -> Result<(), DataError> {
+        self.inner.replace(path, payload)?;
+        if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+            return Err(DataError::Io(
+                "second object write acknowledgement lost".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn later_session_publication_failure_preserves_prior_session_without_replay() {
+    use lake_catalog::{CatalogRepository, MemoryCatalogRepository};
+    use lake_ingestion::{
+        LeasedAtomicIngestCommitter, ObjectCatalogCommitter, StagingPartitionWriter,
+    };
+    let sessions = [session(2025, 5, 30), session(2025, 6, 2)];
+    let provider = Arc::new(CountingProvider {
+        provider: FakeBarsProvider {
+            bars: sessions
+                .iter()
+                .map(|session| bar(session.open_time, "519.13"))
+                .collect(),
+        },
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let objects = Arc::new(UncertainSecondWrite {
+        inner: lake_storage::LocalFilesystemStore::new(directory.path()),
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let catalog = Arc::new(MemoryCatalogRepository::new());
+    let transaction = BarsIngestTransaction::new(
+        provider.clone(),
+        Arc::new(EmptyTradeReader),
+        Arc::new(StagingPartitionWriter::new()),
+        Arc::new(LeasedAtomicIngestCommitter::new(
+            Arc::new(ObjectCatalogCommitter::new(
+                objects.clone(),
+                catalog.clone(),
+            )),
+            Arc::new(PublicationLeases::default()),
+        )),
+    );
+    assert!(transaction
+        .run(AssetClass::Equity, "QQQ", BarInterval::OneMinute, &sessions)
+        .await
+        .is_err());
+    assert_eq!(provider.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(objects.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert_eq!(
+        catalog
+            .get(
+                AssetClass::Equity,
+                DataType::Bars,
+                Some("1min"),
+                "QQQ",
+                sessions[0].session_date
+            )
+            .unwrap()
+            .unwrap()
+            .status,
+        CoverageStatus::Complete
+    );
+    assert!(catalog
+        .get(
+            AssetClass::Equity,
+            DataType::Bars,
+            Some("1min"),
+            "QQQ",
+            sessions[1].session_date
+        )
+        .unwrap()
+        .is_none());
+}
