@@ -100,7 +100,10 @@ the endpoint and credentials. Azure uses conditional Blob ETags and the storage
 service's HTTP Date; local processes use kernel-locked atomic files and shared
 OS monotonic uptime. A local reboot holds capacity for a full window. Worker
 permit lifetimes use monotonic time anchored before the reservation RPC, so
-delayed responses cannot extend grants. Workers reserve short batches of permits. Unused,
+delayed responses cannot extend grants. Workers adapt short permit batches to
+their observed consumption, shrinking after unused expiry and growing only when
+exhausted before half their lifetime. This avoids wasting allowance on slow
+workers without refunding reservations. Unused,
 expired and ambiguously acknowledged grants remain charged through sixty seconds
 after their last permitted use; restart never refunds possible provider requests.
 Budget errors fail closed. There is no fixed division by maximum worker count,
