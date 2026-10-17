@@ -39,6 +39,4 @@ jobs:
             done
             az acr import --name fcau7enxjst4w72u --source "ghcr.io/carson-fricke/${source}@${digest}" --repository "$repository" --username "$GITHUB_ACTOR" --password "$GHCR_TOKEN" --force --only-show-errors --output none
           }
-          restore_graph fca fca-harness sha256:a6f996b2bb8c32fd8e2da5722055febc867fabfb830eff254a252a22f090f199
-          restore_graph fca-ingestion fca-ingestion sha256:b76e43c4e20f13f093dd4c67d6e44f0e39df3b98a9b443d399c146a39713879d
-          restore_graph fca-thesis fca-thesis sha256:07a3e189c3421142e1878cc0659ff4f45dc9a5e406b6c2199e4db963d5b3b36f
+          restore_graph fca fca-harness sha256:8ea398afdf09d364874cfd71fcf632c2dc0f01b2c57b9ee74760c714e6941e35
