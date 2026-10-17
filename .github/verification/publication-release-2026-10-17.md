@@ -146,6 +146,17 @@ were explicitly stopped, their four durable failed records archived and reset,
 and the corresponding backtest stopped before retrying. No market payload or
 request-budget entry was deleted during this smoke-only recovery.
 
+The final scheduled-dispatcher check caught an incomplete part of that reset:
+the old stopped ACA executions still correlated with the reused smoke admission
+IDs. The unchanged image acknowledgement guard correctly rejected them. After
+verifying all ten manual Job executions terminal, an exclusive lease on the shared
+dispatch lock fenced both coordinators while the manual ingestion Job was
+exported, recreated with its exact image/identity/resources, and verified to have
+empty vendor execution history. The lease was then released. Completed admission
+results, fresh publications and request allowance were preserved; the temporary
+reset helper was removed. The cutover documentation now explicitly includes
+vendor history when admission IDs are reset.
+
 ACR and weekly GHCR cleanup now share `image-retention.mjs`. Both hydrate OCI
 index references, retain complete graphs and plan all bounded deletions before
 applying them. GHCR retains its seven-day floor and ten newest image roots;

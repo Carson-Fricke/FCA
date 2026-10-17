@@ -225,6 +225,14 @@ or upgrade outdated data. The October 17 release completed this cutover before
 starting matching writers; its release record distinguishes the reset inventory
 from fresh post-cutover smoke data.
 
+Resetting admission IDs also requires clearing their vendor execution history.
+Deleting only Blob job/partition documents leaves correlated ACA executions and
+must still trip image/ownership checks when IDs are reused. For a bounded
+development reset, drain every execution, hold exclusive dispatch ownership and
+recreate the manual ingestion Job with its exact image, identity and resources
+to clear ACA history. Release dispatch only after the definition is restored.
+Never relax acknowledgement validation or add an old-image exception.
+
 `HARNESS_MARKET_DATA_MODE` selects the complete local or Azure composition.
 Local mode needs no Azure service. Local Thesis/UI can select the entire remote
 harness instead. Native execution receives catalog/acquisition and reader ports
