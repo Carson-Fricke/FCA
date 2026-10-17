@@ -26,9 +26,9 @@ jobs:
       group: image-build-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
-    # The first build after a cargo-chef recipe change recompiles the Rust
-    # dependency layers cold (the lake cook includes DuckDB). One long run
-    # repopulates the BuildKit cache; warm runs finish in minutes.
+    # Dependency-graph changes can require a cold Rust cook and cache export.
+    # The harness cook owns the bundled DuckDB build; the finite lake targets
+    # omit it. Source-only changes reuse these registry-backed dependency layers.
     timeout-minutes: 90
     permissions:
       contents: read

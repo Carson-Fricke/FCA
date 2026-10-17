@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # The smoke is non-destructive: it is read-only except for the bounded
-    # synthetic backtest execution and the temporary one-replica quant API
+    # market-data backtest execution and the temporary one-replica quant API
     # scale used by the private ingress health probe, which is restored
     # through an exit trap. Trader revision health is observed without
     # scaling the traders.
@@ -229,10 +229,10 @@ jobs:
           printf 'quant-api-fqdn=%s\n' "$quant_api_fqdn" >> "$GITHUB_OUTPUT"
           {
             echo "### Quant runtime smoke"
-            echo "- Environment: \\`$DEPLOYMENT_ENVIRONMENT\\`"
+            echo "- Environment: \`$DEPLOYMENT_ENVIRONMENT\`"
             echo "- Digest expectation: $digest_mode"
-            echo "- Shared image: \\`$reported_image\\`"
-            echo "- Quant API app: \\`$quant_api_app_name\\`"
+            echo "- Shared image: \`$reported_image\`"
+            echo "- Quant API app: \`$quant_api_app_name\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify ingress and storage posture
@@ -295,10 +295,10 @@ jobs:
 
           {
             echo "### Ingress and storage posture"
-            echo "- Quant API ingress external: \\`$ingress_external\\` (expected \\`$expected_external\\`)"
-            echo "- Quant API ingress allowInsecure: \\`$ingress_allow_insecure\\`"
-            echo "- killswitch table: present on \\`$storage_account\\` (management plane)"
-            echo "- harness-results and harness-state containers: present on \\`$storage_account\\` (management plane)"
+            echo "- Quant API ingress external: \`$ingress_external\` (expected \`$expected_external\`)"
+            echo "- Quant API ingress allowInsecure: \`$ingress_allow_insecure\`"
+            echo "- killswitch table: present on \`$storage_account\` (management plane)"
+            echo "- harness-results and harness-state containers: present on \`$storage_account\` (management plane)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run probe-safe quant API health smoke
@@ -349,7 +349,7 @@ jobs:
             {
               echo "### Quant API health"
               echo "- Mode: public ingress"
-              echo "- \\`/health\\` returned status ok; harness and market-data protected routes rejected anonymous access with 401"
+              echo "- \`/health\` returned status ok; harness and market-data protected routes rejected anonymous access with 401"
             } >> "$GITHUB_STEP_SUMMARY"
           else
             normalized_prefix="${RESOURCE_NAME_PREFIX,,}"
@@ -416,7 +416,7 @@ jobs:
             {
               echo "### Quant API health"
               echo "- Mode: private ingress (temporary one-replica probe)"
-              echo "- The active revision passed all three \\`/health\\` probes and was restored to zero minimum replicas"
+              echo "- The active revision passed all three \`/health\` probes and was restored to zero minimum replicas"
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -467,7 +467,7 @@ jobs:
 
           {
             echo "### Backtest job smoke"
-            echo "- Execution \\`$execution_name\\` succeeded with the bounded market-lake configuration \\`$BACKTEST_SMOKE_CONFIG\\`"
+            echo "- Execution \`$execution_name\` succeeded with the bounded market-lake configuration \`$BACKTEST_SMOKE_CONFIG\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report trader revision health
@@ -522,7 +522,7 @@ jobs:
               --query "properties.template.scale.minReplicas" \
               --output tsv)"
             crypto_status="$(classify_trader_status "$crypto_provisioning" "$crypto_health" "$crypto_min_replicas")"
-            crypto_detail="provisioning \\`$crypto_provisioning\\`, health \\`$crypto_health\\`, min replicas \\`$crypto_min_replicas\\`"
+            crypto_detail="provisioning \`$crypto_provisioning\`, health \`$crypto_health\`, min replicas \`$crypto_min_replicas\`"
           else
             crypto_status="disabled"
             crypto_detail="no crypto compute is deployed in this environment"
@@ -540,10 +540,10 @@ jobs:
             echo ""
             echo "| Trader | Status | Detail |"
             echo "| --- | --- | --- |"
-            echo "| RTH trader (\\`$rth_trader_app_name\\`) | \\`$rth_status\\` | provisioning \\`$rth_provisioning\\`, health \\`$rth_health\\`, min replicas \\`$rth_min_replicas\\` |"
-            echo "| Crypto trader (\\`$crypto_trader_app_name\\`) | \\`$crypto_status\\` | $crypto_detail |"
+            echo "| RTH trader (\`$rth_trader_app_name\`) | \`$rth_status\` | provisioning \`$rth_provisioning\`, health \`$rth_health\`, min replicas \`$rth_min_replicas\` |"
+            echo "| Crypto trader (\`$crypto_trader_app_name\`) | \`$crypto_status\` | $crypto_detail |"
             echo ""
             if [[ "$rth_status" == "degraded" || "$crypto_status" == "degraded" ]]; then
-              echo "Degraded trader status does not fail this smoke. It is expected until the environment vault holds the referenced Alpaca credential pair and the harness trader runtime is implemented. Seed values per \\`.github/runbooks/key-vault-runtime-secrets.md\\` and \\`.github/runbooks/h5-quant-smoke.md\\`; never echo secret values."
+              echo "Degraded trader status does not fail this smoke. It is expected until the environment vault holds the referenced Alpaca credential pair and the harness trader runtime is implemented. Seed values per \`.github/runbooks/key-vault-runtime-secrets.md\` and \`.github/runbooks/h5-quant-smoke.md\`; never echo secret values."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

@@ -150,7 +150,11 @@ COPY --link --from=builder /opt/venv /opt/venv
 # dependency and toolchain snapshots, rather than mutable source-build caches.
 # Linked payload layers can be reused independently of earlier runtime copies.
 COPY --link --chown=10001:10001 --from=harness-deps /usr/local/cargo /usr/local/cargo
-COPY --link --from=rust-base /usr/local/rustup /usr/local/rustup
+# The source build resolves every component requested by the workspace pin.
+# rust-base has only the minimal profile; copying it would make rootless JIT
+# probes try to install the pin's missing clippy/rustfmt components at runtime.
+COPY --link --from=rust /usr/local/rustup /usr/local/rustup
+COPY --link src/harness/rust-toolchain.toml /opt/rust/runtime-probe/rust-toolchain.toml
 COPY --link src/harness/strategy-sdk /opt/rust/sdk/strategy-sdk
 COPY --link src/harness/num /opt/rust/sdk/num
 COPY --link src/harness/contracts /opt/rust/sdk/contracts
@@ -180,6 +184,12 @@ WORKDIR /app
 # local trader state); the runtime user needs a writable mount point there.
 RUN mkdir -p /app/.local && chown lake:lake /app/.local
 USER lake
+
+# Exercise the actual JIT pin with the read-only toolchain and runtime UID.
+# No component download or toolchain mutation is permitted in production.
+RUN --network=none cd /opt/rust/runtime-probe \
+    && rustc --version --verbose && cargo --version --verbose \
+    && rustup which rustc && rustup which cargo
 
 ENTRYPOINT ["lake"]
 CMD ["--help"]

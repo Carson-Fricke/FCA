@@ -245,18 +245,21 @@ and non-SDK Rust source. Registry-backed intermediate caches isolate image build
 from Actions' dependency-cache storage allowance.
 
 The query crate pins the DuckDB wrapper/native engine pair exactly, with the
-same versions in both workspace lockfiles. The harness dependency cook can then
-reuse the lake's native compilation; independent resolutions previously built
-two different DuckDB versions in the shared image.
+same versions and native build dependencies in both workspace lockfiles. Shared
+verification targets can reuse those native artifacts across workspaces. The
+production image's finite lake targets omit DuckDB; the harness dependency cook
+builds it once.
 
 Azure object enumeration filters hierarchical-storage directory entries at the
 SDK adapter boundary. Catalogs see file keys consistently with local storage;
 directory placeholders must never be decoded as publication manifests.
 
 The harness dependency cook is an immutable `harness-deps` stage. Runtime Cargo
-files come from that stage and Rustup from `rust-base`, never from a source build
-that mutates toolchain/cache metadata. Linked payload copies keep unrelated image
-layers reusable when an earlier payload changes.
+files come from that stage; Rustup comes from the completed harness build, which
+has installed every component requested by the managed-workspace pin. The
+minimal base toolchain alone is insufficient. An offline build step probes that
+pin with the unprivileged runtime user and read-only toolchain. Linked payload
+copies keep unrelated image layers reusable when an earlier payload changes.
 
 ## Executable verification
 

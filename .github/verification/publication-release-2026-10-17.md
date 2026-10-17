@@ -84,6 +84,31 @@ Thesis deployment is temporarily suspended for this controlled rollout and is
 restored afterward. Hosted outcomes and deployed image pins are recorded after
 the Actions runs complete; the preflight alone does not establish deployment.
 
+## First hosted rollout
+
+[CI](https://github.com/Carson-Fricke/FCA/actions/runs/39061177251) passed on
+`36308d9`: Python quality/tests/package took 73 seconds (tests 52 seconds,
+wheel and installed-SDK checks one second each), UI took 58 seconds, lake Rust
+647 seconds and harness Rust 568 seconds, including compilation/cache fill.
+
+The [first deployment](https://github.com/Carson-Fricke/FCA/actions/runs/39061177296)
+published both images and successfully deployed the matching API, worker and
+scheduled dispatcher. The first shared-image registry cache fill took 26m 57s;
+the finite ingestion image reused that cache and took 12 seconds. Production
+compiled DuckDB once, in the harness cook. Native version alignment improves
+consistency and cross-workspace verification reuse; it did not eliminate a
+second production DuckDB compilation.
+
+The final backtest smoke failed before market-data acquisition: the runtime
+copied the minimal base Rustup snapshot, whereas the JIT workspace pin also
+requires Clippy and rustfmt. Rustup attempted to install those missing components
+under the unprivileged runtime user and failed on its read-only home. The image
+now copies the completed build's toolchain and exercises the actual workspace
+pin as the runtime user with networking disabled. The smoke workflow's report
+strings also had double-escaped backticks that invoked shell substitutions;
+those are corrected. A follow-up hosted build verifies the image fix and warm
+dependency-cache behavior before the release is considered complete.
+
 Ignored command logs and cutover inventories are under
 `.local/verification/release-2026-10-17/` and
 `.local/verification/market-cutover-2026-10-17/`.

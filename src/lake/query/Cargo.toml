@@ -12,8 +12,8 @@ lake-catalog.workspace = true
 lake-coverage.workspace = true
 lake-reference.workspace = true
 lake-storage.workspace = true
-# Both workspace lockfiles must resolve the same native engine so the shared
-# image reuses the lake dependency cook instead of compiling DuckDB twice.
+# Keep the native engine identical across both workspace lockfiles so shared
+# verification targets can reuse artifacts without fragmenting native caches.
 duckdb = { version = "=1.10506.0", features = ["bundled"] }
 # Same major as duckdb's bundled re-export; the `ipc` feature unifies onto
 # `duckdb::arrow` so the arrow-stream response can be written directly.

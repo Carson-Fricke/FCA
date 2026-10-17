@@ -12,13 +12,13 @@ issues, or task evidence.
 
 `deploy-main.yml` on `master` runs three stages:
 
-1. `publish-image` builds one immutable shared image and returns its GHCR
-   digest.
-2. `deploy` imports that exact digest into the private ACR, deploys
-   `infra/main.bicep`, and verifies that the lake API, ingest job, quant API,
-   RTH trader, optional crypto trader, and backtest job all reference the same
-   mirrored ACR digest. The quant runtime shares the lake image; there is no
-   separate quant image to publish. The quant API runs `api`, traders
+1. `publish-image` builds the immutable harness and finite ingestion images
+   and returns their GHCR digests.
+2. `deploy` imports those exact digests into the private ACR, deploys
+   `infra/main.bicep`, and verifies the pins. The quant API, RTH trader, optional
+   crypto trader and backtest job share the harness digest; ingestion workers
+   and the scheduled dispatcher share the finite ingestion digest.
+   The quant API hosts the market-data routes and runs `api`, traders
    run `trader`, and the backtest job runs `backtest-job` from that
    one image.
 3. `quant-smoke` calls `.github/workflows/quant-smoke.yml` with the published
@@ -127,9 +127,10 @@ gh run watch <run-id> --repo Carson-Fricke/FCA
 - Missing table or container: the storage composition changed or was deleted
   outside CI; redeploy `infra/main.bicep` and rerun the smoke.
 - Backtest execution `Failed`: inspect that execution's logs in Azure for the
-  container exit; the synthetic configuration requires no credentials, so a
-  failure indicates image, configuration, or platform problems rather than
-  unseeded secrets.
+  container exit. The real-data configuration requires the lake bearer and a
+  reachable market-data API. The JIT also requires every component from the
+  workspace toolchain pin: the image's offline runtime-user probe must pass
+  without Rustup installing components or modifying the read-only toolchain.
 - Quant API probes failing after seed or rotation: confirm enabled current
   versions, the `harness-api-bearer-token` reference, and the quant runtime
   identity's `Key Vault Secrets User` role, then allow for reference-refresh
