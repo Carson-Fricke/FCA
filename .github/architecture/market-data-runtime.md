@@ -249,6 +249,10 @@ same versions in both workspace lockfiles. The harness dependency cook can then
 reuse the lake's native compilation; independent resolutions previously built
 two different DuckDB versions in the shared image.
 
+Azure object enumeration filters hierarchical-storage directory entries at the
+SDK adapter boundary. Catalogs see file keys consistently with local storage;
+directory placeholders must never be decoded as publication manifests.
+
 The harness dependency cook is an immutable `harness-deps` stage. Runtime Cargo
 files come from that stage and Rustup from `rust-base`, never from a source build
 that mutates toolchain/cache metadata. Linked payload copies keep unrelated image

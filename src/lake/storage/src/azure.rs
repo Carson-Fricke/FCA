@@ -676,7 +676,12 @@ impl AzureBlobContainer for SdkBlobContainer {
         let mut names = Vec::new();
         for page in pages {
             let page = page.map_err(http_error)?;
-            names.extend(page.blobs.blobs().map(|blob| blob.name.clone()));
+            names.extend(
+                page.blobs
+                    .blobs()
+                    .filter(|blob| blob.properties.resource_type.as_deref() != Some("directory"))
+                    .map(|blob| blob.name.clone()),
+            );
         }
         Ok(names)
     }

@@ -356,3 +356,72 @@ fn long_history_metadata_downloads_overlap_with_bounded_fanout_and_ordered_resul
     assert!(http.peak.load(Ordering::SeqCst) <= 32);
     assert_eq!(http.active.load(Ordering::SeqCst), 0);
 }
+
+#[derive(Debug)]
+struct HierarchicalListingHttp;
+
+impl HttpClient for HierarchicalListingHttp {
+    fn execute_request<'a, 'b, 'future>(
+        &'a self,
+        request: &'b Request,
+    ) -> BoxFuture<'future, azure_core::Result<Response>>
+    where
+        'a: 'future,
+        'b: 'future,
+        Self: 'future,
+    {
+        Box::pin(async move {
+            assert_eq!(request.method(), &Method::Get);
+            assert!(request
+                .url()
+                .query_pairs()
+                .any(|(name, value)| name == "prefix" && value == "publications/"));
+            let mut xml = String::from(
+                r#"<EnumerationResults ServiceEndpoint="https://example.blob.core.windows.net/" ContainerName="lake"><Prefix>publications/</Prefix><Blobs>"#,
+            );
+            for (name, resource_type, length) in [
+                ("asset_class=equity", "directory", 0),
+                ("asset_class=equity/symbol=MSFT", "directory", 0),
+                (
+                    "asset_class=equity/symbol=MSFT/date=2025-12-30.json",
+                    "file",
+                    123,
+                ),
+                ("empty.json", "file", 0),
+            ] {
+                xml.push_str(&format!(
+                    "<Blob><Name>publications/{name}</Name><Properties>\
+                     <Creation-Time>Fri, 18 Oct 2024 12:00:00 GMT</Creation-Time>\
+                     <Last-Modified>Fri, 18 Oct 2024 12:00:00 GMT</Last-Modified>\
+                     <Etag>&quot;entry&quot;</Etag><Content-Length>{length}</Content-Length>\
+                     <Content-Type>application/json</Content-Type><BlobType>BlockBlob</BlobType>\
+                     <ResourceType>{resource_type}</ResourceType></Properties></Blob>"
+                ));
+            }
+            xml.push_str("</Blobs><NextMarker /></EnumerationResults>");
+            let payload = Bytes::from(xml);
+            let mut headers = Headers::new();
+            headers.insert("date", "Fri, 18 Oct 2024 12:00:00 GMT".to_string());
+            headers.insert("x-ms-request-id", LEASE_ID.to_string());
+            headers.insert("content-type", "application/xml".to_string());
+            headers.insert("content-length", payload.len().to_string());
+            Ok(Response::new(
+                StatusCode::Ok,
+                headers,
+                Box::pin(stream::once(async move { Ok(payload) })),
+            ))
+        })
+    }
+}
+
+#[test]
+fn hierarchical_listing_exposes_files_without_directory_placeholders() {
+    let objects = AzureReadableBlobStore::new(container(Arc::new(HierarchicalListingHttp)));
+    assert_eq!(
+        objects.list_prefix("publications/").unwrap(),
+        vec![
+            "publications/asset_class=equity/symbol=MSFT/date=2025-12-30.json",
+            "publications/empty.json",
+        ]
+    );
+}
