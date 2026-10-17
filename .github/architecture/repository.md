@@ -999,6 +999,11 @@ mandated architecture and behavior suites remain in their owning jobs. UI-only
 changes skip backend images, and infrastructure-only releases reuse the deployed
 immutable image digests. Obsolete verification/image builds are cancellable;
 shared environment locks cover infrastructure mutations, smoke and retention.
+Manual main deployments rebuild/publish the selected source before mirroring it;
+ordinary infrastructure-only pushes reuse deployed immutable image digests.
+ACR retention plans in `scripts/ci/acr-retention.mjs` protect entire OCI manifest
+graphs rooted at deployed, referenced, newest and operator-tagged images. Index
+metadata is hydrated before planning; incomplete retained graphs abort cleanup.
 
 Docker images use registry-backed intermediate caches and manifest-based Cargo
 dependency layers. Filtered Python input trees reproduce the canonical wheel

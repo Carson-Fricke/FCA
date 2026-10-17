@@ -109,6 +109,23 @@ strings also had double-escaped backticks that invoked shell substitutions;
 those are corrected. A follow-up hosted build verifies the image fix and warm
 dependency-cache behavior before the release is considered complete.
 
+The follow-up image build passed its offline rootless probe. Shared-image build
+time fell to 4m 04s (dependency cooks were cache hits, no native recompilation);
+the finite image took 5 seconds. Follow-up CI passed: Python 100 seconds, harness
+143 seconds and lake 106 seconds. Thesis backend, runtime smoke and UI deployment
+also passed in [their run](https://github.com/Carson-Fricke/FCA/actions/runs/39063704748).
+
+The fresh-data smoke then exposed a separate registry cleanup defect: retained
+OCI indexes did not protect their untagged child manifests. Azure retained the
+index but could not pull its platform image. `acr-retention.mjs` now computes
+graph closure over hydrated index metadata before producing any deletion plan;
+newest-image selection counts roots, and cache grace windows protect children too.
+Four focused policy tests cover shared/nested children, explicit retention roots,
+incomplete-graph rejection and bounded oldest-first deletion. A temporary manual
+Actions recovery restores the exact current published graphs using its package-read
+identity; it is removed after that bounded operation. Local GitHub credentials lack
+package-read scope and cannot perform that recovery directly.
+
 Ignored command logs and cutover inventories are under
 `.local/verification/release-2026-10-17/` and
 `.local/verification/market-cutover-2026-10-17/`.

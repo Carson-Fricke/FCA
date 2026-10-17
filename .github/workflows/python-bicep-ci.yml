@@ -60,8 +60,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify input selection
-        run: node --test scripts/ci/changes.test.mjs
+      - name: Verify release tooling
+        run: node --test scripts/ci/*.test.mjs
       - name: Select changed products
         id: changes
         env:

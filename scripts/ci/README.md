@@ -22,3 +22,7 @@ Build and deployment checks belong here, outside the pytest behavior suite.
   installation layers. Installed SDK smoke remains required for both images.
 - `changes.mjs` derives dependency-aware workflow selection from the commit range;
   `node --test scripts/ci/changes.test.mjs` verifies source/build input routing.
+- `acr-retention.mjs` plans bounded registry cleanup from hydrated OCI manifest
+  metadata. Retained image roots protect all platform manifests, attestations and
+  nested indices; incomplete graphs abort before deletion. `acr-retention.test.mjs`
+  verifies those retention and ordering rules without external services.
