@@ -40,7 +40,7 @@ impl ParquetMetadata {
     }
 }
 
-/// Serialize a canonical Arrow batch and replace its deterministic object.
+/// Serialize a canonical Arrow batch under its immutable content-addressed path.
 pub struct ParquetWriter<S: BlobStore> {
     store: Arc<S>,
 }
@@ -86,24 +86,27 @@ impl<S: BlobStore + 'static> ParquetWriter<S> {
             ]))
             .build();
         let mut payload = Vec::new();
-        let encode_started = std::time::Instant::now();
+
+        let pipeline = lake_pipeline::Pipeline::global();
+        let mut encode_metric = pipeline.timer(lake_pipeline::Stage::Parquet);
+        encode_metric.rows(batch.num_rows());
         {
             let mut writer = ArrowWriter::try_new(&mut payload, schema, Some(properties))
                 .map_err(DataError::io)?;
             writer.write(batch).map_err(DataError::io)?;
             writer.close().map_err(DataError::io)?;
         }
-        let encode_seconds = encode_started.elapsed().as_secs_f64();
-        let path = partition_path(session_date, asset_class, data_type, interval, symbol)?;
-        let checksum_started = std::time::Instant::now();
+
+        encode_metric.bytes(payload.len());
+        drop(encode_metric);
+        let logical = partition_path(session_date, asset_class, data_type, interval, symbol)?;
+
+        let mut hash_metric = pipeline.timer(lake_pipeline::Stage::Hash);
+        hash_metric.bytes(payload.len());
         let checksum = hex::encode(Sha256::digest(&payload));
+        drop(hash_metric);
+        let path = lake_contracts::immutable_path(&logical, &checksum)?;
         self.store.replace(&path, &payload)?;
-        eprintln!(
-            "PROFILE parquet rows={} encode_seconds={encode_seconds:.3} checksum_store_seconds={:.3} bytes={}",
-            batch.num_rows(),
-            checksum_started.elapsed().as_secs_f64(),
-            payload.len()
-        );
         Ok(ParquetMetadata {
             path,
             rows: batch.num_rows() as u64,

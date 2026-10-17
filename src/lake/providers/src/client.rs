@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_util::future::try_join_all;
-use futures_util::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
+use futures_util::stream::{self, FuturesUnordered, StreamExt};
 use lake_catalog::ContractRecord;
 use lake_contracts::{format_nanos_utc, parse_iso_nanos, AssetClass, BarInterval, DateTime};
 use serde_json::Value;
@@ -29,7 +29,7 @@ use crate::lane::{lane_for, Lane};
 use crate::parse::{self, DataType};
 use crate::records::{
     NormalizedBar, NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedOptionQuote,
-    NormalizedOptionTrade, NormalizedQuote, NormalizedTrade, Timestamped,
+    NormalizedOptionTrade, NormalizedQuote, NormalizedTrade, RecordMemory, Timestamped,
 };
 use crate::transport::{
     AlpacaTransport, BoxFuture, ReqwestTransport, TransportFailure, TransportResponse,
@@ -331,17 +331,31 @@ impl AlpacaClient {
         let mut page_token: Option<String> = None;
         let mut seen_tokens: HashSet<String> = HashSet::new();
         let mut records: Vec<NormalizedBar> = Vec::new();
+        let mut retained_bytes = 0;
         loop {
             let mut params = base_params.clone();
             if let Some(token) = &page_token {
                 params.push(("page_token".to_string(), token.clone()));
             }
             let response = self.request(&path, &params).await?;
-            let (rows, next_page_token) =
-                parse::page_rows(&response.body, DataType::Bars, &symbol)?;
-            for row in rows {
-                records.push(parse::parse_bar(row, &symbol)?);
-            }
+            let requested_symbol = symbol.clone();
+            let pipeline = lake_pipeline::Pipeline::global();
+            let cpu = pipeline.cpu().await.map_err(resource_error)?;
+            let (page, next_page_token) = tokio::task::spawn_blocking(move || {
+                let _cpu = cpu;
+                let mut timer = pipeline.timer(lake_pipeline::Stage::Normalize);
+                let (rows, next) =
+                    parse::page_rows(&response.body, DataType::Bars, &requested_symbol)?;
+                let page = rows
+                    .into_iter()
+                    .map(|row| parse::parse_bar(row, &requested_symbol))
+                    .collect::<Result<Vec<_>, _>>()?;
+                timer.rows(page.len());
+                Ok::<_, ProviderError>((page, next))
+            })
+            .await
+            .map_err(|e| ProviderError::Protocol(e.to_string()))??;
+            append_records(&mut records, page, &mut retained_bytes)?;
             match next_page_token {
                 None => break,
                 Some(token) if token.is_empty() => break,
@@ -355,8 +369,7 @@ impl AlpacaClient {
                 }
             }
         }
-        records.sort_by_key(Timestamped::timestamp);
-        Ok(records)
+        sort_records(records).await
     }
 
     /// Fetch the complete contract master in an explicit expiry window.
@@ -491,7 +504,7 @@ impl AlpacaClient {
         .await
     }
 
-    async fn fetch_option_data<T>(
+    async fn fetch_option_data<T: RecordMemory + Send + 'static>(
         &self,
         contracts: &[ContractRecord],
         data_type: DataType,
@@ -501,17 +514,18 @@ impl AlpacaClient {
     ) -> Result<Vec<T>, ProviderError> {
         let contracts = normalize_contracts(contracts);
         let mut records = Vec::new();
+        let mut retained_bytes = 0;
         for batch in contracts.chunks(OPTION_CONTRACTS_PER_REQUEST) {
-            records.extend(
-                self.fetch_option_batch(batch, data_type, start, end, parser)
-                    .await?,
-            );
+            let page = self
+                .fetch_option_batch(batch, data_type, start, end, parser)
+                .await?;
+            append_records(&mut records, page, &mut retained_bytes)?;
         }
         Ok(records)
     }
 
     /// Fetch one option batch, paging its cursor to exhaustion.
-    async fn fetch_option_batch<T>(
+    async fn fetch_option_batch<T: RecordMemory + Send + 'static>(
         &self,
         batch: &[(String, ContractRecord)],
         data_type: DataType,
@@ -535,6 +549,7 @@ impl AlpacaClient {
         let mut page_token: Option<String> = None;
         let mut seen_tokens: HashSet<String> = HashSet::new();
         let mut records: Vec<T> = Vec::new();
+        let mut retained_bytes = 0;
         loop {
             let mut params = base_params.clone();
             // The provider's option trades endpoint rejects a feed parameter
@@ -547,11 +562,23 @@ impl AlpacaClient {
                 params.push(("page_token".to_string(), token.clone()));
             }
             let response = self.request(&path, &params).await?;
-            let (rows, next_page_token) =
-                parse::option_page_rows(&response.body, data_type, batch)?;
-            for (contract, row) in rows {
-                records.push(parser(row, contract)?);
-            }
+            let batch = batch.to_vec();
+            let pipeline = lake_pipeline::Pipeline::global();
+            let cpu = pipeline.cpu().await.map_err(resource_error)?;
+            let (page, next_page_token) = tokio::task::spawn_blocking(move || {
+                let _cpu = cpu;
+                let mut timer = pipeline.timer(lake_pipeline::Stage::Normalize);
+                let (rows, next) = parse::option_page_rows(&response.body, data_type, &batch)?;
+                let page = rows
+                    .into_iter()
+                    .map(|(contract, row)| parser(row, contract))
+                    .collect::<Result<Vec<_>, _>>()?;
+                timer.rows(page.len());
+                Ok::<_, ProviderError>((page, next))
+            })
+            .await
+            .map_err(|e| ProviderError::Protocol(e.to_string()))??;
+            append_records(&mut records, page, &mut retained_bytes)?;
             match next_page_token {
                 None => return Ok(records),
                 Some(token) if token.is_empty() => return Ok(records),
@@ -615,9 +642,20 @@ impl AlpacaClient {
         symbols: &[String],
         spec: &FetchSpec<T>,
     ) -> Result<Vec<T>, ProviderError> {
-        let tasks = symbols.iter().map(|symbol| self.fetch_symbol(symbol, spec));
-        let pages = try_join_all(tasks).await?;
-        Ok(pages.into_iter().flatten().collect())
+        let tasks: Vec<BoxFuture<'_, Result<Vec<T>, ProviderError>>> = symbols
+            .iter()
+            .map(|symbol| {
+                Box::pin(self.fetch_symbol(symbol, spec))
+                    as BoxFuture<'_, Result<Vec<T>, ProviderError>>
+            })
+            .collect();
+        let mut pending = stream::iter(tasks).buffer_unordered(self.config.max_concurrency);
+        let mut records = Vec::new();
+        let mut retained_bytes = 0;
+        while let Some(page) = pending.next().await {
+            append_records(&mut records, page?, &mut retained_bytes)?;
+        }
+        Ok(records)
     }
 
     async fn fetch_market_sliced<T: Timestamped + Send + 'static>(
@@ -659,13 +697,13 @@ impl AlpacaClient {
                 );
                 async move { self.fetch_market(symbols, &slice).await }
             });
-        let pages: Vec<Vec<T>> = stream::iter(fetches)
-            .buffer_unordered(self.config.max_concurrency)
-            .try_collect()
-            .await?;
-        let mut records: Vec<T> = pages.into_iter().flatten().collect();
-        records.sort_by_key(Timestamped::timestamp);
-        Ok(records)
+        let mut pending = stream::iter(fetches).buffer_unordered(self.config.max_concurrency);
+        let mut records = Vec::new();
+        let mut retained_bytes = 0;
+        while let Some(page) = pending.next().await {
+            append_records(&mut records, page?, &mut retained_bytes)?;
+        }
+        sort_records(records).await
     }
 
     /// Fetch one symbol's window as independent, page-sized units.
@@ -696,15 +734,15 @@ impl AlpacaClient {
             queue.push(self.fetch_unit(symbol, spec, lower, upper));
         }
         let mut records: Vec<T> = Vec::new();
+        let mut retained_bytes = 0;
         while let Some(outcome) = queue.next().await {
             let outcome = outcome?;
-            records.extend(outcome.records);
+            append_records(&mut records, outcome.records, &mut retained_bytes)?;
             for (lower, upper) in outcome.children {
                 queue.push(self.fetch_unit(symbol, spec, lower, upper));
             }
         }
-        records.sort_by_key(Timestamped::timestamp);
-        Ok(records)
+        sort_records(records).await
     }
 
     fn fetch_unit<'a, T: Timestamped + Send + 'static>(
@@ -777,6 +815,7 @@ impl AlpacaClient {
         mut records: Vec<T>,
         first_token: String,
     ) -> Result<Vec<T>, ProviderError> {
+        let mut retained_bytes = records.iter().map(RecordMemory::allocated_bytes).sum();
         let mut seen: HashSet<String> = HashSet::new();
         let mut token = Some(first_token);
         while let Some(current) = token {
@@ -787,7 +826,7 @@ impl AlpacaClient {
                 )));
             }
             let page = self.fetch_page(symbol, spec, Some(&current), false).await?;
-            records.extend(page.records);
+            append_records(&mut records, page.records, &mut retained_bytes)?;
             token = page.next_page_token.filter(|value| !value.is_empty());
         }
         Ok(records)
@@ -801,11 +840,12 @@ impl AlpacaClient {
         let mut page_token: Option<String> = None;
         let mut seen_tokens: HashSet<String> = HashSet::new();
         let mut records: Vec<T> = Vec::new();
+        let mut retained_bytes = 0;
         loop {
             let page = self
                 .fetch_page(symbol, spec, page_token.as_deref(), false)
                 .await?;
-            records.extend(page.records);
+            append_records(&mut records, page.records, &mut retained_bytes)?;
             match page.next_page_token {
                 None => return Ok(records),
                 Some(token) if token.is_empty() => return Ok(records),
@@ -850,13 +890,22 @@ impl AlpacaClient {
         // execute in parallel on the runtime's workers instead of serializing
         // inside one fetch task.
         let body = response.body;
+        let allocation = response.allocation;
         let parser = spec.parser;
         let window = spec.window;
         let data_type = spec.data_type;
         let symbol = symbol.to_string();
         let parse_started = std::time::Instant::now();
+        let pipeline = lake_pipeline::Pipeline::global();
+        let cpu = pipeline
+            .cpu()
+            .await
+            .map_err(|error| ProviderError::Configuration(error.to_string()))?;
         let (parsed, next_page_token) = tokio::task::spawn_blocking(
             move || -> Result<(ParsedPage<T>, Option<String>), ProviderError> {
+                let _cpu = cpu;
+                let _allocation = allocation;
+                let mut normalize = pipeline.timer(lake_pipeline::Stage::Normalize);
                 let (rows, next_page_token) = parse::page_rows(&body, data_type, &symbol)?;
                 let has_cursor = next_page_token
                     .as_deref()
@@ -868,6 +917,7 @@ impl AlpacaClient {
                     trim_trailing_ties && has_cursor,
                     &symbol,
                 )?;
+                normalize.rows(page.records.len());
                 Ok((page, next_page_token))
             },
         )
@@ -900,10 +950,26 @@ impl AlpacaClient {
         params: &[(String, String)],
     ) -> Result<TransportResponse, ProviderError> {
         for attempt in 1..=self.config.max_attempts {
+            let pipeline = lake_pipeline::Pipeline::global();
+            let allocation = std::sync::Arc::new(
+                pipeline
+                    .response()
+                    .await
+                    .map_err(|error| ProviderError::Configuration(error.to_string()))?,
+            );
             let permit = self.lane.acquire().await;
+            let rate_wait = pipeline.timer(lake_pipeline::Stage::RateWait);
             self.governor.before_request().await?;
+            drop(rate_wait);
             let started = std::time::Instant::now();
-            let outcome = self.transport.get(url, params, &self.headers).await;
+            let outcome = self
+                .transport
+                .get(url, params, &self.headers, allocation.clone())
+                .await
+                .map(|mut response| {
+                    response.allocation = Some(allocation);
+                    response
+                });
             let elapsed = started.elapsed();
             drop(permit);
             match outcome {
@@ -921,7 +987,9 @@ impl AlpacaClient {
                             url: url.to_string(),
                         });
                     }
-                    tokio::time::sleep(self.retry_delay(&response, attempt)).await;
+                    let delay = self.retry_delay(&response, attempt);
+                    drop(response);
+                    tokio::time::sleep(delay).await;
                 }
                 Err(TransportFailure::Transport(message)) => {
                     if attempt == self.config.max_attempts {
@@ -1277,4 +1345,40 @@ fn month_number(name: &str) -> Option<u32> {
         .iter()
         .position(|month| month.eq_ignore_ascii_case(name))
         .map(|index| index as u32 + 1)
+}
+
+fn resource_error(error: lake_contracts::DataError) -> ProviderError {
+    ProviderError::Configuration(error.to_string())
+}
+fn append_records<T: RecordMemory>(
+    records: &mut Vec<T>,
+    incoming: Vec<T>,
+    bytes: &mut usize,
+) -> Result<(), ProviderError> {
+    *bytes = bytes.saturating_add(
+        incoming
+            .iter()
+            .map(RecordMemory::allocated_bytes)
+            .sum::<usize>(),
+    );
+    lake_pipeline::Pipeline::global()
+        .check_dataset_bytes(*bytes)
+        .map_err(resource_error)?;
+    records.extend(incoming);
+    Ok(())
+}
+async fn sort_records<T: Timestamped + Send + 'static>(
+    mut records: Vec<T>,
+) -> Result<Vec<T>, ProviderError> {
+    let pipeline = lake_pipeline::Pipeline::global();
+    let cpu = pipeline.cpu().await.map_err(resource_error)?;
+    tokio::task::spawn_blocking(move || {
+        let _cpu = cpu;
+        let mut timer = pipeline.timer(lake_pipeline::Stage::Sort);
+        timer.rows(records.len());
+        records.sort_by_key(Timestamped::timestamp);
+        records
+    })
+    .await
+    .map_err(|e| ProviderError::Protocol(e.to_string()))
 }

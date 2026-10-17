@@ -4,7 +4,7 @@ This capability supplies filesystem persistence and finite worker processes. It 
 
 - `lib.rs`: exports the local adapter facade.
 - `state.rs`: resolves and initializes an explicitly owned filesystem tree and implements marker-protected cleanup.
-- `catalog.rs`: indexes current coverage and contract records in independently atomic files, avoiding whole-catalog rewrites.
+- `catalog.rs`: stores option contract records; market coverage belongs to the shared manifest catalog.
 - `ownership.rs`: protects cross-process job and publication ownership with kernel file locks.
 - `jobs.rs`: durably admits immutable work and exposes fenced updates through the shared persistence ports.
 - `runner.rs`: pins a worker executable by content hash, starts finite child processes, reconciles ownership after host restart and prohibits unknown-outcome replay.

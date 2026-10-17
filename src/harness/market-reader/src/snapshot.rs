@@ -101,6 +101,7 @@ impl MarketDataSnapshot {
                 self.request.interval.as_deref(),
                 &self.request.symbol,
             )
+            .and_then(|logical| lake_contracts::immutable_path(&logical, &file.checksum))
             .map_err(|e| ReaderError::Snapshot(e.to_string()))?;
             if file.object_path != expected
                 || file.checksum.len() != 64

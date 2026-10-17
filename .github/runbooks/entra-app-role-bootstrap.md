@@ -112,4 +112,5 @@ audience keeps the API on static-bearer-only authentication, which remains the
 local development path; the shared bearer secret retires once every hosted
 caller authenticates with its managed identity. Clients mint tokens for the
 audience with an `azure-identity` `TokenCredential` such as
-`DefaultAzureCredential` (`lakeclient.LakeClient(credential=..., audience=...)`).
+`DefaultAzureCredential`, then supply the access token to their authenticated
+HTTP transport. The Python `lakeclient` SDK has been removed.

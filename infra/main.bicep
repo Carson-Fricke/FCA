@@ -26,6 +26,15 @@ param ingestionMemoryGiB string = '8'
 @minValue(1)
 @maxValue(16)
 param ingestionSessionConcurrency int = 2
+@description('Per-worker resource admission limits. Keep accounted session + response memory below the worker allocation, with runtime headroom.')
+param ingestionPipelineLimits object = {
+  cpuSlots: 4
+  responseMemoryMiB: 1024
+  maxResponseMiB: 8
+  memoryMiB: 4096
+  sessionMiB: 2048
+  publicationConcurrency: 2
+}
 @minValue(1)
 @maxValue(64)
 param ingestionMaxWorkers int = 8
@@ -336,6 +345,7 @@ module containerApps './modules/container-apps.bicep' = {
     ingestionCpu: ingestionCpu
     ingestionMemoryGiB: ingestionMemoryGiB
     ingestionSessionConcurrency: ingestionSessionConcurrency
+    ingestionPipelineLimits: ingestionPipelineLimits
     ingestionMaxWorkers: ingestionMaxWorkers
     ingestionPartitionDays: ingestionPartitionDays
     ingestionTimeoutSeconds: ingestionTimeoutSeconds

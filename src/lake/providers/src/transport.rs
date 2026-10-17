@@ -16,14 +16,24 @@ use serde_json::Value;
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// One provider response: status, `Retry-After`, and the decoded JSON body.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 pub struct TransportResponse {
+    /// Response headroom retained through normalization; fake external transports leave this empty.
+    pub allocation: Option<std::sync::Arc<lake_pipeline::Reservation>>,
     /// The HTTP status code.
     pub status: u16,
     /// The `Retry-After` header exactly as received.
     pub retry_after: Option<String>,
     /// The decoded JSON body.
     pub body: Value,
+}
+
+impl PartialEq for TransportResponse {
+    fn eq(&self, other: &Self) -> bool {
+        self.status == other.status
+            && self.retry_after == other.retry_after
+            && self.body == other.body
+    }
 }
 
 /// A transport-level failure that never produced a usable response.
@@ -45,6 +55,7 @@ pub trait AlpacaTransport: Send + Sync {
         url: &'a str,
         params: &'a [(String, String)],
         headers: &'a [(String, String)],
+        allocation: std::sync::Arc<lake_pipeline::Reservation>,
     ) -> BoxFuture<'a, Result<TransportResponse, TransportFailure>>;
 }
 
@@ -91,13 +102,16 @@ impl AlpacaTransport for ReqwestTransport {
         url: &'a str,
         params: &'a [(String, String)],
         headers: &'a [(String, String)],
+        allocation: std::sync::Arc<lake_pipeline::Reservation>,
     ) -> BoxFuture<'a, Result<TransportResponse, TransportFailure>> {
         Box::pin(async move {
             let mut request = self.client.get(encode_query(url, params));
             for (name, value) in headers {
                 request = request.header(name.as_str(), value.as_str());
             }
-            let response = match request.send().await {
+            let pipeline = lake_pipeline::Pipeline::global();
+            let mut network = pipeline.timer(lake_pipeline::Stage::Network);
+            let mut response = match request.send().await {
                 Ok(response) => response,
                 Err(error) => {
                     let message = error.to_string();
@@ -114,18 +128,45 @@ impl AlpacaTransport for ReqwestTransport {
                 .get(reqwest::header::RETRY_AFTER)
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_string);
-            let text = response
-                .text()
+            let mut bytes = Vec::new();
+            while let Some(chunk) = response
+                .chunk()
                 .await
-                .map_err(|error| TransportFailure::Transport(error.to_string()))?;
+                .map_err(|error| TransportFailure::Transport(error.to_string()))?
+            {
+                network.bytes(bytes.len().saturating_add(chunk.len()));
+                pipeline
+                    .check()
+                    .map_err(|error| TransportFailure::Protocol(error.to_string()))?;
+                if bytes.len().saturating_add(chunk.len()) > pipeline.limits.max_response_bytes {
+                    return Err(TransportFailure::Protocol(
+                        "provider response exceeds configured byte limit".into(),
+                    ));
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            network.bytes(bytes.len());
+            drop(network);
+            let text = String::from_utf8(bytes)
+                .map_err(|error| TransportFailure::Protocol(error.to_string()))?;
             // A full SIP page is CPU-heavy to decode. Keep JSON allocation and
             // parsing off the async workers needed by other in-flight requests.
-            let body = tokio::task::spawn_blocking(move || decode_body(&text, status))
+            let cpu = pipeline
+                .cpu()
                 .await
-                .map_err(|error| {
-                    TransportFailure::Protocol(format!("response decode task failed: {error}"))
-                })??;
+                .map_err(|error| TransportFailure::Protocol(error.to_string()))?;
+            let (body, allocation) = tokio::task::spawn_blocking(move || {
+                let _cpu = cpu;
+                let mut decode = pipeline.timer(lake_pipeline::Stage::Decode);
+                decode.bytes(text.len());
+                decode_body(&text, status).map(|body| (body, allocation))
+            })
+            .await
+            .map_err(|error| {
+                TransportFailure::Protocol(format!("response decode task failed: {error}"))
+            })??;
             Ok(TransportResponse {
+                allocation: Some(allocation),
                 status,
                 retry_after,
                 body,

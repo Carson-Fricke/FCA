@@ -179,9 +179,82 @@ pub struct NormalizedBar {
 }
 
 /// The parseable record timestamp used by the time-sliced planner.
-pub(crate) trait Timestamped {
+pub(crate) trait Timestamped: RecordMemory {
     /// The record's UTC timestamp.
     fn timestamp(&self) -> DateTime;
+}
+
+/// Retained normalized allocation accounting; used before appending another page.
+pub trait RecordMemory {
+    fn allocated_bytes(&self) -> usize;
+}
+
+fn text(value: &Option<String>) -> usize {
+    value.as_ref().map_or(0, String::capacity)
+}
+fn conditions(values: &Vec<String>) -> usize {
+    values.capacity() * std::mem::size_of::<String>()
+        + values.iter().map(String::capacity).sum::<usize>()
+}
+impl RecordMemory for NormalizedTrade {
+    fn allocated_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.symbol.capacity()
+            + self.exchange.capacity()
+            + self.tape.capacity()
+            + text(&self.update)
+            + conditions(&self.conditions)
+    }
+}
+impl RecordMemory for NormalizedQuote {
+    fn allocated_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.symbol.capacity()
+            + self.bid_exchange.capacity()
+            + self.ask_exchange.capacity()
+            + self.tape.capacity()
+            + conditions(&self.conditions)
+    }
+}
+impl RecordMemory for NormalizedCryptoTrade {
+    fn allocated_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.symbol.capacity()
+            + text(&self.exchange)
+            + text(&self.taker_side)
+    }
+}
+impl RecordMemory for NormalizedCryptoQuote {
+    fn allocated_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.symbol.capacity()
+            + text(&self.bid_exchange)
+            + text(&self.ask_exchange)
+    }
+}
+impl RecordMemory for NormalizedBar {
+    fn allocated_bytes(&self) -> usize {
+        std::mem::size_of::<Self>() + self.symbol.capacity()
+    }
+}
+impl RecordMemory for NormalizedOptionTrade {
+    fn allocated_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.symbol.capacity()
+            + self.underlying.capacity()
+            + self.exchange.capacity()
+            + self.condition.capacity()
+    }
+}
+impl RecordMemory for NormalizedOptionQuote {
+    fn allocated_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.symbol.capacity()
+            + self.underlying.capacity()
+            + self.bid_exchange.capacity()
+            + self.ask_exchange.capacity()
+            + self.condition.capacity()
+    }
 }
 
 impl Timestamped for NormalizedTrade {

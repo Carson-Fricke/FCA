@@ -1,8 +1,7 @@
-//! Asset classes, data types, and the frozen Hive partition layout.
+//! Asset classes, data types, logical Hive partitions and immutable object identity.
 //!
-//! Object layout, file naming, and partition paths are frozen: the harness
-//! reads `date=/asset_class=/data_type=/SYMBOL.parquet` partitions directly
-//! from disk.
+//! Logical names retain date/asset/data/symbol dimensions. Published market
+//! objects prefix those names with the exact SHA-256 content digest.
 
 use core::fmt;
 
@@ -224,4 +223,29 @@ pub fn partition_path(
             symbol
         )),
     }
+}
+
+/// Bind a logical partition to immutable content. Only the current path format is accepted.
+pub fn immutable_path(logical: &str, checksum: &str) -> Result<String, DataError> {
+    if checksum.len() != 64
+        || !checksum
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err(DataError::value(
+            "object checksum must be lowercase SHA-256",
+        ));
+    }
+    Ok(format!("sha256={checksum}/{logical}"))
+}
+
+/// Extract the required content digest from a current immutable object reference.
+pub fn object_checksum(path: &str) -> Result<&str, DataError> {
+    let digest = path
+        .strip_prefix("sha256=")
+        .and_then(|p| p.split_once('/'))
+        .map(|(hash, _)| hash)
+        .ok_or_else(|| DataError::value("outdated market object path; reset affected coverage"))?;
+    immutable_path("", digest)?;
+    Ok(digest)
 }

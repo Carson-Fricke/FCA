@@ -9,7 +9,7 @@
 //!
 //! Classification mirrors `_classify_files` exactly: an entry is usable only
 //! when its state is `complete` **and** its object path equals the canonical
-//! `date=/asset_class=/data_type=/SYMBOL.parquet` partition. Every other entry
+//! `sha256=<digest>/date=/asset_class=/data_type=/SYMBOL.parquet` partition. Every other entry
 //! is incomplete, including terminal `empty` and `delisted` sessions, so a file
 //! query never pretends a session with no partition is covered.
 //!
@@ -228,6 +228,9 @@ fn has_expected_path(
         interval,
         symbol,
     )
+    .and_then(|logical| {
+        lake_contracts::immutable_path(&logical, record.checksum.as_deref().unwrap_or(""))
+    })
     .is_ok_and(|expected| object_path == expected)
 }
 

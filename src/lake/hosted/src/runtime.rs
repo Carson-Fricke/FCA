@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lake_catalog::{AzureTableCatalogRepository, CatalogRepository, JobRepository};
+use lake_catalog::{CatalogRepository, JobRepository, PublicationCatalog};
 use lake_configuration::{ConfigError, LakeSettings};
 use lake_contracts::DataError;
 use lake_coverage::{EnsureAdmission, EnsureSpec, EnsureSubmission};
@@ -62,7 +62,7 @@ impl From<DataError> for HostedEnsureError {
 
 /// Azure-backed catalog, job, query, and ingest boundaries for hosting.
 pub struct HostedRuntime {
-    catalog: Arc<AzureTableCatalogRepository>,
+    catalog: Arc<PublicationCatalog>,
     jobs: Arc<dyn JobRepository>,
     contracts: Arc<dyn lake_catalog::ContractRepository>,
     sas_issuer: Arc<AzureBlobSasIssuer>,
@@ -109,13 +109,6 @@ impl HostedRuntime {
             .unwrap_or_else(|| DEFAULT_STORAGE_CONTAINER.to_string());
         let coverage_table = environment_value(environ, COVERAGE_TABLE_ENV)
             .unwrap_or_else(|| DEFAULT_COVERAGE_TABLE.to_string());
-        let catalog = AzureTableCatalogRepository::new(Arc::new(
-            lake_catalog::SdkTableEntityStore::from_account_url(
-                &table_url,
-                &coverage_table,
-                Arc::clone(&credential),
-            )?,
-        ));
         let contracts = Arc::new(lake_catalog::AzureTableContractRepository::new(Arc::new(
             lake_catalog::SdkTableEntityStore::from_account_url(
                 &table_url,
@@ -135,6 +128,16 @@ impl HostedRuntime {
             Arc::clone(&credential),
         )?);
         let jobs: Arc<dyn JobRepository> = Arc::new(BlobJobRepository::new(read_store.clone()));
+        let catalog = PublicationCatalog::new(
+            read_store.clone(),
+            Arc::new(lake_storage::AzureBlobLeaseProvider::from_account_url(
+                &blob_url,
+                &container_name,
+                credential.clone(),
+                60,
+                lake_catalog::PUBLICATION_PREFIX,
+            )?),
+        );
         let ingestion = Arc::new(IngestionJobs {
             store: JobStore::new(format!("{blob_url}/{container_name}"), credential.clone())?,
             runner: AcaRunner::new(AcaConfig::from_environment(environ)?, credential.clone())?,
@@ -154,9 +157,9 @@ impl HostedRuntime {
         })
     }
 
-    /// The Azure Table coverage catalog for this process.
+    /// The committed manifest coverage catalog for this process.
     #[must_use]
-    pub fn catalog(&self) -> &Arc<AzureTableCatalogRepository> {
+    pub fn catalog(&self) -> &Arc<PublicationCatalog> {
         &self.catalog
     }
 

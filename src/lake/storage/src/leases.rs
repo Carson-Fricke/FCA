@@ -1,9 +1,8 @@
-//! Scoped leases for protecting symbol-day lake replacements.
+//! Fenced ownership of symbol-day coverage manifests.
 //!
 //! Ports the provider-independent half of `lake.storage.leases`: the
-//! canonicalized [`SymbolDayScope`] key and Azure lock-blob name, the [`Lease`]
-//! and [`LeaseProvider`] boundaries, and the `hold_lease` helper. The Azure
-//! provider itself is deferred to the hosted phase.
+//! Canonical manifest identity, renewal cadence and fenced read/publish ownership
+//! shared by local kernel locks and Azure blob leases.
 
 use lake_contracts::{symbol_filename, AssetClass, DataError, Date};
 
@@ -44,19 +43,26 @@ impl SymbolDayScope {
         )
     }
 
-    /// Return the deterministic relative name used by Azure lock blobs.
+    /// Return the deterministic manifest name protected by both adapters.
     pub fn blob_name(&self) -> String {
         format!(
-            "date={}/asset_class={}/{}.lock",
-            self.session_date.isoformat(),
+            "asset_class={}/symbol={}/date={}.json",
             self.asset_class.value(),
-            quote(&self.symbol)
+            quote(&self.symbol),
+            self.session_date.isoformat()
         )
     }
 }
 
 /// A held scope lease with explicit renewal and release operations.
 pub trait Lease: Send + Sync {
+    /// Finite owners supply a renewal cadence; kernel ownership has no expiry.
+    fn renewal_interval(&self) -> Option<std::time::Duration>;
+    /// Read the manifest protected by this ownership token.
+    fn read(&self) -> Result<Vec<u8>, DataError>;
+
+    /// Atomically replace the manifest, rejecting expired or released ownership.
+    fn publish(&self, payload: &[u8]) -> Result<(), DataError>;
     /// Return the provider lease identifier.
     fn lease_id(&self) -> Option<&str>;
 

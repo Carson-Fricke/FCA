@@ -4,7 +4,11 @@
 
 The runtime implements one harness-hosted HTTP composition, a shared read-only
 reader, durable partitioned local/ACA ingestion, native catalog access, and
-snapshot/cache reuse. Local and Azure execution were verified at source
+snapshot/cache reuse. Publication now uses immutable SHA-256 object paths and one
+renewed, fenced symbol-day manifest; ingestion shares explicit CPU, response,
+session-memory and publication budgets with structured stage/resource metrics.
+These source changes require the publication cutover below before deployment.
+Local and Azure execution were verified at source
 `81162c3`; the [rollout record](../verification/ingestion-fleet-rollout-2026-10-15.md)
 documents deployed image pins, measured performance and the GitHub billing
 block. Later source changes still require their own release verification.
@@ -20,7 +24,8 @@ block. Later source changes still require their own release verification.
 | Ingestion execution control | `src/lake/ingest-jobs` | Conditional durable admission, immutable worker specifications, lease-fenced job state, ACA execution reconciliation and aggregate worker limits. |
 | Finite ingestion process | `src/lake/ingest-worker` | Claim one job, fetch provider secrets using its identity, run shared transactions, publish progress/results, settle and exit. |
 | Provider acquisition/publication | `src/lake/providers`, `ingestion`, `storage` | Provider paging/governance, staging, canonical Parquet writing and symbol-day publication leases. |
-| Local deployment adapters | `src/lake/local` | Partition-indexed filesystem catalog, durable job documents, kernel ownership and content-pinned finite worker processes. |
+| Local deployment adapters | `src/lake/local` | Atomic contract files, durable job documents, kernel-fenced manifest ownership and content-pinned finite worker processes. |
+| Ingestion resources and measurements | `src/lake/pipeline` | Shared CPU/response/session/publication admission, cancellation fencing, stage/pool counters and OS CPU/RSS. |
 | Hosting composition | `src/lake/hosted`, `src/harness/api` | Select local or Azure adapters and inject native capabilities and HTTP routes. The hosted API has no provider-client dependency. |
 
 `harness-market-reader` depends on value contracts and Arrow/Parquet, not HTTP,
@@ -57,10 +62,12 @@ partitions; active reads also require compressed payload and decode memory.
 the corresponding cache. Cache corruption and metadata mismatches fail visibly.
 
 `POST /market-data/v1/snapshot/locations` renews access to the same manifest.
-API bearer credentials are never sent to signed-object URLs. If the canonical
-object has been replaced, an old snapshot can use previously verified cached
-bytes; otherwise checksum validation rejects the replacement. A snapshot pins
-content identity, not perpetual retention of historical objects.
+API bearer credentials are never sent to signed-object URLs. Market objects use
+`sha256=<digest>/<logical-partition-path>` and are immutable: replacing current
+coverage retains the bytes referenced by earlier snapshots, including cold reads.
+Content garbage collection needs an explicit retention contract; no publication
+path deletes old generations. Local signed URLs encode canonical paths once at
+the HTTP transport boundary, including symbols containing percent escapes.
 
 ## Durable partitioned ingestion
 
@@ -117,16 +124,55 @@ allowance; this is the operator's current execution policy.
 Provider decoding returns typed records. Ingestion validates and canonically
 orders them, then builds Arrow batches directly with exact decimal values.
 Storage accepts only the pinned schema and serializes canonical Parquet; no JSON
-row normalization facade remains. A shared CPU-stage semaphore bounds blocking
-validation, encoding and publication, while bounded sessions overlap provider
-I/O. No per-column or per-pass thread fan-out multiplies with concurrent sessions.
+row normalization facade remains. `lake-pipeline` owns shared process resource
+admission, cancellation and measurements. Providers reserve response headroom
+before the request governor and retain it through blocking decode/normalization.
+JSON decoding, normalization, sorting, Arrow projection and Parquet encoding share
+one CPU budget;
+lease waits and object/manifest writes use a separate publication budget. Sessions
+reserve memory before fetching and retain that reservation through completion.
+Normalized input is bounded incrementally with encoding headroom; an oversized
+session fails visibly rather than waiting for credits held by itself. This is
+allocation accounting with explicit body/input limits, not an RSS allocator or a
+spill-to-disk implementation. Local workers divide host CPU and the configurable
+host memory budget; no per-column or per-pass thread fan-out is used.
 
-Publication remains atomic within one symbol/day. Competing dataset writers wait
-up to 75 seconds for that publication lease before any mutation; only acquisition
-conflicts are retried. Publication, provider acquisition and uncertain ACA starts
-are never replayed by this wait. Bar ingestion keeps its bounded range fetch and
-publishes each session separately rather than attempting a multi-day commit under
-one symbol/day lease. Closed crypto days use half-open tick membership
+`PublicationCatalog` is the only production coverage implementation. Its authority
+is `publications/asset_class=<asset>/symbol=<encoded>/date=<day>.json`, holding all
+dataset/interval rows for that symbol-day. Readers consult committed manifests;
+Azure Tables retain separate contracts/listings/job capabilities, not coverage.
+Discovery filters symbol/date paths before reading manifest payloads. Azure batches
+those reads with 32-way network fan-out and ordered results; local files use the
+same batch port without per-file remote waits.
+The publisher validates all candidate objects against their hashes and coverage,
+acquires a publication slot and the manifest lease, reads the current manifest,
+uploads immutable objects, merges selected rows, and replaces the manifest once.
+Objects left by failed uploads are unreachable; no partial dataset set is visible.
+Acquisition conflicts alone may wait up to 75 seconds. Mutations and ambiguous
+acknowledgements are not replayed: a failed final acknowledgement can mean the
+manifest committed, and coverage is the reconciliation authority.
+
+Azure leases protect the manifest blob itself. The lease ID accompanies the final
+PUT, so expiry/reacquisition rejects stale writers atomically. Renewal runs at one
+third of the lease duration and stops before release. Local kernel ownership has
+no expiry and protects atomic file replacement. Cancellation serializes with the
+final visibility mutation before job settlement; aborting a caller cannot authorize
+its surviving blocking encoder to publish later. Bar range acquisition remains
+batched and publication remains one symbol-day at a time.
+
+Workers emit `ingestion_metrics` every ten seconds and attach the final snapshot
+to `worker_settled`, attributed by retained job ID and partition. Metrics include
+secret setup/coverage/progress/network/decode/normalize/validate/sort/Arrow/Parquet/
+hash/upload/manifest/lease and
+rate-wait timings, bytes/rows, pool occupancy/high-water/waits and OS CPU/RSS.
+Timings are overlapping stage service time, not additive wall time. Network bytes
+are decoded HTTP body bytes, not compressed bytes on the wire. The maintained
+`ingestion/examples/replay.rs` exercises the full loopback HTTP-to-publication path
+with synthetic quotes/trades, no credentials and isolated temporary objects; it
+verifies row counts and reports throughput. It does not measure Alpaca latency,
+Azure egress or ACA startup. See `docs/ingestion-performance.md` for commands.
+
+Closed crypto days use half-open tick membership
 `[open, close)` so adjacent days cannot duplicate a midnight event; an unfinished
 day includes its current query endpoint when that endpoint precedes the close.
 
@@ -138,7 +184,8 @@ with platform replica retries disabled. Defaults are eight concurrent worker
 executions, two sessions per worker, 31-day partitions and an 86,400-second
 execution deadline. Bicep exposes `ingestionMaxWorkers`,
 `ingestionSessionConcurrency`, `ingestionPartitionDays`, `ingestionCpu`,
-`ingestionMemoryGiB`, `ingestionTimeoutSeconds` and `ingestionImageReference`.
+`ingestionMemoryGiB`, `ingestionTimeoutSeconds`, `ingestionImageReference` and
+`ingestionPipelineLimits` (CPU slots, response/session bytes, publication slots).
 Runtime controls are the corresponding `LAKE_INGEST_*` settings; the job name,
 worker identity, image, resource group and provider Key Vault are explicit inputs.
 The partition default amortizes worker startup over month/year requests. Smaller
@@ -161,10 +208,18 @@ OIDC bootstrap before recurring releases can create the new grant.
 
 ACA replaces the ACI adapter completely. Old ACI job documents are obsolete and
 must be drained and deleted before deploying current writers. There is no old
-executor decoder or runtime migration. Canonical Parquet and coverage remain
-unchanged, including byte-identical output for the retained replay benchmark.
+executor decoder or runtime migration. The current publication cutover also
+retires per-dataset Table/file coverage rows and mutable market object names;
+Parquet payload schemas and canonical bytes remain unchanged. Drain accepted work,
+stop API/dispatcher/worker writers, then reset affected development market objects,
+coverage rows, saved snapshots and retained ingestion job/partition/executor
+records before starting one matching API/worker image
+pair. Preserve unrelated contracts, listings, reference data and harness state.
+Preserve the charged request-allowance ledger until its outstanding window has
+expired. There is no mixed-writer window, old coverage reader, or runtime conversion.
 Local reset remains an explicit marker-protected operation; reads never delete
-or upgrade outdated data.
+or upgrade outdated data. The currently deployed `81162c3` release is historical
+verification, not evidence that this cutover or these source changes are deployed.
 
 `HARNESS_MARKET_DATA_MODE` selects the complete local or Azure composition.
 Local mode needs no Azure service. Local Thesis/UI can select the entire remote
@@ -188,6 +243,11 @@ artifacts without sharing mutable target mounts with concurrent branches. Python
 image inputs preserve the canonical wheel contents while excluding unrelated UI
 and non-SDK Rust source. Registry-backed intermediate caches isolate image builds
 from Actions' dependency-cache storage allowance.
+
+The query crate pins the DuckDB wrapper/native engine pair exactly, with the
+same versions in both workspace lockfiles. The harness dependency cook can then
+reuse the lake's native compilation; independent resolutions previously built
+two different DuckDB versions in the shared image.
 
 The harness dependency cook is an immutable `harness-deps` stage. Runtime Cargo
 files come from that stage and Rustup from `rust-base`, never from a source build

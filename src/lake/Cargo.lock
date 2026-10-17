@@ -1220,9 +1220,9 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "duckdb"
-version = "1.10505.0"
+version = "1.10506.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "970e05eedd3f55c435194d9104f90a9b4a79a80d6e73251bc9ff43e178130c4e"
+checksum = "e3472b9152d879c5534353b20854e43525b2c78b2dbba156711e9939d30278b4"
 dependencies = [
  "arrow",
  "cast",
@@ -2221,6 +2221,8 @@ dependencies = [
  "bytes",
  "futures-util",
  "lake-contracts",
+ "lake-pipeline",
+ "lake-storage",
  "serde",
  "serde_json",
  "tempfile",
@@ -2263,6 +2265,7 @@ dependencies = [
  "hex",
  "lake-catalog",
  "lake-contracts",
+ "lake-storage",
  "serde",
  "serde_json",
  "sha2",
@@ -2294,6 +2297,7 @@ dependencies = [
  "lake-local",
  "lake-query",
  "lake-storage",
+ "percent-encoding",
  "serde",
  "serde_json",
  "sha2",
@@ -2378,6 +2382,7 @@ dependencies = [
  "lake-ingest-jobs",
  "lake-ingestion",
  "lake-local",
+ "lake-pipeline",
  "lake-providers",
  "lake-storage",
  "reqwest 0.13.5",
@@ -2405,10 +2410,13 @@ dependencies = [
  "lake-contracts",
  "lake-coverage",
  "lake-http",
+ "lake-local",
+ "lake-pipeline",
  "lake-providers",
  "lake-storage",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "tower",
@@ -2434,6 +2442,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lake-pipeline"
+version = "0.1.0"
+dependencies = [
+ "lake-contracts",
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "lake-providers"
 version = "0.1.0"
 dependencies = [
@@ -2441,6 +2461,7 @@ dependencies = [
  "futures-util",
  "lake-catalog",
  "lake-contracts",
+ "lake-pipeline",
  "percent-encoding",
  "reqwest 0.13.5",
  "serde",
@@ -2506,6 +2527,7 @@ dependencies = [
  "futures-util",
  "hex",
  "lake-contracts",
+ "lake-pipeline",
  "parquet",
  "serde_json",
  "sha2",
@@ -2588,9 +2610,9 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
 name = "libduckdb-sys"
-version = "1.10505.0"
+version = "1.10506.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cb514dab5e271e849235c1cb98bd65a2ae107fbd619a6740219319c54a71d95"
+checksum = "0aac3459f2f7f0221d5be9114fa77ff5877040c8de456d3b986a680579fe202b"
 dependencies = [
  "cc",
  "flate2",

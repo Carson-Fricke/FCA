@@ -20,6 +20,7 @@ impl AlpacaTransport for Transport {
         url: &'a str,
         params: &'a [(String, String)],
         _: &'a [(String, String)],
+        _: Arc<lake_pipeline::Reservation>,
     ) -> BoxFuture<'a, Result<TransportResponse, TransportFailure>> {
         Box::pin(async move {
             self.requests
@@ -44,6 +45,7 @@ impl AlpacaTransport for Transport {
                     "next_page_token":if self.repeat || param("page_token").is_none() {Some("next")}else{None}})
             };
             Ok(TransportResponse {
+                allocation: None,
                 status: 200,
                 retry_after: None,
                 body,

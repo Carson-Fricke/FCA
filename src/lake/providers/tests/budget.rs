@@ -33,10 +33,12 @@ impl AlpacaTransport for Provider {
         _: &'a str,
         _: &'a [(String, String)],
         _: &'a [(String, String)],
+        _: Arc<lake_pipeline::Reservation>,
     ) -> BoxFuture<'a, Result<TransportResponse, TransportFailure>> {
         Box::pin(async move {
             let attempt = self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(TransportResponse {
+                allocation: None,
                 status: if attempt == 0 { 503 } else { 200 },
                 retry_after: None,
                 body: serde_json::json!({"quotes":{"AAPL":[]},"next_page_token":null}),

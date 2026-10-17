@@ -19,7 +19,7 @@ use lake_contracts::{
 
 const TABLE_KEY_SAFE: &[u8] = b"_.-~";
 
-/// The exact JSON key set of one legacy coverage row in `catalog.json`.
+/// The exact required JSON key set of one current coverage record.
 pub(crate) const COVERAGE_JSON_KEYS: [&str; 10] = [
     "asset_class",
     "byte_size",
@@ -422,7 +422,7 @@ impl CoverageRecord {
     }
 }
 
-/// Restore one coverage row from a parsed `catalog.json` row value.
+/// Decode one strict current coverage record from a manifest value.
 pub(crate) fn coverage_from_value(value: &Value) -> Result<CoverageRecord, DataError> {
     let object = value
         .as_object()

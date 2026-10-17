@@ -70,6 +70,8 @@ pub(crate) fn equity_trades(
     records: &[&NormalizedTrade],
     symbol: &str,
 ) -> Result<RecordBatch, DataError> {
+    let mut projection = lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::Arrow);
+    projection.rows(records.len());
     batch(
         AssetClass::Equity,
         DataType::Trade,
@@ -95,6 +97,8 @@ pub(crate) fn equity_quotes(
     records: &[&NormalizedQuote],
     symbol: &str,
 ) -> Result<RecordBatch, DataError> {
+    let mut projection = lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::Arrow);
+    projection.rows(records.len());
     batch(
         AssetClass::Equity,
         DataType::Quote,
@@ -121,6 +125,8 @@ pub(crate) fn option_trades(
     records: &[&NormalizedOptionTrade],
     symbol: &str,
 ) -> Result<RecordBatch, DataError> {
+    let mut projection = lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::Arrow);
+    projection.rows(records.len());
     batch(
         AssetClass::Option,
         DataType::Trade,
@@ -141,6 +147,8 @@ pub(crate) fn option_quotes(
     records: &[&NormalizedOptionQuote],
     symbol: &str,
 ) -> Result<RecordBatch, DataError> {
+    let mut projection = lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::Arrow);
+    projection.rows(records.len());
     batch(
         AssetClass::Option,
         DataType::Quote,
@@ -166,6 +174,8 @@ pub(crate) fn crypto_trades(
     records: &[&NormalizedCryptoTrade],
     symbol: &str,
 ) -> Result<RecordBatch, DataError> {
+    let mut projection = lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::Arrow);
+    projection.rows(records.len());
     batch(
         AssetClass::Crypto,
         DataType::Trade,
@@ -185,6 +195,8 @@ pub(crate) fn crypto_quotes(
     records: &[&NormalizedCryptoQuote],
     symbol: &str,
 ) -> Result<RecordBatch, DataError> {
+    let mut projection = lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::Arrow);
+    projection.rows(records.len());
     batch(
         AssetClass::Crypto,
         DataType::Quote,
@@ -206,6 +218,8 @@ pub(crate) fn bars(
     asset: AssetClass,
     symbol: &str,
 ) -> Result<RecordBatch, DataError> {
+    let mut projection = lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::Arrow);
+    projection.rows(records.len());
     batch(
         asset,
         DataType::Bars,

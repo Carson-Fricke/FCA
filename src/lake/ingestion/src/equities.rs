@@ -108,9 +108,10 @@ impl EquityIngestTransaction {
         session: &CoverageSession,
         data_types: Option<&[DataType]>,
     ) -> Result<EquityIngestResult, DataError> {
+        let session_memory = lake_pipeline::Pipeline::global().session().await?;
         let symbol = canonical_symbol(symbol)?;
         let selected = normalize_data_types(data_types, false)?;
-        let session_fetch_started = std::time::Instant::now();
+
         if let Some(guard) = &self.cap_guard {
             guard.enforce_ingest(0)?;
         }
@@ -131,15 +132,16 @@ impl EquityIngestTransaction {
             })
             .collect();
         let results = join_all(fetches).await;
-        eprintln!(
-            "PROFILE fetch symbol={symbol} session={} seconds={:.3}",
-            session.session_date.isoformat(),
-            session_fetch_started.elapsed().as_secs_f64()
-        );
 
         if let Some(message) = fetch_error_message(&selected, &results) {
             let retryable = failures_all_transient(&results);
-            return self.publish_error(&symbol, session, &selected, message, retryable);
+            let transaction = self.clone();
+            let session = *session;
+            return crate::common::blocking_stage(move || {
+                let _session_memory = session_memory;
+                transaction.publish_error(&symbol, &session, &selected, message, retryable)
+            })
+            .await;
         }
         let records: Vec<EquityRecords> = results
             .into_iter()
@@ -148,8 +150,11 @@ impl EquityIngestTransaction {
 
         let transaction = self.clone();
         let session = *session;
-        crate::common::cpu_stage(move || transaction.finish(symbol, &session, selected, records))
-            .await
+        crate::common::blocking_stage(move || {
+            let _session_memory = session_memory;
+            transaction.finish(symbol, &session, selected, records)
+        })
+        .await
     }
 
     /// Stage and publish on a bounded blocking thread, leaving fetch I/O free.
@@ -160,7 +165,6 @@ impl EquityIngestTransaction {
         selected: Vec<DataType>,
         records: Vec<EquityRecords>,
     ) -> Result<EquityIngestResult, DataError> {
-        let stage_started = std::time::Instant::now();
         let staged_result = self.stage(&symbol, session, &selected, &records);
         let staged = match staged_result {
             Ok(staged) => staged,
@@ -175,11 +179,6 @@ impl EquityIngestTransaction {
                 );
             }
         };
-        eprintln!(
-            "PROFILE stage symbol={symbol} session={} seconds={:.3}",
-            session.session_date.isoformat(),
-            stage_started.elapsed().as_secs_f64()
-        );
 
         if let Some(guard) = &self.cap_guard {
             let additional_bytes = staged
@@ -220,9 +219,10 @@ impl EquityIngestTransaction {
         selected: &[DataType],
         records: &[EquityRecords],
     ) -> Result<StagedEquityObjects, DataError> {
+        let pipeline = lake_pipeline::Pipeline::global();
+        let _cpu = pipeline.cpu_blocking()?;
         let mut metadata = Vec::with_capacity(selected.len());
         for (data_type, records) in selected.iter().zip(records) {
-            let rows_started = std::time::Instant::now();
             let rows = match (data_type, records) {
                 (DataType::Trade, EquityRecords::Trades(trades)) => {
                     trade_rows(trades, symbol, session)?
@@ -232,8 +232,7 @@ impl EquityIngestTransaction {
                 }
                 _ => unreachable!("fetch results align with the selected data types"),
             };
-            let convert_seconds = rows_started.elapsed().as_secs_f64();
-            let write_started = std::time::Instant::now();
+
             metadata.push(self.writer.write(
                 &rows,
                 session.session_date,
@@ -242,13 +241,6 @@ impl EquityIngestTransaction {
                 None,
                 symbol,
             )?);
-            eprintln!(
-                "PROFILE stage-part symbol={symbol} session={} data_type={} rows={} convert_seconds={convert_seconds:.3} write_seconds={:.3}",
-                session.session_date.isoformat(),
-                data_type.value(),
-                rows.num_rows(),
-                write_started.elapsed().as_secs_f64()
-            );
         }
         Ok(StagedEquityObjects {
             objects: self.writer.drain_staged(),

@@ -7,6 +7,7 @@ publish.workspace = true
 description = "Arrow/Parquet writing, atomic object replacement, leases, and the capacity guard."
 
 [dependencies]
+lake-pipeline.workspace = true
 lake-contracts.workspace = true
 arrow-array.workspace = true
 arrow-buffer.workspace = true

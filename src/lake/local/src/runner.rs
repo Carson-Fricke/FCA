@@ -121,11 +121,56 @@ impl WorkerRunner for LocalRunner {
             .append(true)
             .open(logs.join(format!("{id}.log")))?;
         let mut command = Command::new(&self.config.executable);
+        let host_memory = std::env::var("LAKE_INGEST_HOST_MEMORY_MIB")
+            .ok()
+            .map(|value| value.parse::<usize>().map_err(DataError::io))
+            .transpose()?
+            .unwrap_or(32768);
+        let worker_memory = host_memory
+            .checked_div(self.config.max_workers)
+            .ok_or_else(|| DataError::value("local worker count must be positive"))?;
+        let session_pool = worker_memory
+            .checked_mul(3)
+            .ok_or_else(|| DataError::value("local host memory budget overflow"))?
+            / 4;
+        let response_pool = (worker_memory / 4).min(1024);
+        if session_pool / self.config.session_concurrency == 0 || response_pool < 64 {
+            return Err(DataError::value(
+                "local host memory budget is too small for the configured worker fleet",
+            ));
+        }
         command
             .arg(&work.job_id)
             .arg(partition)
             .env("HARNESS_MARKET_DATA_MODE", "local")
             .env("LAKE_LOCAL_DATA_DIR", &self.config.root)
+            .env(
+                "LAKE_INGEST_MEMORY_MIB",
+                std::env::var("LAKE_INGEST_MEMORY_MIB")
+                    .unwrap_or_else(|_| session_pool.to_string()),
+            )
+            .env(
+                "LAKE_INGEST_SESSION_MIB",
+                std::env::var("LAKE_INGEST_SESSION_MIB").unwrap_or_else(|_| {
+                    (session_pool / self.config.session_concurrency).to_string()
+                }),
+            )
+            .env(
+                "LAKE_INGEST_RESPONSE_MEMORY_MIB",
+                std::env::var("LAKE_INGEST_RESPONSE_MEMORY_MIB")
+                    .unwrap_or_else(|_| response_pool.to_string()),
+            )
+            .env(
+                "LAKE_INGEST_CPU_SLOTS",
+                std::env::var("LAKE_INGEST_CPU_SLOTS").unwrap_or_else(|_| {
+                    std::thread::available_parallelism()
+                        .map_or(1, std::num::NonZeroUsize::get)
+                        .checked_div(self.config.max_workers)
+                        .unwrap_or(1)
+                        .max(1)
+                        .to_string()
+                }),
+            )
             .env(
                 "LAKE_INGEST_MAX_WORKERS",
                 self.config.max_workers.to_string(),

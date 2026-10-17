@@ -1,76 +1,66 @@
-//! Coverage planning must remain bounded by the requested Azure catalog partitions.
-use std::sync::{Arc, Mutex};
-
-use lake_catalog::{AzureTableCatalogRepository, TableEntity, TableEntityStore, TableQuery};
+//! Coverage discovery reads only the requested symbol's committed manifests.
+use lake_catalog::PublicationCatalog;
 use lake_contracts::{AssetClass, DataError, DataType, Date, DateTime};
 use lake_coverage::calculate_coverage;
-
+use lake_storage::{BlobStore, Lease, LeaseProvider, ReadableBlobStore, SymbolDayScope};
+use std::sync::{Arc, Mutex};
 #[derive(Default)]
-struct Table {
-    queries: Mutex<Vec<TableQuery>>,
+struct Objects(Mutex<Vec<String>>);
+impl BlobStore for Objects {
+    fn replace(&self, _: &str, _: &[u8]) -> Result<(), DataError> {
+        panic!("read-only planning")
+    }
 }
-
-impl TableEntityStore for Table {
-    fn get_entity(&self, _: &str, _: &str) -> Result<TableEntity, DataError> {
-        Err(DataError::NotFound("absent".into()))
+impl ReadableBlobStore for Objects {
+    fn read(&self, _: &str) -> Result<Vec<u8>, DataError> {
+        panic!("no manifests listed")
     }
-    fn upsert_entity(&self, _: TableEntity) -> Result<(), DataError> {
-        panic!("coverage planning cannot mutate storage")
-    }
-    fn query_entities(&self, query: &TableQuery) -> Result<Vec<TableEntity>, DataError> {
-        self.queries.lock().unwrap().push(query.clone());
+    fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, DataError> {
+        self.0.lock().unwrap().push(prefix.into());
         Ok(Vec::new())
     }
-    fn delete_entity(&self, _: &str, _: &str) -> Result<(), DataError> {
-        panic!("coverage planning cannot mutate storage")
+    fn delete_prefix(&self, _: &str) -> Result<u64, DataError> {
+        panic!("read-only planning")
     }
 }
-
+struct Locks;
+impl LeaseProvider for Locks {
+    fn acquire(&self, _: &SymbolDayScope) -> Result<Box<dyn Lease>, DataError> {
+        panic!("read-only planning")
+    }
+}
 #[test]
-fn coverage_reads_only_selected_partitions_and_bars_source_revisions() {
-    for (data_type, interval, expected_datasets) in [
-        (DataType::Quote, None, vec!["quote"]),
-        (DataType::Bars, Some("1min"), vec!["bars", "trade"]),
+fn coverage_discovery_uses_selected_symbols_without_mutation() {
+    for (data, interval, per_symbol) in [
+        (DataType::Quote, None, 1),
+        (DataType::Bars, Some("1min"), 2),
     ] {
-        let table = Arc::new(Table::default());
-        let catalog = AzureTableCatalogRepository::new(table.clone());
+        let objects = Arc::new(Objects::default());
+        let catalog = PublicationCatalog::new(objects.clone(), Arc::new(Locks));
         let date = Date::parse("2024-01-18").unwrap();
-        let as_of = DateTime::parse_iso_utc("2024-01-20T00:00:00Z").unwrap();
         let report = calculate_coverage(
             &catalog,
             None,
             AssetClass::Equity,
-            &[data_type],
+            &[data],
             &["MSFT".into(), "SPY".into()],
             interval,
             date,
             date,
-            as_of,
+            DateTime::parse_iso_utc("2024-01-20T00:00:00Z").unwrap(),
         )
         .unwrap();
         assert_eq!(report.gap_plan().gaps.len(), 2);
-        let queries = table.queries.lock().unwrap();
-        assert_eq!(queries.len(), 2 * expected_datasets.len());
-        for query in queries.iter() {
-            assert_eq!(query.filter, "PartitionKey eq @partition");
-        }
+        let queries = objects.0.lock().unwrap();
+        assert_eq!(queries.len(), 2 * per_symbol);
         for symbol in ["MSFT", "SPY"] {
-            for dataset in &expected_datasets {
-                let expected = format!(
-                    "coverage|equity|{dataset}|{symbol}{}",
-                    if *dataset == "bars" {
-                        "|interval=1min"
-                    } else {
-                        ""
-                    }
-                );
-                assert!(
-                    queries
-                        .iter()
-                        .any(|q| q.parameters["partition"] == expected),
-                    "{expected}"
-                );
-            }
+            assert_eq!(
+                queries
+                    .iter()
+                    .filter(|p| **p == format!("publications/asset_class=equity/symbol={symbol}"))
+                    .count(),
+                per_symbol
+            );
         }
     }
 }

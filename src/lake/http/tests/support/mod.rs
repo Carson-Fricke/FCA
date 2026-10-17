@@ -21,7 +21,7 @@ use lake_catalog::{
     CatalogRepository, ContractRecord, CoverageRecord, CoverageStatus, MemoryCatalogRepository,
     MemoryJobRepository,
 };
-use lake_contracts::{partition_path, AssetClass, DataError, DataType, Date, DateTime, Decimal18};
+use lake_contracts::{AssetClass, DataError, DataType, Date, DateTime, Decimal18};
 use lake_coverage::{EnsureAdmission, EnsureSubmission};
 use lake_http::{create_app, ApiClock, LakeApiConfig, LakeApiState};
 use lake_query::{EnsureCallback, FileUrlIssuer, QueryApplicationError};
@@ -156,7 +156,7 @@ pub fn complete_record(
         Some(object_path),
         12,
         3456,
-        Some("checksum".to_string()),
+        Some(TEST_CHECKSUM.to_string()),
         None,
         None,
     )
@@ -389,7 +389,7 @@ pub fn complete_bars_record(interval: &str, symbol: &str, session_date: Date) ->
         Some(object_path),
         12,
         3456,
-        Some("checksum".to_string()),
+        Some(TEST_CHECKSUM.to_string()),
         None,
         Some(interval.to_string()),
     )
@@ -654,4 +654,23 @@ pub fn write_fundamentals(
         paths.push(path);
     }
     paths
+}
+
+pub const TEST_CHECKSUM: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+pub fn partition_path(
+    date: Date,
+    asset: AssetClass,
+    data: DataType,
+    interval: Option<&str>,
+    symbol: &str,
+) -> Result<String, DataError> {
+    lake_contracts::partition_path(date, asset, data, interval, symbol)
+        .and_then(|logical| lake_contracts::immutable_path(&logical, TEST_CHECKSUM))
+}
+pub fn with_metadata(mut record: CoverageRecord, metadata: &ParquetMetadata) -> CoverageRecord {
+    record.object_path = Some(metadata.path.clone());
+    record.checksum = Some(metadata.checksum.clone());
+    record.byte_size = metadata.bytes;
+    record.row_count = metadata.rows;
+    record
 }

@@ -58,15 +58,41 @@ impl FileOwnership {
         Ok(())
     }
 }
-impl lake_storage::Lease for FileOwnership {
+struct FilePublicationLease {
+    owner: FileOwnership,
+    objects: lake_storage::LocalFilesystemStore,
+    path: String,
+}
+impl lake_storage::Lease for FilePublicationLease {
+    fn renewal_interval(&self) -> Option<std::time::Duration> {
+        None
+    }
+    fn read(&self) -> Result<Vec<u8>, DataError> {
+        use lake_storage::ReadableBlobStore;
+        self.owner.renew()?;
+        match self.objects.read(&self.path) {
+            Err(DataError::NotFound(_)) => Ok(b"[]".to_vec()),
+            result => result,
+        }
+    }
+    fn publish(&self, payload: &[u8]) -> Result<(), DataError> {
+        use lake_storage::BlobStore;
+        let owner = self.owner.file.lock().map_err(DataError::io)?;
+        if owner.is_none() {
+            return Err(DataError::Conflict(
+                "publication ownership was released".into(),
+            ));
+        }
+        self.objects.replace(&self.path, payload)
+    }
     fn lease_id(&self) -> Option<&str> {
         Some("local-kernel-lock")
     }
     fn renew(&self) -> Result<(), DataError> {
-        self.renew()
+        self.owner.renew()
     }
     fn release(&self) -> Result<(), DataError> {
-        self.release()
+        self.owner.release()
     }
 }
 pub struct FileLeaseProvider(pub std::path::PathBuf);
@@ -75,15 +101,12 @@ impl lake_storage::LeaseProvider for FileLeaseProvider {
         &self,
         scope: &lake_storage::SymbolDayScope,
     ) -> Result<Box<dyn lake_storage::Lease>, DataError> {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        loop {
-            match FileOwnership::acquire(&self.0.join(scope.blob_name())) {
-                Ok(owner) => return Ok(Box::new(owner)),
-                Err(DataError::Conflict(_)) if std::time::Instant::now() < deadline => {
-                    std::thread::sleep(std::time::Duration::from_millis(10))
-                }
-                Err(e) => return Err(e),
-            }
-        }
+        let owner =
+            FileOwnership::acquire(&self.0.join(".publication-locks").join(scope.blob_name()))?;
+        Ok(Box::new(FilePublicationLease {
+            owner,
+            objects: lake_storage::LocalFilesystemStore::new(self.0.clone()),
+            path: format!("{}/{}", lake_catalog::PUBLICATION_PREFIX, scope.blob_name()),
+        }))
     }
 }

@@ -8,6 +8,8 @@ description = "Coverage, job, run, contract, listing, and front-set records with
 
 [dependencies]
 lake-contracts.workspace = true
+lake-storage.workspace = true
+lake-pipeline.workspace = true
 azure_core.workspace = true
 azure_data_tables.workspace = true
 azure_storage.workspace = true

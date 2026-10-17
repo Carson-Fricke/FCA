@@ -304,26 +304,20 @@ fn close(batch: &RecordBatch, row: usize) -> Decimal18 {
 }
 
 #[derive(Default)]
-struct PublicationLeases(Mutex<Vec<lake_storage::SymbolDayScope>>);
-struct PublicationLease;
-impl lake_storage::Lease for PublicationLease {
-    fn lease_id(&self) -> Option<&str> {
-        None
-    }
-    fn renew(&self) -> Result<(), DataError> {
-        Ok(())
-    }
-    fn release(&self) -> Result<(), DataError> {
-        Ok(())
-    }
+struct PublicationLeases {
+    scopes: Mutex<Vec<lake_storage::SymbolDayScope>>,
+    root: std::path::PathBuf,
 }
 impl lake_storage::LeaseProvider for PublicationLeases {
     fn acquire(
         &self,
         scope: &lake_storage::SymbolDayScope,
     ) -> Result<Box<dyn lake_storage::Lease>, DataError> {
-        guard(&self.0).push(scope.clone());
-        Ok(Box::new(PublicationLease))
+        guard(&self.scopes).push(scope.clone());
+        lake_storage::LeaseProvider::acquire(
+            &lake_local::FileLeaseProvider(self.root.clone()),
+            scope,
+        )
     }
 }
 struct CountingProvider {
@@ -347,11 +341,9 @@ impl BarsDataProvider for CountingProvider {
 
 #[tokio::test]
 async fn week_partitions_fetch_once_per_range_and_publish_every_session_under_its_own_lease() {
-    use lake_catalog::{CatalogRepository, MemoryCatalogRepository};
+    use lake_catalog::{CatalogRepository, PublicationCatalog};
     use lake_coverage::{requested_coverage, EnsureJob, EnsureSpec};
-    use lake_ingestion::{
-        EnsureIngest, EnsureProviders, LeasedAtomicIngestCommitter, ObjectCatalogCommitter,
-    };
+    use lake_ingestion::{EnsureIngest, EnsureProviders, ObjectCatalogCommitter};
     use lake_storage::ReadableBlobStore;
 
     let start = Date::from_ymd(2025, 5, 27).unwrap();
@@ -371,8 +363,11 @@ async fn week_partitions_fetch_once_per_range_and_publish_every_session_under_it
     });
     let directory = tempfile::tempdir().unwrap();
     let objects = Arc::new(lake_storage::LocalFilesystemStore::new(directory.path()));
-    let catalog = Arc::new(MemoryCatalogRepository::new());
-    let leases = Arc::new(PublicationLeases::default());
+    let leases = Arc::new(PublicationLeases {
+        scopes: Mutex::default(),
+        root: directory.path().into(),
+    });
+    let catalog = Arc::new(PublicationCatalog::new(objects.clone(), leases.clone()));
     let as_of = DateTime::parse_iso_utc("2025-06-10T00:00:00Z").unwrap();
     let application = EnsureIngest {
         providers: EnsureProviders {
@@ -380,12 +375,9 @@ async fn week_partitions_fetch_once_per_range_and_publish_every_session_under_it
             ..EnsureProviders::default()
         },
         contracts: None,
-        committer: Arc::new(LeasedAtomicIngestCommitter::new(
-            Arc::new(ObjectCatalogCommitter::new(
-                objects.clone(),
-                catalog.clone(),
-            )),
-            leases.clone(),
+        committer: Arc::new(ObjectCatalogCommitter::new(
+            objects.clone(),
+            catalog.clone(),
         )),
         trades: Arc::new(EmptyTradeReader),
         clock: Arc::new(move || as_of),
@@ -428,7 +420,7 @@ async fn week_partitions_fetch_once_per_range_and_publish_every_session_under_it
         "provider acquisition stays batched by range"
     );
     assert_eq!(
-        guard(&leases.0)
+        guard(&leases.scopes)
             .iter()
             .map(|scope| scope.session_date)
             .collect::<Vec<_>>(),
@@ -516,10 +508,8 @@ impl lake_storage::BlobStore for UncertainSecondWrite {
 
 #[tokio::test]
 async fn later_session_publication_failure_preserves_prior_session_without_replay() {
-    use lake_catalog::{CatalogRepository, MemoryCatalogRepository};
-    use lake_ingestion::{
-        LeasedAtomicIngestCommitter, ObjectCatalogCommitter, StagingPartitionWriter,
-    };
+    use lake_catalog::{CatalogRepository, PublicationCatalog};
+    use lake_ingestion::{ObjectCatalogCommitter, StagingPartitionWriter};
     let sessions = [session(2025, 5, 30), session(2025, 6, 2)];
     let provider = Arc::new(CountingProvider {
         provider: FakeBarsProvider {
@@ -535,17 +525,17 @@ async fn later_session_publication_failure_preserves_prior_session_without_repla
         inner: lake_storage::LocalFilesystemStore::new(directory.path()),
         calls: std::sync::atomic::AtomicUsize::new(0),
     });
-    let catalog = Arc::new(MemoryCatalogRepository::new());
+    let catalog = Arc::new(PublicationCatalog::new(
+        Arc::new(lake_storage::LocalFilesystemStore::new(directory.path())),
+        Arc::new(lake_local::FileLeaseProvider(directory.path().into())),
+    ));
     let transaction = BarsIngestTransaction::new(
         provider.clone(),
         Arc::new(EmptyTradeReader),
         Arc::new(StagingPartitionWriter::new()),
-        Arc::new(LeasedAtomicIngestCommitter::new(
-            Arc::new(ObjectCatalogCommitter::new(
-                objects.clone(),
-                catalog.clone(),
-            )),
-            Arc::new(PublicationLeases::default()),
+        Arc::new(ObjectCatalogCommitter::new(
+            objects.clone(),
+            catalog.clone(),
         )),
     );
     assert!(transaction

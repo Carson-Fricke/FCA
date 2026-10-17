@@ -41,7 +41,7 @@ crate.
   `cargo clippy --workspace --all-targets -- -D warnings`, and
   `cargo test --workspace`. No Python interpreter is needed.
 - Workspace root is also `src/lake/Cargo.toml`. Crates are direct children:
-  `contracts`, `configuration`, `catalog`, `coverage`, `providers`,
+  `contracts`, `configuration`, `pipeline`, `catalog`, `coverage`, `providers`,
   `storage`, `ingestion`, `ingest-jobs`, `ingest-worker`, `query`,
   `http`, `local`, `reference`, `hosted`, `cli`. From `src/lake`,
   run the same three gates; no Python interpreter is needed.

@@ -25,6 +25,12 @@ pub trait ReadableBlobStore: BlobStore {
     /// Return the full payload of one object.
     fn read(&self, relative_path: &str) -> Result<Vec<u8>, DataError>;
 
+    /// Read an ordered bounded metadata batch. Remote adapters overlap network
+    /// waits; the default is appropriate for fast local files and injected stores.
+    fn read_many(&self, paths: &[String]) -> Result<Vec<Vec<u8>>, DataError> {
+        paths.iter().map(|path| self.read(path)).collect()
+    }
+
     /// Return the object paths below `prefix`.
     fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, DataError>;
 

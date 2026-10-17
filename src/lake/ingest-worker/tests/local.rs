@@ -45,7 +45,8 @@ async fn local_worker_publishes_all_datasets_and_retained_admission_survives_hos
         }
         let time=params.get("start").unwrap();
         let row=if kind=="trades"{serde_json::json!({"t":time,"p":100.5,"s":100,"x":"V","c":["@"],"i":1,"z":"C"})}else if kind=="quotes"{serde_json::json!({"t":time,"bp":100,"bs":100,"bx":"V","ap":101,"as":100,"ax":"V","c":[],"z":"C"})}else{serde_json::json!({"t":time,"o":100,"h":101,"l":99,"c":100.5,"v":100,"n":1,"vw":100.5})};
-        let rows=if path.contains("/AAPL/"){serde_json::json!([row])}else{serde_json::json!({"AAPL":[row]})};
+        let symbol = params.get("symbols").map(String::as_str).unwrap_or("AAPL");
+        let rows=if path.contains("/AAPL/"){serde_json::json!([row])}else{serde_json::json!({symbol:[row]})};
         let mut body=serde_json::Map::new();body.insert(kind.into(),rows);body.insert("next_page_token".into(),serde_json::Value::Null);
         {
             let mut active = concurrency.active_kinds.lock().unwrap();
@@ -135,12 +136,30 @@ async fn local_worker_publishes_all_datasets_and_retained_admission_survives_hos
             .root()
             .join("ingestion/logs")
             .join(format!("{}.log", reference.worker_key().unwrap()));
-        assert!(std::fs::read_to_string(log)
-            .unwrap()
-            .contains("worker_started"));
+        let log = std::fs::read_to_string(log).unwrap();
+        assert!(log.contains("worker_started"));
+        let settled = log
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .find(|event| event["event"] == "worker_settled")
+            .expect("worker persists a structured final stage/resource log");
+        assert_eq!(settled["job_id"], reference.job_id);
+        assert!(
+            settled["pipeline"]["stages"]["network"]["bytes"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        assert!(
+            settled["pipeline"]["resources"]["cpu"]["peak"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
     }
-    let catalog = Arc::new(lake_local::FileCatalog::new(
-        layout.state_dir().join("catalog"),
+    let catalog = Arc::new(lake_catalog::PublicationCatalog::new(
+        Arc::new(lake_storage::LocalFilesystemStore::new(layout.objects())),
+        Arc::new(lake_local::FileLeaseProvider(layout.objects())),
     ));
     for data in [DataType::Trade, DataType::Quote, DataType::Bars] {
         let row = catalog
@@ -244,6 +263,30 @@ async fn local_worker_publishes_all_datasets_and_retained_admission_survives_hos
         assert!(!direct_rows.is_empty());
         assert_eq!(direct_rows, remote_rows);
     }
+    http.ensure(&harness_lakeclient::EnsureSpec::new(
+        "crypto",
+        "quote",
+        "BTC/USD",
+        "2024-01-18",
+        "2024-01-18",
+    ))
+    .await
+    .unwrap();
+    let crypto = harness_lakeclient::ReadSpec {
+        asset_class: "crypto".into(),
+        data_type: "quote".into(),
+        symbol: "BTC/USD".into(),
+        start_date: "2024-01-18".into(),
+        end_date: "2024-01-18".into(),
+        interval: None,
+    };
+    let native_crypto = direct.read_arrow(&crypto).await.unwrap();
+    let remote_crypto = http.read_arrow(&crypto).await.unwrap();
+    assert!(!native_crypto.is_empty());
+    assert_eq!(
+        native_crypto, remote_crypto,
+        "encoded crypto paths must survive signed HTTP transport"
+    );
     let invalid_option = harness_lakeclient::EnsureSpec::new(
         "option",
         "quote",

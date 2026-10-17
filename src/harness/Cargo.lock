@@ -2422,6 +2422,8 @@ dependencies = [
  "azure_storage",
  "futures-util",
  "lake-contracts",
+ "lake-pipeline",
+ "lake-storage",
  "serde",
  "serde_json",
  "time",
@@ -2484,6 +2486,7 @@ dependencies = [
  "lake-local",
  "lake-query",
  "lake-storage",
+ "percent-encoding",
  "serde",
  "serde_json",
  "sha2",
@@ -2554,6 +2557,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lake-pipeline"
+version = "0.1.0"
+dependencies = [
+ "lake-contracts",
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "lake-query"
 version = "0.1.0"
 dependencies = [
@@ -2607,6 +2622,7 @@ dependencies = [
  "futures-util",
  "hex",
  "lake-contracts",
+ "lake-pipeline",
  "parquet",
  "serde_json",
  "sha2",

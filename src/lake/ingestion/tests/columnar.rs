@@ -244,7 +244,7 @@ async fn read_at(
         .lock()
         .unwrap()
         .iter()
-        .find(|o| o.metadata.path == path)
+        .find(|o| o.metadata.path == format!("sha256={}/{path}", o.metadata.checksum))
         .unwrap()
         .metadata
         .clone();

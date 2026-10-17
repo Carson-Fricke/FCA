@@ -7,3 +7,5 @@
 - `__main__.py` delegates the Python command surface.
 
 `ingest-jobs/` owns durable ACA execution control; `ingest-worker/` is the finite provider process. `hosted/` composes Azure adapters for the harness-hosted HTTP boundary in `http/`. Catalog/coverage, providers, ingestion transactions, writing/leases, reference acquisition and query policy remain separate capabilities. `local/` and `cli/` retain explicit owned-data cleanup. Reading/decoding and caches belong to `harness/market-reader/`.
+
+`pipeline/` owns shared ingestion CPU, byte/session and publication admission, cancellation and stage/resource measurements. It serves providers, storage, catalog, transactions and finite workers without owning acquisition or storage policy.

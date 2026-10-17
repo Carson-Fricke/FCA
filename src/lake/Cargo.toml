@@ -7,6 +7,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "pipeline",
     "contracts",
     "configuration",
     "catalog",
@@ -31,6 +32,7 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
+lake-pipeline = { path = "pipeline" }
 lake-contracts = { path = "contracts" }
 lake-configuration = { path = "configuration" }
 lake-catalog = { path = "catalog" }

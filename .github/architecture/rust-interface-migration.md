@@ -79,8 +79,10 @@ and every harness Python package (`harness.configuration`, `harness.core`,
 `harness.screening`, `harness.data`, `harness.testing`, and `harness.cli`)
 were deleted in the native-authoring wave. The Python products that remain are
 the lake service shim and its retained library surface (`src/lake`, see
-`lake-rust-rewrite-plan.md`), the consumer-facing `lakeclient` client
-(`src/lakeclient`), and Thesis (`src/thesis`).
+`lake-rust-rewrite-plan.md`), Thesis (`src/thesis`), and its generic runtime
+(`src/thesis_runtime`). The unused Python `lakeclient` SDK and its obsolete
+soak driver are removed. Rust `harness-lakeclient` remains the active
+market-data acquisition adapter.
 
 Deleted engine modules: `harness.runtime`, `harness.oms`, `harness.fills`,
 `harness.portfolio`, `harness.risk`, `harness.venues`, `harness.results`,

@@ -22,7 +22,6 @@ on:
       - src/thesis/**
       - src/thesis_runtime/**
       - src/lake/**/*.py
-      - src/lakeclient/**
       - src/lake/contracts/**
       - src/harness/strategy-sdk/**
       - src/harness/contracts/**

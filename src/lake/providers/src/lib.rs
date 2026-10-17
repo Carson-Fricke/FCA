@@ -23,7 +23,7 @@ pub use governor::{RequestBudget, RequestGovernor};
 pub use lane::{lane_for, Lane, LanePermit, LaneTuning};
 pub use records::{
     NormalizedBar, NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedOptionQuote,
-    NormalizedOptionTrade, NormalizedQuote, NormalizedTrade,
+    NormalizedOptionTrade, NormalizedQuote, NormalizedTrade, RecordMemory,
 };
 pub use transport::{
     AlpacaTransport, BoxFuture, ReqwestTransport, TransportFailure, TransportResponse,

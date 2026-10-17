@@ -19,7 +19,6 @@ on:
       - infra/**
       - src/harness/**
       - src/lake/**
-      - src/lakeclient/**
       - src/thesis/**
       - src/thesis_runtime/**
       - scripts/ci/merge_cargo_recipes.py

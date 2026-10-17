@@ -5,7 +5,7 @@ import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 const names = ['python', 'harness', 'lake', 'bicep', 'ui', 'main_image', 'thesis_image', 'main_deploy', 'thesis_deploy'];
-const lakePython = /^src\/lake(?:client)?\/.*\.py$/;
+const lakePython = /^src\/lake\/.*\.py$/;
 const portableSdk = /^src\/harness\/(?:strategy-sdk|contracts|num)\//;
 
 export function classify(paths, force = false) {

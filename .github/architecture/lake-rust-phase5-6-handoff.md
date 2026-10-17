@@ -302,10 +302,10 @@ package directories (`src/lake/local`, `http`, `ingestion`, `storage`,
    by the children. Changing the planner without preserving this loses rows;
    the regression test is
    `a_cursor_split_never_loses_rows_tied_with_the_page_boundary`.
-4. **One catalog instance per process.** `create_local_app_with` passes the
-   shared `JsonCatalogStore` into the launcher; new compositions must do the
-   same. The store stat-checks and reloads on external writes, but a second
-   in-process instance still serves stale reads until a write.
+4. **Current coverage authority.** The historical mutable JSON catalog is
+   retired. Current local/Azure compositions use `PublicationCatalog` and
+   fenced symbol-day manifests as documented in `market-data-runtime.md`.
+   Readers do not keep an independent mutable coverage cache.
 5. **Windows file locking**: stop any running `lake.exe` before
    `cargo build --release`; stale servers hold the binary and old trace/log
    handles (`Stop-Process -Name lake -Force`).

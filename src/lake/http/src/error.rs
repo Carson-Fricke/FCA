@@ -145,6 +145,7 @@ impl ApiError {
     #[must_use]
     pub fn from_query(error: &QueryApplicationError) -> Self {
         let status = match error.code.as_str() {
+            "internal_error" => StatusCode::INTERNAL_SERVER_ERROR,
             "coverage_incomplete" => StatusCode::CONFLICT,
             "ensure_failed" => StatusCode::BAD_GATEWAY,
             "ensure_unavailable" | "query_unavailable" | "sas_unavailable" => {

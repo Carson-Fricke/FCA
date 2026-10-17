@@ -115,6 +115,7 @@ impl CryptoIngestTransaction {
         session: &CoverageSession,
         data_types: Option<&[DataType]>,
     ) -> Result<CryptoIngestResult, DataError> {
+        let session_memory = lake_pipeline::Pipeline::global().session().await?;
         let pair = canonical_pair(pair)?;
         let selected = normalize_data_types(data_types, true)?;
         validate_session(session)?;
@@ -158,7 +159,13 @@ impl CryptoIngestTransaction {
 
         if let Some(message) = fetch_error_message(&selected, &results) {
             let retryable = failures_all_transient(&results);
-            return self.publish_error(&pair, session, &selected, message, retryable);
+            let transaction = self.clone();
+            let session = *session;
+            return crate::common::blocking_stage(move || {
+                let _session_memory = session_memory;
+                transaction.publish_error(&pair, &session, &selected, message, retryable)
+            })
+            .await;
         }
         let records: Vec<CryptoRecords> = results
             .into_iter()
@@ -167,7 +174,8 @@ impl CryptoIngestTransaction {
 
         let transaction = self.clone();
         let session = *session;
-        crate::common::cpu_stage(move || {
+        crate::common::blocking_stage(move || {
+            let _session_memory = session_memory;
             transaction.finish(pair, &session, selected, records, query_end)
         })
         .await
@@ -241,6 +249,8 @@ impl CryptoIngestTransaction {
         records: &[CryptoRecords],
         query_end: DateTime,
     ) -> Result<StagedCryptoObjects, DataError> {
+        let pipeline = lake_pipeline::Pipeline::global();
+        let _cpu = pipeline.cpu_blocking()?;
         let mut metadata = Vec::with_capacity(selected.len());
         for (data_type, records) in selected.iter().zip(records) {
             let rows = match (data_type, records) {

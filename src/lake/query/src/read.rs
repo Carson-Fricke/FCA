@@ -3,7 +3,7 @@
 //! The route validates its query parameters at the HTTP boundary, then plans
 //! through the same coverage classification the file query uses: an entry is a
 //! readable file only when its state is `complete` and its object path is the
-//! canonical `date=/asset_class=/data_type=[interval=]/SYMBOL.parquet`
+//! current `sha256=<digest>/date=/asset_class=/data_type=[interval=]/SYMBOL.parquet`
 //! partition. Empty, delisted, missing, partial, and foreign-path entries are
 //! never read. The plan keeps only catalog metadata; the shared reader loads
 //! verified objects through its injected byte source.

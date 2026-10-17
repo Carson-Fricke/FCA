@@ -273,6 +273,7 @@ impl BarsIngestTransaction {
         interval: BarInterval,
         sessions: &[CoverageSession],
     ) -> Result<BarsIngestResult, DataError> {
+        let session_memory = lake_pipeline::Pipeline::global().session().await?;
         if !matches!(
             asset_class,
             AssetClass::Equity | AssetClass::Crypto | AssetClass::Option
@@ -330,7 +331,7 @@ impl BarsIngestTransaction {
                     let transaction = self.clone();
                     let partition_symbol = symbol.clone();
                     let partition_session = *session;
-                    let staged = crate::common::cpu_stage(move || {
+                    let staged = crate::common::blocking_stage(move || {
                         transaction.stage_provider(
                             asset_class,
                             &partition_symbol,
@@ -425,7 +426,11 @@ impl BarsIngestTransaction {
             retryable,
         };
         let transaction = self.clone();
-        crate::common::cpu_stage(move || transaction.finish(staged, result)).await
+        crate::common::blocking_stage(move || {
+            let _session_memory = session_memory;
+            transaction.finish(staged, result)
+        })
+        .await
     }
 
     /// Publish without blocking concurrent provider I/O on the async runtime.
@@ -499,7 +504,12 @@ impl BarsIngestTransaction {
         session: &CoverageSession,
         bars: &[NormalizedBar],
     ) -> Result<(ParquetMetadata, u64, String), DataError> {
+        let pipeline = lake_pipeline::Pipeline::global();
+        let _cpu = pipeline.cpu_blocking()?;
+        let mut validation = pipeline.timer(lake_pipeline::Stage::Validate);
+        validation.rows(bars.len());
         let bars = provider_bar_records(symbol, bars, interval, session)?;
+        drop(validation);
         let batch = crate::columnar::bars(&bars, asset_class, symbol)?;
         let metadata = self.writer.write(
             &batch,
@@ -536,7 +546,7 @@ impl BarsIngestTransaction {
         let transaction = self.clone();
         let symbol = symbol.to_string();
         let session = *session;
-        crate::common::cpu_stage(move || {
+        crate::common::blocking_stage(move || {
             transaction.stage_trade_partition(asset_class, &symbol, interval, &session, partition)
         })
         .await
@@ -552,6 +562,9 @@ impl BarsIngestTransaction {
         session: &CoverageSession,
         partition: StoredTradePartition,
     ) -> Result<(ParquetMetadata, u64, String), DataError> {
+        let pipeline = lake_pipeline::Pipeline::global();
+        let _cpu = pipeline.cpu_blocking()?;
+        let derive = pipeline.timer(lake_pipeline::Stage::Derive);
         let bars = match asset_class {
             AssetClass::Equity => {
                 let records = equity_records(partition.records)?;
@@ -567,6 +580,7 @@ impl BarsIngestTransaction {
                 )))
             }
         };
+        drop(derive);
         let batch = crate::columnar::bars(&bars, asset_class, symbol)?;
         let metadata = self.writer.write(
             &batch,

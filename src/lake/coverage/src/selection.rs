@@ -414,6 +414,9 @@ fn option_expected_path(entry: &SessionCoverage, data_type: DataType) -> bool {
         record.interval.as_deref(),
         &entry.symbol,
     )
+    .and_then(|logical| {
+        lake_contracts::immutable_path(&logical, record.checksum.as_deref().unwrap_or(""))
+    })
     .is_ok_and(|expected| object_path == expected)
 }
 

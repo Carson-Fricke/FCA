@@ -26,11 +26,16 @@ use time::OffsetDateTime;
 /// overwrite-aware upload, whole-object download, prefix listing and delete,
 /// and lease maintenance for one blob.
 pub trait AzureBlobContainer: Send + Sync {
+    /// Replace a leased blob only if the supplied lease still owns that blob.
+    fn upload_leased(&self, path: &str, payload: &[u8], lease_id: &str) -> Result<(), DataError>;
     /// Upload `payload` to `path`, replacing any existing blob iff `overwrite`.
     fn upload(&self, path: &str, payload: &[u8], overwrite: bool) -> Result<(), DataError>;
 
     /// Return the full payload of one blob, or [`DataError::NotFound`].
     fn download(&self, path: &str) -> Result<Vec<u8>, DataError>;
+
+    /// Download metadata in request order with bounded network fan-out.
+    fn download_many(&self, paths: &[String]) -> Result<Vec<Vec<u8>>, DataError>;
 
     /// Return the blob names below `prefix`.
     fn list(&self, prefix: &str) -> Result<Vec<String>, DataError>;
@@ -151,7 +156,9 @@ fn http_error(error: azure_core::Error) -> DataError {
     if is_http_status(&error, StatusCode::NotFound) {
         return DataError::NotFound("missing".to_string());
     }
-    if is_http_status(&error, StatusCode::Conflict) {
+    if is_http_status(&error, StatusCode::Conflict)
+        || is_http_status(&error, StatusCode::PreconditionFailed)
+    {
         return DataError::Conflict(error.to_string());
     }
     DataError::Io(error.to_string())
@@ -286,6 +293,12 @@ impl BlobStore for AzureReadableBlobStore {
 }
 
 impl ReadableBlobStore for AzureReadableBlobStore {
+    fn read_many(&self, paths: &[String]) -> Result<Vec<Vec<u8>>, DataError> {
+        for path in paths {
+            validate_object_path(path)?;
+        }
+        self.container.download_many(paths)
+    }
     fn read(&self, relative_path: &str) -> Result<Vec<u8>, DataError> {
         let path = relative_path.to_string();
         validate_object_path(&path)?;
@@ -320,6 +333,7 @@ pub struct AzureBlobLease {
     path: String,
     lease_id: String,
     released: Mutex<bool>,
+    renewal_interval: std::time::Duration,
 }
 
 impl AzureBlobLease {
@@ -331,6 +345,22 @@ impl AzureBlobLease {
 }
 
 impl Lease for AzureBlobLease {
+    fn renewal_interval(&self) -> Option<std::time::Duration> {
+        Some(self.renewal_interval)
+    }
+    fn read(&self) -> Result<Vec<u8>, DataError> {
+        self.container.download(&self.path)
+    }
+
+    fn publish(&self, payload: &[u8]) -> Result<(), DataError> {
+        if *self.lock() {
+            return Err(DataError::Conflict(
+                "cannot publish with a released lease".into(),
+            ));
+        }
+        self.container
+            .upload_leased(&self.path, payload, &self.lease_id)
+    }
     fn lease_id(&self) -> Option<&str> {
         Some(&self.lease_id)
     }
@@ -419,7 +449,7 @@ impl LeaseProvider for AzureBlobLeaseProvider {
         let path = self.blob_name(scope);
         // Conditional creation accepts an existing empty lock without a ranged
         // download (which Azure rejects with 416) or overwriting another writer.
-        match self.container.upload(&path, b"", false) {
+        match self.container.upload(&path, b"[]", false) {
             Ok(()) | Err(DataError::Conflict(_)) => {}
             Err(error) => return Err(error),
         }
@@ -431,6 +461,9 @@ impl LeaseProvider for AzureBlobLeaseProvider {
             path,
             lease_id,
             released: Mutex::new(false),
+            renewal_interval: std::time::Duration::from_secs(
+                u64::from(self.lease_duration_seconds) / 3,
+            ),
         }))
     }
 }
@@ -578,6 +611,34 @@ impl SdkBlobContainer {
 }
 
 impl AzureBlobContainer for SdkBlobContainer {
+    fn download_many(&self, paths: &[String]) -> Result<Vec<Vec<u8>>, DataError> {
+        use futures_util::stream::{self, StreamExt, TryStreamExt};
+        let container = self.container.clone();
+        let paths = paths.to_vec();
+        self.executor.block_on(async move {
+            stream::iter(paths)
+                .map(|path| {
+                    let client = container.blob_client(path);
+                    async move { client.get_content().await.map_err(http_error) }
+                })
+                .buffered(32)
+                .try_collect()
+                .await
+        })?
+    }
+    fn upload_leased(&self, path: &str, payload: &[u8], lease_id: &str) -> Result<(), DataError> {
+        let lease: LeaseId = lease_id.parse().map_err(DataError::io)?;
+        let future = self
+            .container
+            .blob_client(path)
+            .put_block_blob(Body::from(payload.to_vec()))
+            .lease_id(lease)
+            .into_future();
+        self.executor
+            .block_on(future)?
+            .map(|_| ())
+            .map_err(http_error)
+    }
     fn upload(&self, path: &str, payload: &[u8], overwrite: bool) -> Result<(), DataError> {
         let client = self.container.blob_client(path);
         let mut request = client.put_block_blob(Body::from(payload.to_vec()));

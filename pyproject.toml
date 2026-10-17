@@ -13,7 +13,6 @@ dependencies = [
     "azure-identity>=1.17",
     "azure-storage-blob>=12.22",
     "azure-storage-queue>=12.12",
-    "duckdb>=1.1",
     "exchange-calendars>=4.5",
     "fastapi>=0.115",
     "hdbscan>=0.8.44",
@@ -48,7 +47,7 @@ include-package-data = false
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["lake*", "thesis*", "harness.strategy-sdk", "harness.contracts", "harness.num"]
+include = ["lake", "lake.*", "thesis*", "harness.strategy-sdk", "harness.contracts", "harness.num"]
 namespaces = true
 exclude = ["*.target*", "*.tests*", "*.src", "*.src.*"]
 

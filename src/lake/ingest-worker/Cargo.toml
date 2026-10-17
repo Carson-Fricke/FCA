@@ -6,6 +6,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+lake-pipeline.workspace = true
 lake-local.workspace = true
 azure_identity.workspace = true
 dotenvy = "0.15"

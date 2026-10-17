@@ -88,10 +88,14 @@ pub fn local_overrides(
     });
     jobs.clone()
         .start_reconciler(std::time::Duration::from_millis(250));
-    let catalog = Arc::new(lake_local::FileCatalog::new(
+    let contracts = Arc::new(lake_local::FileCatalog::new(
         layout.state_dir().join("catalog"),
     ));
     let read_store = Arc::new(lake_storage::LocalFilesystemStore::new(layout.objects()));
+    let catalog = Arc::new(lake_catalog::PublicationCatalog::new(
+        read_store.clone(),
+        Arc::new(lake_local::FileLeaseProvider(layout.objects())),
+    ));
     let repository = Arc::new(lake_ingest_jobs::BlobJobRepository::new(Arc::new(
         lake_storage::LocalFilesystemStore::new(layout.root()),
     )));
@@ -134,7 +138,7 @@ pub fn local_overrides(
         crate::HostedOverrides {
             catalog: catalog.clone(),
             jobs: repository,
-            contracts: catalog,
+            contracts,
             option_resolver: options,
             sas_issuer: issuer,
             read_store,
@@ -174,7 +178,9 @@ impl SignedObjects {
 }
 impl FileUrlIssuer for SignedObjects {
     fn issue(&self, path: &str) -> Result<String, DataError> {
-        if !(path.starts_with("date=") || path.starts_with("reference/"))
+        if !(lake_contracts::object_checksum(path).is_ok()
+            || (path.starts_with("date=") && path.contains("/asset_class=reference/"))
+            || path.starts_with("reference/"))
             || path
                 .split('/')
                 .any(|v| v.is_empty() || v == ".." || v == ".")
@@ -185,8 +191,16 @@ impl FileUrlIssuer for SignedObjects {
         }
         let expires = epoch() + 900;
         let signature = hex::encode(self.mac(path, expires).finalize().into_bytes());
+        let encoded = path
+            .split('/')
+            .map(|segment| {
+                percent_encoding::utf8_percent_encode(segment, percent_encoding::NON_ALPHANUMERIC)
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("/");
         Ok(format!(
-            "{}/v1/objects/{path}?expires={expires}&signature={signature}",
+            "{}/v1/objects/{encoded}?expires={expires}&signature={signature}",
             self.base
         ))
     }

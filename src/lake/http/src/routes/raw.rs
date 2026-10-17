@@ -94,7 +94,9 @@ fn catalog_object(object_path: &str) -> Result<CatalogObject, ApiError> {
     {
         return Err(invalid());
     }
-    let segments: Vec<&str> = object_path.split('/').collect();
+    let checksum = lake_contracts::object_checksum(object_path).map_err(|_| invalid())?;
+    let (_, logical) = object_path.split_once('/').ok_or_else(invalid)?;
+    let segments: Vec<&str> = logical.split('/').collect();
     if segments.len() != 4 && segments.len() != 5 {
         return Err(invalid());
     }
@@ -156,6 +158,7 @@ fn catalog_object(object_path: &str) -> Result<CatalogObject, ApiError> {
         interval.as_deref(),
         &symbol,
     )
+    .and_then(|logical| lake_contracts::immutable_path(&logical, checksum))
     .map_err(|_| invalid())?;
     if object_path != canonical {
         return Err(invalid());

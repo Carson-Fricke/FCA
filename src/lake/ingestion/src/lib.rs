@@ -27,7 +27,6 @@ mod common;
 mod crypto;
 mod ensure;
 mod equities;
-mod leased;
 pub mod options;
 mod providers;
 mod publication;
@@ -43,7 +42,6 @@ pub use common::{AtomicIngestCommitter, PartitionWriter, StagedParquetObject, Tr
 pub use crypto::{CryptoClock, CryptoIngestResult, CryptoIngestTransaction};
 pub use ensure::{EnsureIngest, EnsureProgress, EnsureProviders};
 pub use equities::{EquityIngestResult, EquityIngestTransaction};
-pub use leased::{scope_for_coverage, LeasedAtomicIngestCommitter};
 pub use options::{
     plan_option_backfill, OptionBackfillItem, OptionBackfillPlan, OptionBackfillRequest,
     OptionChainSelector, OptionClock, OptionIngestResult, OptionIngestTransaction,

@@ -17,4 +17,5 @@ hex.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+lake-storage.workspace = true
 tokio.workspace = true

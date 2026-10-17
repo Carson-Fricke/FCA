@@ -16,7 +16,12 @@ async fn main() {
     }
     .await;
     if let Err(error) = result {
-        eprintln!("ingestion worker failed: {error}");
+        eprintln!(
+            "{}",
+            serde_json::json!({"event":"worker_failed", "job_id":std::env::args().nth(1),
+            "partition":std::env::args().nth(2), "error":error.to_string(),
+            "pipeline":lake_pipeline::Pipeline::global().snapshot()})
+        );
         std::process::exit(1);
     }
 }

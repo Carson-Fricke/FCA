@@ -7,7 +7,6 @@
 //! failures ([`ProviderError::Transport`] and [`ProviderError::Timeout`]) are
 //! retried; every other failure propagates on its first occurrence.
 
-use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use arrow_array::RecordBatch;
@@ -17,23 +16,14 @@ use lake_contracts::{symbol_filename, AssetClass, DataError, DataType, Date};
 use lake_providers::ProviderError;
 use lake_storage::ParquetMetadata;
 
-/// Bound blocking ingest stages to the process's actual CPU allocation.
-///
-/// Independent sessions can fetch while another session validates, builds
-/// columns, encodes and publishes. Each stage uses one blocking thread and no
-/// nested OS threads. The caller separately bounds fetched sessions in memory.
-pub(crate) async fn cpu_stage<T: Send + 'static>(
+/// Offload completion while its caller retains a session memory reservation.
+/// CPU-heavy sections acquire the shared CPU budget inside this task; publication
+/// owns an independent I/O budget and never holds a CPU slot across storage waits.
+pub(crate) async fn blocking_stage<T: Send + 'static>(
     stage: impl FnOnce() -> Result<T, DataError> + Send + 'static,
 ) -> Result<T, DataError> {
-    static SLOTS: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
-    let slots = SLOTS.get_or_init(|| {
-        Arc::new(tokio::sync::Semaphore::new(
-            std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get),
-        ))
-    });
-    let permit = slots.clone().acquire_owned().await.map_err(DataError::io)?;
     tokio::task::spawn_blocking(move || {
-        let _permit = permit;
+        lake_pipeline::Pipeline::global().check()?;
         stage()
     })
     .await
@@ -49,11 +39,17 @@ pub(crate) fn ordered_records<T>(
     validate: impl Fn(&T) -> Result<(), DataError>,
     compare: impl Fn(&T, &T) -> std::cmp::Ordering,
 ) -> Result<Vec<&T>, DataError> {
+    let pipeline = lake_pipeline::Pipeline::global();
+    let mut validation = pipeline.timer(lake_pipeline::Stage::Validate);
+    validation.rows(records.len());
     let mut ordered = Vec::with_capacity(records.len());
     for record in records {
         validate(record)?;
         ordered.push(record);
     }
+    drop(validation);
+    let mut sorting = pipeline.timer(lake_pipeline::Stage::Sort);
+    sorting.rows(records.len());
     ordered.sort_by(|left, right| compare(left, right));
     Ok(ordered)
 }
@@ -95,9 +91,10 @@ pub trait PartitionWriter: Send + Sync {
     fn reset_staged(&self);
 }
 
-/// Publish objects and coverage rows as one atomic unit.
+/// Publish immutable objects and expose their coverage through one fenced symbol-day manifest.
 pub trait AtomicIngestCommitter: Send + Sync {
-    /// Commit every staged object and coverage row, or none of them.
+    /// Expose all selected coverage at once. Failed uploads may leave unreachable
+    /// immutable candidates; failed acknowledgements have an unknown outcome.
     fn commit(
         &self,
         objects: &[StagedParquetObject],

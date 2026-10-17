@@ -39,7 +39,11 @@ fn fixture() -> (Source, MarketDataSnapshot) {
     };
     let partition = Partition {
         session_date: "2024-01-18".into(),
-        object_path: "date=2024-01-18/asset_class=equity/data_type=trade/AAPL.parquet".into(),
+        object_path: lake_contracts::immutable_path(
+            "date=2024-01-18/asset_class=equity/data_type=trade/AAPL.parquet",
+            &hex::encode(Sha256::digest(&payload)),
+        )
+        .unwrap(),
         checksum: hex::encode(Sha256::digest(&payload)),
         row_count: 2,
         byte_size: payload.len() as u64,
@@ -146,6 +150,13 @@ fn identities_pin_exact_metadata_and_reject_forged_or_duplicate_partitions() {
     .is_err());
     let mut new_files = snapshot.files.clone();
     new_files[0].checksum = "0".repeat(64);
+    assert!(MarketDataSnapshot::new(snapshot.request.clone(), new_files.clone()).is_err());
+    let logical = snapshot.files[0].object_path.split_once('/').unwrap().1;
+    new_files[0].object_path =
+        lake_contracts::immutable_path(logical, &new_files[0].checksum).unwrap();
+    let mut outdated = snapshot.files.clone();
+    outdated[0].object_path = logical.to_string();
+    assert!(MarketDataSnapshot::new(snapshot.request.clone(), outdated).is_err());
     assert_ne!(
         MarketDataSnapshot::new(snapshot.request, new_files)
             .unwrap()
@@ -183,10 +194,14 @@ fn empty_fixture(data: lake_contracts::DataType) -> (Source, MarketDataSnapshot)
     files[0].checksum = hex::encode(Sha256::digest(&source.payload));
     files[0].row_count = 0;
     files[0].byte_size = source.payload.len() as u64;
-    files[0].object_path = format!(
-        "date=2024-01-18/asset_class=equity/data_type={}/AAPL.parquet",
-        data.value()
-    );
+    files[0].object_path = lake_contracts::immutable_path(
+        &format!(
+            "date=2024-01-18/asset_class=equity/data_type={}/AAPL.parquet",
+            data.value()
+        ),
+        &files[0].checksum,
+    )
+    .unwrap();
     (
         source,
         MarketDataSnapshot::new(snapshot.request, files).unwrap(),
@@ -242,7 +257,11 @@ fn range_fixture() -> (Vec<Bytes>, MarketDataSnapshot) {
         let date = format!("2024-01-{:02}", 18 + index);
         files.push(Partition {
             session_date: date.clone(),
-            object_path: format!("date={date}/asset_class=equity/data_type=trade/AAPL.parquet"),
+            object_path: lake_contracts::immutable_path(
+                &format!("date={date}/asset_class=equity/data_type=trade/AAPL.parquet"),
+                &hex::encode(Sha256::digest(&payload)),
+            )
+            .unwrap(),
             checksum: hex::encode(Sha256::digest(&payload)),
             row_count: batch.num_rows() as u64,
             byte_size: payload.len() as u64,

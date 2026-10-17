@@ -3,10 +3,7 @@ use lake_catalog::{ContractRepository, JobState};
 use lake_contracts::{AssetClass, DataError, DataType, Date, DateTime};
 use lake_coverage::{requested_coverage, EnsureJob, EnsureSpec};
 use lake_ingest_jobs::{JobOwnership, JobPersistence, JobStore, WorkRequest};
-use lake_ingestion::{
-    CatalogTradeReader, EnsureIngest, EnsureProviders, LeasedAtomicIngestCommitter,
-    ObjectCatalogCommitter,
-};
+use lake_ingestion::{CatalogTradeReader, EnsureIngest, EnsureProviders, ObjectCatalogCommitter};
 use std::{collections::BTreeMap, sync::Arc};
 
 fn io(error: impl std::fmt::Display) -> DataError {
@@ -30,6 +27,7 @@ fn required(env: &BTreeMap<String, String>, name: &str) -> Result<String, DataEr
 
 pub async fn run(id: &str, partition: &str) -> Result<(), DataError> {
     let mut env: BTreeMap<String, String> = std::env::vars().collect();
+    lake_pipeline::Pipeline::initialize(lake_pipeline::Limits::from_environment(&env)?)?;
     if env.get("HARNESS_MARKET_DATA_MODE").map(String::as_str) == Some("local") {
         if let Ok(path) = std::env::var("LAKE_LOCAL_PROVIDER_ENV") {
             for entry in dotenvy::from_path_iter(path)
@@ -44,20 +42,19 @@ pub async fn run(id: &str, partition: &str) -> Result<(), DataError> {
         }
         let layout = lake_local::LocalLayout::from_environment(None, &env).map_err(io)?;
         layout.initialize().map_err(io)?;
-        let catalog = Arc::new(lake_local::FileCatalog::new(
+        let contracts = Arc::new(lake_local::FileCatalog::new(
             layout.state_dir().join("catalog"),
         ));
         let objects = Arc::new(lake_storage::LocalFilesystemStore::new(layout.objects()));
+        let catalog = Arc::new(lake_catalog::PublicationCatalog::new(
+            objects.clone(),
+            Arc::new(lake_local::FileLeaseProvider(layout.objects())),
+        ));
         let deps = WorkerDependencies {
             catalog: catalog.clone(),
-            contracts: catalog.clone(),
+            contracts,
             reads: objects.clone(),
-            committer: Arc::new(LeasedAtomicIngestCommitter::new(
-                Arc::new(ObjectCatalogCommitter::new(objects, catalog)),
-                Arc::new(lake_local::FileLeaseProvider(
-                    layout.state_dir().join("publication-locks"),
-                )),
-            )),
+            committer: Arc::new(ObjectCatalogCommitter::new(objects, catalog)),
         };
         run_owned(
             lake_local::LocalJobStore::new(layout.root().into()),
@@ -165,6 +162,7 @@ async fn run_owned<S: JobPersistence>(
     let work = async move {
         // Provider secrets never enter API configuration, execution arguments, or durable work.
         if let Some(credential) = credential {
+            let _secrets = lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::Secrets);
             let vault = required(&env, "LAKE_PROVIDER_KEY_VAULT_URL")?;
             let token = credential
                 .get_token(&["https://vault.azure.net/.default"])
@@ -265,6 +263,8 @@ async fn run_owned<S: JobPersistence>(
                     let catalog_for_plan = catalog.clone();
                     let plan_spec = spec.clone();
                     let gaps = tokio::task::spawn_blocking(move || {
+                        let _coverage =
+                            lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::Coverage);
                         requested_coverage(
                             catalog_for_plan.as_ref(),
                             None,
@@ -304,18 +304,31 @@ async fn run_owned<S: JobPersistence>(
     };
     let mut work = tokio::spawn(work);
     let deadline = tokio::time::sleep(std::time::Duration::from_secs(timeout));
+    let mut metrics = tokio::time::interval(std::time::Duration::from_secs(10));
+    metrics.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     tokio::pin!(deadline);
     let result = lake_ingest_jobs::while_owned(owner.as_ref(), async {
         loop {
             tokio::select! {
                 result=&mut work=>break result.map_err(io).and_then(|v|v),
                 _=&mut deadline=>break Err(DataError::EnsureJob("ingestion execution deadline exceeded".into())),
+                _=metrics.tick()=>{
+                    eprintln!("{}", serde_json::json!({"event":"ingestion_metrics","job_id":id,"partition":partition,"seconds":execution_started.elapsed().as_secs_f64(),"pipeline":lake_pipeline::Pipeline::global().snapshot()}));
+                }
                 changed=progress_recv.changed()=>{
-                    if changed.is_ok(){job.record.progress=progress_recv.borrow_and_update().clone();job.record.updated_at=now();owner.save(&job).await?;}
+                    if changed.is_ok(){
+                        let _progress = lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::Progress);
+                        job.record.progress=progress_recv.borrow_and_update().clone();job.record.updated_at=now();owner.save(&job).await?;
+                    }
                 }
             }
         }
     }).await;
+    // Abort cannot stop a running blocking encoder. Fence publication before
+    // settlement, including after ownership loss, and wake all budget waiters.
+    tokio::task::spawn_blocking(|| lake_pipeline::Pipeline::global().cancel())
+        .await
+        .map_err(io)?;
     work.abort();
     owner.renew().await?;
     job.record.state = if result.is_ok() {
@@ -327,11 +340,13 @@ async fn run_owned<S: JobPersistence>(
     job.record.progress = progress_recv.borrow().clone();
     job.record.updated_at = now();
     job.record.error_message = result.as_ref().err().map(ToString::to_string);
+    let finalization = lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::Progress);
     owner.save(&job).await?;
     owner.release().await?;
+    drop(finalization);
     eprintln!(
         "{}",
-        serde_json::json!({"event":"worker_settled","job_id":id,"seconds":execution_started.elapsed().as_secs_f64(),"state":job.record.state.value(),"rows":job.record.progress.as_ref().map(|p|p.rows)})
+        serde_json::json!({"event":"worker_settled","job_id":id,"partition":partition,"seconds":execution_started.elapsed().as_secs_f64(),"state":job.record.state.value(),"rows":job.record.progress.as_ref().map(|p|p.rows),"pipeline":lake_pipeline::Pipeline::global().snapshot()})
     );
     result.map(|_| ())
 }
@@ -387,9 +402,6 @@ fn azure_dependencies(
         )
         .map_err(io)?,
     );
-    let catalog = Arc::new(lake_catalog::AzureTableCatalogRepository::new(
-        entities.clone(),
-    ));
     let contracts: Arc<dyn ContractRepository> =
         Arc::new(lake_catalog::AzureTableContractRepository::new(entities));
     let blobs = Arc::new(lake_storage::AzureBlobStore::from_account_url(
@@ -407,12 +419,10 @@ fn azure_dependencies(
         container,
         credential.clone(),
         60,
-        "locks",
+        lake_catalog::PUBLICATION_PREFIX,
     )?);
-    let committer = Arc::new(LeasedAtomicIngestCommitter::new(
-        Arc::new(ObjectCatalogCommitter::new(blobs, catalog.clone())),
-        leases,
-    ));
+    let catalog = Arc::new(lake_catalog::PublicationCatalog::new(reads.clone(), leases));
+    let committer = Arc::new(ObjectCatalogCommitter::new(blobs, catalog.clone()));
     Ok(WorkerDependencies {
         catalog,
         contracts,

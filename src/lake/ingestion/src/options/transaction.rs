@@ -117,18 +117,25 @@ impl OptionIngestTransaction {
     ///
     /// Empty responses from a closed session are written as valid empty
     /// Parquet objects and cataloged as terminal `empty` coverage. A later
-    /// delivery replaces the same paths and catalog keys instead of appending.
+    /// delivery publishes new immutable objects and atomically replaces current coverage.
     pub async fn run(
         &self,
         contract: ContractRecord,
         session: &CoverageSession,
         data_types: Option<&[DataType]>,
     ) -> Result<OptionIngestResult, DataError> {
+        let session_memory = lake_pipeline::Pipeline::global().session().await?;
         let requested = normalize_data_types(data_types)?;
         let results = self.fetch(&contract, session, &requested).await;
 
         if let Some(message) = fetch_error_message(&requested, &results) {
-            return self.publish_error(&contract, session, &requested, message);
+            let transaction = self.clone();
+            let session = *session;
+            return crate::common::blocking_stage(move || {
+                let _session_memory = session_memory;
+                transaction.publish_error(&contract, &session, &requested, message)
+            })
+            .await;
         }
         let records: Vec<OptionRecords> = results
             .into_iter()
@@ -137,8 +144,11 @@ impl OptionIngestTransaction {
 
         let transaction = self.clone();
         let session = *session;
-        crate::common::cpu_stage(move || transaction.finish(contract, &session, requested, records))
-            .await
+        crate::common::blocking_stage(move || {
+            let _session_memory = session_memory;
+            transaction.finish(contract, &session, requested, records)
+        })
+        .await
     }
 
     /// Stage and publish on a bounded blocking thread, leaving fetch I/O free.
@@ -231,6 +241,8 @@ impl OptionIngestTransaction {
         data_types: &[DataType],
         records: &[OptionRecords],
     ) -> Result<StagedOptionObjects, DataError> {
+        let pipeline = lake_pipeline::Pipeline::global();
+        let _cpu = pipeline.cpu_blocking()?;
         let mut metadata = Vec::with_capacity(data_types.len());
         for (data_type, records) in data_types.iter().zip(records) {
             let rows = match (data_type, records) {

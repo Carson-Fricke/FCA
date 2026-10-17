@@ -7,11 +7,16 @@
 The Rust rewrite is complete. The current hosting shape is defined in
 [Harness market-data runtime](market-data-runtime.md): one combined harness API,
 a shared harness-owned read-only reader, checksum-pinned snapshots/caches and
-finite ACI ingestion workers. Standalone API entrypoints are removed; the complete local harness uses filesystem adapters and finite local workers through shared ingestion contracts; `lake local reset --yes` remains explicit cleanup.
+finite ACA ingestion workers. Standalone API entrypoints are removed; the complete local harness uses filesystem adapters and finite local workers through shared ingestion contracts; `lake local reset --yes` remains explicit cleanup.
 The unused queue worker and enqueue contracts are removed in favor of durable
-ACI admission.
+ACA admission.
 Historical phase descriptions below record the completed rewrite rather than
 provide a second supported deployment shape.
+
+The unused Python `lakeclient` SDK and `scripts/soak/run_soak.py` are removed.
+The soak driver depended on deleted Python lake modules. Its recorded YAML
+inputs remain as provenance for historical cost projections; new acquisition
+uses Rust `harness-lakeclient` through the harness market-data composition.
 
 Hosted symbol-day locks use atomic conditional blob creation (`If-None-Match: *`)
 followed by lease acquisition. Existing empty lock blobs are valid coordination

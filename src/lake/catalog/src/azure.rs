@@ -10,21 +10,15 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lake_contracts::{
-    canonical_symbol, AssetClass, DataError, DataType, Date, DateTime, Decimal18,
-};
+use lake_contracts::{canonical_symbol, DataError, Date, DateTime, Decimal18};
 use serde_json::Value;
 
 use crate::models::{
-    table_key, BarSource, ContractRecord, CoverageRecord, CoverageStatus, DelistingType, JobRecord,
-    JobState, ListingRecord, ListingType, OptionType, RunRecord, RunState,
+    table_key, ContractRecord, DelistingType, JobRecord, JobState, ListingRecord, ListingType,
+    OptionType, RunRecord, RunState,
 };
-use crate::ports::{
-    CatalogRepository, ContractRepository, CoverageQuery, JobRepository, ListingRepository,
-    RunRepository,
-};
+use crate::ports::{ContractRepository, JobRepository, ListingRepository, RunRepository};
 
-const COVERAGE_PARTITION_PREFIX: &str = "coverage";
 const JOB_PARTITION_KEY: &str = "jobs";
 const RUN_PARTITION_KEY: &str = "runs";
 const CONTRACT_PARTITION_KEY: &str = "contracts";
@@ -154,129 +148,12 @@ fn parse_enum<T: Copy>(
     parse(text).ok_or_else(|| DataError::value(format!("{text:?} is not a valid {type_name}")))
 }
 
-/// The Azure partition key shared by memory and Table coverage adapters.
-pub fn coverage_partition_key(record: &CoverageRecord) -> String {
-    record.partition_key()
-}
-
 /// The Azure partition key for one canonical entity identifier.
 pub fn listing_partition_for(entity_id: &str) -> String {
     format!(
         "{LISTING_PARTITION_PREFIX}|{}",
         table_key(entity_id.trim().to_uppercase().as_str())
     )
-}
-
-/// Map coverage metadata to an Azure Table-compatible entity.
-pub fn coverage_to_entity(record: &CoverageRecord) -> TableEntity {
-    let mut entity = TableEntity::new();
-    entity.insert(
-        "PartitionKey".to_string(),
-        Value::String(record.partition_key()),
-    );
-    entity.insert("RowKey".to_string(), Value::String(record.row_key()));
-    entity.insert(
-        "AssetClass".to_string(),
-        Value::String(record.asset_class.value().to_string()),
-    );
-    entity.insert(
-        "DataType".to_string(),
-        Value::String(record.data_type.value().to_string()),
-    );
-    entity.insert("Symbol".to_string(), Value::String(record.symbol.clone()));
-    entity.insert(
-        "SessionDate".to_string(),
-        Value::String(record.session_date.isoformat()),
-    );
-    entity.insert(
-        "Status".to_string(),
-        Value::String(record.status.value().to_string()),
-    );
-    entity.insert("RowCount".to_string(), Value::from(record.row_count));
-    entity.insert("ByteSize".to_string(), Value::from(record.byte_size));
-    if let Some(object_path) = &record.object_path {
-        entity.insert("ObjectPath".to_string(), Value::String(object_path.clone()));
-    }
-    if let Some(checksum) = &record.checksum {
-        entity.insert("Checksum".to_string(), Value::String(checksum.clone()));
-    }
-    if let Some(error_message) = &record.error_message {
-        entity.insert(
-            "ErrorMessage".to_string(),
-            Value::String(error_message.clone()),
-        );
-    }
-    if let Some(interval) = &record.interval {
-        entity.insert("Interval".to_string(), Value::String(interval.clone()));
-    }
-    if let Some(bar_source) = &record.bar_source {
-        entity.insert(
-            "BarSource".to_string(),
-            Value::String(bar_source.value().to_string()),
-        );
-    }
-    if let Some(source_revision) = &record.source_revision {
-        entity.insert(
-            "SourceRevision".to_string(),
-            Value::String(source_revision.clone()),
-        );
-    }
-    entity
-}
-
-/// Restore a coverage record from an Azure Table entity.
-pub fn coverage_from_entity(entity: &TableEntity) -> Result<CoverageRecord, DataError> {
-    let session_date = entity_string(entity, "SessionDate")?;
-    let session_date = Date::parse(&session_date).ok_or_else(|| {
-        DataError::value(format!(
-            "Invalid isoformat string: {:?}",
-            entity_string(entity, "SessionDate").unwrap_or_default()
-        ))
-    })?;
-    let asset_class =
-        enum_value::<AssetClass>(entity, "AssetClass", "AssetClass", AssetClass::from_value)?;
-    let data_type = enum_value::<DataType>(entity, "DataType", "DataType", DataType::from_value)?;
-    let status = enum_value::<CoverageStatus>(
-        entity,
-        "Status",
-        "CoverageStatus",
-        CoverageStatus::from_value,
-    )?;
-    let record = CoverageRecord::new(
-        asset_class,
-        data_type,
-        entity_string(entity, "Symbol")?,
-        session_date,
-        status,
-        optional_string(entity, "ObjectPath"),
-        entity_integer(entity, "RowCount", 0)?,
-        entity_integer(entity, "ByteSize", 0)?,
-        optional_string(entity, "Checksum"),
-        optional_string(entity, "ErrorMessage"),
-        optional_string(entity, "Interval"),
-    )?;
-    match optional_string(entity, "BarSource") {
-        Some(raw) => {
-            let source = BarSource::from_value(&raw)
-                .ok_or_else(|| DataError::value(format!("{raw:?} is not a valid BarSource")))?;
-            let revision = optional_string(entity, "SourceRevision")
-                .ok_or_else(|| DataError::value("coverage BarSource requires a SourceRevision"))?;
-            record.with_bar_provenance(source, revision)
-        }
-        None => {
-            if record.data_type == DataType::Bars && record.is_terminal() {
-                return Err(DataError::value(
-                    "outdated bars coverage: provenance is required",
-                ));
-            }
-            if optional_string(entity, "SourceRevision").is_some() {
-                return Err(DataError::value(
-                    "coverage SourceRevision requires a BarSource",
-                ));
-            }
-            Ok(record)
-        }
-    }
 }
 
 /// Map job state and UTC timestamps to an Azure Table-compatible entity.
@@ -606,149 +483,6 @@ fn is_active(record: &ContractRecord, as_of: Option<Date>) -> bool {
 }
 
 /// The coverage partition chosen for one filter combination.
-///
-/// Mirrors `_coverage_partition_for_filters`: with all three filters present
-/// the scan targets the exact partition; otherwise it covers the prefixed
-/// partitions with a range query. Bars rows append their interval token so
-/// distinct intervals never share a partition.
-fn coverage_partition_for_filters(
-    asset_class: Option<AssetClass>,
-    data_type: Option<DataType>,
-    symbol: Option<&str>,
-    interval: Option<&str>,
-) -> Result<String, DataError> {
-    match (asset_class, data_type, symbol) {
-        (Some(asset_class), Some(data_type), Some(symbol)) => {
-            let symbol = canonical_symbol(symbol)?;
-            let base = format!(
-                "{COVERAGE_PARTITION_PREFIX}|{}|{}|{}",
-                asset_class.value(),
-                data_type.value(),
-                table_key(&symbol)
-            );
-            Ok(match interval {
-                Some(interval) => format!("{base}|interval={}", table_key(interval)),
-                None => base,
-            })
-        }
-        _ => Ok(COVERAGE_PARTITION_PREFIX.to_string()),
-    }
-}
-
-/// The coverage query mirroring `_coverage_query`.
-///
-/// A bars scan only targets an exact partition when the interval filter is
-/// present; without it the prefixed range query is used.
-fn coverage_query(
-    asset_class: Option<AssetClass>,
-    data_type: Option<DataType>,
-    symbol: Option<&str>,
-    interval: Option<&str>,
-) -> Result<TableQuery, DataError> {
-    let exact = asset_class.is_some()
-        && data_type.is_some()
-        && symbol.is_some()
-        && (data_type != Some(DataType::Bars) || interval.is_some());
-    if exact {
-        return Ok(TableQuery::partition_eq(&coverage_partition_for_filters(
-            asset_class,
-            data_type,
-            symbol,
-            interval,
-        )?));
-    }
-    Ok(TableQuery::partition_range("coverage|", "coverage}"))
-}
-
-/// Catalog repository backed by an Azure Tables store.
-pub struct AzureTableCatalogRepository {
-    table: Arc<dyn TableEntityStore>,
-}
-
-impl AzureTableCatalogRepository {
-    /// Build the repository over an injected table store.
-    pub fn new(table: Arc<dyn TableEntityStore>) -> Self {
-        Self { table }
-    }
-}
-
-impl CatalogRepository for AzureTableCatalogRepository {
-    fn get(
-        &self,
-        asset_class: AssetClass,
-        data_type: DataType,
-        interval: Option<&str>,
-        symbol: &str,
-        session_date: Date,
-    ) -> Result<Option<CoverageRecord>, DataError> {
-        let partition = coverage_partition_for_filters(
-            Some(asset_class),
-            Some(data_type),
-            Some(symbol),
-            interval,
-        )?;
-        let row = match interval {
-            Some(interval) => format!(
-                "{}|interval={}",
-                session_date.isoformat(),
-                table_key(interval)
-            ),
-            None => session_date.isoformat(),
-        };
-        match self.table.get_entity(&partition, &row) {
-            Ok(entity) => Ok(Some(coverage_from_entity(&entity)?)),
-            Err(DataError::NotFound(_)) => Ok(None),
-            Err(error) => Err(error),
-        }
-    }
-
-    fn upsert(&self, record: &CoverageRecord) -> Result<(), DataError> {
-        self.table.upsert_entity(coverage_to_entity(record))
-    }
-
-    fn list(&self, query: &CoverageQuery) -> Result<Vec<CoverageRecord>, DataError> {
-        let CoverageQuery {
-            asset_class,
-            data_type,
-            symbol,
-            interval,
-            start,
-            end,
-        } = query;
-        if let (Some(start), Some(end)) = (*start, *end) {
-            if start > end {
-                return Err(DataError::value("start must be on or before end"));
-            }
-        }
-        let table_query = coverage_query(
-            *asset_class,
-            *data_type,
-            symbol.as_deref(),
-            interval.as_deref(),
-        )?;
-        let entities = self.table.query_entities(&table_query)?;
-        let mut records = entities
-            .iter()
-            .map(coverage_from_entity)
-            .collect::<Result<Vec<_>, _>>()?;
-        records.sort_by(|left, right| left.sort_key().cmp(&right.sort_key()));
-        let canonical = symbol.as_deref().map(canonical_symbol).transpose()?;
-        records.retain(|record| {
-            asset_class.is_none_or(|filter| record.asset_class == filter)
-                && data_type.is_none_or(|filter| record.data_type == filter)
-                && canonical
-                    .as_deref()
-                    .is_none_or(|filter| record.symbol == filter)
-                && interval
-                    .as_deref()
-                    .is_none_or(|filter| record.interval.as_deref() == Some(filter))
-                && start.is_none_or(|filter| record.session_date >= filter)
-                && end.is_none_or(|filter| record.session_date <= filter)
-        });
-        Ok(records)
-    }
-}
-
 /// Job repository backed by an Azure Tables store.
 pub struct AzureTableJobRepository {
     table: Arc<dyn TableEntityStore>,

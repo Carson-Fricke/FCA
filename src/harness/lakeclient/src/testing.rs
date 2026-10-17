@@ -391,6 +391,7 @@ async fn snapshot(
             request.interval.as_deref(),
             &request.symbol,
         )
+        .and_then(|logical| lake_contracts::immutable_path(&logical, &checksum))
         .unwrap();
         files.push(Partition {
             session_date: request.start_date.clone(),

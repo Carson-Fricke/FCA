@@ -164,14 +164,17 @@ impl EnsuredQueryFile {
 
     /// Return the only object path valid for this request partition.
     pub fn expected_path(&self) -> Result<String, BoundedQueryError> {
-        partition_path(
+        let logical = partition_path(
             self.session_date,
             self.asset_class,
             self.data_type,
             self.interval.as_deref(),
             &self.symbol,
         )
-        .map_err(|error| BoundedQueryError::storage_path_not_allowed(error.to_string()))
+        .map_err(|error| BoundedQueryError::storage_path_not_allowed(error.to_string()))?;
+        lake_contracts::object_checksum(&self.object_path)
+            .and_then(|hash| lake_contracts::immutable_path(&logical, hash))
+            .map_err(|error| BoundedQueryError::storage_path_not_allowed(error.to_string()))
     }
 }
 

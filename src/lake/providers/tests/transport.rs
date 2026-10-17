@@ -28,8 +28,12 @@ async fn concurrent_responses_preserve_decoding_and_http_error_policy() {
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let transport = ReqwestTransport::new(2.0);
     let urls = ["valid", "empty", "malformed", "limited"].map(|path| format!("{base}/{path}"));
-    let results =
-        futures_util::future::join_all(urls.iter().map(|url| transport.get(url, &[], &[]))).await;
+    let results = futures_util::future::join_all(urls.iter().map(|url| async {
+        let allocation =
+            std::sync::Arc::new(lake_pipeline::Pipeline::global().response().await.unwrap());
+        transport.get(url, &[], &[], allocation).await
+    }))
+    .await;
     server.abort();
     assert_eq!(results[0].as_ref().unwrap().body, expected);
     assert_eq!(results[1].as_ref().unwrap().status, 204);

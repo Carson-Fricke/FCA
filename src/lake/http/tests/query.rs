@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use axum::http::StatusCode;
 use lake_catalog::{CoverageRecord, MemoryCatalogRepository, MemoryContractRepository};
-use lake_contracts::{partition_path, AssetClass, DataType, Date};
+use lake_contracts::{AssetClass, DataType, Date};
 use lake_query::{BoundedDuckDbQuery, QueryLimits};
 use serde_json::json;
 use support::*;
@@ -49,7 +49,7 @@ fn complete_bars(interval: &str, session_date: Date) -> CoverageRecord {
         Some(object_path),
         12,
         3456,
-        Some("checksum".to_string()),
+        Some(TEST_CHECKSUM.to_string()),
         None,
         Some(interval.to_string()),
     )
@@ -76,8 +76,14 @@ async fn bars_file_query_threads_the_interval_through_the_response() {
     });
     let (status, _, body) = send(&router, post_json("/v1/query", Some(TOKEN), request)).await;
 
-    let object_path =
-        "date=2024-01-18/asset_class=equity/data_type=bars/interval=1min/AAPL.parquet";
+    let object_path = partition_path(
+        date(1, 18),
+        AssetClass::Equity,
+        DataType::Bars,
+        Some("1min"),
+        "AAPL",
+    )
+    .unwrap();
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["files"][0]["data_type"], "bars");
     assert_eq!(body["files"][0]["interval"], "1min");
@@ -104,7 +110,7 @@ async fn bars_file_query_threads_the_interval_through_the_response() {
 async fn sql_query_over_bars_registers_the_interval_partition() {
     let temporary = tempfile::tempdir().expect("tempdir");
     let store = Arc::new(lake_storage::LocalFilesystemStore::new(temporary.path()));
-    write_market_partition(
+    let metadata = write_market_partition(
         &store,
         AssetClass::Equity,
         DataType::Bars,
@@ -116,7 +122,7 @@ async fn sql_query_over_bars_registers_the_interval_partition() {
             json!({"timestamp": "2024-01-18T14:32:00Z", "open": "190.41", "high": "190.60", "low": "190.30", "close": "190.55", "volume": "1500"}),
         ],
     );
-    let catalog = shared_catalog([complete_bars("1min", date(1, 18))]);
+    let catalog = shared_catalog([with_metadata(complete_bars("1min", date(1, 18)), &metadata)]);
     let mut state = base_state(Arc::clone(&catalog) as Arc<dyn lake_catalog::CatalogRepository>);
     state.bounded_query = Some(Arc::new(BoundedDuckDbQuery::new(
         temporary.path(),
@@ -152,7 +158,14 @@ async fn complete_file_query_returns_files_and_catalog_metadata() {
     request["end_date"] = json!("2024-01-18");
     let (status, _, body) = send(&router, post_json("/v1/query", Some(TOKEN), request)).await;
 
-    let object_path = "date=2024-01-18/asset_class=equity/data_type=trade/AAPL.parquet";
+    let object_path = partition_path(
+        date(1, 18),
+        AssetClass::Equity,
+        DataType::Trade,
+        None,
+        "AAPL",
+    )
+    .unwrap();
     let url = format!("https://blob.test/{object_path}?read-only-expiring");
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
@@ -168,7 +181,7 @@ async fn complete_file_query_returns_files_and_catalog_metadata() {
                 "sas_url": url,
                 "row_count": 12,
                 "byte_size": 3456,
-                "checksum": "checksum",
+                "checksum": TEST_CHECKSUM,
             }],
             "results": {
                 "requested_sessions": 1,
@@ -483,10 +496,14 @@ async fn option_file_query_returns_the_selected_osi_partition() {
     assert_eq!(body["files"][0]["symbol"], contract_symbol);
     assert_eq!(
         issuer.paths(),
-        vec![
-            "date=2024-01-19/asset_class=option/data_type=trade/SPY240119C00500000.parquet"
-                .to_string()
-        ]
+        vec![partition_path(
+            date(1, 19),
+            AssetClass::Option,
+            DataType::Trade,
+            None,
+            "SPY240119C00500000"
+        )
+        .unwrap()]
     );
 }
 

@@ -76,13 +76,11 @@ later tasks own their implementation.
 |   |   |-- queue/                 Durable worker and dead-letter behavior
 |   |   `-- storage/               Parquet, Azure, capacity, and leases
 |   |-- harness/                   quant-harness capabilities and processes
-|   |-- lakeclient/                Consumer-facing market-lake Python client
 |   `-- thesis/                    Workspace-scoped research platform
 |-- strategies/                    Harness strategy namespace
 |-- tests/
 |   |-- harness/                   Tests mirroring quant-harness capabilities
 |   |-- lake/                      Tests mirroring market-lake capabilities
-|   |-- lakeclient/                Market-lake client contract tests
 |   `-- thesis/                    Thesis capability tests
 |-- Dockerfile                     Shared runtime image definition
 |-- pyproject.toml                 Shared Python project and tools

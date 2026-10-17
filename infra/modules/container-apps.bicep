@@ -24,6 +24,14 @@ param ingestionMemoryGiB string = '8'
 @minValue(1)
 @maxValue(16)
 param ingestionSessionConcurrency int = 2
+param ingestionPipelineLimits object = {
+  cpuSlots: 4
+  responseMemoryMiB: 1024
+  maxResponseMiB: 8
+  memoryMiB: 4096
+  sessionMiB: 2048
+  publicationConcurrency: 2
+}
 @minValue(1)
 @maxValue(64)
 param ingestionMaxWorkers int = 8
@@ -199,7 +207,15 @@ var quantBaseEnvironment = [
     value: killSwitchTableName
   }
 ]
-var ingestionEnvironment = [
+var ingestionPipelineEnvironment = [
+  { name: 'LAKE_INGEST_CPU_SLOTS', value: string(ingestionPipelineLimits.cpuSlots) }
+  { name: 'LAKE_INGEST_RESPONSE_MEMORY_MIB', value: string(ingestionPipelineLimits.responseMemoryMiB) }
+  { name: 'LAKE_INGEST_MAX_RESPONSE_MIB', value: string(ingestionPipelineLimits.maxResponseMiB) }
+  { name: 'LAKE_INGEST_MEMORY_MIB', value: string(ingestionPipelineLimits.memoryMiB) }
+  { name: 'LAKE_INGEST_SESSION_MIB', value: string(ingestionPipelineLimits.sessionMiB) }
+  { name: 'LAKE_INGEST_PUBLICATION_CONCURRENCY', value: string(ingestionPipelineLimits.publicationConcurrency) }
+]
+var ingestionEnvironment = concat([
   { name: 'HARNESS_MARKET_DATA_MODE', value: 'azure' }
   { name: 'HARNESS_MARKET_DATA_CACHE_MEMORY_BYTES', value: '134217728' }
   { name: 'HARNESS_MARKET_DATA_CACHE_DISK_BYTES', value: '1073741824' }
@@ -217,7 +233,7 @@ var ingestionEnvironment = [
   { name: 'LAKE_INGEST_PARTITION_DAYS', value: string(ingestionPartitionDays) }
   { name: 'LAKE_INGEST_TIMEOUT_SECONDS', value: string(ingestionTimeoutSeconds) }
   { name: 'LAKE_PROVIDER_KEY_VAULT_URL', value: keyVaultUri }
-]
+], ingestionPipelineEnvironment)
 var quantApiEnvironment = concat(backtestEnvironment, ingestionEnvironment, empty(lakeApiAudience) ? [] : [
   { name: 'LAKE_API__AUTH__ENTRA_TENANT_ID', value: lakeApiTenantId }
   { name: 'LAKE_API__AUTH__ENTRA_AUDIENCE', value: lakeApiAudience }
@@ -393,7 +409,7 @@ resource ingestionJob 'Microsoft.App/jobs@2025-07-01' = {
         name: 'ingest'
         image: ingestionImageReference
         command: ['/usr/local/bin/lake-ingest-worker']
-        env: [
+        env: concat([
           { name: 'AZURE_CLIENT_ID', value: runtimeIdentityClientId }
           { name: 'LAKE_STORAGE_ACCOUNT_NAME', value: storageAccountName }
           { name: 'LAKE_STORAGE_CONTAINER', value: 'lake' }
@@ -401,7 +417,7 @@ resource ingestionJob 'Microsoft.App/jobs@2025-07-01' = {
           { name: 'LAKE_PROVIDER_KEY_VAULT_URL', value: keyVaultUri }
           { name: 'LAKE_INGEST_SESSION_CONCURRENCY', value: string(ingestionSessionConcurrency) }
           { name: 'LAKE_INGEST_TIMEOUT_SECONDS', value: string(ingestionTimeoutSeconds) }
-        ]
+        ], ingestionPipelineEnvironment)
         resources: { cpu: json(ingestionCpu), memory: '${ingestionMemoryGiB}Gi' }
       }]
     }

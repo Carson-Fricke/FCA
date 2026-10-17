@@ -287,7 +287,6 @@ snapshots require no `.git` directory in the deployed image.
 | --- | --- | --- |
 | `market-lake` | `src/lake` | Separate acquisition, catalog, query, storage, HTTP and ACA execution capabilities, plus retained Python value libraries. The harness composes HTTP hosting and owns market-data reading. |
 | `quant-harness` | `src/harness` | Deterministic simulation, OMS and portfolio behavior, results, paper/shadow/live runtimes, and the shared read-only market-data reader/cache. Its API composes market-data HTTP hosting. |
-| `lakeclient` | `src/lakeclient` | Consumer-facing authenticated ensure, polling, file-query, and Parquet access without provider or Azure credentials. |
 | `thesis` | `src/thesis` | FCA research, workspace services, concrete tools/workflows, HTTP transport and application composition. |
 | `thesis_runtime` | `src/thesis_runtime` | Generic host for sessions, conversations, tools, workflows, subagents and durable execution, without FCA imports. |
 | Authored programs | `config/harness/*.rs` and inline `parameters.source` | User-authored Rust strategies, indicators, studies, and screening programs compiled against the authoring SDK. |
@@ -668,8 +667,10 @@ remains deployment work.
 ### Retained Python products
 
 `pyproject.toml` keeps the dependencies the surviving Python products
-require: the lake service shim and its retained library surface (`lake`), the
-`lakeclient` product, and Thesis. No harness Python surface remains installed
+require: the lake service shim and its retained library surface (`lake`) and
+Thesis products. The unused Python `lakeclient` SDK and its obsolete soak
+driver are removed; market-data acquisition uses Rust `harness-lakeclient`.
+No harness Python surface remains installed
 or tested. The Python test suite covers the retained lake and Thesis
 surfaces; the Rust suites cover the engine and the harness.
 
@@ -843,7 +844,7 @@ operational drift:
   storage, observability, and Container Apps definitions.
 - `.github/workflows` provides path-filtered checks, image publication, and
   OIDC-based deployment.
-- `tests/lake`, `tests/lakeclient`, and `tests/thesis` mirror their product
+- `tests/lake`, `tests/thesis`, and `tests/thesis_runtime` mirror their product
   capability boundaries. `tests` also holds explicit cross-product contract
   tests where integration is intentional.
 

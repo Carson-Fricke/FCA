@@ -1,5 +1,11 @@
 # E6.3 Full-History AAPL and SPY Soak
 
+Retired: the Python `lakeclient` SDK and `scripts/soak/run_soak.py` have been
+removed. The commands below document the historical T049 execution and must
+not be used for new runs. The YAML inputs remain as provenance for the
+historical cost projections. Current market-data acquisition and bounded
+benchmark instructions are in [Local market lake](../../docs/local-market-lake.md).
+
 This runbook operates the T049 soak: backfilling trades and quotes for AAPL
 and SPY over available SIP history through the market-lake ensure path while
 recording per-session sessions, rows, bytes, estimated pages, and duration,
