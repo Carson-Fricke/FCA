@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { planRetention } from './acr-retention.mjs';
+import { planRetention } from './image-retention.mjs';
 
 const digest = n => `sha256:${n.toString(16).padStart(64, '0')}`;
 const image = (n, day, children = [], tags = []) => ({
@@ -30,6 +30,8 @@ test('incomplete retained graphs and unhydrated indices abort without a deletion
   root.references = null;
   assert.throws(() => planRetention([image(1, 1), root], [], limits), /child-manifest metadata/);
   assert.throws(() => planRetention([image(1, 1)], [digest(9)], limits), /incomplete/);
+  assert.throws(() => planRetention([{ ...image(1, 1), mediaType: undefined }], [], limits), /metadata requires/);
+  assert.throws(() => planRetention([image(1, 1)], [], { ...limits, cacheCutoff: NaN }), /cutoff/);
 });
 
 test('deletions remain oldest-first and bounded, with a grace window for cache manifests', () => {

@@ -22,7 +22,11 @@ Build and deployment checks belong here, outside the pytest behavior suite.
   installation layers. Installed SDK smoke remains required for both images.
 - `changes.mjs` derives dependency-aware workflow selection from the commit range;
   `node --test scripts/ci/changes.test.mjs` verifies source/build input routing.
-- `acr-retention.mjs` plans bounded registry cleanup from hydrated OCI manifest
-  metadata. Retained image roots protect all platform manifests, attestations and
-  nested indices; incomplete graphs abort before deletion. `acr-retention.test.mjs`
-  verifies those retention and ordering rules without external services.
+- `image-retention.mjs` owns the pure bounded image-retention policy. Retained
+  roots protect all platform manifests, attestations and nested indices;
+  incomplete graphs abort before deletion. `acr-retention.test.mjs` verifies
+  retention and ordering without external services.
+- `acr-retention.mjs` reads hydrated Azure metadata and writes a deletion plan.
+- `ghcr-retention.mjs` hydrates upstream descriptors with bounded read concurrency
+  and maps the shared plan to GitHub package version IDs. Neither adapter deletes
+  artifacts; workflows apply the completed plan afterward.

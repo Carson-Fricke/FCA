@@ -1001,7 +1001,9 @@ immutable image digests. Obsolete verification/image builds are cancellable;
 shared environment locks cover infrastructure mutations, smoke and retention.
 Manual main deployments rebuild/publish the selected source before mirroring it;
 ordinary infrastructure-only pushes reuse deployed immutable image digests.
-ACR retention plans in `scripts/ci/acr-retention.mjs` protect entire OCI manifest
+ACR and GHCR share the pure policy in `scripts/ci/image-retention.mjs`; their
+metadata adapters produce deletion plans before workflows apply mutations.
+Retention protects entire OCI manifest
 graphs rooted at deployed, referenced, newest and operator-tagged images. Index
 metadata is hydrated before planning; incomplete retained graphs abort cleanup.
 

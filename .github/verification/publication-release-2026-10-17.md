@@ -126,6 +126,23 @@ Actions recovery restores the exact current published graphs using its package-r
 identity; it is removed after that bounded operation. Local GitHub credentials lack
 package-read scope and cannot perform that recovery directly.
 
+The completed recovery restored the current harness/ingestion and previous
+harness graphs. Thesis images are published directly to ACR, so its broken
+previous index could not be restored from GHCR. Its healthy replacement took
+100% traffic; the unused old revision was deactivated and that broken index
+was archived and removed after checking every current app/job image reference.
+Two smoke ingestion executions that never started after image-pull failures
+were explicitly stopped, their four durable failed records archived and reset,
+and the corresponding backtest stopped before retrying. No market payload or
+request-budget entry was deleted during this smoke-only recovery.
+
+ACR and weekly GHCR cleanup now share `image-retention.mjs`. Both hydrate OCI
+index references, retain complete graphs and plan all bounded deletions before
+applying them. GHCR retains its seven-day floor and ten newest image roots;
+its descriptor reads run with bounded concurrency. Temporary recovery code was
+removed after use. The final all-cache-hit publish took 6 seconds for the harness
+and 5 seconds for ingestion; this measures image publication, not Azure rollout.
+
 Ignored command logs and cutover inventories are under
 `.local/verification/release-2026-10-17/` and
 `.local/verification/market-cutover-2026-10-17/`.
