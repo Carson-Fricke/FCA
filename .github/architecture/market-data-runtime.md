@@ -7,11 +7,14 @@ reader, durable partitioned local/ACA ingestion, native catalog access, and
 snapshot/cache reuse. Publication now uses immutable SHA-256 object paths and one
 renewed, fenced symbol-day manifest; ingestion shares explicit CPU, response,
 session-memory and publication budgets with structured stage/resource metrics.
-These source changes require the publication cutover below before deployment.
-Local and Azure execution were verified at source
-`81162c3`; the [rollout record](../verification/ingestion-fleet-rollout-2026-10-15.md)
-documents deployed image pins, measured performance and the GitHub billing
-block. Later source changes still require their own release verification.
+The development-data cutover completed on 2026-10-17. Azure runs the matching
+harness/finite-worker images built from `9df5870`; fresh trades and quotes were
+ingested and read through a successful 4,708,592-event backtest. The optimized
+local harness and its current-format store are running, with local worker behavior
+verified against fake provider HTTP. The [release record](../verification/publication-release-2026-10-17.md)
+contains image pins, hosted CI/build timings and live checks. The
+[earlier rollout](../verification/ingestion-fleet-rollout-2026-10-15.md) remains
+historical performance evidence.
 
 ## Boundaries
 
@@ -218,8 +221,9 @@ pair. Preserve unrelated contracts, listings, reference data and harness state.
 Preserve the charged request-allowance ledger until its outstanding window has
 expired. There is no mixed-writer window, old coverage reader, or runtime conversion.
 Local reset remains an explicit marker-protected operation; reads never delete
-or upgrade outdated data. The currently deployed `81162c3` release is historical
-verification, not evidence that this cutover or these source changes are deployed.
+or upgrade outdated data. The October 17 release completed this cutover before
+starting matching writers; its release record distinguishes the reset inventory
+from fresh post-cutover smoke data.
 
 `HARNESS_MARKET_DATA_MODE` selects the complete local or Azure composition.
 Local mode needs no Azure service. Local Thesis/UI can select the entire remote

@@ -6,6 +6,17 @@ The source batch includes `5120b06` and its final Azure-listing/native-build
 follow-up: immutable fenced publication, worker resource admission and metrics,
 retirement of the Python lake client/soak driver, and deployment/packaging updates.
 
+## Outcome
+
+Committed and pushed to `master`. The [main deployment and fresh-data backtest](https://github.com/Carson-Fricke/FCA/actions/runs/39065264294)
+and [Thesis backend/runtime/UI deployment](https://github.com/Carson-Fricke/FCA/actions/runs/39065264163)
+passed. [Full source CI](https://github.com/Carson-Fricke/FCA/actions/runs/39063975234)
+passed; subsequent release-tooling checks include all ten Node assertions.
+The [GHCR cleanup](https://github.com/Carson-Fricke/FCA/actions/runs/39066148059)
+and [current shared-policy ACR cleanup](https://github.com/Carson-Fricke/FCA/actions/runs/39066425102)
+also passed against the real registries. Temporary recovery code is removed and
+the Thesis deployment workflow is active.
+
 ## Data cutover
 
 On 2026-10-17, accepted Azure ingestion records were verified terminal and no
@@ -37,8 +48,8 @@ The cutover does not migrate reads or retain an old-format implementation.
 | UV lock, repository Ruff lint/format and ty | Passed |
 | UI checks, tests and production build | Passed; 280 tests passed, 1 skipped; two existing check warnings |
 | Bicep build and lint | Passed with existing template warnings |
-| Workflow selection | 6 tests passed |
-| Workflow structure/shell parsing | 8 YAML workflows and 63 embedded shell blocks passed |
+| Release tooling | 10 Node tests passed: 6 workflow selection and 4 graph-retention policies |
+| Final workflow structure/shell parsing | 8 YAML workflows and 65 embedded shell blocks passed |
 | Both Dockerfile build checks | Passed without warnings |
 | Linux container dependency planner | Built; both recipes include the new pipeline crate and matching native engine versions |
 | Linux resource-pipeline Clippy and behavior tests | Passed; 2 tests |
@@ -77,12 +88,11 @@ results beyond the existing opt-in live-Cosmos/UI cases.
 
 ## Rollout boundary
 
-GitHub billing previously prevented runner startup; the operator reports that
-block cleared. The rollout must establish matching harness, worker and dispatcher
-images before the Thesis workflow reapplies the shared composition. Automatic
-Thesis deployment is temporarily suspended for this controlled rollout and is
-restored afterward. Hosted outcomes and deployed image pins are recorded after
-the Actions runs complete; the preflight alone does not establish deployment.
+GitHub billing previously prevented runner startup; the operator cleared that
+block. Matching harness, worker and dispatcher images were installed before
+restoring the temporarily suspended Thesis workflow. Both deployment workflows
+and their final smokes passed. The evidence below includes hosted outcomes and
+live image pins, beyond preflight verification.
 
 ## First hosted rollout
 
@@ -106,8 +116,8 @@ under the unprivileged runtime user and failed on its read-only home. The image
 now copies the completed build's toolchain and exercises the actual workspace
 pin as the runtime user with networking disabled. The smoke workflow's report
 strings also had double-escaped backticks that invoked shell substitutions;
-those are corrected. A follow-up hosted build verifies the image fix and warm
-dependency-cache behavior before the release is considered complete.
+those are corrected. The follow-up hosted build verified the image fix and warm
+dependency-cache behavior.
 
 The follow-up image build passed its offline rootless probe. Shared-image build
 time fell to 4m 04s (dependency cooks were cache hits, no native recompilation);
@@ -142,6 +152,42 @@ applying them. GHCR retains its seven-day floor and ten newest image roots;
 its descriptor reads run with bounded concurrency. Temporary recovery code was
 removed after use. The final all-cache-hit publish took 6 seconds for the harness
 and 5 seconds for ingestion; this measures image publication, not Azure rollout.
+
+## Final live evidence
+
+| Workload | Verified image digest |
+| --- | --- |
+| Harness API / backtest / traders | `sha256:39b6e6b27b775deb2a42eb6e27dfb7a5dcbb7da53005651d69f8b0864e882523` |
+| Ingestion worker / dispatcher | `sha256:8a777b7516775a062d2736ba42f6c9a8fd05e0a690f9f57ccb59ac04b7cf8a5e` |
+| Thesis API | `sha256:b02ac914f06a9f9a103287eeb00cf3d6c62f8f91158106de592aac698be39ff0` |
+
+The API allocation remains 1 vCPU / 2 GiB; finite ACA workers remain 4 vCPU /
+8 GiB. The dispatcher is scheduled, and both fresh ingestion executions
+(`56u8644`, `9epnmmx`) completed. Backtest execution
+`fca-ml-dev-backtest-qyeoptg` succeeded with 4,708,592 market events, 2 orders and
+15 fills. MSFT trades and quotes for January 2–4, 2024 have complete current
+publication manifests and immutable SHA-256 objects. Bars were not requested
+by this smoke and remain missing; all-three-dataset behavior is covered by the
+retained local finite-worker suite. The quote worker reported 982,191 committed
+rows in 24.287 worker seconds; this is an operational smoke measurement, not
+a controlled local/Azure throughput comparison.
+
+Local and remote harness `/health` and `/market-data/health` return 200 with
+status `ok`; both protected auth routes reject anonymous requests with 401.
+Local Thesis health and UI `/w` also return 200. The local harness was resumed
+with optimized current binaries after its reset.
+
+Measured hosted build/cache states:
+
+| State | Shared image | Finite ingestion image |
+| --- | --- | --- |
+| First dependency-cache fill | 26m 57s | 12s |
+| Dependency cache reused; source/runtime follow-up | 4m 04s | 5s |
+| All image layers reused | 6s | 5s |
+
+The full warm CI run completed in 2m 32s; individual Rust jobs took 2m 23s and
+1m 46s. These are measured cache states, not a claim that a cold native build
+completes in seconds. Registry graph retention was rechecked after cleanup.
 
 Ignored command logs and cutover inventories are under
 `.local/verification/release-2026-10-17/` and
