@@ -13,3 +13,5 @@ Provider-independent blob, Parquet, capacity and lease boundaries. Consumers use
 Market-data decoding and caching belong to `harness-market-reader`; this crate owns canonical writing and storage adapters.
 
 - `staged.rs` — Owned, sealed scratch files with byte admission, bounded hashing and automatic cleanup.
+
+Local object replacement stages under a reserved `.fca-staging` directory on the same filesystem. That directory is outside the logical object namespace and cannot be addressed through storage ports; listings expose committed names only. Publication readers retain strict manifest-path validation.

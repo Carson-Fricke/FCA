@@ -318,3 +318,5 @@ The synchronous Blob and Table SDK bridges yield multithreaded Tokio scheduler w
 The Linux runtime supplies a writable local data root and the bundled worker path. Local signed-object transport accepts an explicit public base URL for forwarded ports and LAN clients. The ingestion image imports the shared registry cache as well as its own cache, retaining the narrow runtime image while reusing already-built worker artifacts.
 
 Finite local workers own scratch directories under `ingestion/scratch/<work-key>/`. Process cleanup removes that checked directory after the worker exits, including orphaned files from an interrupted process; system temporary storage is not left with unowned ingestion runs.
+
+Local object replacement stages under a reserved `.fca-staging` directory on the same filesystem. That directory is outside the logical object namespace and cannot be addressed through storage ports; listings expose committed names only. Publication readers retain strict manifest-path validation.

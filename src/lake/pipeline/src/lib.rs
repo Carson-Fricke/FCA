@@ -28,7 +28,7 @@ impl Default for Limits {
         Self {
             cpu_slots: std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get),
             response_bytes: 1024 * MIB,
-            max_response_bytes: 8 * MIB,
+            max_response_bytes: 4 * MIB,
             session_bytes: 4096 * MIB,
             max_session_bytes: 2048 * MIB,
             publication_slots: 2,
@@ -147,6 +147,7 @@ struct Measurement {
     calls: AtomicU64,
     nanos: AtomicU64,
     bytes: AtomicU64,
+    max_bytes: AtomicU64,
     rows: AtomicU64,
 }
 #[derive(Serialize)]
@@ -154,6 +155,7 @@ struct StageSnapshot {
     calls: u64,
     seconds: f64,
     bytes: u64,
+    max_bytes: u64,
     rows: u64,
 }
 
@@ -289,6 +291,7 @@ impl Pipeline {
                         calls: m.calls.load(Ordering::Relaxed),
                         seconds: m.nanos.load(Ordering::Relaxed) as f64 / 1e9,
                         bytes: m.bytes.load(Ordering::Relaxed),
+                        max_bytes: m.max_bytes.load(Ordering::Relaxed),
                         rows: m.rows.load(Ordering::Relaxed),
                     },
                 )
@@ -323,6 +326,9 @@ impl Drop for StageTimer {
         self.measurement
             .bytes
             .fetch_add(self.bytes, Ordering::Relaxed);
+        self.measurement
+            .max_bytes
+            .fetch_max(self.bytes, Ordering::Relaxed);
         self.measurement
             .rows
             .fetch_add(self.rows, Ordering::Relaxed);

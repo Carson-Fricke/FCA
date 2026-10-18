@@ -7,7 +7,7 @@ in ACA execution stdout/stderr. Final counters are also persisted in each termin
 `ingestion/partitions/<job_id>/<key>.json` document under `metrics`, so execution
 cleanup cannot erase them. Counters describe attempted work; job state remains the outcome.
 
-Each stage records calls, service seconds, payload bytes and rows where applicable:
+Each stage records calls, service seconds, payload bytes, maximum single payload bytes and rows where applicable:
 provider-secret setup, coverage discovery, progress persistence, network, JSON
 decode, typed normalization, validation, sorting, Arrow projection,
 bar derivation, scratch spilling, Parquet, hashing, upload, manifest publication, lease and rate waits.
@@ -49,7 +49,7 @@ instructions, keeping local and Azure ingestion separate.
 | --- | --- | --- |
 | `LAKE_INGEST_CPU_SLOTS` | Available CPU allocation; Bicep sets 4 | Shared decode, normalization, sorting and encoding slots |
 | `LAKE_INGEST_RESPONSE_MEMORY_MIB` | 1024 | Response body/decoded-page headroom pool |
-| `LAKE_INGEST_MAX_RESPONSE_MIB` | 8 | Maximum decompressed HTTP body; wire admission reserves this maximum, while decode admission uses 16 times actual bytes plus 2 MiB bounded row bookkeeping |
+| `LAKE_INGEST_MAX_RESPONSE_MIB` | 4 | Maximum decompressed HTTP body; wire admission reserves this maximum, while decode admission uses 16 times actual bytes plus 2 MiB bounded row bookkeeping |
 | `LAKE_INGEST_MEMORY_MIB` | 4096 | Session reservation pool |
 | `LAKE_INGEST_SESSION_MIB` | 2048 | Reservation for bounded active merge/encoding work, held through completion; page streaming removes a daily row-count limit |
 | `LAKE_INGEST_PUBLICATION_CONCURRENCY` | 2 | Storage/lease publications independent of CPU slots |

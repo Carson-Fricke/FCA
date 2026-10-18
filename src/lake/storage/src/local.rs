@@ -2,8 +2,9 @@
 //!
 //! Ports `lake.storage.parquet.LocalFilesystemStore`: objects live below a
 //! resolved root, every path is validated as a relative POSIX path that stays
-//! under that root, and replacement writes a temporary file in the target
-//! directory, fsyncs it, and renames it into place. The rename is retried on
+//! under that root. Replacements stage in a reserved directory on the same
+//! filesystem, fsync, and atomically rename into the logical object namespace.
+//! Listings expose only committed objects. The rename is retried on
 //! Windows sharing violations because an open handle denies the replace.
 
 use std::fs;
@@ -19,6 +20,7 @@ use crate::ports::{BlobStore, ReadableBlobStore};
 const PATH_ERROR: &str = "object path must be a non-empty relative POSIX path";
 const RENAME_ATTEMPTS: u64 = 6;
 const RENAME_BACKOFF_MILLIS: u64 = 50;
+const STAGING_DIRECTORY: &str = ".fca-staging";
 
 static TEMPORARY_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -44,6 +46,11 @@ impl LocalFilesystemStore {
 
     fn target(&self, relative_path: &str) -> Result<PathBuf, DataError> {
         let parts = validate_relative_path(relative_path)?;
+        if parts[0].eq_ignore_ascii_case(STAGING_DIRECTORY) {
+            return Err(DataError::value(
+                "object path uses the reserved storage staging namespace",
+            ));
+        }
         let mut target = self.root.clone();
         for part in parts {
             target.push(part);
@@ -61,12 +68,26 @@ impl LocalFilesystemStore {
         self.target(prefix)
     }
 
-    fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<(), DataError> {
+    fn temporary_path(&self) -> Result<PathBuf, DataError> {
+        let directory = self.root.join(STAGING_DIRECTORY);
+        fs::create_dir_all(&directory)?;
+        Ok(directory.join(format!("{}-{}.tmp", std::process::id(), random_suffix())))
+    }
+
+    fn collect_files(&self, directory: &Path, files: &mut Vec<PathBuf>) -> Result<(), DataError> {
         for entry in fs::read_dir(directory)? {
             let entry = entry?;
+            if directory == self.root
+                && entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(STAGING_DIRECTORY))
+            {
+                continue;
+            }
             let file_type = entry.file_type()?;
             if file_type.is_dir() {
-                Self::collect_files(&entry.path(), files)?;
+                self.collect_files(&entry.path(), files)?;
             } else if file_type.is_file() {
                 files.push(entry.path());
             }
@@ -91,7 +112,7 @@ impl LocalFilesystemStore {
         if start.is_file() {
             files.push(start);
         } else if start.is_dir() {
-            Self::collect_files(&start, &mut files)?;
+            self.collect_files(&start, &mut files)?;
         }
         files.sort();
         Ok(files)
@@ -105,10 +126,13 @@ impl BlobStore for LocalFilesystemStore {
             .parent()
             .ok_or_else(|| DataError::value(PATH_ERROR))?;
         fs::create_dir_all(parent)?;
-        let temporary = parent.join(format!(".upload-{}.tmp", random_suffix()));
+        let temporary = self.temporary_path()?;
         let result = (|| {
             let mut input = fs::File::open(source)?;
-            let mut output = fs::File::create(&temporary)?;
+            let mut output = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)?;
             std::io::copy(&mut input, &mut output)?;
             output.sync_all()?;
             rename_with_retries(&temporary, &target)
@@ -126,11 +150,7 @@ impl BlobStore for LocalFilesystemStore {
             .ok_or_else(|| DataError::value(PATH_ERROR))?
             .to_path_buf();
         fs::create_dir_all(&parent)?;
-        let name = target
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let temporary = parent.join(format!(".{name}.{}.tmp", random_suffix()));
+        let temporary = self.temporary_path()?;
         let outcome = write_and_replace(&temporary, &target, payload);
         if outcome.is_err() {
             let _ = fs::remove_file(&temporary);
@@ -189,7 +209,10 @@ fn validate_relative_path(relative_path: &str) -> Result<Vec<&str>, DataError> {
 
 fn write_and_replace(temporary: &Path, target: &Path, payload: &[u8]) -> std::io::Result<()> {
     {
-        let mut file = fs::File::create(temporary)?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(temporary)?;
         file.write_all(payload)?;
         file.flush()?;
         file.sync_all()?;

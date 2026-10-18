@@ -30,7 +30,7 @@ param ingestionSessionConcurrency int = 2
 param ingestionPipelineLimits object = {
   cpuSlots: 4
   responseMemoryMiB: 1024
-  maxResponseMiB: 8
+  maxResponseMiB: 4
   memoryMiB: 4096
   sessionMiB: 2048
   publicationConcurrency: 2
