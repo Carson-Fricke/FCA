@@ -670,7 +670,7 @@ fn aggregate_bars(
             }
             _ => bars.push(NormalizedBar {
                 timestamp: bucket,
-                symbol: symbol.to_string(),
+                symbol: symbol.into(),
                 open: point.price,
                 high: point.price,
                 low: point.price,
@@ -698,7 +698,7 @@ fn provider_bar_records(
         .iter()
         .map(|bar| NormalizedBar {
             timestamp: bucket_start(bar.timestamp, interval, session),
-            symbol: symbol.to_string(),
+            symbol: symbol.into(),
             open: bar.open,
             high: bar.high,
             low: bar.low,
@@ -854,14 +854,18 @@ fn crypto_records(records: Vec<StoredTrade>) -> Result<Vec<CryptoTradeRecord>, D
 fn normalize_equity(record: &EquityTradeRecord) -> NormalizedTrade {
     NormalizedTrade {
         timestamp: record.timestamp,
-        symbol: record.symbol.clone(),
+        symbol: record.symbol.as_str().into(),
         trade_id: record.trade_id,
-        exchange: record.exchange.clone(),
+        exchange: record.exchange.as_str().into(),
         price: record.price,
         size: record.size,
-        conditions: record.conditions.clone(),
-        tape: record.tape.clone(),
-        update: record.update.clone(),
+        conditions: record
+            .conditions
+            .iter()
+            .map(|s| s.as_str().into())
+            .collect(),
+        tape: record.tape.as_str().into(),
+        update: record.update.as_deref().map(Into::into),
     }
 }
 
@@ -870,11 +874,11 @@ fn normalize_equity(record: &EquityTradeRecord) -> NormalizedTrade {
 fn normalize_crypto(record: &CryptoTradeRecord) -> NormalizedCryptoTrade {
     NormalizedCryptoTrade {
         timestamp: record.timestamp,
-        symbol: record.symbol.clone(),
+        symbol: record.symbol.as_str().into(),
         trade_id: record.trade_id,
-        exchange: record.exchange.clone(),
+        exchange: record.exchange.as_deref().map(Into::into),
         price: record.price,
         size: record.size,
-        taker_side: record.taker_side.clone(),
+        taker_side: record.taker_side.as_deref().map(Into::into),
     }
 }

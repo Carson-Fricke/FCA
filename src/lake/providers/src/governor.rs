@@ -61,7 +61,9 @@ impl RequestGovernor {
     }
     /// Acquire after the in-flight lane, immediately before transport dispatch.
     pub async fn before_request(&self) -> Result<(), ProviderError> {
+        let pacing = lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::RatePacing);
         self.acquire().await;
+        drop(pacing);
         if let Some(budget) = &self.budget {
             budget.acquire().await?;
         }

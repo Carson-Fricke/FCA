@@ -128,6 +128,9 @@ impl Objects {
     }
 }
 impl BlobStore for Objects {
+    fn replace_file(&self, path: &str, file: &std::path::Path) -> Result<(), DataError> {
+        self.replace(path, &std::fs::read(file)?)
+    }
     fn replace(&self, path: &str, payload: &[u8]) -> Result<(), DataError> {
         assert!(
             self.lock.held.load(Ordering::SeqCst),
@@ -295,7 +298,7 @@ fn concurrent_symbol_day_publications_wait_and_both_preserve_their_objects_and_c
     for (staged, rows) in [first, second] {
         assert_eq!(
             objects.values.lock().unwrap()[&staged[0].metadata.path],
-            staged[0].payload
+            std::fs::read(staged[0].payload.path()).unwrap()
         );
         let row = &rows[0];
         assert_eq!(
@@ -490,7 +493,9 @@ fn invalid_publication_candidates_never_reach_storage_mutation() {
             staged.clear();
             coverage[0].object_path = None;
         } else {
-            staged[0].payload[0] ^= 1;
+            let mut bytes = std::fs::read(staged[0].payload.path()).unwrap();
+            bytes[0] ^= 1;
+            std::fs::write(staged[0].payload.path(), bytes).unwrap();
         }
         assert!(publisher.commit(&staged, &coverage).is_err());
         assert_eq!(objects.calls.load(Ordering::SeqCst), 0);

@@ -13,4 +13,6 @@ pub use store::{BlobJobRepository, JobStore, OwnedJob};
 mod execution;
 mod ports;
 pub use execution::{LocalConfig, WorkerSpec};
-pub use ports::{while_owned, ActiveJob, JobOwnership, JobPersistence, WorkerRunner};
+pub use ports::{
+    while_owned, ActiveJob, JobOwnership, JobPersistence, RequestAuthority, WorkerRunner,
+};

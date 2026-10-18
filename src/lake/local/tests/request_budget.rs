@@ -1,5 +1,5 @@
 //! Independent local workers share one OS-clock ledger, including reboot fencing.
-use lake_ingest_jobs::{BudgetState, JobPersistence};
+use lake_ingest_jobs::{BudgetState, RequestAuthority};
 use lake_local::LocalJobStore;
 
 #[tokio::test]

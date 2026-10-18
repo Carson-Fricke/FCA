@@ -438,14 +438,7 @@ impl crate::JobPersistence for JobStore {
     async fn own_work(&self, work: &crate::WorkRef) -> Result<OwnedJob, DataError> {
         self.own_work(work).await
     }
-    async fn reserve_requests(
-        &self,
-        scope: &str,
-        limit: u32,
-        count: u32,
-    ) -> Result<crate::BudgetGrant, DataError> {
-        self.reserve_requests(scope, limit, count).await
-    }
+
     async fn own(&self, id: &str) -> Result<OwnedJob, DataError> {
         self.own(id).await
     }
@@ -466,5 +459,17 @@ impl crate::JobOwnership for OwnedJob {
     }
     async fn save(&self, job: &DurableJob) -> Result<(), DataError> {
         self.save(job).await
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::RequestAuthority for JobStore {
+    async fn reserve_requests(
+        &self,
+        scope: &str,
+        limit: u32,
+        count: u32,
+    ) -> Result<crate::BudgetGrant, DataError> {
+        self.reserve_requests(scope, limit, count).await
     }
 }

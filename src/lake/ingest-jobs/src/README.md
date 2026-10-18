@@ -11,3 +11,5 @@ One current job document retains immutable requests and the accepted worker spec
 - `budget.rs`: defines restart-safe rolling request reservations and the conditional Blob adapter.
 - `service.rs`: reconciles retained intents under dispatcher ownership and enforces shared worker limits and deadlines.
 - `bin/`: contains the finite provider-free Azure coordination entrypoint.
+
+Request allowance uses its own `RequestAuthority` port; permit caches do not depend on execution lifecycle methods. Immutable worker lanes contain several disjoint bounded chunks, with concurrently persisted dispatch intents and durable final metrics.

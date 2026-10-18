@@ -61,9 +61,24 @@ pub fn local_overrides(
         .transpose()
         .map_err(|e| crate::HostedEnsureError::new(format!("invalid worker deadline: {e}")))?
         .unwrap_or(86400);
+    let host_memory_mib = env
+        .get("LAKE_INGEST_HOST_MEMORY_MIB")
+        .map(|s| s.parse::<usize>().map_err(DataError::io))
+        .transpose()
+        .map_err(error)?
+        .map(Ok)
+        .unwrap_or_else(lake_local::host_memory_mib)
+        .map_err(error)?;
+    if host_memory_mib < 512 {
+        return Err(error(DataError::value(
+            "at least 512 MiB of available ingestion memory is required",
+        )));
+    }
+    let max_workers = max_workers.min(host_memory_mib / 512).max(1);
     let jobs = Arc::new(IngestionJobs {
         store: lake_local::LocalJobStore::new(layout.root().into()),
         runner: lake_local::LocalRunner::new(LocalConfig {
+            host_memory_mib,
             executable,
             provider_env: env
                 .get("LAKE_LOCAL_PROVIDER_ENV")

@@ -704,6 +704,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "time",
+ "tokio",
  "tracing",
  "url",
  "uuid",
@@ -2529,6 +2530,7 @@ dependencies = [
  "httpdate",
  "lake-catalog",
  "lake-contracts",
+ "lake-pipeline",
  "lake-storage",
  "quick-xml",
  "reqwest 0.13.5",
@@ -2626,6 +2628,7 @@ dependencies = [
  "parquet",
  "serde_json",
  "sha2",
+ "tempfile",
  "time",
  "tokio",
 ]

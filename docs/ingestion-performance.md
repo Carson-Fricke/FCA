@@ -3,12 +3,16 @@
 Workers emit JSON `ingestion_metrics` every ten seconds and a final `worker_settled`
 snapshot, with the retained `job_id`, internal partition and elapsed wall seconds.
 Local logs are under the selected lake root's `ingestion/logs/`; remote events are
-in ACA execution stdout/stderr. Metrics are operational logs, not job outcomes.
+in ACA execution stdout/stderr. Final counters are also persisted in each terminal
+`ingestion/partitions/<job_id>/<key>.json` document under `metrics`, so execution
+cleanup cannot erase them. Counters describe attempted work; job state remains the outcome.
 
 Each stage records calls, service seconds, payload bytes and rows where applicable:
 provider-secret setup, coverage discovery, progress persistence, network, JSON
 decode, typed normalization, validation, sorting, Arrow projection,
-bar derivation, Parquet, hashing, upload, manifest publication, lease and rate waits.
+bar derivation, scratch spilling, Parquet, hashing, upload, manifest publication, lease and rate waits.
+Rate metrics distinguish cache waiting, authority RPCs, CAS retry backoff, exhausted
+authority capacity, and local pacing.
 Stage service times overlap across tasks and must not be summed as wall time.
 Counters describe work at stage boundaries, including attempted uploads; committed
 rows and the execution outcome remain the job progress/state authority. Early worker
@@ -45,26 +49,43 @@ instructions, keeping local and Azure ingestion separate.
 | --- | --- | --- |
 | `LAKE_INGEST_CPU_SLOTS` | Available CPU allocation; Bicep sets 4 | Shared decode, normalization, sorting and encoding slots |
 | `LAKE_INGEST_RESPONSE_MEMORY_MIB` | 1024 | Response body/decoded-page headroom pool |
-| `LAKE_INGEST_MAX_RESPONSE_MIB` | 8 | Maximum decompressed HTTP response body; reserves eight times this for its lifetime through normalization |
+| `LAKE_INGEST_MAX_RESPONSE_MIB` | 8 | Maximum decompressed HTTP body; wire admission reserves this maximum, while decode admission uses 16 times actual bytes plus 2 MiB bounded row bookkeeping |
 | `LAKE_INGEST_MEMORY_MIB` | 4096 | Session reservation pool |
-| `LAKE_INGEST_SESSION_MIB` | 2048 | Reservation held before fetch through final completion; normalized input is limited to one quarter of this, leaving encoding headroom |
+| `LAKE_INGEST_SESSION_MIB` | 2048 | Reservation for bounded active merge/encoding work, held through completion; page streaming removes a daily row-count limit |
 | `LAKE_INGEST_PUBLICATION_CONCURRENCY` | 2 | Storage/lease publications independent of CPU slots |
-| `LAKE_INGEST_HOST_MEMORY_MIB` | 32768 locally | Host accounting budget divided among local workers |
+| `LAKE_INGEST_HOST_MEMORY_MIB` | 75% of currently available RAM locally | Accepted host budget divided among local workers; explicit override available |
+| `LAKE_INGEST_SCRATCH_MIB` | 4096 | Owned temporary run/Parquet files; released on deletion and visibly rejected when exhausted |
 
 Local workers divide host CPU slots across the accepted maximum worker count.
-They allocate three quarters of their host-memory share to session reservations,
-one quarter (capped at 1024 MiB) to response headroom and divide the session pool by
-session concurrency. Explicit worker settings override these derived defaults.
-The host budget is configurable; it is not physical-memory autodetection.
+Fleet admission caps workers to at least 512 MiB per worker. Each worker allocates
+one third of its host-memory share to session reservations and one half (capped at
+2048 MiB) to response/decode headroom; the remaining share leaves runtime overhead.
+Explicit worker settings override these derived defaults. The accepted host budget
+is retained with the immutable execution specification.
 
-These are explicit admission/accounting limits and response/input guards, not a
-general RSS allocator. A dataset exceeding retained-input headroom fails visibly;
-it does not wait for memory held by itself, silently truncate data, or spill to
-disk. A workload requiring larger single sessions needs a reviewed larger budget
-or a future spill/streaming design. Keep total reservations below actual memory
-with headroom for runtime, SDK, reader and allocator overhead. The 4-vCPU/8-GiB
-worker and 1-vCPU/2-GiB API allocations remain unchanged. Bicep exposes the resource
-controls together as `ingestionPipelineLimits` and passes them to accepted ACA work.
+Wire and decode are separate pools within the response budget (one quarter wire,
+three quarters decode), so queued bodies cannot starve their own decoders. Typed
+pages retain decode reservations until acquisition consumes them. Sessions spill
+canonical Arrow runs and merge at bounded fan-in; sealed files close write handles.
+Final Parquet encoding and local/Azure uploads stream files. Scratch limits fail
+rather than waiting for capacity held by that session. The 4-vCPU/8-GiB worker and
+1-vCPU/2-GiB API allocations remain unchanged.
+
+Plans expose up to eight balanced finite worker lanes by default. Each consumes
+several short, disjoint chunks before exit, amortizing startup and sharing provider
+connections. Compare end-to-end admission-to-terminal time separately from active
+worker time, and compare durable committed row counts and logical records.
+
+## Plan/admission cutover
+
+The current lane identity hashes its ordered request list, and durable jobs include
+a required `metrics` field (null before settlement). Local execution input includes
+the accepted host-memory budget. Drain/stop old ingestion writers before replacing
+API/dispatcher/worker images together; remove obsolete ingestion job, partition and
+executor/admission records within the selected development store. Existing current
+market manifests, immutable Parquet, contracts, listings and other application data
+remain valid. Preserve the request budget ledger through outstanding charges.
+Readers never infer old plan formats or launch old retained worker images.
 
 ## Publication cutover
 
@@ -87,3 +108,5 @@ outstanding charged window; a full local reset must wait for that window to
 expire before removing the ledger. Reads reject corrupt/outdated current manifests and
 never convert or delete them. Old immutable generations remain retained; garbage
 collection needs an explicit snapshot-retention policy.
+
+Finite local workers own scratch directories under `ingestion/scratch/<work-key>/`. Process cleanup removes that checked directory after the worker exits, including orphaned files from an interrupted process; system temporary storage is not left with unowned ingestion runs.

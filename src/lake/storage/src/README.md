@@ -11,3 +11,5 @@ Provider-independent blob, Parquet, capacity and lease boundaries. Consumers use
 - `leases.rs` implements storage lease coordination.
 
 Market-data decoding and caching belong to `harness-market-reader`; this crate owns canonical writing and storage adapters.
+
+- `staged.rs` — Owned, sealed scratch files with byte admission, bounded hashing and automatic cleanup.

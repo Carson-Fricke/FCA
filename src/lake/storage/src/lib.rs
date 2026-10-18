@@ -6,6 +6,7 @@ pub mod leases;
 pub mod local;
 pub mod parquet;
 pub mod ports;
+pub mod staged;
 
 pub use azure::{
     sas_issuer_from_account_url, AzureBlobContainer, AzureBlobLease, AzureBlobLeaseProvider,
@@ -20,3 +21,5 @@ pub use leases::{Lease, LeaseProvider, SymbolDayScope};
 pub use local::LocalFilesystemStore;
 pub use parquet::{ParquetMetadata, ParquetWriter};
 pub use ports::{BlobStore, ReadableBlobStore, SasIssuer};
+
+pub use staged::StagedFile;

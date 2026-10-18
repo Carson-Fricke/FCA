@@ -37,49 +37,79 @@ fn grant(count: u32, started: tokio::time::Instant) -> CachedGrant {
 }
 
 #[test]
-fn expired_slow_or_idle_grants_shrink_without_refunding_or_boundary_oscillation() {
+fn expired_unused_permits_shrink_and_early_exhaustion_grows_without_refunds() {
     let start = tokio::time::Instant::now();
     let mut state = PermitState::new();
-    assert_eq!(state.request_size(start, 10000), 32);
-    state.grant = Some(grant(32, start));
+    state.grants.push_back(grant(32, start));
     for _ in 0..18 {
-        assert!(state.grant.as_mut().unwrap().take(start));
+        assert!(state.grants.front_mut().unwrap().take(start));
     }
-    assert_eq!(
-        state.request_size(start + std::time::Duration::from_secs(1), 10000),
-        18
-    );
-    state.grant = Some(grant(18, start));
-    let near_expiry = start + std::time::Duration::from_millis(999);
-    for _ in 0..18 {
-        assert!(state.grant.as_mut().unwrap().take(near_expiry));
-    }
-    assert_eq!(
-        state.request_size(near_expiry, 10000),
-        18,
-        "near-expiry exhaustion must not grow back to32"
-    );
-    state.grant = Some(grant(18, start));
-    assert_eq!(
-        state.request_size(start + std::time::Duration::from_secs(2), 10000),
-        1,
-        "idle reservations must not consume32 permits repeatedly"
-    );
+    state.discard_expired(start + std::time::Duration::from_secs(1));
+    assert_eq!(state.batch, 18);
+    assert_eq!(state.available(), 0);
+    state.grants.push_back(grant(18, start));
+    while state.grants.front_mut().unwrap().take(start) {}
+    state.discard_expired(start);
+    assert_eq!(state.batch, 36);
+    state.grants.push_back(grant(36, start));
+    state.discard_expired(start + std::time::Duration::from_secs(2));
+    assert_eq!(state.batch, 1);
 }
 
-#[test]
-fn early_exhaustion_grows_within_the_batch_and_configured_limits() {
-    let start = tokio::time::Instant::now();
-    let mut state = PermitState {
-        batch: 1,
-        grant: Some(grant(1, start)),
-    };
-    for expected in [2, 4, 8, 16, 32, 32] {
-        let early = start + std::time::Duration::from_millis(100);
-        let cached = state.grant.as_mut().unwrap();
-        while cached.take(early) {}
-        assert_eq!(state.request_size(early, 10000), expected);
-        state.grant = Some(grant(expected, start));
+#[derive(Clone)]
+struct Authority {
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+    stalled: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+#[async_trait::async_trait]
+impl RequestAuthority for Authority {
+    async fn reserve_requests(
+        &self,
+        _: &str,
+        _: u32,
+        _: u32,
+    ) -> Result<BudgetGrant, lake_contracts::DataError> {
+        if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
+            self.stalled.notify_one();
+            self.release.notified().await;
+        }
+        Ok(BudgetGrant {
+            count: 10,
+            valid_for: std::time::Duration::from_secs(5),
+            retry_after: std::time::Duration::ZERO,
+        })
     }
-    assert_eq!(state.request_size(start, 5), 5);
+}
+#[tokio::test]
+async fn cached_permits_are_available_while_the_authority_refill_is_stalled() {
+    let authority = Authority {
+        calls: Arc::default(),
+        stalled: Arc::default(),
+        release: Arc::default(),
+    };
+    let budget = SharedBudget::new(authority.clone(), "fake", "key", 10000);
+    budget.acquire().await.unwrap();
+    budget.acquire().await.unwrap();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        authority.stalled.notified(),
+    )
+    .await
+    .unwrap();
+    for _ in 0..8 {
+        tokio::time::timeout(std::time::Duration::from_millis(250), budget.acquire())
+            .await
+            .expect("cached permits cannot wait on storage I/O")
+            .unwrap();
+    }
+    let next = budget.acquire();
+    tokio::pin!(next);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(5), &mut next)
+            .await
+            .is_err()
+    );
+    authority.release.notify_one();
+    next.await.unwrap();
 }

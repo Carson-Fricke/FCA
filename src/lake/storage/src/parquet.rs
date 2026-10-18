@@ -16,7 +16,6 @@ use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::metadata::KeyValue;
 use parquet::file::properties::{WriterProperties, WriterVersion};
-use sha2::{Digest, Sha256};
 
 use crate::ports::BlobStore;
 
@@ -66,54 +65,75 @@ impl<S: BlobStore + 'static> ParquetWriter<S> {
         interval: Option<&str>,
         symbol: &str,
     ) -> Result<ParquetMetadata, DataError> {
-        validate_batch(batch, asset_class, data_type, symbol)?;
-        let schema = batch.schema();
-        let metadata = schema.metadata();
-        let name = metadata
-            .get(SCHEMA_METADATA_KEY)
-            .cloned()
-            .unwrap_or_default();
-        let version = metadata
-            .get(SCHEMA_VERSION_METADATA_KEY)
-            .cloned()
-            .unwrap_or_default();
-        let properties = WriterProperties::builder()
-            .set_compression(Compression::ZSTD(Default::default()))
-            .set_writer_version(WriterVersion::PARQUET_2_0)
-            .set_key_value_metadata(Some(vec![
-                KeyValue::new(SCHEMA_METADATA_KEY.to_string(), name),
-                KeyValue::new(SCHEMA_VERSION_METADATA_KEY.to_string(), version),
-            ]))
-            .build();
-        let mut payload = Vec::new();
-
-        let pipeline = lake_pipeline::Pipeline::global();
-        let mut encode_metric = pipeline.timer(lake_pipeline::Stage::Parquet);
-        encode_metric.rows(batch.num_rows());
-        {
-            let mut writer = ArrowWriter::try_new(&mut payload, schema, Some(properties))
-                .map_err(DataError::io)?;
-            writer.write(batch).map_err(DataError::io)?;
-            writer.close().map_err(DataError::io)?;
-        }
-
-        encode_metric.bytes(payload.len());
-        drop(encode_metric);
-        let logical = partition_path(session_date, asset_class, data_type, interval, symbol)?;
-
-        let mut hash_metric = pipeline.timer(lake_pipeline::Stage::Hash);
-        hash_metric.bytes(payload.len());
-        let checksum = hex::encode(Sha256::digest(&payload));
-        drop(hash_metric);
-        let path = lake_contracts::immutable_path(&logical, &checksum)?;
-        self.store.replace(&path, &payload)?;
-        Ok(ParquetMetadata {
-            path,
-            rows: batch.num_rows() as u64,
-            bytes: payload.len() as u64,
-            checksum,
-        })
+        let (metadata, file) = stage_batches(
+            std::iter::once(Ok(batch.clone())),
+            session_date,
+            asset_class,
+            data_type,
+            interval,
+            symbol,
+        )?;
+        self.store.replace_file(&metadata.path, file.path())?;
+        Ok(metadata)
     }
+}
+
+/// Encode a bounded batch iterator to an owned scratch file. Publication belongs to the caller.
+pub fn stage_batches(
+    batches: impl Iterator<Item = Result<RecordBatch, DataError>>,
+    session_date: Date,
+    asset_class: AssetClass,
+    data_type: DataType,
+    interval: Option<&str>,
+    symbol: &str,
+) -> Result<(ParquetMetadata, Arc<crate::StagedFile>), DataError> {
+    let schema = Arc::new(schema_for(asset_class, data_type)?);
+    let properties = WriterProperties::builder()
+        .set_compression(Compression::ZSTD(Default::default()))
+        .set_writer_version(WriterVersion::PARQUET_2_0)
+        .set_max_row_group_row_count(Some(131072))
+        .set_key_value_metadata(Some(vec![
+            KeyValue::new(
+                SCHEMA_METADATA_KEY.to_string(),
+                schema.metadata().get(SCHEMA_METADATA_KEY).cloned(),
+            ),
+            KeyValue::new(
+                SCHEMA_VERSION_METADATA_KEY.to_string(),
+                schema.metadata().get(SCHEMA_VERSION_METADATA_KEY).cloned(),
+            ),
+        ]))
+        .build();
+    let pipeline = lake_pipeline::Pipeline::global();
+    let mut file = crate::StagedFile::new()?;
+    let mut rows = 0;
+    {
+        let mut writer =
+            ArrowWriter::try_new(&mut file, schema, Some(properties)).map_err(DataError::io)?;
+        for batch in batches {
+            pipeline.check()?;
+            let batch = batch?;
+            validate_batch(&batch, asset_class, data_type, symbol)?;
+            rows += batch.num_rows();
+            let mut metric = pipeline.timer(lake_pipeline::Stage::Parquet);
+            metric.rows(batch.num_rows());
+            writer.write(&batch).map_err(DataError::io)?;
+        }
+        let _close = pipeline.timer(lake_pipeline::Stage::Parquet);
+        writer.close().map_err(DataError::io)?;
+    }
+
+    let mut hash = pipeline.timer(lake_pipeline::Stage::Hash);
+    hash.bytes(file.len());
+    let checksum = file.checksum()?;
+    let logical = partition_path(session_date, asset_class, data_type, interval, symbol)?;
+    let path = lake_contracts::immutable_path(&logical, &checksum)?;
+    let metadata = ParquetMetadata {
+        path,
+        rows: rows as u64,
+        bytes: file.len() as u64,
+        checksum,
+    };
+    Ok((metadata, Arc::new(file.seal())))
 }
 
 /// Reject a schema or partition mismatch before serialization or mutation.

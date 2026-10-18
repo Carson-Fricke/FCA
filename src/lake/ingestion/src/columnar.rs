@@ -43,7 +43,7 @@ fn symbols(symbol: &str, rows: usize) -> ArrayRef {
     strings(std::iter::repeat_n(symbol, rows))
 }
 
-fn conditions<'a>(values: impl Iterator<Item = &'a Vec<String>>) -> ArrayRef {
+fn conditions<'a>(values: impl Iterator<Item = &'a Vec<lake_providers::ProviderText>>) -> ArrayRef {
     let mut builder = ListBuilder::new(StringBuilder::new()).with_field(Arc::new(Field::new(
         "item",
         ArrowType::Utf8,

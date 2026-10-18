@@ -55,12 +55,12 @@ pub(crate) fn ordered_records<T>(
 }
 
 /// An immutable, fully written Parquet payload waiting for one atomic commit.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct StagedParquetObject {
     /// Metadata for the exact bytes carried by `payload`.
     pub metadata: ParquetMetadata,
-    /// The complete Parquet object payload.
-    pub payload: Vec<u8>,
+    /// Owned sealed Parquet scratch file, retained until publication completes.
+    pub payload: std::sync::Arc<lake_storage::StagedFile>,
 }
 
 /// Whole-partition replacement with a private staging area.
@@ -70,6 +70,17 @@ pub struct StagedParquetObject {
 /// `reset_staged` discards anything not yet drained. Staged bytes never become
 /// externally visible before the committer publishes them.
 pub trait PartitionWriter: Send + Sync {
+    /// Stream canonical batches into one unpublished object.
+    fn write_batches(
+        &self,
+        records: Box<dyn Iterator<Item = Result<RecordBatch, DataError>> + Send>,
+        session_date: Date,
+        asset_class: AssetClass,
+        data_type: DataType,
+        interval: Option<&str>,
+        symbol: &str,
+    ) -> Result<ParquetMetadata, DataError>;
+
     /// Serialize one dataset and stage its object.
     ///
     /// `interval` is the bars interval partition dimension; bars datasets pass

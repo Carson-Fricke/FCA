@@ -19,7 +19,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use futures_util::future::try_join_all;
 use futures_util::stream::{self, FuturesUnordered, StreamExt};
 use lake_catalog::ContractRecord;
-use lake_contracts::{format_nanos_utc, parse_iso_nanos, AssetClass, BarInterval, DateTime};
+use lake_contracts::{format_nanos_utc, AssetClass, BarInterval, DateTime};
 use serde_json::Value;
 
 use crate::config::ProviderConfig;
@@ -52,7 +52,7 @@ const SEED_UNIT_NANOS: i64 = 60 * 1_000_000_000;
 /// Upper bound on the seed fan-out per symbol window.
 const MAX_SEEDS: usize = 64;
 
-type Parser<T> = fn(&Value, &str) -> Result<T, ProviderError>;
+type Parser<T> = fn(&parse::RawRow<'_>, &str) -> Result<T, ProviderError>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Market {
@@ -94,6 +94,18 @@ struct FetchSpec<T> {
 }
 
 impl<T> FetchSpec<T> {
+    fn copy(&self) -> Self {
+        Self {
+            market: self.market,
+            data_type: self.data_type,
+            parser: self.parser,
+            start: self.start,
+            end: self.end,
+            start_nanos: self.start_nanos,
+            end_nanos: self.end_nanos,
+            window: self.window,
+        }
+    }
     fn new(
         market: Market,
         data_type: DataType,
@@ -115,19 +127,19 @@ impl<T> FetchSpec<T> {
     }
 }
 
-/// The outcome of one fetch unit: its rows plus, when the page proved the
-/// unit holds more than one page, the child units that cover the remainder.
-struct UnitOutcome<T> {
-    records: Vec<T>,
-    children: Vec<(i64, i64)>,
-}
-
 /// One fetched page: its kept rows, the cursor, and the highest timestamp the
 /// page proves fully fetched.
 struct PageResult<T> {
+    allocation: std::sync::Arc<lake_pipeline::Reservation>,
     records: Vec<T>,
     next_page_token: Option<String>,
     safe_split_nanos: Option<i64>,
+}
+
+struct UnitPage<T> {
+    page: PageResult<T>,
+    unit: FetchSpec<T>,
+    history: Option<HashSet<String>>,
 }
 
 /// Paginated Alpaca client sharing one governor and one adaptive key lane.
@@ -187,6 +199,82 @@ impl AlpacaClient {
         &self.lane
     }
 
+    /// Acquire bounded provider pages; cancellation drops all pending requests.
+    pub fn stream_trades<'a>(
+        &'a self,
+        symbols: &[impl AsRef<str>],
+        start: DateTime,
+        end: DateTime,
+    ) -> crate::RecordStream<'a, NormalizedTrade> {
+        self.market_pages(
+            normalize_symbols(symbols),
+            FetchSpec::new(
+                Market::Equity,
+                DataType::Trades,
+                parse::parse_trade,
+                start,
+                end,
+                None,
+            ),
+        )
+    }
+    /// Acquire bounded provider pages; cancellation drops all pending requests.
+    pub fn stream_quotes<'a>(
+        &'a self,
+        symbols: &[impl AsRef<str>],
+        start: DateTime,
+        end: DateTime,
+    ) -> crate::RecordStream<'a, NormalizedQuote> {
+        self.market_pages(
+            normalize_symbols(symbols),
+            FetchSpec::new(
+                Market::Equity,
+                DataType::Quotes,
+                parse::parse_quote,
+                start,
+                end,
+                None,
+            ),
+        )
+    }
+    /// Acquire bounded provider pages; cancellation drops all pending requests.
+    pub fn stream_crypto_trades<'a>(
+        &'a self,
+        symbols: &[impl AsRef<str>],
+        start: DateTime,
+        end: DateTime,
+    ) -> crate::RecordStream<'a, NormalizedCryptoTrade> {
+        self.market_pages(
+            normalize_crypto_pairs(symbols),
+            FetchSpec::new(
+                Market::Crypto,
+                DataType::Trades,
+                parse::parse_crypto_trade,
+                start,
+                end,
+                None,
+            ),
+        )
+    }
+    /// Acquire bounded provider pages; cancellation drops all pending requests.
+    pub fn stream_crypto_quotes<'a>(
+        &'a self,
+        symbols: &[impl AsRef<str>],
+        start: DateTime,
+        end: DateTime,
+    ) -> crate::RecordStream<'a, NormalizedCryptoQuote> {
+        self.market_pages(
+            normalize_crypto_pairs(symbols),
+            FetchSpec::new(
+                Market::Crypto,
+                DataType::Quotes,
+                parse::parse_crypto_quote,
+                start,
+                end,
+                None,
+            ),
+        )
+    }
     /// Fetch equity trades for the inclusive `[start, end]` window.
     pub async fn fetch_trades(
         &self,
@@ -348,7 +436,7 @@ impl AlpacaClient {
                     parse::page_rows(&response.body, DataType::Bars, &requested_symbol)?;
                 let page = rows
                     .into_iter()
-                    .map(|row| parse::parse_bar(row, &requested_symbol))
+                    .map(|row| parse::parse_bar(&row, &requested_symbol))
                     .collect::<Result<Vec<_>, _>>()?;
                 timer.rows(page.len());
                 Ok::<_, ProviderError>((page, next))
@@ -402,8 +490,9 @@ impl AlpacaClient {
                     params.push(("page_token".into(), token.clone()));
                 }
                 let response = self.request_url(&url, &params).await?;
-                let rows = response
-                    .body
+                let body: Value = serde_json::from_slice(&response.body)
+                    .map_err(|e| ProviderError::Protocol(e.to_string()))?;
+                let rows = body
                     .get("option_contracts")
                     .and_then(Value::as_array)
                     .ok_or_else(|| {
@@ -447,7 +536,7 @@ impl AlpacaClient {
                     }
                     contracts.insert(record.symbol.clone(), record);
                 }
-                token = match response.body.get("next_page_token") {
+                token = match body.get("next_page_token") {
                     None | Some(Value::Null) => None,
                     Some(Value::String(s)) if s.is_empty() => None,
                     Some(Value::String(s)) => Some(s.clone()),
@@ -504,35 +593,77 @@ impl AlpacaClient {
         .await
     }
 
+    pub fn stream_option_trades<'a>(
+        &'a self,
+        contracts: &[ContractRecord],
+        start: DateTime,
+        end: DateTime,
+    ) -> crate::RecordStream<'a, NormalizedOptionTrade> {
+        self.option_pages(
+            contracts,
+            DataType::Trades,
+            start,
+            end,
+            parse::parse_option_trade,
+        )
+    }
+    pub fn stream_option_quotes<'a>(
+        &'a self,
+        contracts: &[ContractRecord],
+        start: DateTime,
+        end: DateTime,
+    ) -> crate::RecordStream<'a, NormalizedOptionQuote> {
+        self.option_pages(
+            contracts,
+            DataType::Quotes,
+            start,
+            end,
+            parse::parse_option_quote,
+        )
+    }
+    fn option_pages<'a, T: RecordMemory + Send + 'static>(
+        &'a self,
+        contracts: &[ContractRecord],
+        data_type: DataType,
+        start: DateTime,
+        end: DateTime,
+        parser: fn(&parse::RawRow<'_>, &ContractRecord) -> Result<T, ProviderError>,
+    ) -> crate::RecordStream<'a, T> {
+        let contracts = normalize_contracts(contracts);
+        Box::pin(async_stream::try_stream! {
+            for batch in contracts.chunks(OPTION_CONTRACTS_PER_REQUEST){
+                let mut pages=self.fetch_option_batch(batch.to_vec(),data_type,start,end,parser);
+                while let Some(page)=pages.next().await {yield page?;}
+            }
+        })
+    }
     async fn fetch_option_data<T: RecordMemory + Send + 'static>(
         &self,
         contracts: &[ContractRecord],
         data_type: DataType,
         start: DateTime,
         end: DateTime,
-        parser: fn(&Value, &ContractRecord) -> Result<T, ProviderError>,
+        parser: fn(&parse::RawRow<'_>, &ContractRecord) -> Result<T, ProviderError>,
     ) -> Result<Vec<T>, ProviderError> {
-        let contracts = normalize_contracts(contracts);
+        let mut pages = self.option_pages(contracts, data_type, start, end, parser);
         let mut records = Vec::new();
-        let mut retained_bytes = 0;
-        for batch in contracts.chunks(OPTION_CONTRACTS_PER_REQUEST) {
-            let page = self
-                .fetch_option_batch(batch, data_type, start, end, parser)
-                .await?;
-            append_records(&mut records, page, &mut retained_bytes)?;
+        let mut bytes = 0;
+        while let Some(page) = pages.next().await {
+            append_records(&mut records, page?.records, &mut bytes)?;
         }
         Ok(records)
     }
 
     /// Fetch one option batch, paging its cursor to exhaustion.
-    async fn fetch_option_batch<T: RecordMemory + Send + 'static>(
-        &self,
-        batch: &[(String, ContractRecord)],
+    fn fetch_option_batch<'a, T: RecordMemory + Send + 'static>(
+        &'a self,
+        batch: Vec<(String, ContractRecord)>,
         data_type: DataType,
         start: DateTime,
         end: DateTime,
-        parser: fn(&Value, &ContractRecord) -> Result<T, ProviderError>,
-    ) -> Result<Vec<T>, ProviderError> {
+        parser: fn(&parse::RawRow<'_>, &ContractRecord) -> Result<T, ProviderError>,
+    ) -> crate::RecordStream<'a, T> {
+        Box::pin(async_stream::try_stream! {
         let symbols = batch
             .iter()
             .map(|(symbol, _)| symbol.as_str())
@@ -548,8 +679,6 @@ impl AlpacaClient {
         let path = format!("/v1beta1/options/{}", data_type.value());
         let mut page_token: Option<String> = None;
         let mut seen_tokens: HashSet<String> = HashSet::new();
-        let mut records: Vec<T> = Vec::new();
-        let mut retained_bytes = 0;
         loop {
             let mut params = base_params.clone();
             // The provider's option trades endpoint rejects a feed parameter
@@ -563,36 +692,39 @@ impl AlpacaClient {
             }
             let response = self.request(&path, &params).await?;
             let batch = batch.to_vec();
+            let decoded=std::sync::Arc::new(lake_pipeline::Pipeline::global().decoded_response(response.body.len()).await.map_err(resource_error)?);
             let pipeline = lake_pipeline::Pipeline::global();
             let cpu = pipeline.cpu().await.map_err(resource_error)?;
             let (page, next_page_token) = tokio::task::spawn_blocking(move || {
                 let _cpu = cpu;
+                let decode=pipeline.timer(lake_pipeline::Stage::Decode);
+                let (rows, next) = parse::option_page_rows(&response.body, data_type, &batch)?;drop(decode);
                 let mut timer = pipeline.timer(lake_pipeline::Stage::Normalize);
-                let (rows, next) = parse::option_page_rows(&response.body, data_type, &batch)?;
                 let page = rows
                     .into_iter()
-                    .map(|(contract, row)| parser(row, contract))
+                    .map(|(contract, row)| parser(&row, contract))
                     .collect::<Result<Vec<_>, _>>()?;
                 timer.rows(page.len());
                 Ok::<_, ProviderError>((page, next))
             })
             .await
             .map_err(|e| ProviderError::Protocol(e.to_string()))??;
-            append_records(&mut records, page, &mut retained_bytes)?;
+            yield crate::RecordPage{records:page,allocation:Some(decoded)};
             match next_page_token {
-                None => return Ok(records),
-                Some(token) if token.is_empty() => return Ok(records),
+                None => break,
+                Some(token) if token.is_empty() => break,
                 Some(token) => {
                     if !seen_tokens.insert(token.clone()) {
-                        return Err(ProviderError::Protocol(format!(
+                        Err(ProviderError::Protocol(format!(
                             "repeated Alpaca option {} page token",
                             data_type.value()
-                        )));
+                        )))?;
                     }
                     page_token = Some(token);
                 }
             }
         }
+            })
     }
 
     /// Fetch equity trades as `slices` concurrent sub-windows merged in
@@ -642,20 +774,13 @@ impl AlpacaClient {
         symbols: &[String],
         spec: &FetchSpec<T>,
     ) -> Result<Vec<T>, ProviderError> {
-        let tasks: Vec<BoxFuture<'_, Result<Vec<T>, ProviderError>>> = symbols
-            .iter()
-            .map(|symbol| {
-                Box::pin(self.fetch_symbol(symbol, spec))
-                    as BoxFuture<'_, Result<Vec<T>, ProviderError>>
-            })
-            .collect();
-        let mut pending = stream::iter(tasks).buffer_unordered(self.config.max_concurrency);
+        let mut pending = self.market_pages(Ok(symbols.to_vec()), spec.copy());
         let mut records = Vec::new();
-        let mut retained_bytes = 0;
+        let mut bytes = 0;
         while let Some(page) = pending.next().await {
-            append_records(&mut records, page?, &mut retained_bytes)?;
+            append_records(&mut records, page?.records, &mut bytes)?;
         }
-        Ok(records)
+        sort_records(records).await
     }
 
     async fn fetch_market_sliced<T: Timestamped + Send + 'static>(
@@ -706,6 +831,21 @@ impl AlpacaClient {
         sort_records(records).await
     }
 
+    fn market_pages<'a, T: Timestamped + Send + 'static>(
+        &'a self,
+        symbols: Result<Vec<String>, ProviderError>,
+        spec: FetchSpec<T>,
+    ) -> crate::RecordStream<'a, T> {
+        Box::pin(async_stream::try_stream! {
+            let streams=symbols?.into_iter()
+                .map(|symbol| self.symbol_pages(symbol,spec.copy())).collect::<Vec<_>>();
+            let mut pages=stream::select_all(streams);
+            while let Some(page)=pages.next().await {
+                yield page?;
+            }
+        })
+    }
+
     /// Fetch one symbol's window as independent, page-sized units.
     ///
     /// The window seeds into coarse units (one per minute, capped) for
@@ -714,122 +854,66 @@ impl AlpacaClient {
     /// plus one nanosecond. Adjacent units differ by exactly one nanosecond,
     /// so no timestamp falls between them and no row is fetched twice:
     /// requests equal pages exactly, with no probe and no density estimate.
-    async fn fetch_symbol<T: Timestamped + Send + 'static>(
-        &self,
-        symbol: &str,
-        spec: &FetchSpec<T>,
-    ) -> Result<Vec<T>, ProviderError> {
-        if spec.window.is_some() {
-            return self.fetch_symbol_sequential(symbol, spec).await;
-        }
-        if spec.end_nanos <= spec.start_nanos {
-            return self.fetch_symbol_sequential(symbol, spec).await;
-        }
-        let seed_count = usize::try_from((spec.end_nanos - spec.start_nanos) / SEED_UNIT_NANOS)
-            .unwrap_or(usize::MAX)
-            .clamp(1, MAX_SEEDS);
-        let mut queue: FuturesUnordered<BoxFuture<'_, Result<UnitOutcome<T>, ProviderError>>> =
-            FuturesUnordered::new();
-        for (lower, upper) in partition_inclusive(spec.start_nanos, spec.end_nanos, seed_count) {
-            queue.push(self.fetch_unit(symbol, spec, lower, upper));
-        }
-        let mut records: Vec<T> = Vec::new();
-        let mut retained_bytes = 0;
-        while let Some(outcome) = queue.next().await {
-            let outcome = outcome?;
-            append_records(&mut records, outcome.records, &mut retained_bytes)?;
-            for (lower, upper) in outcome.children {
-                queue.push(self.fetch_unit(symbol, spec, lower, upper));
-            }
-        }
-        sort_records(records).await
-    }
-
-    fn fetch_unit<'a, T: Timestamped + Send + 'static>(
+    fn symbol_pages<'a, T: Timestamped + Send + 'static>(
         &'a self,
-        symbol: &'a str,
-        spec: &'a FetchSpec<T>,
-        lower: i64,
-        upper: i64,
-    ) -> BoxFuture<'a, Result<UnitOutcome<T>, ProviderError>> {
-        Box::pin(async move {
-            let unit = FetchSpec {
-                market: spec.market,
-                data_type: spec.data_type,
-                parser: spec.parser,
-                start: DateTime::from_micros(lower.div_euclid(1_000)),
-                end: DateTime::from_micros(upper.div_euclid(1_000)),
-                start_nanos: lower,
-                end_nanos: upper,
-                window: None,
+        symbol: String,
+        spec: FetchSpec<T>,
+    ) -> crate::RecordStream<'a, T> {
+        Box::pin(async_stream::try_stream! {
+            let seeds=if spec.window.is_some() {1} else {
+                usize::try_from((spec.end_nanos-spec.start_nanos).max(0)/SEED_UNIT_NANOS)
+                    .unwrap_or(MAX_SEEDS).clamp(1,MAX_SEEDS)
             };
-            let page = self.fetch_page(symbol, &unit, None, true).await?;
-            match page.next_page_token {
-                None => Ok(UnitOutcome {
-                    records: page.records,
-                    children: Vec::new(),
-                }),
-                Some(token) if token.is_empty() => Ok(UnitOutcome {
-                    records: page.records,
-                    children: Vec::new(),
-                }),
-                Some(token) => {
-                    // Split at the largest timestamp strictly below the page's
-                    // final row: pages are contiguous and sorted, so every row
-                    // at or below that timestamp is already fetched, while the
-                    // trailing same-timestamp run may continue on the next page
-                    // and is deliberately left to the children (which re-fetch
-                    // it) instead of being orphaned by a one-nanosecond gap.
-                    let remainder = page
-                        .safe_split_nanos
-                        .map(|safe| safe.saturating_add(1))
-                        .filter(|start| *start <= upper);
-                    let Some(remainder_start) = remainder else {
-                        return self
-                            .drain_cursor(symbol, &unit, page.records, token)
-                            .await
-                            .map(|all| UnitOutcome {
-                                records: all,
-                                children: Vec::new(),
-                            });
-                    };
-                    let mid = remainder_start + (upper - remainder_start) / 2;
-                    let mut children = vec![(remainder_start, mid)];
-                    if mid < upper {
-                        children.push((mid + 1, upper));
+            let mut pending:FuturesUnordered<BoxFuture<'_,Result<UnitPage<T>,ProviderError>>>=FuturesUnordered::new();
+            for (lower,upper) in partition_inclusive(spec.start_nanos,spec.end_nanos,seeds) {
+                let unit=FetchSpec {start_nanos:lower,end_nanos:upper,..spec.copy()};
+                pending.push(Box::pin(self.fetch_unit(&symbol,unit,None,None,true)));
+            }
+            while let Some(result)=pending.next().await {
+                let UnitPage {mut page,unit,history}=result?;
+                let cursor=page.next_page_token.take().filter(|token| !token.is_empty());
+                let remainder=if history.is_none() && spec.window.is_none() {
+                    page.safe_split_nanos.map(|value| value.saturating_add(1))
+                        .filter(|value| *value<=unit.end_nanos)
+                } else {None};
+                if !page.records.is_empty() {
+                    yield crate::RecordPage {records:page.records,allocation:Some(page.allocation)};
+                }
+                if let Some(token)=cursor {
+                    if let Some(lower)=remainder {
+                        let mid=lower+(unit.end_nanos-lower)/2;
+                        for (start,end) in [(lower,mid),(mid.saturating_add(1),unit.end_nanos)] {
+                            if start>end {continue;}
+                            let child=FetchSpec {start_nanos:start,end_nanos:end,..unit.copy()};
+                            pending.push(Box::pin(self.fetch_unit(&symbol,child,None,None,true)));
+                        }
+                    } else {
+                        let mut seen=history.unwrap_or_default();
+                        if !seen.insert(token.clone()) {
+                            Err(ProviderError::Protocol("repeated Alpaca page token".into()))?;
+                        }
+                        pending.push(Box::pin(self.fetch_unit(&symbol,unit,Some(token),Some(seen),false)));
                     }
-                    Ok(UnitOutcome {
-                        records: page.records,
-                        children,
-                    })
                 }
             }
         })
     }
-
-    /// Follow a cursor to exhaustion when a unit cannot be split further.
-    async fn drain_cursor<T: Timestamped + Send + 'static>(
+    async fn fetch_unit<T: Timestamped + Send + 'static>(
         &self,
         symbol: &str,
-        spec: &FetchSpec<T>,
-        mut records: Vec<T>,
-        first_token: String,
-    ) -> Result<Vec<T>, ProviderError> {
-        let mut retained_bytes = records.iter().map(RecordMemory::allocated_bytes).sum();
-        let mut seen: HashSet<String> = HashSet::new();
-        let mut token = Some(first_token);
-        while let Some(current) = token {
-            if !seen.insert(current.clone()) {
-                return Err(ProviderError::Protocol(format!(
-                    "repeated Alpaca {} page token for '{symbol}'",
-                    spec.data_type.value()
-                )));
-            }
-            let page = self.fetch_page(symbol, spec, Some(&current), false).await?;
-            append_records(&mut records, page.records, &mut retained_bytes)?;
-            token = page.next_page_token.filter(|value| !value.is_empty());
-        }
-        Ok(records)
+        unit: FetchSpec<T>,
+        cursor: Option<String>,
+        history: Option<HashSet<String>>,
+        trim: bool,
+    ) -> Result<UnitPage<T>, ProviderError> {
+        let page = self
+            .fetch_page(symbol, &unit, cursor.as_deref(), trim)
+            .await?;
+        Ok(UnitPage {
+            page,
+            unit,
+            history,
+        })
     }
 
     async fn fetch_symbol_sequential<T: Timestamped + Send + 'static>(
@@ -837,29 +921,19 @@ impl AlpacaClient {
         symbol: &str,
         spec: &FetchSpec<T>,
     ) -> Result<Vec<T>, ProviderError> {
-        let mut page_token: Option<String> = None;
-        let mut seen_tokens: HashSet<String> = HashSet::new();
-        let mut records: Vec<T> = Vec::new();
-        let mut retained_bytes = 0;
-        loop {
-            let page = self
-                .fetch_page(symbol, spec, page_token.as_deref(), false)
-                .await?;
-            append_records(&mut records, page.records, &mut retained_bytes)?;
-            match page.next_page_token {
-                None => return Ok(records),
-                Some(token) if token.is_empty() => return Ok(records),
-                Some(token) => {
-                    if !seen_tokens.insert(token.clone()) {
-                        return Err(ProviderError::Protocol(format!(
-                            "repeated Alpaca {} page token for '{symbol}'",
-                            spec.data_type.value()
-                        )));
-                    }
-                    page_token = Some(token);
-                }
-            }
+        let mut spec = spec.copy();
+        spec.window = Some(SliceWindow {
+            start: spec.start,
+            end: spec.end,
+            inclusive_end: true,
+        });
+        let mut pages = self.symbol_pages(symbol.into(), spec);
+        let mut records = Vec::new();
+        let mut bytes = 0;
+        while let Some(page) = pages.next().await {
+            append_records(&mut records, page?.records, &mut bytes)?;
         }
+        Ok(records)
     }
 
     async fn fetch_page<T: Timestamped + Send + 'static>(
@@ -890,6 +964,12 @@ impl AlpacaClient {
         // execute in parallel on the runtime's workers instead of serializing
         // inside one fetch task.
         let body = response.body;
+        let decoded = std::sync::Arc::new(
+            lake_pipeline::Pipeline::global()
+                .decoded_response(body.len())
+                .await
+                .map_err(resource_error)?,
+        );
         let allocation = response.allocation;
         let parser = spec.parser;
         let window = spec.window;
@@ -905,8 +985,10 @@ impl AlpacaClient {
             move || -> Result<(ParsedPage<T>, Option<String>), ProviderError> {
                 let _cpu = cpu;
                 let _allocation = allocation;
-                let mut normalize = pipeline.timer(lake_pipeline::Stage::Normalize);
+                let decode = pipeline.timer(lake_pipeline::Stage::Decode);
                 let (rows, next_page_token) = parse::page_rows(&body, data_type, &symbol)?;
+                drop(decode);
+                let mut normalize = pipeline.timer(lake_pipeline::Stage::Normalize);
                 let has_cursor = next_page_token
                     .as_deref()
                     .is_some_and(|token| !token.is_empty());
@@ -929,6 +1011,7 @@ impl AlpacaClient {
         // collapses throughput to the controller floor).
         self.lane.observe_service(parse_started.elapsed());
         Ok(PageResult {
+            allocation: decoded,
             records: parsed.records,
             next_page_token,
             safe_split_nanos: parsed.safe_split_nanos,
@@ -1088,7 +1171,7 @@ struct ParsedPage<T> {
 /// timestamp strictly below the page's final row is the last value for which
 /// the page proves every existing row has been fetched.
 fn parse_page_rows<T: Timestamped>(
-    rows: &[&Value],
+    rows: &[parse::RawRow<'_>],
     parser: Parser<T>,
     window: Option<SliceWindow>,
     trim_trailing_ties: bool,
@@ -1097,11 +1180,7 @@ fn parse_page_rows<T: Timestamped>(
     let mut last_nanos: Option<i64> = None;
     let mut safe_split_nanos: Option<i64> = None;
     for row in rows {
-        if let Some(nanos) = row
-            .get("t")
-            .and_then(Value::as_str)
-            .and_then(parse_iso_nanos)
-        {
+        if let Some(nanos) = row.nanos() {
             if last_nanos.is_some_and(|last| nanos != last) {
                 safe_split_nanos = last_nanos;
             }
@@ -1116,10 +1195,7 @@ fn parse_page_rows<T: Timestamped>(
     let mut records = Vec::with_capacity(rows.len());
     for row in rows {
         if let Some(boundary) = trim_below {
-            let nanos = row
-                .get("t")
-                .and_then(Value::as_str)
-                .and_then(parse_iso_nanos);
+            let nanos = row.nanos();
             if nanos.is_some_and(|nanos| nanos > boundary) {
                 continue;
             }

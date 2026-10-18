@@ -44,7 +44,7 @@ fn session(year: i32, month: u32, day_of_month: u32) -> CoverageSession {
 fn bar(timestamp: DateTime, close: &str) -> NormalizedBar {
     NormalizedBar {
         timestamp,
-        symbol: "QQQ".to_string(),
+        symbol: "QQQ".into(),
         open: Decimal18::parse("519.11").expect("open"),
         high: Decimal18::parse("519.99").expect("high"),
         low: Decimal18::parse("519.00").expect("low"),
@@ -101,6 +101,21 @@ impl RecordingWriter {
 }
 
 impl PartitionWriter for RecordingWriter {
+    fn write_batches(
+        &self,
+        batches: Box<dyn Iterator<Item = Result<RecordBatch, DataError>> + Send>,
+        day: Date,
+        asset: AssetClass,
+        data: DataType,
+        interval: Option<&str>,
+        symbol: &str,
+    ) -> Result<ParquetMetadata, DataError> {
+        let batches = batches.collect::<Result<Vec<_>, _>>()?;
+        let batch = arrow_select::concat::concat_batches(&batches[0].schema(), &batches)
+            .map_err(DataError::io)?;
+        self.write(&batch, day, asset, data, interval, symbol)
+    }
+
     fn write(
         &self,
         records: &RecordBatch,
@@ -111,7 +126,7 @@ impl PartitionWriter for RecordingWriter {
         symbol: &str,
     ) -> Result<ParquetMetadata, DataError> {
         let path = partition_path(session_date, asset_class, data_type, interval, symbol)?;
-        let payload = Vec::new();
+        let payload = Arc::new(lake_storage::StagedFile::new()?.seal());
         let metadata = ParquetMetadata {
             path,
             rows: records.num_rows() as u64,
@@ -495,6 +510,9 @@ struct UncertainSecondWrite {
     calls: std::sync::atomic::AtomicUsize,
 }
 impl lake_storage::BlobStore for UncertainSecondWrite {
+    fn replace_file(&self, path: &str, file: &std::path::Path) -> Result<(), DataError> {
+        self.replace(path, &std::fs::read(file)?)
+    }
     fn replace(&self, path: &str, payload: &[u8]) -> Result<(), DataError> {
         self.inner.replace(path, payload)?;
         if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1 {

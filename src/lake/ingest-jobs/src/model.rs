@@ -31,6 +31,8 @@ pub struct DurableJob {
     pub dispatched_at: Option<i64>,
     pub execution_deleted: bool,
     pub result: Option<serde_json::Value>,
+    #[serde(deserialize_with = "serde::Deserialize::deserialize")]
+    pub metrics: Option<serde_json::Value>,
 }
 impl DurableJob {
     pub fn new(
@@ -96,6 +98,7 @@ impl DurableJob {
             dispatched_at: None,
             execution_deleted: false,
             result: None,
+            metrics: None,
         })
     }
     pub fn terminal(&self) -> bool {
@@ -116,12 +119,12 @@ impl DurableJob {
         if self.partition.is_some() {
             return Err(DataError::value("a partition cannot be partitioned again"));
         }
-        let days = self.execution.partition_days();
-        if days == 0 {
+        let max_days = self.execution.partition_days();
+        if max_days == 0 {
             return Err(DataError::value("partition days must be positive"));
         }
         let mut work = Vec::new();
-        let mut keys = std::collections::BTreeSet::new();
+
         for request in &self.requests {
             let mut parts = Vec::new();
             match request {
@@ -134,8 +137,18 @@ impl DurableJob {
                         .ok_or_else(|| DataError::value("invalid start date"))?;
                     let last = Date::parse(end_date)
                         .ok_or_else(|| DataError::value("invalid end date"))?;
+                    let mut length = 1usize;
+                    let mut cursor = start;
+                    while cursor < last {
+                        length += 1;
+                        cursor = cursor.add_days(1);
+                    }
+                    let days = length
+                        .div_ceil(self.execution.max_workers().max(1) * 4)
+                        .min(usize::from(max_days))
+                        .max(1) as i32;
                     loop {
-                        let end = start.add_days(i32::from(days) - 1).min(last);
+                        let end = start.add_days(days - 1).min(last);
                         let mut part = request.clone();
                         if let WorkRequest::Dataset {
                             start_date,
@@ -155,23 +168,29 @@ impl DurableJob {
                 }
                 WorkRequest::OptionSelection { .. } => parts.push(request.clone()),
             }
-            for request in parts {
-                let bytes = serde_json::to_vec(&request).map_err(DataError::io)?;
-                let mut partition = self.clone();
-                partition.partition = Some(hex::encode(Sha256::digest(bytes)));
-                partition.requests = vec![request];
-                partition.record.state = JobState::Queued;
-                partition.record.updated_at = self.record.created_at;
-                partition.record.progress = None;
-                partition.record.error_message = None;
-                partition.dispatch_started = false;
-                partition.dispatched_at = None;
-                partition.execution_deleted = false;
-                partition.result = None;
-                if keys.insert(partition.partition.clone()) {
-                    work.push(partition);
-                }
-            }
+            work.extend(parts);
+        }
+        let lane_count = work.len().min(self.execution.max_workers().max(1));
+        let mut lanes = vec![Vec::new(); lane_count];
+        for (index, request) in work.into_iter().enumerate() {
+            lanes[index % lane_count].push(request);
+        }
+        let mut work = Vec::new();
+        for requests in lanes {
+            let bytes = serde_json::to_vec(&requests).map_err(DataError::io)?;
+            let mut partition = self.clone();
+            partition.partition = Some(hex::encode(Sha256::digest(bytes)));
+            partition.requests = requests;
+            partition.record.state = JobState::Queued;
+            partition.record.updated_at = self.record.created_at;
+            partition.record.progress = None;
+            partition.record.error_message = None;
+            partition.dispatch_started = false;
+            partition.dispatched_at = None;
+            partition.execution_deleted = false;
+            partition.result = None;
+            partition.metrics = None;
+            work.push(partition);
         }
         Ok(work)
     }
@@ -186,7 +205,10 @@ impl DurableJob {
             || (self.dispatch_started && !next.dispatch_started)
             || (self.dispatched_at.is_some() && self.dispatched_at != next.dispatched_at)
             || (self.execution_deleted && !next.execution_deleted)
-            || (self.terminal() && (self.record != next.record || self.result != next.result))
+            || (self.terminal()
+                && (self.record != next.record
+                    || self.result != next.result
+                    || self.metrics != next.metrics))
         {
             return Err(DataError::Conflict(
                 "accepted input and terminal ingestion outcomes are immutable".into(),

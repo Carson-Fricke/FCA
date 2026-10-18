@@ -8,6 +8,7 @@ publish.workspace = true
 [dependencies]
 async-trait.workspace = true
 lake-contracts.workspace = true
+lake-pipeline.workspace = true
 lake-catalog.workspace = true
 lake-storage.workspace = true
 azure_core.workspace = true

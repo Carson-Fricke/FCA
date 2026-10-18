@@ -120,20 +120,18 @@ impl WorkerRunner for LocalRunner {
             .create(true)
             .append(true)
             .open(logs.join(format!("{id}.log")))?;
+        let scratch = self.config.root.join("ingestion/scratch").join(&id);
+        std::fs::create_dir_all(&scratch)?;
         let mut command = Command::new(&self.config.executable);
-        let host_memory = std::env::var("LAKE_INGEST_HOST_MEMORY_MIB")
-            .ok()
-            .map(|value| value.parse::<usize>().map_err(DataError::io))
-            .transpose()?
-            .unwrap_or(32768);
+        let host_memory = self.config.host_memory_mib;
         let worker_memory = host_memory
             .checked_div(self.config.max_workers)
             .ok_or_else(|| DataError::value("local worker count must be positive"))?;
         let session_pool = worker_memory
-            .checked_mul(3)
+            .checked_mul(1)
             .ok_or_else(|| DataError::value("local host memory budget overflow"))?
-            / 4;
-        let response_pool = (worker_memory / 4).min(1024);
+            / 3;
+        let response_pool = (worker_memory / 2).min(2048);
         if session_pool / self.config.session_concurrency == 0 || response_pool < 64 {
             return Err(DataError::value(
                 "local host memory budget is too small for the configured worker fleet",
@@ -143,6 +141,9 @@ impl WorkerRunner for LocalRunner {
             .arg(&work.job_id)
             .arg(partition)
             .env("HARNESS_MARKET_DATA_MODE", "local")
+            .env("TMP", &scratch)
+            .env("TEMP", &scratch)
+            .env("TMPDIR", &scratch)
             .env("LAKE_LOCAL_DATA_DIR", &self.config.root)
             .env(
                 "LAKE_INGEST_MEMORY_MIB",
@@ -218,6 +219,18 @@ impl WorkerRunner for LocalRunner {
             return Err(DataError::Conflict(
                 "local worker still owns execution".into(),
             ));
+        }
+        let scratch_root = self.config.root.join("ingestion/scratch");
+        let scratch = scratch_root.join(&id);
+        if scratch.exists() {
+            let root = std::fs::canonicalize(&scratch_root)?;
+            let target = std::fs::canonicalize(&scratch)?;
+            if !target.starts_with(&root) || target == root {
+                return Err(DataError::value("scratch cleanup escaped its owned root"));
+            }
+            tokio::task::spawn_blocking(move || std::fs::remove_dir_all(target))
+                .await
+                .map_err(DataError::io)??;
         }
         let path = self.receipt(&id);
         if path.exists() {

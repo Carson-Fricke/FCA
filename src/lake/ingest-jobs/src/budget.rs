@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 const WINDOW_MICROS: i64 = 60_000_000;
-const PERMIT_LIFETIME_MICROS: i64 = 1_000_000;
+const PERMIT_LIFETIME_MICROS: i64 = 5_000_000;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -205,7 +205,9 @@ impl crate::JobStore {
                 .await
                 .map_err(crate::store::io)?;
             if matches!(response.status().as_u16(), 409 | 412) {
-                tokio::task::yield_now().await;
+                let _conflict =
+                    lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::RateConflict);
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
                 continue;
             }
             crate::store::success(response).await?;

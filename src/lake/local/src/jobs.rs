@@ -163,6 +163,40 @@ impl JobPersistence for LocalJobStore {
         entries.sort_by_key(|v| v.created);
         Ok(entries)
     }
+}
+
+// Shared OS uptime is comparable across local worker processes and cannot jump
+// forward with wall-clock corrections. A reboot regression is fenced above.
+#[cfg(windows)]
+fn uptime_micros() -> Result<(i64, i64), DataError> {
+    // SAFETY: GetTickCount64 takes no pointers and has no caller preconditions.
+    let millis = unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() };
+    Ok((
+        millis.saturating_mul(1000).min(i64::MAX as u64) as i64,
+        20_000,
+    ))
+}
+#[cfg(unix)]
+fn uptime_micros() -> Result<(i64, i64), DataError> {
+    let mut time = std::mem::MaybeUninit::<libc::timespec>::uninit();
+    // SAFETY: clock_gettime initializes the supplied timespec on success.
+    if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, time.as_mut_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    // SAFETY: the successful call initialized both fields.
+    let time = unsafe { time.assume_init() };
+    if time.tv_sec < 0 || time.tv_nsec < 0 {
+        return Err(DataError::value("invalid OS monotonic time"));
+    }
+    Ok((
+        (time.tv_sec as i128 * 1_000_000 + time.tv_nsec as i128 / 1000).min(i64::MAX as i128)
+            as i64,
+        1,
+    ))
+}
+
+#[async_trait::async_trait]
+impl lake_ingest_jobs::RequestAuthority for LocalJobStore {
     async fn reserve_requests(
         &self,
         scope: &str,
@@ -213,34 +247,4 @@ impl JobPersistence for LocalJobStore {
         .await
         .map_err(DataError::io)?
     }
-}
-
-// Shared OS uptime is comparable across local worker processes and cannot jump
-// forward with wall-clock corrections. A reboot regression is fenced above.
-#[cfg(windows)]
-fn uptime_micros() -> Result<(i64, i64), DataError> {
-    // SAFETY: GetTickCount64 takes no pointers and has no caller preconditions.
-    let millis = unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() };
-    Ok((
-        millis.saturating_mul(1000).min(i64::MAX as u64) as i64,
-        20_000,
-    ))
-}
-#[cfg(unix)]
-fn uptime_micros() -> Result<(i64, i64), DataError> {
-    let mut time = std::mem::MaybeUninit::<libc::timespec>::uninit();
-    // SAFETY: clock_gettime initializes the supplied timespec on success.
-    if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, time.as_mut_ptr()) } != 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
-    // SAFETY: the successful call initialized both fields.
-    let time = unsafe { time.assume_init() };
-    if time.tv_sec < 0 || time.tv_nsec < 0 {
-        return Err(DataError::value("invalid OS monotonic time"));
-    }
-    Ok((
-        (time.tv_sec as i128 * 1_000_000 + time.tv_nsec as i128 / 1000).min(i64::MAX as i128)
-            as i64,
-        1,
-    ))
 }

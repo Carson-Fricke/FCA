@@ -26,6 +26,7 @@ use time::OffsetDateTime;
 /// overwrite-aware upload, whole-object download, prefix listing and delete,
 /// and lease maintenance for one blob.
 pub trait AzureBlobContainer: Send + Sync {
+    fn upload_file(&self, path: &str, source: &std::path::Path) -> Result<(), DataError>;
     /// Replace a leased blob only if the supplied lease still owns that blob.
     fn upload_leased(&self, path: &str, payload: &[u8], lease_id: &str) -> Result<(), DataError>;
     /// Upload `payload` to `path`, replacing any existing blob iff `overwrite`.
@@ -246,6 +247,10 @@ impl AzureBlobStore {
 }
 
 impl BlobStore for AzureBlobStore {
+    fn replace_file(&self, path: &str, source: &std::path::Path) -> Result<(), DataError> {
+        validate_object_path(path)?;
+        self.container.upload_file(path, source)
+    }
     fn replace(&self, relative_path: &str, payload: &[u8]) -> Result<(), DataError> {
         let path = relative_path.to_string();
         validate_object_path(&path)?;
@@ -285,6 +290,10 @@ impl AzureReadableBlobStore {
 }
 
 impl BlobStore for AzureReadableBlobStore {
+    fn replace_file(&self, path: &str, source: &std::path::Path) -> Result<(), DataError> {
+        validate_object_path(path)?;
+        self.container.upload_file(path, source)
+    }
     fn replace(&self, relative_path: &str, payload: &[u8]) -> Result<(), DataError> {
         let path = relative_path.to_string();
         validate_object_path(&path)?;
@@ -611,6 +620,24 @@ impl SdkBlobContainer {
 }
 
 impl AzureBlobContainer for SdkBlobContainer {
+    fn upload_file(&self, path: &str, source: &std::path::Path) -> Result<(), DataError> {
+        let client = self.container.blob_client(path);
+        let source = source.to_path_buf();
+        self.executor.block_on(async move {
+            let input = tokio::fs::File::open(source).await.map_err(DataError::io)?;
+            let stream = azure_core::tokio::fs::FileStreamBuilder::new(input)
+                .build()
+                .await
+                .map_err(DataError::io)?;
+            client
+                .put_block_blob(Body::SeekableStream(Box::new(stream)))
+                .into_future()
+                .await
+                .map_err(http_error)?;
+            Ok(())
+        })?
+    }
+
     fn download_many(&self, paths: &[String]) -> Result<Vec<Vec<u8>>, DataError> {
         use futures_util::stream::{self, StreamExt, TryStreamExt};
         let container = self.container.clone();

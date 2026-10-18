@@ -7,6 +7,9 @@ use std::sync::{Arc, Mutex};
 #[derive(Default)]
 struct Objects(Mutex<Vec<String>>);
 impl BlobStore for Objects {
+    fn replace_file(&self, path: &str, file: &std::path::Path) -> Result<(), DataError> {
+        self.replace(path, &std::fs::read(file)?)
+    }
     fn replace(&self, _: &str, _: &[u8]) -> Result<(), DataError> {
         panic!("read-only planning")
     }

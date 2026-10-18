@@ -33,14 +33,13 @@ impl AtomicIngestCommitter for ObjectCatalogCommitter {
         objects: &[StagedParquetObject],
         coverage: &[CoverageRecord],
     ) -> Result<(), DataError> {
-        use sha2::{Digest, Sha256};
         let pipeline = lake_pipeline::Pipeline::global();
         let cpu = pipeline.cpu_blocking()?;
         let mut validation = pipeline.timer(lake_pipeline::Stage::Hash);
         validation.bytes(objects.iter().map(|object| object.payload.len()).sum());
         let mut paths = std::collections::BTreeSet::new();
         for object in objects {
-            let digest = format!("{:x}", Sha256::digest(&object.payload));
+            let digest = object.payload.checksum()?;
             if !paths.insert(object.metadata.path.as_str())
                 || object.metadata.bytes != object.payload.len() as u64
                 || object.metadata.checksum != digest
@@ -71,7 +70,7 @@ impl AtomicIngestCommitter for ObjectCatalogCommitter {
                 let mut upload = pipeline.timer(lake_pipeline::Stage::Upload);
                 upload.bytes(staged.payload.len());
                 self.object_store
-                    .replace(&staged.metadata.path, &staged.payload)?;
+                    .replace_file(&staged.metadata.path, staged.payload.path())?;
             }
             Ok(())
         })

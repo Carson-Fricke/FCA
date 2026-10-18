@@ -12,6 +12,8 @@ use lake_contracts::DataError;
 /// `replace` has whole-object semantics: a successful call makes the supplied
 /// payload the complete contents at `relative_path`.
 pub trait BlobStore: Send + Sync {
+    /// Upload a file with bounded buffering.
+    fn replace_file(&self, relative_path: &str, source: &std::path::Path) -> Result<(), DataError>;
     /// Atomically make `payload` the complete contents at `relative_path`.
     fn replace(&self, relative_path: &str, payload: &[u8]) -> Result<(), DataError>;
 }

@@ -8,6 +8,7 @@ description = "Arrow/Parquet writing, atomic object replacement, leases, and the
 
 [dependencies]
 lake-pipeline.workspace = true
+tempfile.workspace = true
 lake-contracts.workspace = true
 arrow-array.workspace = true
 arrow-buffer.workspace = true
@@ -28,4 +29,3 @@ time.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true

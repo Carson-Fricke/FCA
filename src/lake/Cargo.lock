@@ -139,7 +139,7 @@ dependencies = [
  "arrow-data 58.4.0",
  "arrow-ipc 58.4.0",
  "arrow-ord 58.4.0",
- "arrow-row",
+ "arrow-row 58.4.0",
  "arrow-schema 58.4.0",
  "arrow-select 58.4.0",
  "arrow-string",
@@ -356,6 +356,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrow-row"
+version = "59.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4c6425032e28266e3fc4ff680805e57e670d6ea92473043f3e65b7ed6ac79f2"
+dependencies = [
+ "arrow-array 59.3.0",
+ "arrow-buffer 59.3.0",
+ "arrow-data 59.3.0",
+ "arrow-schema 59.3.0",
+ "half",
+]
+
+[[package]]
 name = "arrow-schema"
 version = "58.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -516,6 +529,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-stream"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b5a71a6f37880a80d1d7f19efd781e4b5de42c88f0722cc13bcb6cc2cfe8476"
+dependencies = [
+ "async-stream-impl",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "async-stream-impl"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7c24de15d275a1ecfd47a380fb4d5ec9bfe0933f309ed5e705b775596a3574d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "async-task"
 version = "4.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -653,6 +688,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "time",
+ "tokio",
  "tracing",
  "url",
  "uuid",
@@ -807,6 +843,16 @@ dependencies = [
  "futures-io",
  "futures-lite 2.6.1",
  "piper",
+]
+
+[[package]]
+name = "borsh"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "553c5d846a6ba5150c65e3b1b8ec073bcf1abc20f9b7220de384a4443ea4e20a"
+dependencies = [
+ "bytes",
+ "cfg_aliases",
 ]
 
 [[package]]
@@ -2352,6 +2398,7 @@ dependencies = [
  "httpdate",
  "lake-catalog",
  "lake-contracts",
+ "lake-pipeline",
  "lake-storage",
  "quick-xml",
  "reqwest 0.13.5",
@@ -2398,7 +2445,10 @@ name = "lake-ingestion"
 version = "0.1.0"
 dependencies = [
  "arrow-array 59.3.0",
+ "arrow-ipc 59.3.0",
+ "arrow-row 59.3.0",
  "arrow-schema 59.3.0",
+ "arrow-select 59.3.0",
  "async-trait",
  "axum",
  "bytes",
@@ -2414,6 +2464,7 @@ dependencies = [
  "lake-pipeline",
  "lake-providers",
  "lake-storage",
+ "parquet",
  "serde",
  "serde_json",
  "sha2",
@@ -2457,6 +2508,7 @@ dependencies = [
 name = "lake-providers"
 version = "0.1.0"
 dependencies = [
+ "async-stream",
  "axum",
  "futures-util",
  "lake-catalog",
@@ -2466,6 +2518,7 @@ dependencies = [
  "reqwest 0.13.5",
  "serde",
  "serde_json",
+ "smol_str",
  "thiserror 2.0.20",
  "tokio",
 ]
@@ -3840,6 +3893,16 @@ name = "smallvec"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9be42f50aa861c555654aa3a37f52f4b1074bacf4e48fe0ef7fa584e80f1f0f"
+
+[[package]]
+name = "smol_str"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4aaa7368fcf4852a4c2dd92df0cace6a71f2091ca0a23391ce7f3a31833f1523"
+dependencies = [
+ "borsh",
+ "serde_core",
+]
 
 [[package]]
 name = "snap"

@@ -363,8 +363,8 @@ async fn complete(jobs: &IngestionJobs, reference: &crate::WorkRef) {
     let mut partition = jobs.store.get_work(reference).await.unwrap();
     partition.record.state = JobState::Complete;
     partition.record.progress = Some(JobProgress {
-        sessions_total: 1,
-        sessions_done: 1,
+        sessions_total: partition.requests.len() as u64,
+        sessions_done: partition.requests.len() as u64,
         symbol: "AAPL".into(),
         session_date: "2024-01-18".into(),
         rows: 1,
@@ -660,19 +660,21 @@ async fn partition_fleet_is_bounded_disjoint_complete_and_aggregates_one_public_
         .await
         .unwrap();
     let plan = root.partitions().unwrap();
-    assert_eq!(plan.len(), 5);
+    assert_eq!(plan.len(), 2);
     let mut dates = Vec::new();
     for partition in &plan {
         assert_eq!(partition.record.job_id, "months");
         assert!(partition.partition.is_some());
-        if let WorkRequest::Dataset {
-            start_date,
-            end_date,
-            ..
-        } = &partition.requests[0]
-        {
-            assert_eq!(start_date, end_date);
-            dates.push(start_date.clone());
+        for request in &partition.requests {
+            if let WorkRequest::Dataset {
+                start_date,
+                end_date,
+                ..
+            } = request
+            {
+                assert_eq!(start_date, end_date);
+                dates.push(start_date.clone());
+            }
         }
     }
     dates.sort();
@@ -682,7 +684,7 @@ async fn partition_fleet_is_bounded_disjoint_complete_and_aggregates_one_public_
             .map(|day| format!("2024-01-{day}"))
             .collect::<Vec<_>>()
     );
-    for expected in [2, 4, 5] {
+    for expected in [2] {
         jobs.reconcile().await.unwrap();
         assert_eq!(state.starts.load(Ordering::SeqCst), expected);
         let root = jobs.store.get("months").await.unwrap();
@@ -714,7 +716,7 @@ async fn partition_fleet_is_bounded_disjoint_complete_and_aggregates_one_public_
     assert!(outcome.execution_deleted);
     let progress = outcome.record.progress.unwrap();
     assert_eq!((progress.sessions_done, progress.sessions_total), (5, 5));
-    assert_eq!(state.starts.load(Ordering::SeqCst), 5);
+    assert_eq!(state.starts.load(Ordering::SeqCst), 2);
     let roots: Vec<_> = state
         .blobs
         .lock()

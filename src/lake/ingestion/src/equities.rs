@@ -20,9 +20,8 @@ use lake_providers::{NormalizedQuote, NormalizedTrade, ProviderError};
 use lake_storage::{ParquetMetadata, StorageCapGuard};
 
 use crate::common::{
-    canonical_symbol, data_error_message, failures_all_transient, fetch_error_message,
-    fetch_with_transient_retry, normalize_data_types, ordered_records, AtomicIngestCommitter,
-    PartitionWriter, TransientRetry,
+    canonical_symbol, failures_all_transient, fetch_error_message, fetch_with_transient_retry,
+    normalize_data_types, ordered_records, AtomicIngestCommitter, PartitionWriter, TransientRetry,
 };
 use crate::providers::EquityDataProvider;
 
@@ -50,12 +49,6 @@ pub struct EquityIngestTransaction {
     committer: Arc<dyn AtomicIngestCommitter>,
     cap_guard: Option<Arc<StorageCapGuard>>,
     retry: TransientRetry,
-}
-
-/// Fetched records for one selected data type.
-enum EquityRecords {
-    Trades(Vec<NormalizedTrade>),
-    Quotes(Vec<NormalizedQuote>),
 }
 
 /// Staged outputs of one transaction, before commit.
@@ -94,7 +87,7 @@ impl EquityIngestTransaction {
 
     /// Fetch and publish the requested data types for one planned session.
     ///
-    /// Every provider request completes before staging begins. Fetch or
+    /// Provider pages stage incrementally; all datasets finish before publication. Fetch or
     /// normalization failures publish only error metadata through the same
     /// atomic boundary; a failed commit is propagated without a compensating
     /// write that could hide a partial backend failure.
@@ -119,16 +112,17 @@ impl EquityIngestTransaction {
         // [open_time, close_time] on both ends: a raw print stamped exactly at
         // the session close (the 16:00:00 ET closing auction print) is part of
         // this session's data and must be accepted by record validation.
-        let fetches: Vec<BoxFuture<'_, Result<EquityRecords, ProviderError>>> = selected
+        let fetches: Vec<BoxFuture<'_, Result<ParquetMetadata, ProviderError>>> = selected
             .iter()
             .map(|data_type| {
                 let data_type = *data_type;
-                let provider = self.provider.as_ref();
-                let symbol = symbol.as_str();
-                let retry = self.retry;
-                Box::pin(
-                    async move { fetch_records(provider, data_type, symbol, session, retry).await },
-                ) as BoxFuture<'_, Result<EquityRecords, ProviderError>>
+                let symbol = &symbol;
+                Box::pin(async move {
+                    fetch_with_transient_retry(self.retry, || {
+                        Box::pin(self.stage_dataset(data_type, symbol, session))
+                    })
+                    .await
+                }) as BoxFuture<'_, Result<ParquetMetadata, ProviderError>>
             })
             .collect();
         let results = join_all(fetches).await;
@@ -143,7 +137,7 @@ impl EquityIngestTransaction {
             })
             .await;
         }
-        let records: Vec<EquityRecords> = results
+        let metadata: Vec<ParquetMetadata> = results
             .into_iter()
             .map(|result| result.expect("a successful gather has no provider error"))
             .collect();
@@ -152,7 +146,7 @@ impl EquityIngestTransaction {
         let session = *session;
         crate::common::blocking_stage(move || {
             let _session_memory = session_memory;
-            transaction.finish(symbol, &session, selected, records)
+            transaction.finish(symbol, &session, selected, metadata)
         })
         .await
     }
@@ -163,23 +157,12 @@ impl EquityIngestTransaction {
         symbol: String,
         session: &CoverageSession,
         selected: Vec<DataType>,
-        records: Vec<EquityRecords>,
+        metadata: Vec<ParquetMetadata>,
     ) -> Result<EquityIngestResult, DataError> {
-        let staged_result = self.stage(&symbol, session, &selected, &records);
-        let staged = match staged_result {
-            Ok(staged) => staged,
-            Err(error) => {
-                self.writer.reset_staged();
-                return self.publish_error(
-                    &symbol,
-                    session,
-                    &selected,
-                    data_error_message(&error),
-                    false,
-                );
-            }
+        let staged = StagedEquityObjects {
+            objects: self.writer.drain_staged(),
+            metadata,
         };
-
         if let Some(guard) = &self.cap_guard {
             let additional_bytes = staged
                 .objects
@@ -211,41 +194,46 @@ impl EquityIngestTransaction {
         })
     }
 
-    /// Validate, sort, and stage every selected dataset.
-    fn stage(
+    async fn stage_dataset(
         &self,
+        data: DataType,
         symbol: &str,
         session: &CoverageSession,
-        selected: &[DataType],
-        records: &[EquityRecords],
-    ) -> Result<StagedEquityObjects, DataError> {
-        let pipeline = lake_pipeline::Pipeline::global();
-        let _cpu = pipeline.cpu_blocking()?;
-        let mut metadata = Vec::with_capacity(selected.len());
-        for (data_type, records) in selected.iter().zip(records) {
-            let rows = match (data_type, records) {
-                (DataType::Trade, EquityRecords::Trades(trades)) => {
-                    trade_rows(trades, symbol, session)?
-                }
-                (DataType::Quote, EquityRecords::Quotes(quotes)) => {
-                    quote_rows(quotes, symbol, session)?
-                }
-                _ => unreachable!("fetch results align with the selected data types"),
-            };
-
-            metadata.push(self.writer.write(
-                &rows,
-                session.session_date,
-                AssetClass::Equity,
-                *data_type,
-                None,
-                symbol,
-            )?);
+    ) -> Result<ParquetMetadata, ProviderError> {
+        let symbols = [symbol.to_string()];
+        let spec = crate::acquisition::StagingSpec {
+            asset: AssetClass::Equity,
+            data,
+            day: session.session_date,
+            symbol: symbol.into(),
+        };
+        let name = symbol.to_string();
+        let day = *session;
+        match data {
+            DataType::Trade => {
+                crate::acquisition::stage_pages(
+                    self.provider
+                        .fetch_trades(&symbols, session.open_time, session.close_time),
+                    move |rows| trade_rows(&rows, &name, &day),
+                    self.writer.clone(),
+                    spec,
+                )
+                .await
+            }
+            DataType::Quote => {
+                crate::acquisition::stage_pages(
+                    self.provider
+                        .fetch_quotes(&symbols, session.open_time, session.close_time),
+                    move |rows| quote_rows(&rows, &name, &day),
+                    self.writer.clone(),
+                    spec,
+                )
+                .await
+            }
+            _ => Err(ProviderError::Configuration(
+                "unsupported tick dataset".into(),
+            )),
         }
-        Ok(StagedEquityObjects {
-            objects: self.writer.drain_staged(),
-            metadata,
-        })
     }
 
     /// Publish error coverage for every selected data type.
@@ -257,6 +245,7 @@ impl EquityIngestTransaction {
         message: String,
         retryable: bool,
     ) -> Result<EquityIngestResult, DataError> {
+        self.writer.reset_staged();
         let coverage = selected
             .iter()
             .map(|data_type| {
@@ -283,33 +272,6 @@ impl EquityIngestTransaction {
             objects: Vec::new(),
             retryable,
         })
-    }
-}
-
-/// Fetch one selected dataset with the transient retry budget applied.
-async fn fetch_records(
-    provider: &dyn EquityDataProvider,
-    data_type: DataType,
-    symbol: &str,
-    session: &CoverageSession,
-    retry: TransientRetry,
-) -> Result<EquityRecords, ProviderError> {
-    let symbols = [symbol.to_string()];
-    match data_type {
-        DataType::Trade => fetch_with_transient_retry(retry, || {
-            provider.fetch_trades(&symbols, session.open_time, session.close_time)
-        })
-        .await
-        .map(EquityRecords::Trades),
-        DataType::Quote => fetch_with_transient_retry(retry, || {
-            provider.fetch_quotes(&symbols, session.open_time, session.close_time)
-        })
-        .await
-        .map(EquityRecords::Quotes),
-        other => Err(ProviderError::Configuration(format!(
-            "unsupported equity data type: {}",
-            other.value()
-        ))),
     }
 }
 

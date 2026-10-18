@@ -6,6 +6,9 @@ license.workspace = true
 publish.workspace = true
 description = "Equity and crypto ingest transactions, record validation, and the committer boundary."
 [dependencies]
+arrow-row.workspace = true
+arrow-ipc.workspace = true
+arrow-select.workspace = true
 lake-pipeline.workspace = true
 harness-market-reader = { path = "../../harness/market-reader" }
 arrow-array.workspace = true
@@ -25,6 +28,7 @@ sha2.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+parquet.workspace = true
 lake-local.workspace = true
 tokio.workspace = true
 tempfile.workspace = true

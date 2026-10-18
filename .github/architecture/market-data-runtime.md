@@ -3,18 +3,16 @@
 ## Status
 
 The runtime implements one harness-hosted HTTP composition, a shared read-only
-reader, durable partitioned local/ACA ingestion, native catalog access, and
-snapshot/cache reuse. Publication now uses immutable SHA-256 object paths and one
-renewed, fenced symbol-day manifest; ingestion shares explicit CPU, response,
-session-memory and publication budgets with structured stage/resource metrics.
-The development-data cutover completed on 2026-10-17. Azure runs the matching
-harness/finite-worker images built from `9df5870`; fresh trades and quotes were
-ingested and read through a successful 4,708,592-event backtest. The optimized
-local harness and its current-format store are running, with local worker behavior
-verified against fake provider HTTP. The [release record](../verification/publication-release-2026-10-17.md)
-contains image pins, hosted CI/build timings and live checks. The
-[earlier rollout](../verification/ingestion-fleet-rollout-2026-10-15.md) remains
-historical performance evidence.
+reader, durable local/ACA ingestion and snapshot/cache reuse. Ingestion now
+streams bounded typed pages through canonical external runs and file-backed
+Parquet staging; finite workers consume balanced immutable lanes with background
+request-permit prefetch and durable final metrics. Publication uses immutable
+SHA-256 object paths and a renewed, fenced symbol-day manifest. CPU, wire/decode,
+session, scratch and publication resources have explicit process budgets.
+
+The [publication release record](../verification/publication-release-2026-10-17.md)
+and [earlier rollout](../verification/ingestion-fleet-rollout-2026-10-15.md) preserve
+historical deployment and performance evidence.
 
 ## Boundaries
 
@@ -25,10 +23,10 @@ historical performance evidence.
 | Catalog and availability | `src/lake/catalog`, `coverage`, `query` | Classify committed data and plan availability. No provider work occurs during reads. |
 | HTTP | `src/lake/http` | Authenticated catalog, admission, snapshot, read and reference routes, composed under the harness API's `/market-data` prefix. |
 | Ingestion execution control | `src/lake/ingest-jobs` | Conditional durable admission, immutable worker specifications, lease-fenced job state, ACA execution reconciliation and aggregate worker limits. |
-| Finite ingestion process | `src/lake/ingest-worker` | Claim one job, fetch provider secrets using its identity, run shared transactions, publish progress/results, settle and exit. |
+| Finite ingestion process | `src/lake/ingest-worker` | Own one immutable plan lane, fetch provider secrets once, consume its disjoint chunks, persist progress/final metrics, settle and exit. |
 | Provider acquisition/publication | `src/lake/providers`, `ingestion`, `storage` | Provider paging/governance, staging, canonical Parquet writing and symbol-day publication leases. |
 | Local deployment adapters | `src/lake/local` | Atomic contract files, durable job documents, kernel-fenced manifest ownership and content-pinned finite worker processes. |
-| Ingestion resources and measurements | `src/lake/pipeline` | Shared CPU/response/session/publication admission, cancellation fencing, stage/pool counters and OS CPU/RSS. |
+| Ingestion resources and measurements | `src/lake/pipeline` | Shared CPU/wire/decode/session/scratch/publication admission, cancellation fencing, stage/pool counters and OS CPU/RSS. |
 | Hosting composition | `src/lake/hosted`, `src/harness/api` | Select local or Azure adapters and inject native capabilities and HTTP routes. The hosted API has no provider-client dependency. |
 
 `harness-market-reader` depends on value contracts and Arrow/Parquet, not HTTP,
@@ -80,13 +78,16 @@ different inputs conflict and terminal outcomes are immutable. Option selection
 is one standalone operation; dataset batches may contain multiple requirements.
 The API admits and observes work without fetching provider data.
 
-The planner deterministically divides dataset date ranges into disjoint calendar
-partitions (31 days by default). Each partition keeps the original execution
-`job_id` and an internal content-derived partition key. Its authoritative state
-lives at `ingestion/partitions/<job_id>/<key>.json`. These are work identities,
-not additional execution job IDs. The root plan and every partition document
-are durable before any external start. Partition size and worker specifications
-remain immutable after admission.
+The planner divides each dataset window into short disjoint calendar chunks: at
+most the configured 31-day cap and approximately four chunks per available
+worker for shorter plans. It distributes those chunks across at most the accepted
+worker limit, spreading dates rather than assigning contiguous months to workers.
+Each finite worker consumes its immutable lane sequentially, sharing provider
+connections, secrets, governor and process startup across chunks. The lane keeps
+the original `job_id` and a hash of its complete ordered request list as an
+internal partition key. State lives at `ingestion/partitions/<job_id>/<key>.json`;
+these are work addresses, never additional execution job IDs. Root and lane
+records are durable before any external start. Accepted inputs never change.
 
 A renewable dispatcher lease bounds the aggregate fleet across all API replicas
 and the scheduled coordinator. Existing partition records are read with bounded
@@ -98,7 +99,7 @@ rechecks committed coverage before executing its accepted partition.
 
 Azure uses manual ACA Job executions of `<quant-api-name>-ingest`; local mode
 uses content-pinned finite child processes through the same ports. Dispatch
-intent precedes the non-idempotent ACA start POST. A lost acknowledgement is
+intent precedes the non-idempotent ACA start POST. Available slots start with bounded concurrent dispatch; each start retains its own intent before I/O. A lost acknowledgement is
 reconciled by the existing execution template's exact job, partition and image
 attribution. It never authorizes another POST. Missing/running work times out
 visibly; a replacement worker cannot replay a partition already marked running.
@@ -113,7 +114,7 @@ the endpoint and credentials. Azure uses conditional Blob ETags and the storage
 service's HTTP Date; local processes use kernel-locked atomic files and shared
 OS monotonic uptime. A local reboot holds capacity for a full window. Worker
 permit lifetimes use monotonic time anchored before the reservation RPC, so
-delayed responses cannot extend grants. Workers adapt short permit batches to
+delayed responses cannot extend grants. A background refill task fetches five-second grants before the cache empties. Its short cache mutex never covers storage I/O or sleep. Workers adapt permit batches to
 their observed consumption, shrinking after unused expiry and growing only when
 exhausted before half their lifetime. This avoids wasting allowance on slow
 workers without refunding reservations. Unused,
@@ -124,21 +125,29 @@ so idle slots do not strand another worker's budget. Local and Azure have
 independent authorities and must not ingest simultaneously with the same Alpaca
 allowance; this is the operator's current execution policy.
 
-Provider decoding returns typed records. Ingestion validates and canonically
-orders them, then builds Arrow batches directly with exact decimal values.
-Storage accepts only the pinned schema and serializes canonical Parquet; no JSON
-row normalization facade remains. `lake-pipeline` owns shared process resource
-admission, cancellation and measurements. Providers reserve response headroom
-before the request governor and retain it through blocking decode/normalization.
-JSON decoding, normalization, sorting, Arrow projection and Parquet encoding share
-one CPU budget;
-lease waits and object/manifest writes use a separate publication budget. Sessions
-reserve memory before fetching and retain that reservation through completion.
-Normalized input is bounded incrementally with encoding headroom; an oversized
-session fails visibly rather than waiting for credits held by itself. This is
-allocation accounting with explicit body/input limits, not an RSS allocator or a
-spill-to-disk implementation. Local workers divide host CPU and the configurable
-host memory budget; no per-column or per-pass thread fan-out is used.
+Providers expose bounded typed page streams; transport owns bounded decompressed
+bytes, while the Alpaca adapter decodes borrowed wire fields directly, preserving
+exact decimal tokens and parsing each timestamp once. Short normalized text uses
+inline storage. Ingestion owns validation, canonical per-page ordering, Arrow
+projection and bounded external merging. Independent nonoverlapping runs bypass
+per-row heap merging. Storage incrementally encodes canonical batches into owned
+scratch files with fixed 131,072-row Parquet groups, hashes files with bounded
+buffers, and streams them to local/Azure object transport. No whole-session record
+array, whole-object byte vector, or provider-specific storage decoder is required.
+
+`lake-pipeline` owns process admission, cancellation and measurements. Wire bodies
+reserve their configured maximum before request allowance. A separate decode pool
+reserves headroom based on actual body length plus bounded row bookkeeping and
+retains it through acquisition consumption. Separating these pools prevents
+queued bodies from holding all memory needed for decoding. CPU-heavy work shares
+one CPU budget; publication waits and uploads use a separate I/O budget. Session
+reservations cover bounded merge/encoding work, not a maximum number of daily
+records. Scratch files own byte reservations until deletion, seal and close write
+handles before merging, and fail visibly on capacity exhaustion. No session waits
+for scratch credits held by its own files. Local admission snapshots 75% of
+available host RAM, caps fleet size to its available budget, and retains that
+budget in accepted execution input; an explicit host budget remains configurable.
+These are explicit accounting/algorithmic bounds, not a general RSS allocator.
 
 `PublicationCatalog` is the only production coverage implementation. Its authority
 is `publications/asset_class=<asset>/symbol=<encoded>/date=<day>.json`, holding all
@@ -164,10 +173,10 @@ its surviving blocking encoder to publish later. Bar range acquisition remains
 batched and publication remains one symbol-day at a time.
 
 Workers emit `ingestion_metrics` every ten seconds and attach the final snapshot
-to `worker_settled`, attributed by retained job ID and partition. Metrics include
+to `worker_settled` and the durable terminal partition record, attributed by retained job ID and partition. Metrics include
 secret setup/coverage/progress/network/decode/normalize/validate/sort/Arrow/Parquet/
-hash/upload/manifest/lease and
-rate-wait timings, bytes/rows, pool occupancy/high-water/waits and OS CPU/RSS.
+hash/spill/upload/manifest/lease and
+rate-cache, ledger-RPC, CAS-conflict, capacity and pacing timings, bytes/rows, pool occupancy/high-water/waits and OS CPU/RSS.
 Timings are overlapping stage service time, not additive wall time. Network bytes
 are decoded HTTP body bytes, not compressed bytes on the wire. The maintained
 `ingestion/examples/replay.rs` exercises the full loopback HTTP-to-publication path
@@ -307,3 +316,5 @@ Empty Blob and lease PUTs explicitly send `Content-Length: 0`, as required by Az
 The synchronous Blob and Table SDK bridges yield multithreaded Tokio scheduler workers while waiting for their dedicated SDK executors. A one-worker API must remain live while storage operations and shared credential I/O complete. The SDK HTTP concurrency behavior tests run on a single Tokio worker and verify overlapping operations with independent outcomes.
 
 The Linux runtime supplies a writable local data root and the bundled worker path. Local signed-object transport accepts an explicit public base URL for forwarded ports and LAN clients. The ingestion image imports the shared registry cache as well as its own cache, retaining the narrow runtime image while reusing already-built worker artifacts.
+
+Finite local workers own scratch directories under `ingestion/scratch/<work-key>/`. Process cleanup removes that checked directory after the worker exits, including orphaned files from an interrupted process; system temporary storage is not left with unowned ingestion runs.

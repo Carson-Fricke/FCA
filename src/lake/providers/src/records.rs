@@ -6,6 +6,7 @@
 
 use lake_catalog::OptionType;
 use lake_contracts::{Date, DateTime, Decimal18};
+use smol_str::SmolStr;
 
 /// One equity trade.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -13,21 +14,21 @@ pub struct NormalizedTrade {
     /// Provider timestamp in UTC.
     pub timestamp: DateTime,
     /// Canonical requested symbol.
-    pub symbol: String,
+    pub symbol: SmolStr,
     /// Provider trade identifier (`i`).
     pub trade_id: u64,
     /// Exchange code (`x`).
-    pub exchange: String,
+    pub exchange: SmolStr,
     /// Trade price (`p`).
     pub price: Decimal18,
     /// Share size (`s`).
     pub size: u32,
     /// Sale conditions (`c`).
-    pub conditions: Vec<String>,
+    pub conditions: Vec<SmolStr>,
     /// Tape (`z`).
-    pub tape: String,
+    pub tape: SmolStr,
     /// Update marker (`u`); absent when the provider omits it.
-    pub update: Option<String>,
+    pub update: Option<SmolStr>,
 }
 
 /// One equity quote.
@@ -36,23 +37,23 @@ pub struct NormalizedQuote {
     /// Provider timestamp in UTC.
     pub timestamp: DateTime,
     /// Canonical requested symbol.
-    pub symbol: String,
+    pub symbol: SmolStr,
     /// Bid exchange code (`bx`).
-    pub bid_exchange: String,
+    pub bid_exchange: SmolStr,
     /// Bid price (`bp`).
     pub bid_price: Decimal18,
     /// Bid size (`bs`).
     pub bid_size: u32,
     /// Ask exchange code (`ax`).
-    pub ask_exchange: String,
+    pub ask_exchange: SmolStr,
     /// Ask price (`ap`).
     pub ask_price: Decimal18,
     /// Ask size (`as`).
     pub ask_size: u32,
     /// Quote conditions (`c`).
-    pub conditions: Vec<String>,
+    pub conditions: Vec<SmolStr>,
     /// Tape (`z`).
-    pub tape: String,
+    pub tape: SmolStr,
 }
 
 /// One option trade for a selected OSI contract.
@@ -65,9 +66,9 @@ pub struct NormalizedOptionTrade {
     /// Provider timestamp in UTC.
     pub timestamp: DateTime,
     /// Canonical OSI symbol of the requested contract.
-    pub symbol: String,
+    pub symbol: SmolStr,
     /// Canonical underlying symbol of the requested contract.
-    pub underlying: String,
+    pub underlying: SmolStr,
     /// Expiration date of the requested contract.
     pub expiration_date: Date,
     /// Strike price of the requested contract.
@@ -75,13 +76,13 @@ pub struct NormalizedOptionTrade {
     /// Call or put side of the requested contract.
     pub option_type: OptionType,
     /// Exchange code (`x`).
-    pub exchange: String,
+    pub exchange: SmolStr,
     /// Trade price (`p`).
     pub price: Decimal18,
     /// Contract size (`s`).
     pub size: u32,
     /// Sale condition (`c`): one string for options, not an array.
-    pub condition: String,
+    pub condition: SmolStr,
 }
 
 /// One option quote for a selected OSI contract.
@@ -90,9 +91,9 @@ pub struct NormalizedOptionQuote {
     /// Provider timestamp in UTC.
     pub timestamp: DateTime,
     /// Canonical OSI symbol of the requested contract.
-    pub symbol: String,
+    pub symbol: SmolStr,
     /// Canonical underlying symbol of the requested contract.
-    pub underlying: String,
+    pub underlying: SmolStr,
     /// Expiration date of the requested contract.
     pub expiration_date: Date,
     /// Strike price of the requested contract.
@@ -100,19 +101,19 @@ pub struct NormalizedOptionQuote {
     /// Call or put side of the requested contract.
     pub option_type: OptionType,
     /// Bid exchange code (`bx`).
-    pub bid_exchange: String,
+    pub bid_exchange: SmolStr,
     /// Bid price (`bp`).
     pub bid_price: Decimal18,
     /// Bid size (`bs`).
     pub bid_size: u32,
     /// Ask exchange code (`ax`).
-    pub ask_exchange: String,
+    pub ask_exchange: SmolStr,
     /// Ask price (`ap`).
     pub ask_price: Decimal18,
     /// Ask size (`as`).
     pub ask_size: u32,
     /// Quote condition (`c`): one string for options, not an array.
-    pub condition: String,
+    pub condition: SmolStr,
 }
 
 /// One crypto trade.
@@ -121,17 +122,17 @@ pub struct NormalizedCryptoTrade {
     /// Provider timestamp in UTC.
     pub timestamp: DateTime,
     /// Canonical requested pair.
-    pub symbol: String,
+    pub symbol: SmolStr,
     /// Provider trade identifier (`i`); absent when the provider omits it.
     pub trade_id: Option<i64>,
     /// Exchange code (`x`); absent when the provider omits it.
-    pub exchange: Option<String>,
+    pub exchange: Option<SmolStr>,
     /// Trade price (`p`).
     pub price: Decimal18,
     /// Trade size (`s`), fractional for crypto.
     pub size: Decimal18,
     /// Taker side (`tks`); absent when the provider omits it.
-    pub taker_side: Option<String>,
+    pub taker_side: Option<SmolStr>,
 }
 
 /// One crypto quote.
@@ -140,15 +141,15 @@ pub struct NormalizedCryptoQuote {
     /// Provider timestamp in UTC.
     pub timestamp: DateTime,
     /// Canonical requested pair.
-    pub symbol: String,
+    pub symbol: SmolStr,
     /// Bid exchange code (`bx`); absent when the provider omits it.
-    pub bid_exchange: Option<String>,
+    pub bid_exchange: Option<SmolStr>,
     /// Bid price (`bp`).
     pub bid_price: Decimal18,
     /// Bid size (`bs`), fractional for crypto.
     pub bid_size: Decimal18,
     /// Ask exchange code (`ax`); absent when the provider omits it.
-    pub ask_exchange: Option<String>,
+    pub ask_exchange: Option<SmolStr>,
     /// Ask price (`ap`).
     pub ask_price: Decimal18,
     /// Ask size (`as`), fractional for crypto.
@@ -165,7 +166,7 @@ pub struct NormalizedBar {
     /// Bucket start in UTC.
     pub timestamp: DateTime,
     /// Canonical requested symbol.
-    pub symbol: String,
+    pub symbol: SmolStr,
     /// Exact open price.
     pub open: Decimal18,
     /// Exact high price.
@@ -189,19 +190,26 @@ pub trait RecordMemory {
     fn allocated_bytes(&self) -> usize;
 }
 
-fn text(value: &Option<String>) -> usize {
-    value.as_ref().map_or(0, String::capacity)
+fn heap_bytes(value: &SmolStr) -> usize {
+    if value.is_heap_allocated() {
+        value.len()
+    } else {
+        0
+    }
 }
-fn conditions(values: &Vec<String>) -> usize {
-    values.capacity() * std::mem::size_of::<String>()
-        + values.iter().map(String::capacity).sum::<usize>()
+fn text(value: &Option<SmolStr>) -> usize {
+    value.as_ref().map_or(0, heap_bytes)
+}
+fn conditions(values: &Vec<SmolStr>) -> usize {
+    values.capacity() * std::mem::size_of::<SmolStr>()
+        + values.iter().map(heap_bytes).sum::<usize>()
 }
 impl RecordMemory for NormalizedTrade {
     fn allocated_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
-            + self.symbol.capacity()
-            + self.exchange.capacity()
-            + self.tape.capacity()
+            + heap_bytes(&self.symbol)
+            + heap_bytes(&self.exchange)
+            + heap_bytes(&self.tape)
             + text(&self.update)
             + conditions(&self.conditions)
     }
@@ -209,17 +217,17 @@ impl RecordMemory for NormalizedTrade {
 impl RecordMemory for NormalizedQuote {
     fn allocated_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
-            + self.symbol.capacity()
-            + self.bid_exchange.capacity()
-            + self.ask_exchange.capacity()
-            + self.tape.capacity()
+            + heap_bytes(&self.symbol)
+            + heap_bytes(&self.bid_exchange)
+            + heap_bytes(&self.ask_exchange)
+            + heap_bytes(&self.tape)
             + conditions(&self.conditions)
     }
 }
 impl RecordMemory for NormalizedCryptoTrade {
     fn allocated_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
-            + self.symbol.capacity()
+            + heap_bytes(&self.symbol)
             + text(&self.exchange)
             + text(&self.taker_side)
     }
@@ -227,33 +235,33 @@ impl RecordMemory for NormalizedCryptoTrade {
 impl RecordMemory for NormalizedCryptoQuote {
     fn allocated_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
-            + self.symbol.capacity()
+            + heap_bytes(&self.symbol)
             + text(&self.bid_exchange)
             + text(&self.ask_exchange)
     }
 }
 impl RecordMemory for NormalizedBar {
     fn allocated_bytes(&self) -> usize {
-        std::mem::size_of::<Self>() + self.symbol.capacity()
+        std::mem::size_of::<Self>() + heap_bytes(&self.symbol)
     }
 }
 impl RecordMemory for NormalizedOptionTrade {
     fn allocated_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
-            + self.symbol.capacity()
-            + self.underlying.capacity()
-            + self.exchange.capacity()
-            + self.condition.capacity()
+            + heap_bytes(&self.symbol)
+            + heap_bytes(&self.underlying)
+            + heap_bytes(&self.exchange)
+            + heap_bytes(&self.condition)
     }
 }
 impl RecordMemory for NormalizedOptionQuote {
     fn allocated_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
-            + self.symbol.capacity()
-            + self.underlying.capacity()
-            + self.bid_exchange.capacity()
-            + self.ask_exchange.capacity()
-            + self.condition.capacity()
+            + heap_bytes(&self.symbol)
+            + heap_bytes(&self.underlying)
+            + heap_bytes(&self.bid_exchange)
+            + heap_bytes(&self.ask_exchange)
+            + heap_bytes(&self.condition)
     }
 }
 

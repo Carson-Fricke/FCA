@@ -1,13 +1,17 @@
 //! Short-lived fleet permits remain charged across lost acknowledgements and restarts.
-use lake_ingest_jobs::{BudgetGrant, JobPersistence};
+use lake_ingest_jobs::{BudgetGrant, RequestAuthority};
 use lake_providers::{ProviderError, RequestBudget};
 use std::sync::Arc;
 
 pub struct SharedBudget<S> {
-    store: S,
-    scope: String,
-    limit: u32,
-    permits: tokio::sync::Mutex<PermitState>,
+    cache: Arc<Cache>,
+    _store: std::marker::PhantomData<S>,
+    refill_task: tokio::task::JoinHandle<()>,
+}
+struct Cache {
+    state: std::sync::Mutex<PermitState>,
+    refill: tokio::sync::Notify,
+    changed: tokio::sync::Notify,
 }
 struct CachedGrant {
     count: u32,
@@ -34,66 +38,125 @@ impl CachedGrant {
 }
 struct PermitState {
     batch: u32,
-    grant: Option<CachedGrant>,
+    grants: std::collections::VecDeque<CachedGrant>,
+    error: Option<String>,
 }
 impl PermitState {
     fn new() -> Self {
         Self {
             batch: 32,
-            grant: None,
+            grants: Default::default(),
+            error: None,
         }
     }
-    fn request_size(&mut self, now: tokio::time::Instant, limit: u32) -> u32 {
-        if let Some(previous) = self.grant.take() {
+    fn discard_expired(&mut self, now: tokio::time::Instant) {
+        while self
+            .grants
+            .front()
+            .is_some_and(|g| now >= g.expires || g.count == 0)
+        {
+            let previous = self.grants.pop_front().expect("front present");
             if now >= previous.expires && previous.count > 0 {
-                // Discarding an expired permit never refunds its authority charge.
                 self.batch = previous.issued.saturating_sub(previous.count).max(1);
             } else if previous.count == 0 && now < previous.grow_before {
-                // Grow only with substantial spare lifetime; near-expiry exhaustion
-                // otherwise oscillates between an oversized and a useful batch.
-                self.batch = self.batch.saturating_mul(2).min(32);
+                self.batch = self.batch.saturating_mul(2).min(128);
             }
         }
-        self.batch.min(32).min(limit)
+    }
+    fn available(&self) -> u32 {
+        self.grants.iter().map(|g| g.count).sum()
     }
 }
-impl<S: JobPersistence> SharedBudget<S> {
+impl<S: RequestAuthority> SharedBudget<S> {
     pub fn new(store: S, endpoint: &str, key: &str, limit: u32) -> Arc<Self> {
+        let cache = Arc::new(Cache {
+            state: std::sync::Mutex::new(PermitState::new()),
+            refill: tokio::sync::Notify::new(),
+            changed: tokio::sync::Notify::new(),
+        });
+        let worker = cache.clone();
+        let scope = lake_ingest_jobs::budget_scope(endpoint, key);
+        let refill_task = tokio::spawn(async move {
+            loop {
+                worker.refill.notified().await;
+                let started = tokio::time::Instant::now();
+                let count = {
+                    let mut state = worker.state.lock().unwrap_or_else(|e| e.into_inner());
+                    state.discard_expired(started);
+                    if state.available() > 8 {
+                        continue;
+                    }
+                    state.batch.min(limit)
+                };
+                let rpc = lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::RateRpc);
+                let result = store.reserve_requests(&scope, limit, count).await;
+                drop(rpc);
+                match result {
+                    Ok(grant) if grant.count > 0 => {
+                        let mut state = worker.state.lock().unwrap_or_else(|e| e.into_inner());
+                        state
+                            .grants
+                            .push_back(CachedGrant::received(grant, started));
+                        state.discard_expired(tokio::time::Instant::now());
+                    }
+                    Ok(grant) => {
+                        let capacity = lake_pipeline::Pipeline::global()
+                            .timer(lake_pipeline::Stage::RateCapacity);
+                        tokio::time::sleep(
+                            grant.retry_after.max(std::time::Duration::from_millis(1)),
+                        )
+                        .await;
+                        drop(capacity);
+                        worker.refill.notify_one();
+                    }
+                    Err(error) => {
+                        worker.state.lock().unwrap_or_else(|e| e.into_inner()).error =
+                            Some(format!("fleet request budget unavailable: {error}"));
+                    }
+                }
+                worker.changed.notify_waiters();
+            }
+        });
         Arc::new(Self {
-            store,
-            scope: lake_ingest_jobs::budget_scope(endpoint, key),
-            limit,
-            permits: tokio::sync::Mutex::new(PermitState::new()),
+            cache,
+            _store: std::marker::PhantomData,
+            refill_task,
         })
     }
 }
-impl<S: JobPersistence> RequestBudget for SharedBudget<S> {
+impl<S> Drop for SharedBudget<S> {
+    fn drop(&mut self) {
+        self.refill_task.abort();
+    }
+}
+impl<S: RequestAuthority> RequestBudget for SharedBudget<S> {
     fn acquire(&self) -> lake_providers::BoxFuture<'_, Result<(), ProviderError>> {
         Box::pin(async move {
-            let mut cached = self.permits.lock().await;
+            let _wait = lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::RateCache);
             loop {
-                if let Some(grant) = cached.grant.as_mut() {
-                    if grant.take(tokio::time::Instant::now()) {
-                        return Ok(());
+                let changed = self.cache.changed.notified();
+                tokio::pin!(changed);
+                changed.as_mut().enable();
+                let taken = {
+                    let mut state = self.cache.state.lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(error) = &state.error {
+                        return Err(ProviderError::Configuration(error.clone()));
                     }
+                    let now = tokio::time::Instant::now();
+                    state.discard_expired(now);
+                    let taken = state
+                        .grants
+                        .front_mut()
+                        .is_some_and(|grant| grant.take(now));
+                    if state.available() <= 8 {
+                        self.cache.refill.notify_one();
+                    }
+                    taken
+                };
+                if taken {
+                    return Ok(());
                 }
-                let started = tokio::time::Instant::now();
-                let count = cached.request_size(started, self.limit);
-                let grant = self
-                    .store
-                    .reserve_requests(&self.scope, self.limit, count)
-                    .await
-                    .map_err(|e| {
-                        ProviderError::Configuration(format!(
-                            "fleet request budget unavailable: {e}"
-                        ))
-                    })?;
-                if grant.count == 0 {
-                    tokio::time::sleep(grant.retry_after.max(std::time::Duration::from_millis(1)))
-                        .await;
-                } else {
-                    cached.grant = Some(CachedGrant::received(grant, started));
-                }
+                changed.await;
             }
         })
     }

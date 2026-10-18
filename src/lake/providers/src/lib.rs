@@ -25,6 +25,25 @@ pub use records::{
     NormalizedBar, NormalizedCryptoQuote, NormalizedCryptoTrade, NormalizedOptionQuote,
     NormalizedOptionTrade, NormalizedQuote, NormalizedTrade, RecordMemory,
 };
+pub use smol_str::SmolStr as ProviderText;
 pub use transport::{
     AlpacaTransport, BoxFuture, ReqwestTransport, TransportFailure, TransportResponse,
 };
+
+/// A bounded page stream owned and consumed by the acquisition caller.
+pub type RecordStream<'a, T> =
+    futures_util::stream::BoxStream<'a, Result<RecordPage<T>, ProviderError>>;
+
+/// Normalized records retain their decode reservation until acquisition consumes them.
+pub struct RecordPage<T> {
+    pub records: Vec<T>,
+    pub allocation: Option<std::sync::Arc<lake_pipeline::Reservation>>,
+}
+impl<T> From<Vec<T>> for RecordPage<T> {
+    fn from(records: Vec<T>) -> Self {
+        Self {
+            records,
+            allocation: None,
+        }
+    }
+}

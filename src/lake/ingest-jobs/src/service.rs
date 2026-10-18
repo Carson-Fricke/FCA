@@ -104,38 +104,36 @@ impl<R: WorkerRunner, S: JobPersistence> IngestionJobs<R, S> {
         }
         // Interleave executions instead of letting one multi-year plan monopolize every slot.
         pending.sort_by(|a, b| a.partition.cmp(&b.partition).then(a.job_id.cmp(&b.job_id)));
-        for reference in pending {
-            if active >= limit {
-                break;
-            }
-            lock.renew().await?;
-            let owner = match self.store.own_work(&reference).await {
-                Ok(owner) => owner,
-                Err(DataError::Conflict(_)) => continue,
-                Err(e) => return Err(e),
-            };
-            let mut work = self.store.get_work(&reference).await?;
-            if work.dispatch_started || work.terminal() {
+        let starts = stream::iter(pending.into_iter().take(limit.saturating_sub(active)))
+            .map(|reference| async move {
+                lock.renew().await?;
+                let owner = match self.store.own_work(&reference).await {
+                    Ok(owner) => owner,
+                    Err(DataError::Conflict(_)) => return Ok(()),
+                    Err(error) => return Err(error),
+                };
+                let mut work = self.store.get_work(&reference).await?;
+                if work.dispatch_started || work.terminal() {
+                    owner.release().await?;
+                    return Ok(());
+                }
+                work.dispatch_started = true;
+                work.dispatched_at = Some(crate::model::now().micros());
+                work.record.updated_at = crate::model::now();
+                owner.save(&work).await?;
                 owner.release().await?;
-                continue;
-            }
-            work.dispatch_started = true;
-            work.dispatched_at = Some(crate::model::now().micros());
-            work.record.updated_at = crate::model::now();
-            owner.save(&work).await?;
-            owner.release().await?;
-            // Durable intent precedes the non-idempotent start. An interrupted start is reconciled by template attribution.
-            self.runner
-                .for_work(&work.execution)?
-                .start(&reference)
-                .await?;
-            if let Some(retained) = partitions
-                .iter_mut()
-                .find(|value| value.reference() == reference)
-            {
-                *retained = work;
-            }
-            active += 1;
+                self.runner
+                    .for_work(&work.execution)?
+                    .start(&reference)
+                    .await
+            })
+            .buffer_unordered(limit.max(1))
+            .try_collect::<Vec<_>>()
+            .await;
+        starts?;
+        // Re-read durable state: workers may have already advanced during concurrent starts.
+        for partition in &mut partitions {
+            *partition = self.store.get_work(&partition.reference()).await?;
         }
         for job in jobs {
             self.aggregate(&job.record.job_id, &partitions).await?;

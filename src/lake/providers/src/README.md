@@ -9,7 +9,7 @@ Alpaca transport, pacing, parsing, and acquisition. The option contract master i
 - `lane.rs` — Adaptive per-key request lane.
 - `lib.rs` — Alpaca market-data client for the market lake.
 - `parse.rs` — Alpaca response page and row parsing.
-- `records.rs` — Normalized provider records independent of HTTP transport.
-- `transport.rs` — Injectable HTTP transport and the production reqwest implementation; response JSON decoding runs on the blocking pool so in-flight downloads retain async worker capacity.
+- `records.rs` — Normalized provider records with inline short text, independent of HTTP transport.
+- `transport.rs` — Injectable HTTP transport and the production reqwest implementation; transport returns bounded raw bytes; typed provider decoding runs on the shared blocking CPU budget.
 
-Provider decoding and normalization share `lake-pipeline` CPU slots with ingestion encoding. Response headroom is reserved before request allowance and follows body ownership through blocking decode/normalization. Normalized pages are accounted before retention; oversized datasets fail visibly. Storage publication is outside this capability.
+Provider decoding and normalization share `lake-pipeline` CPU slots with ingestion encoding. Response headroom is reserved before request allowance and follows body ownership through blocking decode/normalization. Bounded normalized page streams retain actual-body decode reservations through consumption. Storage publication is outside this capability.

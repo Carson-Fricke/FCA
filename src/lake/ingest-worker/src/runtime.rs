@@ -96,6 +96,7 @@ async fn run_owned<S: JobPersistence>(
     deps: WorkerDependencies,
 ) -> Result<(), DataError> {
     let execution_started = std::time::Instant::now();
+    let execution_started_at = now().micros();
     eprintln!(
         "{}",
         serde_json::json!({"event":"worker_started","job_id":id,"at_micros":now().micros()})
@@ -145,10 +146,15 @@ async fn run_owned<S: JobPersistence>(
     let owner = Arc::new(owner);
     let (progress_send, mut progress_recv) =
         tokio::sync::watch::channel(None::<lake_catalog::JobProgress>);
+    let progress_counts = Arc::new(std::sync::Mutex::new((0usize, 0usize, 0usize, 0usize)));
+    let reported = progress_counts.clone();
     let progress: lake_ingestion::EnsureProgress = Arc::new(move |total, done, coverage| {
+        let mut counts = reported.lock().unwrap_or_else(|e| e.into_inner());
+        counts.2 = total;
+        counts.3 = done;
         progress_send.send_replace(Some(lake_catalog::JobProgress {
-            sessions_total: total as u64,
-            sessions_done: done as u64,
+            sessions_total: (counts.0 + total) as u64,
+            sessions_done: (counts.1 + done) as u64,
             symbol: coverage.symbol.clone(),
             session_date: coverage.session_date.isoformat(),
             rows: coverage.row_count,
@@ -288,6 +294,11 @@ async fn run_owned<S: JobPersistence>(
                             max_sessions,
                         )
                         .await?;
+                    let mut counts = progress_counts.lock().unwrap_or_else(|e| e.into_inner());
+                    counts.0 += counts.2;
+                    counts.1 += counts.3;
+                    counts.2 = 0;
+                    counts.3 = 0;
                 }
                 WorkRequest::OptionSelection { selector } => {
                     let resolved = lake_ingestion::options::resolve::OptionContractResolver::new(
@@ -337,6 +348,9 @@ async fn run_owned<S: JobPersistence>(
         JobState::Failed
     };
     job.result = result.as_ref().ok().cloned().flatten();
+    let mut metrics = lake_pipeline::Pipeline::global().snapshot();
+    metrics["worker"] = serde_json::json!({"started_at_micros":execution_started_at,"seconds":execution_started.elapsed().as_secs_f64()});
+    job.metrics = Some(metrics);
     job.record.progress = progress_recv.borrow().clone();
     job.record.updated_at = now();
     job.record.error_message = result.as_ref().err().map(ToString::to_string);

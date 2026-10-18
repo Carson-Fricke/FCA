@@ -10,12 +10,11 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
-use serde_json::Value;
 
 /// A boxed, sendable future returned by [`AlpacaTransport::get`].
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// One provider response: status, `Retry-After`, and the decoded JSON body.
+/// One provider response: status, `Retry-After`, and the bounded response bytes.
 #[derive(Debug)]
 pub struct TransportResponse {
     /// Response headroom retained through normalization; fake external transports leave this empty.
@@ -24,8 +23,8 @@ pub struct TransportResponse {
     pub status: u16,
     /// The `Retry-After` header exactly as received.
     pub retry_after: Option<String>,
-    /// The decoded JSON body.
-    pub body: Value,
+    /// The decompressed response bytes; provider adapters own decoding.
+    pub body: Vec<u8>,
 }
 
 impl PartialEq for TransportResponse {
@@ -147,29 +146,11 @@ impl AlpacaTransport for ReqwestTransport {
             }
             network.bytes(bytes.len());
             drop(network);
-            let text = String::from_utf8(bytes)
-                .map_err(|error| TransportFailure::Protocol(error.to_string()))?;
-            // A full SIP page is CPU-heavy to decode. Keep JSON allocation and
-            // parsing off the async workers needed by other in-flight requests.
-            let cpu = pipeline
-                .cpu()
-                .await
-                .map_err(|error| TransportFailure::Protocol(error.to_string()))?;
-            let (body, allocation) = tokio::task::spawn_blocking(move || {
-                let _cpu = cpu;
-                let mut decode = pipeline.timer(lake_pipeline::Stage::Decode);
-                decode.bytes(text.len());
-                decode_body(&text, status).map(|body| (body, allocation))
-            })
-            .await
-            .map_err(|error| {
-                TransportFailure::Protocol(format!("response decode task failed: {error}"))
-            })??;
             Ok(TransportResponse {
                 allocation: Some(allocation),
                 status,
                 retry_after,
-                body,
+                body: bytes,
             })
         })
     }
@@ -192,24 +173,4 @@ pub(crate) fn encode_query(url: &str, params: &[(String, String)]) -> String {
         encoded.push_str(&utf8_percent_encode(value, QUERY_ENCODE_SET).to_string());
     }
     encoded
-}
-
-/// Decode a response body; successful responses must be JSON, error responses
-/// are allowed to carry a non-JSON body because the status drives the policy.
-fn decode_body(text: &str, status: u16) -> Result<Value, TransportFailure> {
-    if text.is_empty() {
-        return Ok(Value::Null);
-    }
-    match serde_json::from_str(text) {
-        Ok(value) => Ok(value),
-        Err(error) => {
-            if (200..300).contains(&status) {
-                Err(TransportFailure::Protocol(format!(
-                    "Alpaca response body is not JSON: {error}"
-                )))
-            } else {
-                Ok(Value::Null)
-            }
-        }
-    }
 }

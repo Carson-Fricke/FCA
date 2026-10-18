@@ -48,7 +48,7 @@ impl AlpacaTransport for Transport {
                 allocation: None,
                 status: 200,
                 retry_after: None,
-                body,
+                body: serde_json::to_vec(&body).unwrap(),
             })
         })
     }

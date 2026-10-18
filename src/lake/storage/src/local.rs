@@ -99,6 +99,26 @@ impl LocalFilesystemStore {
 }
 
 impl BlobStore for LocalFilesystemStore {
+    fn replace_file(&self, relative_path: &str, source: &Path) -> Result<(), DataError> {
+        let target = self.target(relative_path)?;
+        let parent = target
+            .parent()
+            .ok_or_else(|| DataError::value(PATH_ERROR))?;
+        fs::create_dir_all(parent)?;
+        let temporary = parent.join(format!(".upload-{}.tmp", random_suffix()));
+        let result = (|| {
+            let mut input = fs::File::open(source)?;
+            let mut output = fs::File::create(&temporary)?;
+            std::io::copy(&mut input, &mut output)?;
+            output.sync_all()?;
+            rename_with_retries(&temporary, &target)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result.map_err(DataError::io)
+    }
+
     fn replace(&self, relative_path: &str, payload: &[u8]) -> Result<(), DataError> {
         let target = self.target(relative_path)?;
         let parent = target

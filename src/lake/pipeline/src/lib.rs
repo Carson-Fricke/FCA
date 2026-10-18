@@ -1,6 +1,6 @@
 //! Process-wide ingestion budgets shared by providers, encoding, and publication.
 //! Limits are explicit accounting limits, not an RSS allocator. Session admission
-//! reserves headroom before fetching; oversized datasets fail rather than deadlock.
+//! reserves bounded merge/encoding headroom; page streams spill instead of retaining daily input.
 use lake_contracts::DataError;
 use serde::Serialize;
 use std::sync::{
@@ -21,6 +21,7 @@ pub struct Limits {
     pub session_bytes: usize,
     pub max_session_bytes: usize,
     pub publication_slots: usize,
+    pub scratch_bytes: usize,
 }
 impl Default for Limits {
     fn default() -> Self {
@@ -31,6 +32,7 @@ impl Default for Limits {
             session_bytes: 4096 * MIB,
             max_session_bytes: 2048 * MIB,
             publication_slots: 2,
+            scratch_bytes: 4 * 1024 * MIB,
         }
     }
 }
@@ -60,6 +62,7 @@ impl Limits {
             )?,
             session_bytes: memory("LAKE_INGEST_MEMORY_MIB", defaults.session_bytes)?,
             max_session_bytes: memory("LAKE_INGEST_SESSION_MIB", defaults.max_session_bytes)?,
+            scratch_bytes: memory("LAKE_INGEST_SCRATCH_MIB", defaults.scratch_bytes)?,
             publication_slots: value(
                 "LAKE_INGEST_PUBLICATION_CONCURRENCY",
                 defaults.publication_slots,
@@ -72,10 +75,12 @@ impl Limits {
         if self.cpu_slots == 0
             || self.publication_slots == 0
             || self.max_response_bytes == 0
+            || self.scratch_bytes == 0
             || self
                 .max_response_bytes
-                .checked_mul(8)
-                .is_none_or(|v| v > self.response_bytes)
+                .checked_mul(16)
+                .and_then(|bytes| bytes.checked_add(2 * MIB))
+                .is_none_or(|v| v > self.response_bytes - self.response_bytes / 4)
             || self.max_session_bytes < MIB
             || self.max_session_bytes > self.session_bytes
         {
@@ -106,8 +111,14 @@ pub enum Stage {
     Upload,
     Manifest,
     RateWait,
+    RateCache,
+    RateRpc,
+    RateCapacity,
+    RateConflict,
+    RatePacing,
+    Spill,
 }
-const NAMES: [&str; 16] = [
+const NAMES: [&str; 22] = [
     "secrets",
     "coverage",
     "progress",
@@ -124,6 +135,12 @@ const NAMES: [&str; 16] = [
     "upload",
     "manifest",
     "rate_wait",
+    "rate_cache",
+    "rate_rpc",
+    "rate_capacity",
+    "rate_conflict",
+    "rate_pacing",
+    "spill",
 ];
 #[derive(Default)]
 struct Measurement {
@@ -145,10 +162,12 @@ pub struct Pipeline {
     stopped: Arc<AtomicBool>,
     cpu: Arc<Pool>,
     responses: Arc<Pool>,
+    decoded: Arc<Pool>,
     sessions: Arc<Pool>,
     publications: Arc<Pool>,
+    scratch: Arc<Pool>,
     commit: Mutex<()>,
-    measurements: [Arc<Measurement>; 16],
+    measurements: [Arc<Measurement>; 22],
 }
 impl Pipeline {
     pub fn new(limits: Limits) -> Result<Arc<Self>, DataError> {
@@ -156,9 +175,14 @@ impl Pipeline {
         let stopped = Arc::new(AtomicBool::new(false));
         Ok(Arc::new(Self {
             cpu: Pool::new(limits.cpu_slots, stopped.clone()),
-            responses: Pool::new(limits.response_bytes, stopped.clone()),
+            responses: Pool::new(limits.response_bytes / 4, stopped.clone()),
+            decoded: Pool::new(
+                limits.response_bytes - limits.response_bytes / 4,
+                stopped.clone(),
+            ),
             sessions: Pool::new(limits.session_bytes, stopped.clone()),
             publications: Pool::new(limits.publication_slots, stopped.clone()),
+            scratch: Pool::new(limits.scratch_bytes, stopped.clone()),
             limits,
             stopped,
             commit: Mutex::new(()),
@@ -194,12 +218,23 @@ impl Pipeline {
     }
     /// Reserve wire + decoded-page headroom until normalized records release the page.
     pub async fn response(&self) -> Result<Reservation, DataError> {
-        self.responses
-            .acquire(self.limits.max_response_bytes * 8)
+        self.responses.acquire(self.limits.max_response_bytes).await
+    }
+    /// Decode headroom follows the actual bounded body through page consumption.
+    /// Separate pools ensure a decoder never waits for memory held by queued wire bodies.
+    pub async fn decoded_response(&self, bytes: usize) -> Result<Reservation, DataError> {
+        self.decoded
+            .acquire(bytes.saturating_mul(16).saturating_add(2 * MIB))
             .await
     }
     pub async fn session(&self) -> Result<Reservation, DataError> {
         self.sessions.acquire(self.limits.max_session_bytes).await
+    }
+    /// Scratch space cannot wait for files retained by this same session.
+    pub fn scratch(&self, bytes: usize) -> Result<Reservation, DataError> {
+        self.scratch
+            .take(bytes)?
+            .ok_or_else(|| DataError::value("ingestion scratch capacity exhausted"))
     }
     pub fn publication(&self) -> Result<Reservation, DataError> {
         self.publications.acquire_blocking(1)
@@ -212,8 +247,10 @@ impl Pipeline {
         for pool in [
             &self.cpu,
             &self.responses,
+            &self.decoded,
             &self.sessions,
             &self.publications,
+            &self.scratch,
         ] {
             pool.notify.notify_waiters();
             pool.changed.notify_all();
@@ -258,7 +295,7 @@ impl Pipeline {
             })
             .collect();
         serde_json::json!({"limits":self.limits, "process":usage::process_usage(), "stages":stages, "resources":{
-            "cpu":self.cpu.snapshot(), "responses":self.responses.snapshot(), "sessions":self.sessions.snapshot(), "publications":self.publications.snapshot()}})
+            "cpu":self.cpu.snapshot(), "responses":self.responses.snapshot(), "decoded":self.decoded.snapshot(), "sessions":self.sessions.snapshot(), "publications":self.publications.snapshot(), "scratch": self.scratch.snapshot()}})
     }
 }
 

@@ -7,6 +7,8 @@ publish.workspace = true
 description = "Alpaca client: cursor paging, retry/backoff, and a shared request-budget governor."
 
 [dependencies]
+async-stream = "0.3"
+smol_str = {version="0.3",features=["serde"]}
 lake-pipeline.workspace = true
 lake-catalog.workspace = true
 lake-contracts.workspace = true

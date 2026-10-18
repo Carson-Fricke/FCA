@@ -34,6 +34,7 @@ param ingestionPipelineLimits object = {
   memoryMiB: 4096
   sessionMiB: 2048
   publicationConcurrency: 2
+  scratchMiB: 4096
 }
 @minValue(1)
 @maxValue(64)

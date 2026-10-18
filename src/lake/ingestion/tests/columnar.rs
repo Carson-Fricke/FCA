@@ -6,7 +6,14 @@ use arrow_array::{
     Array, Decimal128Array, Int64Array, ListArray, RecordBatch, StringArray,
     TimestampNanosecondArray, UInt64Array,
 };
-use futures_util::future::BoxFuture;
+use futures_util::{future::BoxFuture, StreamExt};
+fn one_page<'a, T: Send + 'a>(
+    future: impl std::future::Future<Output = Result<Vec<T>, ProviderError>> + Send + 'a,
+) -> lake_providers::RecordStream<'a, T> {
+    Box::pin(futures_util::stream::once(async move {
+        future.await.map(Into::into)
+    }))
+}
 use harness_market_reader::{
     CacheConfig, MarketDataReader, MarketDataSnapshot, Partition, PartitionSource, ReaderError,
     SnapshotRequest,
@@ -59,8 +66,8 @@ impl EquityDataProvider for Provider {
         _: &'a [String],
         start: DateTime,
         _: DateTime,
-    ) -> BoxFuture<'a, Result<Vec<NormalizedTrade>, ProviderError>> {
-        Box::pin(async move {
+    ) -> lake_providers::RecordStream<'a, NormalizedTrade> {
+        one_page(async move {
             Ok([u64::MAX, 1]
                 .into_iter()
                 .map(|trade_id| NormalizedTrade {
@@ -82,8 +89,8 @@ impl EquityDataProvider for Provider {
         _: &'a [String],
         start: DateTime,
         _: DateTime,
-    ) -> BoxFuture<'a, Result<Vec<NormalizedQuote>, ProviderError>> {
-        Box::pin(async move {
+    ) -> lake_providers::RecordStream<'a, NormalizedQuote> {
+        one_page(async move {
             Ok(vec![NormalizedQuote {
                 timestamp: start,
                 symbol: "AAPL".into(),
@@ -105,8 +112,8 @@ impl CryptoDataProvider for Provider {
         _: &'a [String],
         start: DateTime,
         _: DateTime,
-    ) -> BoxFuture<'a, Result<Vec<NormalizedCryptoTrade>, ProviderError>> {
-        Box::pin(async move {
+    ) -> lake_providers::RecordStream<'a, NormalizedCryptoTrade> {
+        one_page(async move {
             Ok(vec![NormalizedCryptoTrade {
                 timestamp: start,
                 symbol: "BTC/USD".into(),
@@ -123,8 +130,8 @@ impl CryptoDataProvider for Provider {
         _: &'a [String],
         start: DateTime,
         _: DateTime,
-    ) -> BoxFuture<'a, Result<Vec<NormalizedCryptoQuote>, ProviderError>> {
-        Box::pin(async move {
+    ) -> lake_providers::RecordStream<'a, NormalizedCryptoQuote> {
+        one_page(async move {
             Ok(vec![NormalizedCryptoQuote {
                 timestamp: start,
                 symbol: "BTC/USD".into(),
@@ -144,13 +151,13 @@ impl OptionMarketDataClient for Provider {
         contracts: &'a [ContractRecord],
         start: DateTime,
         _: DateTime,
-    ) -> BoxFuture<'a, Result<Vec<NormalizedOptionTrade>, ProviderError>> {
-        Box::pin(async move {
+    ) -> lake_providers::RecordStream<'a, NormalizedOptionTrade> {
+        one_page(async move {
             let c = &contracts[0];
             Ok(vec![NormalizedOptionTrade {
                 timestamp: start,
-                symbol: c.symbol.clone(),
-                underlying: c.underlying.clone(),
+                symbol: c.symbol.as_str().into(),
+                underlying: c.underlying.as_str().into(),
                 expiration_date: c.expiration_date,
                 strike_price: c.strike_price,
                 option_type: c.option_type,
@@ -166,13 +173,13 @@ impl OptionMarketDataClient for Provider {
         contracts: &'a [ContractRecord],
         start: DateTime,
         _: DateTime,
-    ) -> BoxFuture<'a, Result<Vec<NormalizedOptionQuote>, ProviderError>> {
-        Box::pin(async move {
+    ) -> lake_providers::RecordStream<'a, NormalizedOptionQuote> {
+        one_page(async move {
             let c = &contracts[0];
             Ok(vec![NormalizedOptionQuote {
                 timestamp: start,
-                symbol: c.symbol.clone(),
-                underlying: c.underlying.clone(),
+                symbol: c.symbol.as_str().into(),
+                underlying: c.underlying.as_str().into(),
                 expiration_date: c.expiration_date,
                 strike_price: c.strike_price,
                 option_type: c.option_type,
@@ -210,14 +217,17 @@ impl PartitionSource for Published {
     ) -> BoxFuture<'a, Result<bytes::Bytes, ReaderError>> {
         Box::pin(async move {
             Ok(bytes::Bytes::from(
-                self.0
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .find(|o| o.metadata.path == partition.object_path)
-                    .unwrap()
-                    .payload
-                    .clone(),
+                std::fs::read(
+                    self.0
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .find(|o| o.metadata.path == partition.object_path)
+                        .unwrap()
+                        .payload
+                        .path(),
+                )
+                .unwrap(),
             ))
         })
     }
@@ -409,12 +419,15 @@ impl CryptoDataProvider for CryptoBoundaryProvider {
         symbols: &'a [String],
         start: DateTime,
         end: DateTime,
-    ) -> BoxFuture<'a, Result<Vec<NormalizedCryptoTrade>, ProviderError>> {
-        Box::pin(async move {
+    ) -> lake_providers::RecordStream<'a, NormalizedCryptoTrade> {
+        one_page(async move {
             self.requests.lock().unwrap().push((start, end));
             let template = Provider
                 .fetch_crypto_trades(symbols, start, end)
-                .await?
+                .next()
+                .await
+                .unwrap()?
+                .records
                 .remove(0);
             Ok(self
                 .timestamps
@@ -433,12 +446,15 @@ impl CryptoDataProvider for CryptoBoundaryProvider {
         symbols: &'a [String],
         start: DateTime,
         end: DateTime,
-    ) -> BoxFuture<'a, Result<Vec<NormalizedCryptoQuote>, ProviderError>> {
-        Box::pin(async move {
+    ) -> lake_providers::RecordStream<'a, NormalizedCryptoQuote> {
+        one_page(async move {
             self.requests.lock().unwrap().push((start, end));
             let template = Provider
                 .fetch_crypto_quotes(symbols, start, end)
-                .await?
+                .next()
+                .await
+                .unwrap()?
+                .records
                 .remove(0);
             Ok(self
                 .timestamps
@@ -596,7 +612,7 @@ impl EquityDataProvider for InvalidQuotes {
         symbols: &'a [String],
         start: DateTime,
         end: DateTime,
-    ) -> BoxFuture<'a, Result<Vec<NormalizedTrade>, ProviderError>> {
+    ) -> lake_providers::RecordStream<'a, NormalizedTrade> {
         Provider.fetch_trades(symbols, start, end)
     }
 
@@ -605,9 +621,14 @@ impl EquityDataProvider for InvalidQuotes {
         symbols: &'a [String],
         start: DateTime,
         end: DateTime,
-    ) -> BoxFuture<'a, Result<Vec<NormalizedQuote>, ProviderError>> {
-        Box::pin(async move {
-            let mut quotes = Provider.fetch_quotes(symbols, start, end).await?;
+    ) -> lake_providers::RecordStream<'a, NormalizedQuote> {
+        one_page(async move {
+            let mut quotes = Provider
+                .fetch_quotes(symbols, start, end)
+                .next()
+                .await
+                .unwrap()?
+                .records;
             quotes[0].symbol = "OTHER".into();
             Ok(quotes)
         })
@@ -665,11 +686,16 @@ impl EquityDataProvider for Pipeline {
         symbols: &'a [String],
         start: DateTime,
         end: DateTime,
-    ) -> BoxFuture<'a, Result<Vec<NormalizedTrade>, ProviderError>> {
-        Box::pin(async move {
+    ) -> lake_providers::RecordStream<'a, NormalizedTrade> {
+        one_page(async move {
             *self.count.lock().unwrap() += 1;
             self.fetched.notify_all();
-            Provider.fetch_trades(symbols, start, end).await
+            Provider
+                .fetch_trades(symbols, start, end)
+                .next()
+                .await
+                .unwrap()
+                .map(|page| page.records)
         })
     }
 
@@ -678,7 +704,7 @@ impl EquityDataProvider for Pipeline {
         symbols: &'a [String],
         start: DateTime,
         end: DateTime,
-    ) -> BoxFuture<'a, Result<Vec<NormalizedQuote>, ProviderError>> {
+    ) -> lake_providers::RecordStream<'a, NormalizedQuote> {
         Provider.fetch_quotes(symbols, start, end)
     }
 }

@@ -21,6 +21,7 @@
 //!    Alpaca's `end` parameter is inclusive and the closing auction print
 //!    belongs to its session.
 
+mod acquisition;
 mod bars;
 mod columnar;
 mod common;
@@ -30,6 +31,7 @@ mod equities;
 pub mod options;
 mod providers;
 mod publication;
+mod sorted;
 mod staging;
 mod trade_inputs;
 pub use trade_inputs::{CryptoTradeRecord, EquityTradeRecord};

@@ -31,6 +31,7 @@ param ingestionPipelineLimits object = {
   memoryMiB: 4096
   sessionMiB: 2048
   publicationConcurrency: 2
+  scratchMiB: 4096
 }
 @minValue(1)
 @maxValue(64)
@@ -213,6 +214,7 @@ var ingestionPipelineEnvironment = [
   { name: 'LAKE_INGEST_MAX_RESPONSE_MIB', value: string(ingestionPipelineLimits.maxResponseMiB) }
   { name: 'LAKE_INGEST_MEMORY_MIB', value: string(ingestionPipelineLimits.memoryMiB) }
   { name: 'LAKE_INGEST_SESSION_MIB', value: string(ingestionPipelineLimits.sessionMiB) }
+  { name: 'LAKE_INGEST_SCRATCH_MIB', value: string(ingestionPipelineLimits.scratchMiB) }
   { name: 'LAKE_INGEST_PUBLICATION_CONCURRENCY', value: string(ingestionPipelineLimits.publicationConcurrency) }
 ]
 var ingestionEnvironment = concat([

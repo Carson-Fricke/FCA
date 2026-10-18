@@ -1,7 +1,7 @@
 //! Production transport behavior against a loopback provider HTTP service.
 
 use axum::{http::StatusCode, response::IntoResponse, routing::get, Json, Router};
-use lake_providers::{AlpacaTransport, ReqwestTransport, TransportFailure};
+use lake_providers::{AlpacaTransport, ReqwestTransport};
 use serde_json::{json, Value};
 
 #[tokio::test(flavor = "current_thread")]
@@ -35,12 +35,15 @@ async fn concurrent_responses_preserve_decoding_and_http_error_policy() {
     }))
     .await;
     server.abort();
-    assert_eq!(results[0].as_ref().unwrap().body, expected);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&results[0].as_ref().unwrap().body).unwrap(),
+        expected
+    );
     assert_eq!(results[1].as_ref().unwrap().status, 204);
-    assert_eq!(results[1].as_ref().unwrap().body, Value::Null);
-    assert!(matches!(&results[2], Err(TransportFailure::Protocol(_))));
+    assert!(results[1].as_ref().unwrap().body.is_empty());
+    assert_eq!(results[2].as_ref().unwrap().body, b"invalid JSON");
     let limited = results[3].as_ref().unwrap();
     assert_eq!(limited.status, 429);
     assert_eq!(limited.retry_after.as_deref(), Some("2"));
-    assert_eq!(limited.body, Value::Null);
+    assert_eq!(limited.body, b"busy");
 }

@@ -7,3 +7,5 @@ Tests exercise the public application and acquisition boundaries; fake transport
 - `options_delta.rs` — Pure numerical model checks complement the HTTP option-selection behavior suite.
 
 - `columnar.rs` — All-six tick-schema transaction round trips through the canonical writer and verified reader; exact decimals, unsigned IDs, nullable values, deterministic ordering, and fetch progress during publication.
+
+- `streaming.rs` — Oversized-session acquisition with exact decimals, tied timestamps, external merging, page-independent canonical bytes and released resource reservations.

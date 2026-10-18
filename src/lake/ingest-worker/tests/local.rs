@@ -63,6 +63,7 @@ async fn local_worker_publishes_all_datasets_and_retained_admission_survives_hos
     let layout = lake_local::LocalLayout::new(dir.path().join("data"));
     layout.initialize().unwrap();
     let configuration = LocalConfig {
+        host_memory_mib: 8192,
         executable: env!("CARGO_BIN_EXE_lake-ingest-worker").into(),
         provider_env: Some(env_file),
         root: layout.root().into(),
@@ -99,7 +100,7 @@ async fn local_worker_publishes_all_datasets_and_retained_admission_survives_hos
         .unwrap()
         .partitions()
         .unwrap();
-    assert_eq!(partitions.len(), 3);
+    assert_eq!(partitions.len(), 2);
     assert!(partitions
         .iter()
         .all(|partition| partition.record.job_id == "local-worker"));
@@ -114,7 +115,9 @@ async fn local_worker_publishes_all_datasets_and_retained_admission_survives_hos
                 "{:?}",
                 job.record.error_message
             );
-            break;
+            if job.execution_deleted {
+                break;
+            }
         }
         assert!(
             tokio::time::Instant::now() < deadline,
@@ -131,31 +134,28 @@ async fn local_worker_publishes_all_datasets_and_retained_admission_survives_hos
         let reference = partition.reference();
         let persisted = store.get_work(&reference).await.unwrap();
         assert!(persisted.terminal());
+        assert!(
+            persisted.metrics.is_some(),
+            "final counters must survive worker cleanup"
+        );
         assert!(persisted.execution_deleted);
+        assert!(!layout
+            .root()
+            .join("ingestion/scratch")
+            .join(reference.worker_key().unwrap())
+            .exists());
         let log = layout
             .root()
             .join("ingestion/logs")
             .join(format!("{}.log", reference.worker_key().unwrap()));
         let log = std::fs::read_to_string(log).unwrap();
         assert!(log.contains("worker_started"));
-        let settled = log
-            .lines()
-            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-            .find(|event| event["event"] == "worker_settled")
-            .expect("worker persists a structured final stage/resource log");
-        assert_eq!(settled["job_id"], reference.job_id);
-        assert!(
-            settled["pipeline"]["stages"]["network"]["bytes"]
-                .as_u64()
-                .unwrap()
-                > 0
-        );
-        assert!(
-            settled["pipeline"]["resources"]["cpu"]["peak"]
-                .as_u64()
-                .unwrap()
-                > 0
-        );
+        let metrics = persisted
+            .metrics
+            .expect("final counters survive process cleanup");
+        assert!(metrics["worker"]["seconds"].as_f64().unwrap() > 0.0);
+        assert!(metrics["stages"]["network"]["bytes"].as_u64().unwrap() > 0);
+        assert!(metrics["resources"]["cpu"]["peak"].as_u64().unwrap() > 0);
     }
     let catalog = Arc::new(lake_catalog::PublicationCatalog::new(
         Arc::new(lake_storage::LocalFilesystemStore::new(layout.objects())),

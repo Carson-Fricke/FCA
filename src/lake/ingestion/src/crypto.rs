@@ -20,9 +20,8 @@ use lake_providers::{NormalizedCryptoQuote, NormalizedCryptoTrade, ProviderError
 use lake_storage::{ParquetMetadata, StorageCapGuard};
 
 use crate::common::{
-    data_error_message, failures_all_transient, fetch_error_message, fetch_with_transient_retry,
-    normalize_data_types, AtomicIngestCommitter, PartitionWriter, StagedParquetObject,
-    TransientRetry,
+    failures_all_transient, fetch_error_message, fetch_with_transient_retry, normalize_data_types,
+    AtomicIngestCommitter, PartitionWriter, StagedParquetObject, TransientRetry,
 };
 use crate::providers::CryptoDataProvider;
 
@@ -54,12 +53,6 @@ pub struct CryptoIngestTransaction {
     cap_guard: Option<Arc<StorageCapGuard>>,
     retry: TransientRetry,
     clock: CryptoClock,
-}
-
-/// Fetched records for one selected data type.
-enum CryptoRecords {
-    Trades(Vec<NormalizedCryptoTrade>),
-    Quotes(Vec<NormalizedCryptoQuote>),
 }
 
 /// Staged outputs of one transaction, before commit.
@@ -135,24 +128,17 @@ impl CryptoIngestTransaction {
         if let Some(guard) = &self.cap_guard {
             guard.enforce_ingest(0)?;
         }
-        let fetches: Vec<BoxFuture<'_, Result<CryptoRecords, ProviderError>>> = selected
+        let fetches: Vec<BoxFuture<'_, Result<ParquetMetadata, ProviderError>>> = selected
             .iter()
             .map(|data_type| {
                 let data_type = *data_type;
-                let provider = self.provider.as_ref();
-                let pair = pair.as_str();
-                let retry = self.retry;
+                let pair = &pair;
                 Box::pin(async move {
-                    fetch_records(
-                        provider,
-                        data_type,
-                        pair,
-                        session.open_time,
-                        query_end,
-                        retry,
-                    )
+                    fetch_with_transient_retry(self.retry, || {
+                        Box::pin(self.stage_dataset(data_type, pair, session, query_end))
+                    })
                     .await
-                }) as BoxFuture<'_, Result<CryptoRecords, ProviderError>>
+                }) as BoxFuture<'_, Result<ParquetMetadata, ProviderError>>
             })
             .collect();
         let results = join_all(fetches).await;
@@ -167,7 +153,7 @@ impl CryptoIngestTransaction {
             })
             .await;
         }
-        let records: Vec<CryptoRecords> = results
+        let metadata: Vec<ParquetMetadata> = results
             .into_iter()
             .map(|result| result.expect("a successful gather has no provider error"))
             .collect();
@@ -176,7 +162,7 @@ impl CryptoIngestTransaction {
         let session = *session;
         crate::common::blocking_stage(move || {
             let _session_memory = session_memory;
-            transaction.finish(pair, &session, selected, records, query_end)
+            transaction.finish(pair, &session, selected, metadata)
         })
         .await
     }
@@ -187,23 +173,12 @@ impl CryptoIngestTransaction {
         pair: String,
         session: &CoverageSession,
         selected: Vec<DataType>,
-        records: Vec<CryptoRecords>,
-        query_end: DateTime,
+        metadata: Vec<ParquetMetadata>,
     ) -> Result<CryptoIngestResult, DataError> {
-        let staged = match self.stage(&pair, session, &selected, &records, query_end) {
-            Ok(staged) => staged,
-            Err(error) => {
-                self.writer.reset_staged();
-                return self.publish_error(
-                    &pair,
-                    session,
-                    &selected,
-                    data_error_message(&error),
-                    false,
-                );
-            }
+        let staged = StagedCryptoObjects {
+            objects: self.writer.drain_staged(),
+            metadata,
         };
-
         if let Some(guard) = &self.cap_guard {
             let additional_bytes = staged
                 .objects
@@ -240,41 +215,47 @@ impl CryptoIngestTransaction {
         (self.clock)()
     }
 
-    /// Validate, sort, and stage every selected dataset.
-    fn stage(
+    async fn stage_dataset(
         &self,
+        data: DataType,
         pair: &str,
         session: &CoverageSession,
-        selected: &[DataType],
-        records: &[CryptoRecords],
         query_end: DateTime,
-    ) -> Result<StagedCryptoObjects, DataError> {
-        let pipeline = lake_pipeline::Pipeline::global();
-        let _cpu = pipeline.cpu_blocking()?;
-        let mut metadata = Vec::with_capacity(selected.len());
-        for (data_type, records) in selected.iter().zip(records) {
-            let rows = match (data_type, records) {
-                (DataType::Trade, CryptoRecords::Trades(trades)) => {
-                    trade_rows(trades, pair, session, query_end)?
-                }
-                (DataType::Quote, CryptoRecords::Quotes(quotes)) => {
-                    quote_rows(quotes, pair, session, query_end)?
-                }
-                _ => unreachable!("fetch results align with the selected data types"),
-            };
-            metadata.push(self.writer.write(
-                &rows,
-                session.session_date,
-                AssetClass::Crypto,
-                *data_type,
-                None,
-                pair,
-            )?);
+    ) -> Result<ParquetMetadata, ProviderError> {
+        let symbols = [pair.to_string()];
+        let spec = crate::acquisition::StagingSpec {
+            asset: AssetClass::Crypto,
+            data,
+            day: session.session_date,
+            symbol: pair.into(),
+        };
+        let name = pair.to_string();
+        let day = *session;
+        match data {
+            DataType::Trade => {
+                crate::acquisition::stage_pages(
+                    self.provider
+                        .fetch_crypto_trades(&symbols, session.open_time, query_end),
+                    move |rows| trade_rows(&rows, &name, &day, query_end),
+                    self.writer.clone(),
+                    spec,
+                )
+                .await
+            }
+            DataType::Quote => {
+                crate::acquisition::stage_pages(
+                    self.provider
+                        .fetch_crypto_quotes(&symbols, session.open_time, query_end),
+                    move |rows| quote_rows(&rows, &name, &day, query_end),
+                    self.writer.clone(),
+                    spec,
+                )
+                .await
+            }
+            _ => Err(ProviderError::Configuration(
+                "unsupported tick dataset".into(),
+            )),
         }
-        Ok(StagedCryptoObjects {
-            objects: self.writer.drain_staged(),
-            metadata,
-        })
     }
 
     /// Publish error coverage for every selected data type.
@@ -286,6 +267,7 @@ impl CryptoIngestTransaction {
         message: String,
         retryable: bool,
     ) -> Result<CryptoIngestResult, DataError> {
+        self.writer.reset_staged();
         let coverage = selected
             .iter()
             .map(|data_type| {
@@ -312,34 +294,6 @@ impl CryptoIngestTransaction {
             objects: Vec::new(),
             retryable,
         })
-    }
-}
-
-/// Fetch one selected dataset with the transient retry budget applied.
-async fn fetch_records(
-    provider: &dyn CryptoDataProvider,
-    data_type: DataType,
-    pair: &str,
-    start: DateTime,
-    end: DateTime,
-    retry: TransientRetry,
-) -> Result<CryptoRecords, ProviderError> {
-    let pairs = [pair.to_string()];
-    match data_type {
-        DataType::Trade => {
-            fetch_with_transient_retry(retry, || provider.fetch_crypto_trades(&pairs, start, end))
-                .await
-                .map(CryptoRecords::Trades)
-        }
-        DataType::Quote => {
-            fetch_with_transient_retry(retry, || provider.fetch_crypto_quotes(&pairs, start, end))
-                .await
-                .map(CryptoRecords::Quotes)
-        }
-        other => Err(ProviderError::Configuration(format!(
-            "unsupported crypto data type: {}",
-            other.value()
-        ))),
     }
 }
 

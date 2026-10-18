@@ -31,8 +31,7 @@ use lake_providers::{NormalizedOptionQuote, NormalizedOptionTrade, ProviderError
 use lake_storage::ParquetMetadata;
 
 use crate::common::{
-    data_error_message, fetch_error_message, AtomicIngestCommitter, PartitionWriter,
-    StagedParquetObject,
+    fetch_error_message, AtomicIngestCommitter, PartitionWriter, StagedParquetObject,
 };
 
 /// Provider boundary for selected OPRA contracts.
@@ -48,7 +47,7 @@ pub trait OptionMarketDataClient: Send + Sync {
         contracts: &'a [ContractRecord],
         start: DateTime,
         end: DateTime,
-    ) -> BoxFuture<'a, Result<Vec<NormalizedOptionTrade>, ProviderError>>;
+    ) -> lake_providers::RecordStream<'a, NormalizedOptionTrade>;
 
     /// Fetch normalized quotes for selected contracts and a session.
     fn get_option_quotes<'a>(
@@ -56,7 +55,7 @@ pub trait OptionMarketDataClient: Send + Sync {
         contracts: &'a [ContractRecord],
         start: DateTime,
         end: DateTime,
-    ) -> BoxFuture<'a, Result<Vec<NormalizedOptionQuote>, ProviderError>>;
+    ) -> lake_providers::RecordStream<'a, NormalizedOptionQuote>;
 }
 
 /// Published metadata for one OSI contract and session transaction.
@@ -85,12 +84,6 @@ pub struct OptionIngestTransaction {
     client: Arc<dyn OptionMarketDataClient>,
     writer: Arc<dyn PartitionWriter>,
     committer: Arc<dyn AtomicIngestCommitter>,
-}
-
-/// Fetched records for one selected data type.
-enum OptionRecords {
-    Trades(Vec<NormalizedOptionTrade>),
-    Quotes(Vec<NormalizedOptionQuote>),
 }
 
 /// Staged outputs of one transaction, before commit.
@@ -126,7 +119,16 @@ impl OptionIngestTransaction {
     ) -> Result<OptionIngestResult, DataError> {
         let session_memory = lake_pipeline::Pipeline::global().session().await?;
         let requested = normalize_data_types(data_types)?;
-        let results = self.fetch(&contract, session, &requested).await;
+        let fetches: Vec<BoxFuture<'_, Result<ParquetMetadata, ProviderError>>> = requested
+            .iter()
+            .map(|data| {
+                let contract = &contract;
+                let data = *data;
+                Box::pin(async move { self.stage_dataset(data, contract, session).await })
+                    as BoxFuture<'_, _>
+            })
+            .collect();
+        let results = join_all(fetches).await;
 
         if let Some(message) = fetch_error_message(&requested, &results) {
             let transaction = self.clone();
@@ -137,7 +139,7 @@ impl OptionIngestTransaction {
             })
             .await;
         }
-        let records: Vec<OptionRecords> = results
+        let metadata: Vec<ParquetMetadata> = results
             .into_iter()
             .map(|result| result.expect("a successful gather has no provider error"))
             .collect();
@@ -146,7 +148,7 @@ impl OptionIngestTransaction {
         let session = *session;
         crate::common::blocking_stage(move || {
             let _session_memory = session_memory;
-            transaction.finish(contract, &session, requested, records)
+            transaction.finish(contract, &session, requested, metadata)
         })
         .await
     }
@@ -157,29 +159,20 @@ impl OptionIngestTransaction {
         contract: ContractRecord,
         session: &CoverageSession,
         requested: Vec<DataType>,
-        records: Vec<OptionRecords>,
+        metadata: Vec<ParquetMetadata>,
     ) -> Result<OptionIngestResult, DataError> {
-        let staged = match self.stage(&contract, session, &requested, &records) {
-            Ok(staged) => staged,
-            Err(error) => {
-                self.writer.reset_staged();
-                return self.publish_error(
-                    &contract,
-                    session,
-                    &requested,
-                    data_error_message(&error),
-                );
-            }
+        let staged = StagedOptionObjects {
+            objects: self.writer.drain_staged(),
+            metadata,
         };
 
-        let coverage =
-            match coverage_records(&contract, session, &requested, &records, &staged.metadata) {
-                Ok(coverage) => coverage,
-                Err(error) => {
-                    self.writer.reset_staged();
-                    return Err(error);
-                }
-            };
+        let coverage = match coverage_records(&contract, session, &requested, &staged.metadata) {
+            Ok(coverage) => coverage,
+            Err(error) => {
+                self.writer.reset_staged();
+                return Err(error);
+            }
+        };
         let outcome = self.committer.commit(&staged.objects, &coverage);
         self.writer.reset_staged();
         outcome?;
@@ -191,82 +184,46 @@ impl OptionIngestTransaction {
         })
     }
 
-    /// Fetch every requested data type concurrently, errors preserved by
-    /// position exactly like `asyncio.gather(return_exceptions=True)`.
-    async fn fetch(
+    async fn stage_dataset(
         &self,
+        data: DataType,
         contract: &ContractRecord,
         session: &CoverageSession,
-        data_types: &[DataType],
-    ) -> Vec<Result<OptionRecords, ProviderError>> {
-        let fetches: Vec<BoxFuture<'_, Result<OptionRecords, ProviderError>>> = data_types
-            .iter()
-            .map(|data_type| match data_type {
-                DataType::Trade => {
-                    let client = self.client.as_ref();
-                    Box::pin(async move {
-                        let contracts = std::slice::from_ref(contract);
-                        client
-                            .get_option_trades(contracts, session.open_time, session.close_time)
-                            .await
-                            .map(OptionRecords::Trades)
-                    }) as BoxFuture<'_, Result<OptionRecords, ProviderError>>
-                }
-                DataType::Quote => {
-                    let client = self.client.as_ref();
-                    Box::pin(async move {
-                        let contracts = std::slice::from_ref(contract);
-                        client
-                            .get_option_quotes(contracts, session.open_time, session.close_time)
-                            .await
-                            .map(OptionRecords::Quotes)
-                    })
-                }
-                other => Box::pin(async move {
-                    Err(ProviderError::Configuration(format!(
-                        "option data_types must be trades or quotes, not {}",
-                        other.value()
-                    )))
-                }),
-            })
-            .collect();
-        join_all(fetches).await
-    }
-
-    /// Validate, sort, and stage every selected dataset.
-    fn stage(
-        &self,
-        contract: &ContractRecord,
-        session: &CoverageSession,
-        data_types: &[DataType],
-        records: &[OptionRecords],
-    ) -> Result<StagedOptionObjects, DataError> {
-        let pipeline = lake_pipeline::Pipeline::global();
-        let _cpu = pipeline.cpu_blocking()?;
-        let mut metadata = Vec::with_capacity(data_types.len());
-        for (data_type, records) in data_types.iter().zip(records) {
-            let rows = match (data_type, records) {
-                (DataType::Trade, OptionRecords::Trades(trades)) => {
-                    trade_rows(trades, contract, session)?
-                }
-                (DataType::Quote, OptionRecords::Quotes(quotes)) => {
-                    quote_rows(quotes, contract, session)?
-                }
-                _ => unreachable!("fetch results align with the selected data types"),
-            };
-            metadata.push(self.writer.write(
-                &rows,
-                session.session_date,
-                AssetClass::Option,
-                *data_type,
-                None,
-                &contract.symbol,
-            )?);
+    ) -> Result<ParquetMetadata, ProviderError> {
+        let contracts = std::slice::from_ref(contract);
+        let identity = contract.clone();
+        let day = *session;
+        let spec = crate::acquisition::StagingSpec {
+            asset: AssetClass::Option,
+            data,
+            day: session.session_date,
+            symbol: contract.symbol.clone(),
+        };
+        match data {
+            DataType::Trade => {
+                crate::acquisition::stage_pages(
+                    self.client
+                        .get_option_trades(contracts, session.open_time, session.close_time),
+                    move |rows| trade_rows(&rows, &identity, &day),
+                    self.writer.clone(),
+                    spec,
+                )
+                .await
+            }
+            DataType::Quote => {
+                crate::acquisition::stage_pages(
+                    self.client
+                        .get_option_quotes(contracts, session.open_time, session.close_time),
+                    move |rows| quote_rows(&rows, &identity, &day),
+                    self.writer.clone(),
+                    spec,
+                )
+                .await
+            }
+            _ => Err(ProviderError::Configuration(
+                "unsupported option tick dataset".into(),
+            )),
         }
-        Ok(StagedOptionObjects {
-            objects: self.writer.drain_staged(),
-            metadata,
-        })
     }
 
     /// Publish error coverage for every selected data type.
@@ -277,6 +234,7 @@ impl OptionIngestTransaction {
         data_types: &[DataType],
         message: String,
     ) -> Result<OptionIngestResult, DataError> {
+        self.writer.reset_staged();
         let coverage = data_types
             .iter()
             .map(|data_type| {
@@ -341,18 +299,13 @@ fn coverage_records(
     contract: &ContractRecord,
     session: &CoverageSession,
     data_types: &[DataType],
-    records: &[OptionRecords],
     metadata: &[ParquetMetadata],
 ) -> Result<Vec<CoverageRecord>, DataError> {
     data_types
         .iter()
-        .zip(records)
         .zip(metadata)
-        .map(|((data_type, records), metadata)| {
-            let row_count = match records {
-                OptionRecords::Trades(trades) => trades.len() as u64,
-                OptionRecords::Quotes(quotes) => quotes.len() as u64,
-            };
+        .map(|(data_type, metadata)| {
+            let row_count = metadata.rows;
             CoverageRecord::new(
                 AssetClass::Option,
                 *data_type,

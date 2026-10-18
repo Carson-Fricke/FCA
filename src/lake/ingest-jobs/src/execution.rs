@@ -17,6 +17,7 @@ pub enum WorkerSpec {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LocalConfig {
+    pub host_memory_mib: usize,
     pub executable: std::path::PathBuf,
     pub provider_env: Option<std::path::PathBuf>,
     pub root: std::path::PathBuf,

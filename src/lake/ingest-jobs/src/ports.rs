@@ -27,19 +27,13 @@ pub struct ActiveJob {
 }
 
 #[async_trait::async_trait]
-pub trait JobPersistence: Clone + Send + Sync + 'static {
+pub trait JobPersistence: crate::RequestAuthority {
     type Owner: JobOwnership + 'static;
     async fn admit(&self, job: DurableJob) -> Result<DurableJob, DataError>;
     async fn get(&self, id: &str) -> Result<DurableJob, DataError>;
     async fn admit_work(&self, work: DurableJob) -> Result<DurableJob, DataError>;
     async fn get_work(&self, work: &WorkRef) -> Result<DurableJob, DataError>;
     async fn own_work(&self, work: &WorkRef) -> Result<Self::Owner, DataError>;
-    async fn reserve_requests(
-        &self,
-        scope: &str,
-        limit: u32,
-        count: u32,
-    ) -> Result<crate::BudgetGrant, DataError>;
     async fn own(&self, id: &str) -> Result<Self::Owner, DataError>;
     async fn dispatch_lock(&self) -> Result<Self::Owner, DataError>;
     async fn active_jobs(&self) -> Result<Vec<ActiveJob>, DataError>;
@@ -61,4 +55,15 @@ pub async fn while_owned<T>(
             result = &mut work => return result,
         }
     }
+}
+
+/// Rolling provider allowance authority, independent of execution lifecycle storage.
+#[async_trait::async_trait]
+pub trait RequestAuthority: Clone + Send + Sync + 'static {
+    async fn reserve_requests(
+        &self,
+        scope: &str,
+        limit: u32,
+        count: u32,
+    ) -> Result<crate::BudgetGrant, DataError>;
 }

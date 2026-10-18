@@ -41,7 +41,10 @@ impl AlpacaTransport for Provider {
                 allocation: None,
                 status: if attempt == 0 { 503 } else { 200 },
                 retry_after: None,
-                body: serde_json::json!({"quotes":{"AAPL":[]},"next_page_token":null}),
+                body: serde_json::to_vec(
+                    &serde_json::json!({"quotes":{"AAPL":[]},"next_page_token":null}),
+                )
+                .unwrap(),
             })
         })
     }

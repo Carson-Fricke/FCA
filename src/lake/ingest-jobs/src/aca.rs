@@ -80,6 +80,7 @@ impl AcaConfig {
                         | "LAKE_INGEST_MAX_RESPONSE_MIB"
                         | "LAKE_INGEST_MEMORY_MIB"
                         | "LAKE_INGEST_SESSION_MIB"
+                        | "LAKE_INGEST_SCRATCH_MIB"
                         | "LAKE_INGEST_PUBLICATION_CONCURRENCY"
                         | "LAKE_STORAGE_ACCOUNT_NAME"
                         | "LAKE_STORAGE_CONTAINER"

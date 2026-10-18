@@ -7,14 +7,18 @@ async fn independent_budgets_backpressure_release_and_cancel_waiters() {
     let limits = Limits {
         cpu_slots: 1,
         publication_slots: 1,
-        response_bytes: 8 * 1024 * 1024,
+        response_bytes: 24 * 1024 * 1024,
         max_response_bytes: 1024 * 1024,
         session_bytes: 1024 * 1024,
         max_session_bytes: 1024 * 1024,
+        scratch_bytes: 1024,
     };
     let pipeline = Pipeline::new(limits).unwrap();
     let cpu = pipeline.cpu().await.unwrap();
-    let response = pipeline.response().await.unwrap();
+    let mut response = Vec::new();
+    for _ in 0..6 {
+        response.push(pipeline.response().await.unwrap());
+    }
     let session = pipeline.session().await.unwrap();
     assert!(
         tokio::time::timeout(Duration::from_millis(5), pipeline.cpu())

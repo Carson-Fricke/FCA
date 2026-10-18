@@ -82,9 +82,9 @@ async fn blob_date_controls_rolling_expiry_even_when_workers_have_a_different_wa
         let state = authority.state.lock().unwrap();
         let state = state.as_ref().unwrap();
         assert_eq!(state.observed_at, 42_000_000);
-        assert_eq!(state.charges[0].release_after, 104_000_000);
+        assert_eq!(state.charges[0].release_after, 108_000_000);
     }
-    authority.seconds.store(103, Ordering::SeqCst);
+    authority.seconds.store(107, Ordering::SeqCst);
     assert_eq!(
         store
             .reserve_requests(&scope, 10000, 1)
@@ -93,7 +93,7 @@ async fn blob_date_controls_rolling_expiry_even_when_workers_have_a_different_wa
             .count,
         0
     );
-    authority.seconds.store(104, Ordering::SeqCst);
+    authority.seconds.store(108, Ordering::SeqCst);
     assert_eq!(
         store
             .reserve_requests(&scope, 10000, 10000)
