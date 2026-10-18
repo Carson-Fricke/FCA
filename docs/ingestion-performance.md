@@ -1,5 +1,8 @@
 # Ingestion measurement and resource controls
 
+See the [two-month local/Azure verification](../.github/verification/ingestion-streaming-2026-10-17.md)
+for measured throughput, startup skew, publication parity, and reader timings.
+
 Workers emit JSON `ingestion_metrics` every ten seconds and a final `worker_settled`
 snapshot, with the retained `job_id`, internal partition and elapsed wall seconds.
 Local logs are under the selected lake root's `ingestion/logs/`; remote events are
@@ -11,8 +14,10 @@ Each stage records calls, service seconds, payload bytes, maximum single payload
 provider-secret setup, coverage discovery, progress persistence, network, JSON
 decode, typed normalization, validation, sorting, Arrow projection,
 bar derivation, scratch spilling, Parquet, hashing, upload, manifest publication, lease and rate waits.
-Rate metrics distinguish cache waiting, authority RPCs, CAS retry backoff, exhausted
-authority capacity, and local pacing.
+Rate metrics distinguish cache waiting, authority RPCs, CAS retry backoff,
+zero-grant authority retry delays, and local pacing. `rate_capacity` records
+those retry delays; a zero grant can mean exhausted allowance or the authority's
+backward-clock guard, so that counter alone does not prove allowance exhaustion.
 Stage service times overlap across tasks and must not be summed as wall time.
 Counters describe work at stage boundaries, including attempted uploads; committed
 rows and the execution outcome remain the job progress/state authority. Early worker
