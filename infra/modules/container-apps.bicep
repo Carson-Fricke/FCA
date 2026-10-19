@@ -359,6 +359,7 @@ resource environmentDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-0
 
 // Coordination is finite and provider-free. The API can scale to zero without stranding durable work.
 resource ingestionDispatcher 'Microsoft.App/jobs@2025-07-01' = {
+  dependsOn: [ingestionJob]
   name: '${quantApiAppName}-dispatch'
   location: location
   tags: tags
@@ -432,6 +433,7 @@ resource ingestionJob 'Microsoft.App/jobs@2025-07-01' = {
 }
 
 resource quantApiApp 'Microsoft.App/containerApps@2025-07-01' = {
+  dependsOn: [ingestionJob, backtestJob]
   name: quantApiAppName
   location: location
   tags: tags
@@ -674,6 +676,7 @@ resource cryptoTraderApp 'Microsoft.App/containerApps@2025-07-01' = if (enableCr
 // Finite, low-resource recovery control survives API scale-to-zero. Capacity
 // hints may overlap; fenced queue claims prevent duplicate engine execution.
 resource executionDispatcher 'Microsoft.App/jobs@2025-07-01' = {
+  dependsOn: [backtestJob]
   name: '${quantApiAppName}-execution-dispatch'
   location: location
   tags: tags

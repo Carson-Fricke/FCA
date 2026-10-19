@@ -13,6 +13,8 @@ market acquisition in `lake/hosted`. The API never executes authored code.
 - `validation.rs`: runs compiler/loading/constructor validation in a bounded child with a deadline. The existing provenance-keyed validation service retains complete result caching in the parent.
 
 One caller-allocated `job_id` survives admission, worker ownership and results.
+REST and MCP admission use the same resolved configuration digest and frozen
+input, so changing transport does not create a false conflict for identical work.
 File-based CLI/MCP composition resolves and embeds source before admission;
 HTTP accepts inline source only and rejects process-local source paths.
 Running work whose owner expires becomes interrupted; recovery never queues it

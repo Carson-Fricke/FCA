@@ -66,12 +66,17 @@ fn streamed_replay_preserves_the_dispatch_hash_and_exact_valuation_history() {
     let factory = Arc::new(move || {
         Ok(Box::new(events.clone().into_iter().map(Ok)) as backtest::backtest::stream::Events)
     });
+    let progress = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let received = progress.clone();
     let (source, bars, sessions) = StreamedReplay::scan(
         factory,
         memory.source_id.clone(),
         config.start_ns,
         config.end_ns,
-        None,
+        Some(Arc::new(move |snapshot| {
+            received.lock().unwrap().push(snapshot);
+            Ok(())
+        })),
     )
     .unwrap();
     assert!(bars.is_empty());
@@ -89,6 +94,13 @@ fn streamed_replay_preserves_the_dispatch_hash_and_exact_valuation_history() {
     let streamed = run(&config, &stream);
     assert_eq!(baseline.dispatch_hash, streamed.dispatch_hash);
     assert_eq!(baseline.market_event_count, streamed.market_event_count);
+    let last = progress.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(
+        last.stage,
+        harness_contracts::progress::ExecutionStage::RunningBacktest
+    );
+    assert_eq!(last.rows, streamed.market_event_count);
+    assert!(last.completed);
     assert_eq!(
         baseline
             .valuations

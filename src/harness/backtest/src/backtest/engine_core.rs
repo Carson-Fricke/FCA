@@ -2170,6 +2170,18 @@ pub fn run_native_engine(
     let order_count: u64 = order_counts.values().sum();
     verify_replay(fixture, preflight, market_event_count)?;
     let fee_totals = aggregate_fees(&assessments);
+    if let Some(report) = fixture.stream.as_ref().and_then(|s| s.reporter.as_ref()) {
+        let mut progress = harness_contracts::progress::ExecutionProgress::stage(
+            if configuration.shell == "study" {
+                harness_contracts::progress::ExecutionStage::RunningStudy
+            } else {
+                harness_contracts::progress::ExecutionStage::RunningBacktest
+            },
+        );
+        progress.rows = market_event_count;
+        progress.completed = true;
+        report(progress).map_err(BacktestError::DataPreflight)?;
+    }
     Ok(BacktestOutcome {
         manifest,
         status: BacktestStatus::Completed,

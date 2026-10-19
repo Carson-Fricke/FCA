@@ -196,7 +196,10 @@ day includes its current query endpoint when that endpoint precedes the close.
 
 ## Deployment and cutover
 
-The combined quant API hosts `/market-data` at 1 vCPU / 2 GiB. Azure's finite
+The combined quant API hosts `/market-data` at 1 vCPU / 2 GiB.
+API activation follows both worker Job template updates; scheduled dispatchers
+also depend on their worker templates. A newly active API cannot dispatch into
+an older template during deployment. Azure's finite
 ingestion Job uses the narrow worker image at 4 vCPU / 8 GiB on Consumption,
 with platform replica retries disabled. Defaults are eight concurrent worker
 executions, two sessions per worker, 31-day partitions and an 86,400-second

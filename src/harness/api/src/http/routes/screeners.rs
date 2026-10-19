@@ -51,17 +51,13 @@ async fn launch_screener(State(state): State<AppState>, body: Bytes) -> Result<R
         };
         let job_id = configuration.job_id.clone();
         let now = state.clock.now();
-        let mut record = JobRecord::new(
-            &job_id,
-            JobKind::Screen,
-            &configuration.configuration_digest,
-            now,
-        );
+        let mut record =
+            JobRecord::new(&job_id, JobKind::Screen, screen.configuration_digest(), now);
         record.strategy_id = screen.definition_id.clone();
         record.data_start =
             chrono::NaiveDate::parse_from_str(&screen.window_start(), "%Y-%m-%d").ok();
         record.data_end = chrono::NaiveDate::parse_from_str(&screen.window_end(), "%Y-%m-%d").ok();
-        record.configuration_digest = Some(configuration.configuration_digest.clone());
+        record.configuration_digest = Some(screen.configuration_digest());
         record.accepted_input = screen.submission_document();
         match state.job_store.admit(record) {
             Err(StoreError::Conflict(detail)) => return Err(ApiError::job_conflict(&detail)),

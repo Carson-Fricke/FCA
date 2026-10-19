@@ -67,15 +67,15 @@ fn launch_with_shell(
     }
     let job_id = configuration.job_id.clone();
     let now = state.clock.now();
-    let mut record = JobRecord::new(&job_id, kind, &configuration.configuration_digest, now);
+    let digest =
+        backtest::backtest::config::BacktestConfig::from_yaml(&configuration.document.to_string())
+            .map_err(|e| ApiError::validation_error(&e.to_string()))?
+            .configuration_hash();
+    let mut record = JobRecord::new(&job_id, kind, &digest, now);
     record.strategy_id = configuration.strategy_ids.join(",");
     record.data_start = configuration.data_start;
     record.data_end = configuration.data_end;
-    record.configuration_digest = Some(
-        backtest::backtest::config::BacktestConfig::from_yaml(&configuration.document.to_string())
-            .map_err(|e| ApiError::validation_error(&e.to_string()))?
-            .configuration_hash(),
-    );
+    record.configuration_digest = Some(digest);
     record.accepted_input = configuration.document.clone();
     match state.job_store.admit(record) {
         Err(StoreError::Conflict(detail)) => return Err(ApiError::job_conflict(&detail)),

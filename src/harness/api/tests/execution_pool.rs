@@ -72,6 +72,18 @@ async fn lost_capacity_hint_keeps_one_queryable_execution_and_interruption_never
     assert_eq!(receipt["job_id"], "retained-job");
     assert_eq!(receipt["state"], "queued");
     assert_eq!(post(&api, &input).await.1, receipt);
+    let submitted = directory.path().join("submission.json");
+    std::fs::write(&submitted, input.to_string()).unwrap();
+    let local = api::local::NativeBacktestSubmitter::new(Arc::new(store.clone()), wake.clone());
+    let joined = mcp::tools::BacktestSubmitter::submit(
+        &local,
+        submitted.to_str().unwrap(),
+        None,
+        Some("retained-job"),
+    )
+    .unwrap();
+    assert_eq!(joined["state"], "queued");
+    assert_eq!(joined["job_id"], receipt["job_id"]);
     assert_eq!(wake.0.load(Ordering::SeqCst), 1);
     let mut changed = input.clone();
     changed["end"] = json!("2024-01-02T15:01:00Z");
