@@ -677,7 +677,7 @@ resource cryptoTraderApp 'Microsoft.App/containerApps@2025-07-01' = if (enableCr
 // hints may overlap; fenced queue claims prevent duplicate engine execution.
 resource executionDispatcher 'Microsoft.App/jobs@2025-07-01' = {
   dependsOn: [backtestJob]
-  name: '${quantApiAppName}-execution-dispatch'
+  name: '${quantApiAppName}-exec'
   location: location
   tags: tags
   identity: { type: 'UserAssigned', userAssignedIdentities: { '${quantIdentityResourceId}': {} } }
