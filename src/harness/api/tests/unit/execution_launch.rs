@@ -1,6 +1,21 @@
 //! Pure Azure protocol identity validation; execution ownership is covered at HTTP.
-use super::acknowledged_execution;
+use super::{acknowledged_execution, start_template};
 use serde_json::json;
+
+#[test]
+fn job_start_uses_only_the_execution_wire_schema() {
+    let container = json!({"name":"worker","image":"repo@sha256:abc","command":["sh"],
+        "args":["exec harness-worker"],"env":[],"resources":{"cpu":4,"memory":"8Gi"}});
+    let mut definition = json!({"containers":[container],"volumes":[],"initContainers":null});
+    definition["containers"][0]["probes"] = json!([]);
+    definition["containers"][0]["volumeMounts"] = json!(null);
+    assert_eq!(
+        start_template(&definition).unwrap(),
+        json!({"containers":[container]})
+    );
+    definition["volumes"] = json!([{"name":"scratch"}]);
+    assert!(start_template(&definition).is_err());
+}
 
 #[test]
 fn minimal_azure_acknowledgements_resolve_only_one_scoped_execution() {

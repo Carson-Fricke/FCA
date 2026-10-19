@@ -439,7 +439,8 @@ jobs:
           az containerapp job show --name "$backtest_job_name" \
             --resource-group "$AZURE_RESOURCE_GROUP" --query properties.template --output json \
             | jq --arg id "$smoke_job_id" \
-              '.containers[0].args = ["export IDENTITY_ENDPOINT=\"$IDENTITY_ENDPOINT?client_id=$AZURE_CLIENT_ID\"; exec harness-worker --smoke"] |
+              '{containers: [.containers[] | {name, image, command, args, env, resources}]} |
+               .containers[0].args = ["export IDENTITY_ENDPOINT=\"$IDENTITY_ENDPOINT?client_id=$AZURE_CLIENT_ID\"; exec harness-worker --smoke"] |
                .containers[0].resources = {cpu: 0.25, memory: "0.5Gi"} |
                .containers[0].env += [{name: "HARNESS_SMOKE_JOB_ID", value: $id}]' > "$template_file"
           execution_name="$(az rest --method post \

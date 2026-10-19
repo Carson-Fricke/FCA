@@ -8,7 +8,7 @@ market acquisition in `lake/hosted`. The API never executes authored code.
 - `backend.rs`: implements atomic filesystem metadata and leased Azure Blob metadata, plus bounded artifact transfers.
 - `store.rs`: retains immutable accepted input, conditional claims, renewable ownership, interrupted recovery and artifact inventories under `execution/`.
 - `dispatch.rs`: adapts admitted submissions to coalesced capacity notifications; notification loss leaves work queued.
-- `launch.rs`: reserves global startup capacity before launching a finite process or a digest-matched ACA Job. Minimal Azure name/ID acknowledgements are scoped and verified through an exact execution GET. Unknown starts retain their reservation and are never retried.
+- `launch.rs`: reserves global startup capacity before launching a finite process or a digest-matched ACA Job. Job definitions are projected to Azure's execution-only start schema. Minimal Azure name/ID acknowledgements are scoped and verified through an exact execution GET. Unknown starts retain their reservation and are never retried.
 - `worker.rs`: consumes startup reservations once, claims queued work, renews ownership, publishes results and exits. Dispatch and smoke modes only observe/notify durable work.
 - `validation.rs`: runs compiler/loading/constructor validation in a bounded child with a deadline. The existing provenance-keyed validation service retains complete result caching in the parent.
 

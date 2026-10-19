@@ -123,10 +123,10 @@ impl AzureStart {
         if !expected.contains("@sha256:") {
             return Err("execution image must be digest-pinned".into());
         }
-        let template = job
-            .pointer("/properties/template")
-            .cloned()
-            .ok_or("execution Job has no template")?;
+        let template = start_template(
+            job.pointer("/properties/template")
+                .ok_or("execution Job has no template")?,
+        )?;
         let containers = template["containers"]
             .as_array()
             .ok_or("execution Job has no containers")?;
@@ -189,6 +189,36 @@ impl AzureStart {
         }
         Ok(())
     }
+}
+
+// Job definitions include volumes, probes and other fields which are not part
+// of StartJobExecutionTemplate. Project the documented execution wire contract.
+fn start_template(definition: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let containers = definition["containers"]
+        .as_array()
+        .ok_or("execution Job has no containers")?;
+    if definition["initContainers"]
+        .as_array()
+        .is_some_and(|rows| !rows.is_empty())
+        || definition["volumes"]
+            .as_array()
+            .is_some_and(|rows| !rows.is_empty())
+    {
+        return Err("execution workers must not require volumes or init containers".into());
+    }
+    let containers: Vec<_> = containers
+        .iter()
+        .map(|container| {
+            let mut projected = serde_json::Map::new();
+            for field in ["name", "image", "command", "args", "env", "resources"] {
+                if let Some(value) = container.get(field).filter(|v| !v.is_null()) {
+                    projected.insert(field.into(), value.clone());
+                }
+            }
+            serde_json::Value::Object(projected)
+        })
+        .collect();
+    Ok(serde_json::json!({"containers":containers}))
 }
 
 fn acknowledged_execution(resource: &str, value: &serde_json::Value) -> Result<String, String> {
