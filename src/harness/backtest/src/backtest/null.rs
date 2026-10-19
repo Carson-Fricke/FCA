@@ -57,6 +57,9 @@ pub fn apply_null_transform(
                 .push(index);
         }
     }
+    if let Some(stream) = &fixture.stream {
+        symbols.extend(stream.evidence.symbols.iter().cloned());
+    }
     if symbols.is_empty() {
         return Err(BacktestError::DataPreflight(
             "null permutation requires a nonempty return series".into(),
@@ -114,6 +117,61 @@ pub fn apply_null_transform(
         references.insert(symbol.clone(), reference);
     }
 
+    if let Some(source) = &fixture.stream {
+        let reporter = source.reporter.clone();
+        let source = source.clone();
+        let references = std::sync::Arc::new(references);
+        let factory = std::sync::Arc::new(move || {
+            let references = references.clone();
+            Ok(Box::new(source.open()?.map(move |event| {
+                let mut event = event?;
+                let symbol = event.symbol().to_string();
+                let timestamp = event.timestamp_ns();
+                let (synthetic, original) = tick_reference(&references[&symbol], timestamp);
+                match &mut event {
+                    MarketEvent::Bar {
+                        open,
+                        high,
+                        low,
+                        close,
+                        ..
+                    } => {
+                        *open = scale_price(*open, synthetic, original, &symbol)?;
+                        *high = scale_price(*high, synthetic, original, &symbol)?;
+                        *low = scale_price(*low, synthetic, original, &symbol)?;
+                        *close = scale_price(*close, synthetic, original, &symbol)?;
+                    }
+                    MarketEvent::Quote { bid, ask, .. } => {
+                        require_positive_tick(*bid, "bid", &symbol, timestamp)?;
+                        require_positive_tick(*ask, "ask", &symbol, timestamp)?;
+                        *bid = scale_price(*bid, synthetic, original, &symbol)?;
+                        *ask = scale_price(*ask, synthetic, original, &symbol)?;
+                    }
+                    MarketEvent::Trade { price, .. } => {
+                        require_positive_tick(*price, "trade price", &symbol, timestamp)?;
+                        *price = scale_price(*price, synthetic, original, &symbol)?;
+                    }
+                }
+                Ok(event)
+            })) as super::stream::Events)
+        });
+        let (stream, events, sessions) = super::stream::StreamedReplay::scan(
+            factory,
+            fixture.source_id.clone(),
+            configuration.start_ns,
+            configuration.end_ns,
+            reporter,
+        )?;
+        return Ok(ReplayFixture {
+            fingerprints: stream.evidence.fingerprints.clone(),
+            stream: Some(stream),
+            events,
+            sessions,
+            source_id: fixture.source_id.clone(),
+            symbols: fixture.symbols.clone(),
+            expected_data_fingerprint: fixture.expected_data_fingerprint.clone(),
+        });
+    }
     let mut events = fixture.events.clone();
     for (index, event) in events.iter_mut().enumerate() {
         match event {
@@ -159,6 +217,7 @@ pub fn apply_null_transform(
 
     let fingerprints = ReplayFingerprints::of_events(&events);
     Ok(ReplayFixture {
+        stream: None,
         sessions: fixture.sessions.clone(),
         events,
         source_id: fixture.source_id.clone(),

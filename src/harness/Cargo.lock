@@ -137,6 +137,8 @@ name = "api"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "azure_core",
+ "azure_identity",
  "backtest",
  "chrono",
  "clap",
@@ -149,6 +151,8 @@ dependencies = [
  "http-body-util",
  "lake-contracts",
  "lake-hosted",
+ "lake-storage",
+ "libc",
  "live",
  "marketdata",
  "mcp",
@@ -157,9 +161,12 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
  "tower",
  "ureq 2.12.1",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -817,6 +824,8 @@ dependencies = [
  "parquet",
  "serde",
  "serde_json",
+ "tempfile",
+ "zstd",
 ]
 
 [[package]]

@@ -445,6 +445,89 @@ impl crate::JobPersistence for JobStore {
     async fn dispatch_lock(&self) -> Result<OwnedJob, DataError> {
         self.dispatch_lock().await
     }
+    async fn pending_work(&self) -> Result<Vec<crate::WorkRef>, DataError> {
+        #[derive(serde::Deserialize)]
+        struct Page {
+            #[serde(rename = "Blobs")]
+            blobs: Blobs,
+            #[serde(rename = "NextMarker", default)]
+            marker: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct Blobs {
+            #[serde(rename = "Blob", default)]
+            items: Vec<Blob>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Blob {
+            #[serde(rename = "Name")]
+            name: String,
+            #[serde(rename = "Metadata")]
+            metadata: Option<Metadata>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Metadata {
+            active: String,
+            dispatched: String,
+        }
+        let mut marker = String::new();
+        let mut out = Vec::new();
+        loop {
+            let response = self
+                .request(reqwest::Method::GET, "")
+                .await?
+                .query(&[
+                    ("restype", "container"),
+                    ("comp", "list"),
+                    ("prefix", "ingestion/partitions/"),
+                    ("include", "metadata"),
+                    ("marker", marker.as_str()),
+                ])
+                .send()
+                .await
+                .map_err(io)?;
+            let payload = success(response).await?.text().await.map_err(io)?;
+            let page: Page = quick_xml::de::from_str(&payload).map_err(io)?;
+            for blob in page.blobs.items {
+                if !blob.name.ends_with(".json") {
+                    continue;
+                }
+                let metadata = blob.metadata.ok_or_else(|| {
+                    DataError::Protocol("ingestion chunk metadata is missing".into())
+                })?;
+                if metadata.active == "false" || metadata.dispatched == "true" {
+                    continue;
+                }
+                if metadata.active != "true" || metadata.dispatched != "false" {
+                    return Err(DataError::Protocol(
+                        "invalid ingestion chunk metadata".into(),
+                    ));
+                }
+                let address = blob
+                    .name
+                    .strip_prefix("ingestion/partitions/")
+                    .and_then(|s| s.strip_suffix(".json"))
+                    .and_then(|s| s.split_once('/'))
+                    .ok_or_else(|| DataError::Protocol("invalid chunk path".into()))?;
+                let reference = crate::WorkRef {
+                    job_id: address.0.into(),
+                    partition: Some(address.1.into()),
+                };
+                reference.path()?;
+                out.push(reference);
+            }
+            if page.marker.is_empty() {
+                break;
+            }
+            if marker == page.marker {
+                return Err(DataError::Protocol(
+                    "Azure repeated pending-work cursor".into(),
+                ));
+            }
+            marker = page.marker;
+        }
+        Ok(out)
+    }
     async fn active_jobs(&self) -> Result<Vec<ActiveJob>, DataError> {
         self.active_jobs().await
     }

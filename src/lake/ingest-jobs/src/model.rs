@@ -29,6 +29,9 @@ pub struct DurableJob {
     pub partition: Option<String>,
     pub dispatch_started: bool,
     pub dispatched_at: Option<i64>,
+    /// The finite container/process initially dispatched for this chunk.
+    #[serde(deserialize_with = "serde::Deserialize::deserialize")]
+    pub executor: Option<WorkRef>,
     pub execution_deleted: bool,
     pub result: Option<serde_json::Value>,
     #[serde(deserialize_with = "serde::Deserialize::deserialize")]
@@ -97,6 +100,7 @@ impl DurableJob {
             dispatch_started: false,
             dispatched_at: None,
             execution_deleted: false,
+            executor: None,
             result: None,
             metrics: None,
         })
@@ -170,11 +174,16 @@ impl DurableJob {
             }
             work.extend(parts);
         }
-        let lane_count = work.len().min(self.execution.max_workers().max(1));
-        let mut lanes = vec![Vec::new(); lane_count];
-        for (index, request) in work.into_iter().enumerate() {
-            lanes[index % lane_count].push(request);
-        }
+        // Tiny bar inputs share one startup. Tick chunks remain independently
+        // claimable so already-running workers can balance the tail dynamically.
+        let bars = work
+            .iter()
+            .all(|r| matches!(r,WorkRequest::Dataset{data_type,..} if data_type=="bars"));
+        let lanes = if bars {
+            vec![work]
+        } else {
+            work.into_iter().map(|request| vec![request]).collect()
+        };
         let mut work = Vec::new();
         for requests in lanes {
             let bytes = serde_json::to_vec(&requests).map_err(DataError::io)?;
@@ -185,6 +194,7 @@ impl DurableJob {
             partition.record.updated_at = self.record.created_at;
             partition.record.progress = None;
             partition.record.error_message = None;
+            partition.executor = None;
             partition.dispatch_started = false;
             partition.dispatched_at = None;
             partition.execution_deleted = false;
@@ -204,6 +214,8 @@ impl DurableJob {
             || self.record.created_at != next.record.created_at
             || (self.dispatch_started && !next.dispatch_started)
             || (self.dispatched_at.is_some() && self.dispatched_at != next.dispatched_at)
+            || (self.executor.is_some() && self.executor != next.executor)
+            || (next.dispatch_started && next.partition.is_some() && next.executor.is_none())
             || (self.execution_deleted && !next.execution_deleted)
             || (self.terminal()
                 && (self.record != next.record

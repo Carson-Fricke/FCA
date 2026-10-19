@@ -472,6 +472,157 @@ pub fn equity_curve_metrics(points: &[EquityPoint]) -> EquityMetrics {
     }
 }
 
+/// Exact full-resolution metrics over a repeatable bounded reader. The second
+/// pass preserves the existing decimal mean and ordered f64 deviation sum.
+pub fn equity_curve_metrics_stream<F, I, E>(read: F) -> Result<EquityMetrics, E>
+where
+    F: Fn() -> Result<I, E>,
+    I: Iterator<Item = Result<EquityPoint, E>>,
+{
+    let mut first = None;
+    let mut last: Option<EquityPoint> = None;
+    let mut count = 0usize;
+    let mut negative = false;
+    let mut zero_predecessor = false;
+    let mut sum = Ok(Decimal18::ZERO);
+    let mut peak = Decimal18::ZERO;
+    let mut peak_ts = 0;
+    let mut opened = None;
+    let mut closed = 0;
+    let mut duration_overflow = false;
+    let mut worst = Ok(Decimal18::ZERO);
+    for point in read()? {
+        let point = point?;
+        negative |= point.equity.is_negative();
+        if first.is_none() {
+            first = Some(point);
+            peak = point.equity;
+            peak_ts = point.timestamp_ns;
+        }
+        if let Some(previous) = last {
+            zero_predecessor |= previous.equity.is_zero();
+            sum = sum.and_then(|total| {
+                div(point.equity, previous.equity, "sharpe_per_sample")
+                    .and_then(|r| sub(r, Decimal18::ONE, "sharpe_per_sample"))
+                    .and_then(|r| add(total, r, "sharpe_per_sample"))
+            });
+            if point.equity >= peak {
+                if let Some(start) = opened.take() {
+                    match span_ns(start, point.timestamp_ns) {
+                        Ok(span) => closed = closed.max(span),
+                        Err(_) => duration_overflow = true,
+                    }
+                }
+                peak = point.equity;
+                peak_ts = point.timestamp_ns;
+            } else if opened.is_none() {
+                opened = Some(peak_ts);
+            }
+        }
+        if peak.is_positive() && point.equity < peak {
+            worst = worst.and_then(|old| {
+                div(point.equity, peak, "max_drawdown")
+                    .and_then(|r| sub(Decimal18::ONE, r, "max_drawdown"))
+                    .map(|dip| old.max(dip))
+            });
+        }
+        last = Some(point);
+        count += 1;
+    }
+    let endpoints = first
+        .into_iter()
+        .chain(last.filter(|_| count > 1))
+        .collect::<Vec<_>>();
+    let total_return = if negative && count >= 2 && endpoints[0].equity.is_positive() {
+        Err("negative_equity")
+    } else {
+        total_return(&endpoints).unwrap_or(Err("arithmetic_overflow"))
+    };
+    let cagr = if negative && count >= 2 && endpoints[0].equity.is_positive() {
+        Err("negative_equity")
+    } else {
+        cagr(&endpoints).unwrap_or(Err("arithmetic_overflow"))
+    };
+    let max_drawdown = if negative {
+        Err("negative_equity")
+    } else {
+        worst.map_err(|_| "arithmetic_overflow")
+    };
+    let mut drawdown = if negative {
+        Err("negative_equity")
+    } else if duration_overflow {
+        Err("arithmetic_overflow")
+    } else {
+        Ok(DrawdownSpan {
+            duration_ns: closed,
+            recovered: true,
+        })
+    };
+    if !negative && !duration_overflow {
+        if let (Some(start), Some(last)) = (opened, last) {
+            match span_ns(start, last.timestamp_ns) {
+                Ok(span) if span > closed => {
+                    drawdown = Ok(DrawdownSpan {
+                        duration_ns: span,
+                        recovered: false,
+                    })
+                }
+                Err(_) => drawdown = Err("arithmetic_overflow"),
+                _ => {}
+            }
+        }
+    }
+    let sharpe_per_sample = if count < 4 {
+        Err("fewer_than_three_returns")
+    } else if negative || zero_predecessor {
+        Err("negative_equity")
+    } else if let Ok(sum) = sum {
+        if let Ok(mean) = div(
+            sum,
+            Decimal18::from_i64((count - 1) as i64),
+            "sharpe_per_sample",
+        ) {
+            let mut previous: Option<EquityPoint> = None;
+            let mut squares = Ok(0.0);
+            for point in read()? {
+                let point = point?;
+                if let Some(previous) = previous {
+                    squares = squares.and_then(|s| {
+                        div(point.equity, previous.equity, "sharpe_per_sample")
+                            .and_then(|r| sub(r, Decimal18::ONE, "sharpe_per_sample"))
+                            .and_then(|r| sub(r, mean, "sharpe_per_sample"))
+                            .map(|d| s + d.to_f64() * d.to_f64())
+                    });
+                }
+                previous = Some(point);
+            }
+            match squares {
+                Ok(s) if s <= 0.0 => Err("zero_volatility"),
+                Ok(s) => {
+                    let result = mean.to_f64() / (s / (count - 2) as f64).sqrt();
+                    if result.is_finite() {
+                        Ok(result)
+                    } else {
+                        Err("arithmetic_overflow")
+                    }
+                }
+                Err(_) => Err("arithmetic_overflow"),
+            }
+        } else {
+            Err("arithmetic_overflow")
+        }
+    } else {
+        Err("arithmetic_overflow")
+    };
+    Ok(EquityMetrics {
+        total_return,
+        cagr,
+        max_drawdown,
+        drawdown,
+        sharpe_per_sample,
+    })
+}
+
 /// Mean of a slice of decimals, or `None` when it is empty.
 fn mean(values: &[Decimal18], metric: &'static str) -> Result<Option<Decimal18>, MetricsError> {
     if values.is_empty() {

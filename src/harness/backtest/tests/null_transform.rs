@@ -112,6 +112,7 @@ fn sample_events(config: &BacktestConfig) -> Vec<MarketEvent> {
 
 fn fixture(config: &BacktestConfig, events: Vec<MarketEvent>) -> ReplayFixture {
     ReplayFixture {
+        stream: None,
         sessions: vec![ExchangeSession {
             session_date_days: config.start_ns.div_euclid(86_400_000_000_000),
             open_ns: config.start_ns,

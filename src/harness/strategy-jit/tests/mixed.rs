@@ -172,6 +172,7 @@ fn study_strategy_and_owned_indicators_share_filtered_callbacks_and_effective_re
         });
     }
     let fixture = ReplayFixture {
+        stream: None,
         fingerprints: ReplayFingerprints::of_events(&events),
         events,
         sessions: vec![ExchangeSession {

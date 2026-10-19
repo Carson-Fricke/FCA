@@ -20,6 +20,20 @@ use azure_storage_blobs::prelude::*;
 use lake_contracts::DataError;
 use time::OffsetDateTime;
 
+/// Compose the conditional, lease-fenced container adapter for application
+/// metadata owners. Domain services depend on their own persistence ports.
+pub fn container_from_account_url(
+    account_url: &str,
+    container: &str,
+    credential: Arc<dyn TokenCredential>,
+) -> Result<Arc<dyn AzureBlobContainer>, DataError> {
+    Ok(Arc::new(SdkBlobContainer::from_account_url(
+        account_url,
+        container,
+        credential,
+    )?))
+}
+
 /// The container surface the blob adapters are built over.
 ///
 /// Mirrors the `ContainerClient` operations the Python adapters duck-type:

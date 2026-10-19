@@ -241,6 +241,7 @@ pub(crate) fn query_ensure<
                         QueryApplicationError::new("ensure_failed", e.to_string(), None)
                     })?;
                 tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                     if let Err(e) = jobs.reconcile().await {
                         eprintln!("ingestion dispatch failed: {e}");
                     }
@@ -340,6 +341,7 @@ pub(crate) fn options<R: lake_ingest_jobs::WorkerRunner, S: lake_ingest_jobs::Jo
             if !job.terminal() {
                 let jobs = jobs.clone();
                 tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                     if let Err(e) = jobs.reconcile().await {
                         eprintln!("ingestion dispatch failed: {e}");
                     }

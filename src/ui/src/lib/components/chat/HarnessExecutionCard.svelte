@@ -10,7 +10,7 @@
     const labels: Record<HarnessJobProgress['stage'], string> = {
         compiling: 'Compiling program', preparing_data: 'Preparing market data',
         reading_data: 'Reading market data', running_study: 'Running study',
-        running_backtest: 'Running backtest', writing_artifacts: 'Writing results'
+        running_backtest: 'Running backtest', writing_artifacts: 'Writing results', interrupted: 'Execution interrupted'
     };
     const progress = $derived(job?.progress ?? []);
     const current = $derived([...progress].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0]);
@@ -35,7 +35,7 @@
 <section class="space-y-2 rounded-lg border border-surface-700 bg-surface-950/30 p-3" data-testid="harness-execution-card" aria-label="Harness execution">
     <p class="text-[10px] text-slate-500">Current execution status · observational overlay</p>
     <div class="flex flex-wrap justify-between gap-2 text-xs">
-        <strong>{job?.state === 'failed' ? 'Execution failed' : stopped ? 'Execution finished' : current ? labels[current.stage] : job?.state === 'queued' ? 'Waiting to start' : job ? 'Running execution' : 'Loading execution status'}</strong>
+        <strong>{error && !stopped ? 'Execution status unavailable' : current?.stage === 'interrupted' ? 'Execution interrupted' : job?.state === 'failed' ? 'Execution failed' : stopped ? 'Execution finished' : current ? labels[current.stage] : job?.state === 'queued' ? 'Waiting to start' : job ? 'Running execution' : 'Loading execution status'}</strong>
         <span class="text-slate-500">{elapsed(job?.created_at, stopped ? job?.updated_at : null)}{job ? ` · ${job.state}` : ''}</span>
     </div>
     {#if current}

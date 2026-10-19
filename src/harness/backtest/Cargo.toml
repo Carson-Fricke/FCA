@@ -20,6 +20,8 @@ arrow-schema = "59"
 parquet = { version = "59", features = ["arrow"] }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
+tempfile = "3"
+zstd = "0.13"
 
 [dev-dependencies]
 harness-lakeclient = { path = "../lakeclient", features = ["test-support"] }

@@ -14,6 +14,16 @@ frame dispatch time. The engine retains unused configured capital in a residual
 cash book and rejects negative or excessive allocations.
 
 `job.rs` consumes ensured lake Arrow batches incrementally into replay events.
+`stream.rs` merges chronological per-symbol/type cursors with bounded lookahead,
+collects exact preflight fingerprints without retaining ticks and reopens the
+same pinned snapshot for simulation. Each pull cursor has an independent decode
+slot to avoid head-of-line deadlock while sharing immutable caches.
+`history.rs` retains exact valuation and ledger rows in 8,192-row compressed,
+checksummed scratch frames, with independent clone snapshots and a configurable
+2 GiB per-history scratch cap (`HARNESS_HISTORY_SCRATCH_BYTES`). Financial metrics
+and Parquet consume every row; only HTML chart points are sampled. Replay bounds
+are 32 symbol/type cursors and 65,536 events sharing one timestamp per cursor;
+exceeding a bound fails explicitly.
 Studies acquire the compiled program-and-indicator subscription union; backtests
 also acquire quotes and trades for every input symbol for `simple_touch`
 execution. Execution feeds do not expand consumer callbacks or the subscription

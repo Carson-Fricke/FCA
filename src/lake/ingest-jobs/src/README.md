@@ -10,6 +10,7 @@ One current job document retains immutable requests and the accepted worker spec
 - `aca.rs`: validates Azure configuration and starts/reconciles exactly attributed ACA Job executions. Start responses contain only an execution name/resource ID; the adapter validates that identity then GETs the exact execution to verify its retained job/partition/image. Accepted asynchronous starts use bounded GET-only polling of same-origin, same-subscription operation locations. Unresolved outcomes are reconciled by attribution without replaying POST.
 - `budget.rs`: defines restart-safe rolling request reservations and the conditional Blob adapter.
 - `service.rs`: reconciles retained intents under dispatcher ownership and enforces shared worker limits and deadlines.
+- `pool.rs`: atomically claims unstarted compatible chunks for a warm executor under the shared dispatcher lease, alternating roots and retaining its original executor attribution.
 - `bin/`: contains the finite provider-free Azure coordination entrypoint.
 
-Request allowance uses its own `RequestAuthority` port; permit caches do not depend on execution lifecycle methods. Immutable worker lanes contain several disjoint bounded chunks, with concurrently persisted dispatch intents and durable final metrics.
+Request allowance uses its own `RequestAuthority` port; permit caches do not depend on execution lifecycle methods. Immutable chunks are independently claimable. Global limits count physical executors, including their startup, rather than every chunk a reused executor owns. A running anchor protects its executor from cleanup until it drains compatible work. Bar-only ranges coalesce to amortize startup.

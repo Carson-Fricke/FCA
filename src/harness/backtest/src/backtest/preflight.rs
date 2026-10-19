@@ -40,15 +40,20 @@ pub fn validate_subscription_coverage(
 ) -> Result<(), BacktestError> {
     for input in subscriptions {
         for symbol in &input.symbols {
-            if !fixture.events.iter().any(|event| {
-                event.symbol() == symbol
-                    && matches!(
-                        (input.data_type.as_str(), event),
-                        ("quote", super::fixture::MarketEvent::Quote { .. })
-                            | ("trade", super::fixture::MarketEvent::Trade { .. })
-                            | ("bars", super::fixture::MarketEvent::Bar { .. })
-                    )
-            }) {
+            if !fixture.stream.as_ref().map_or_else(
+                || {
+                    fixture.events.iter().any(|event| {
+                        event.symbol() == symbol
+                            && matches!(
+                                (input.data_type.as_str(), event),
+                                ("quote", super::fixture::MarketEvent::Quote { .. })
+                                    | ("trade", super::fixture::MarketEvent::Trade { .. })
+                                    | ("bars", super::fixture::MarketEvent::Bar { .. })
+                            )
+                    })
+                },
+                |stream| stream.covers(&input.data_type, symbol),
+            ) {
                 return Err(BacktestError::DataPreflight(format!(
                     "fixture is missing requested {}/{} coverage",
                     input.data_type, symbol
@@ -79,6 +84,36 @@ pub fn preflight_data(
         return Err(BacktestError::DataPreflight(
             "a backtest fixture requires at least one session".to_string(),
         ));
+    }
+    if let Some(stream) = &fixture.stream {
+        if stream.bounds.is_some_and(|(first, last)| {
+            first < configuration.start_ns || last >= configuration.end_ns
+        }) {
+            return Err(BacktestError::DataPreflight(
+                "an event falls outside the configured run window".into(),
+            ));
+        }
+        if configuration.shell != "study"
+            && configuration
+                .symbols
+                .iter()
+                .any(|symbol| !stream.evidence.symbols.contains(&symbol.to_uppercase()))
+        {
+            return Err(BacktestError::DataPreflight(
+                "fixture is missing configured symbols".into(),
+            ));
+        }
+        if let Some(expected) = &fixture.expected_data_fingerprint {
+            if expected != &stream.evidence.fingerprints.data {
+                return Err(BacktestError::DataPreflight(
+                    "fixture data fingerprint does not match the expected fingerprint".into(),
+                ));
+            }
+        }
+        if stream.evidence.event_count == 0 {
+            return Err(BacktestError::DataPreflight("empty replay".into()));
+        }
+        return Ok(stream.evidence.clone());
     }
     if fixture.events.is_empty() {
         return Err(BacktestError::DataPreflight(

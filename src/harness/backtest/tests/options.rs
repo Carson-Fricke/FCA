@@ -77,8 +77,19 @@ fn both_selectors_feed_quotes_trades_and_bars_through_the_same_program_input() {
             })
             .collect();
         let fixture = lake_fixture_with_subscriptions(&config, &client, &inputs).unwrap();
-        assert_eq!(fixture.events.len(), 3);
-        assert!(fixture.events.iter().all(|e| e.symbol() == "ATM"));
+        assert_eq!(
+            fixture
+                .open_events()
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+                .len(),
+            3
+        );
+        assert!(fixture
+            .open_events()
+            .unwrap()
+            .all(|e| e.unwrap().symbol() == "ATM"));
         assert!(fixture.source_id.contains(CONTRACT));
         assert!(fixture.source_id.contains("2024-01-18T21:00:00Z"));
         let requests = server.requests();
@@ -134,7 +145,10 @@ fn bare_contract_symbols_are_classified_as_options() {
     assert_eq!(
         lake_fixture_with_subscriptions(&config, &client, &inputs)
             .unwrap()
-            .events
+            .open_events()
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
             .len(),
         1
     );

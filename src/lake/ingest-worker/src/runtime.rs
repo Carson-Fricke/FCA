@@ -81,20 +81,34 @@ pub async fn run(id: &str, partition: &str) -> Result<(), DataError> {
     }
 }
 
+#[derive(Clone)]
 struct WorkerDependencies {
     catalog: Arc<dyn lake_catalog::CatalogRepository>,
     contracts: Arc<dyn ContractRepository>,
     reads: Arc<dyn lake_storage::ReadableBlobStore>,
     committer: Arc<dyn lake_ingestion::AtomicIngestCommitter>,
 }
-async fn run_owned<S: JobPersistence>(
+#[derive(Clone)]
+struct WorkerContext {
+    env: BTreeMap<String, String>,
+    credential: Option<Arc<dyn azure_core::auth::TokenCredential>>,
+    deps: WorkerDependencies,
+    client_cache: Arc<tokio::sync::OnceCell<Arc<lake_providers::AlpacaClient>>>,
+}
+async fn run_partition<S: JobPersistence>(
     store: S,
     id: &str,
     partition: &str,
-    mut env: BTreeMap<String, String>,
-    credential: Option<Arc<dyn azure_core::auth::TokenCredential>>,
-    deps: WorkerDependencies,
-) -> Result<(), DataError> {
+    context: WorkerContext,
+    defer: bool,
+) -> Result<Finished<S::Owner>, DataError> {
+    let WorkerContext {
+        mut env,
+        credential,
+        deps,
+        client_cache,
+    } = context;
+    let before = lake_pipeline::Pipeline::global().snapshot();
     let execution_started = std::time::Instant::now();
     let execution_started_at = now().micros();
     eprintln!(
@@ -119,8 +133,13 @@ async fn run_owned<S: JobPersistence>(
     };
     let mut job = store.get_work(&reference).await?;
     if job.terminal() {
-        owner.release().await?;
-        return Ok(());
+        let finished = Finished {
+            owner: Arc::new(owner),
+            job,
+            error: None,
+            executed: false,
+        };
+        return Ok(finished);
     }
     if job.record.state == JobState::Running {
         owner.release().await?;
@@ -166,59 +185,68 @@ async fn run_owned<S: JobPersistence>(
     let work_owner = owner.clone();
     let worker_id = id.to_string();
     let work = async move {
-        // Provider secrets never enter API configuration, execution arguments, or durable work.
-        if let Some(credential) = credential {
-            let _secrets = lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::Secrets);
-            let vault = required(&env, "LAKE_PROVIDER_KEY_VAULT_URL")?;
-            let token = credential
-                .get_token(&["https://vault.azure.net/.default"])
-                .await
-                .map_err(io)?;
-            let http = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-                .map_err(io)?;
-            let (key, secret) = tokio::try_join!(
-                provider_secret(&http, &vault, token.token.secret(), "alpaca-api-key"),
-                provider_secret(&http, &vault, token.token.secret(), "alpaca-api-secret")
-            )?;
-            env.insert("LAKE_PROVIDER__API_KEY".into(), key);
-            env.insert("LAKE_PROVIDER__API_SECRET".into(), secret);
-        }
-        let settings = lake_configuration::LakeSettings::load(None, &env).map_err(io)?;
-        let mut config = lake_providers::ProviderConfig::new(
-            env.get("LAKE_PROVIDER__BASE_URL")
-                .map(String::as_str)
-                .unwrap_or("https://data.alpaca.markets"),
-            settings.provider.api_key.clone(),
-            settings.provider.api_secret.clone(),
-        );
-        config.max_concurrency = settings.provider.request.max_concurrency as usize;
-        config.timeout_seconds = settings.provider.request.timeout_seconds;
-        config.max_attempts = settings.provider.retry.max_attempts;
-        config.requests_per_minute = settings
-            .provider
-            .request
-            .requests_per_minute
-            .or(Some(10_000));
-        config.honor_retry_after = settings.provider.retry.honor_retry_after;
-        let limit = config
-            .requests_per_minute
-            .expect("worker budget is required");
-        if !(1..=10_000).contains(&limit) {
-            return Err(DataError::value(
-                "provider request budget exceeds 10000 per minute",
-            ));
-        }
-        let budget = crate::budget::SharedBudget::new(
-            budget_store,
-            &config.base_url,
-            config.api_key.as_deref().unwrap_or(""),
-            limit,
-        );
-        let governor = lake_providers::RequestGovernor::with_budget(limit, budget).map_err(io)?;
-        let client =
-            Arc::new(lake_providers::AlpacaClient::with_reqwest(config, governor).map_err(io)?);
+        let client = client_cache
+            .get_or_try_init(|| async {
+                // Provider secrets never enter API configuration, execution arguments, or durable work.
+                if let Some(credential) = credential {
+                    let _secrets =
+                        lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::Secrets);
+                    let vault = required(&env, "LAKE_PROVIDER_KEY_VAULT_URL")?;
+                    let token = credential
+                        .get_token(&["https://vault.azure.net/.default"])
+                        .await
+                        .map_err(io)?;
+                    let http = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(30))
+                        .build()
+                        .map_err(io)?;
+                    let (key, secret) = tokio::try_join!(
+                        provider_secret(&http, &vault, token.token.secret(), "alpaca-api-key"),
+                        provider_secret(&http, &vault, token.token.secret(), "alpaca-api-secret")
+                    )?;
+                    env.insert("LAKE_PROVIDER__API_KEY".into(), key);
+                    env.insert("LAKE_PROVIDER__API_SECRET".into(), secret);
+                }
+                let settings = lake_configuration::LakeSettings::load(None, &env).map_err(io)?;
+                let mut config = lake_providers::ProviderConfig::new(
+                    env.get("LAKE_PROVIDER__BASE_URL")
+                        .map(String::as_str)
+                        .unwrap_or("https://data.alpaca.markets"),
+                    settings.provider.api_key.clone(),
+                    settings.provider.api_secret.clone(),
+                );
+                config.max_concurrency = settings.provider.request.max_concurrency as usize;
+                config.timeout_seconds = settings.provider.request.timeout_seconds;
+                config.max_attempts = settings.provider.retry.max_attempts;
+                config.requests_per_minute = settings
+                    .provider
+                    .request
+                    .requests_per_minute
+                    .or(Some(10_000));
+                config.honor_retry_after = settings.provider.retry.honor_retry_after;
+                let limit = config
+                    .requests_per_minute
+                    .expect("worker budget is required");
+                if !(1..=10_000).contains(&limit) {
+                    return Err(DataError::value(
+                        "provider request budget exceeds 10000 per minute",
+                    ));
+                }
+                let budget = crate::budget::SharedBudget::new(
+                    budget_store,
+                    &config.base_url,
+                    config.api_key.as_deref().unwrap_or(""),
+                    limit,
+                );
+                let governor =
+                    lake_providers::RequestGovernor::with_budget(limit, budget).map_err(io)?;
+                let client = Arc::new(
+                    lake_providers::AlpacaClient::with_reqwest(config, governor).map_err(io)?,
+                );
+                Ok::<_, DataError>(client)
+            })
+            .await?
+            .clone();
         let max_sessions = env
             .get("LAKE_INGEST_SESSION_CONCURRENCY")
             .map(|v| v.parse::<usize>().map_err(io))
@@ -337,9 +365,11 @@ async fn run_owned<S: JobPersistence>(
     }).await;
     // Abort cannot stop a running blocking encoder. Fence publication before
     // settlement, including after ownership loss, and wake all budget waiters.
-    tokio::task::spawn_blocking(|| lake_pipeline::Pipeline::global().cancel())
-        .await
-        .map_err(io)?;
+    if result.is_err() {
+        tokio::task::spawn_blocking(|| lake_pipeline::Pipeline::global().cancel())
+            .await
+            .map_err(io)?;
+    }
     work.abort();
     owner.renew().await?;
     job.record.state = if result.is_ok() {
@@ -348,21 +378,117 @@ async fn run_owned<S: JobPersistence>(
         JobState::Failed
     };
     job.result = result.as_ref().ok().cloned().flatten();
-    let mut metrics = lake_pipeline::Pipeline::global().snapshot();
+    let mut metrics = metric_delta(&before, lake_pipeline::Pipeline::global().snapshot());
     metrics["worker"] = serde_json::json!({"started_at_micros":execution_started_at,"seconds":execution_started.elapsed().as_secs_f64()});
     job.metrics = Some(metrics);
     job.record.progress = progress_recv.borrow().clone();
     job.record.updated_at = now();
     job.record.error_message = result.as_ref().err().map(ToString::to_string);
     let finalization = lake_pipeline::Pipeline::global().timer(lake_pipeline::Stage::Progress);
-    owner.save(&job).await?;
-    owner.release().await?;
+    if !defer {
+        owner.save(&job).await?;
+        owner.release().await?;
+    }
     drop(finalization);
     eprintln!(
         "{}",
         serde_json::json!({"event":"worker_settled","job_id":id,"partition":partition,"seconds":execution_started.elapsed().as_secs_f64(),"state":job.record.state.value(),"rows":job.record.progress.as_ref().map(|p|p.rows),"pipeline":lake_pipeline::Pipeline::global().snapshot()})
     );
-    result.map(|_| ())
+    Ok(Finished {
+        owner,
+        job,
+        error: result.err(),
+        executed: true,
+    })
+}
+struct Finished<O> {
+    owner: Arc<O>,
+    job: lake_ingest_jobs::DurableJob,
+    error: Option<DataError>,
+    executed: bool,
+}
+
+async fn run_owned<S: JobPersistence>(
+    store: S,
+    id: &str,
+    partition: &str,
+    env: BTreeMap<String, String>,
+    credential: Option<Arc<dyn azure_core::auth::TokenCredential>>,
+    deps: WorkerDependencies,
+) -> Result<(), DataError> {
+    let context = WorkerContext {
+        env,
+        credential,
+        deps,
+        client_cache: Arc::new(tokio::sync::OnceCell::new()),
+    };
+    let first = run_partition(store.clone(), id, partition, context.clone(), true).await?;
+    if !first.executed {
+        first.owner.release().await?;
+        return Ok(());
+    }
+    let pooled = if first.error.is_none() && !first.job.execution_deleted {
+        lake_ingest_jobs::while_owned(first.owner.as_ref(), async {
+            let mut last_job = id.to_string();
+            loop {
+                let Some(next) =
+                    lake_ingest_jobs::claim_next(&store, &first.job, &last_job).await?
+                else {
+                    break;
+                };
+                let finished = run_partition(
+                    store.clone(),
+                    &next.job_id,
+                    next.partition
+                        .as_deref()
+                        .ok_or_else(|| DataError::value("pool work has no partition"))?,
+                    context.clone(),
+                    false,
+                )
+                .await?;
+                if let Some(error) = finished.error {
+                    return Err(error);
+                }
+                last_job = next.job_id;
+            }
+            Ok(())
+        })
+        .await
+    } else {
+        Ok(())
+    };
+    first.owner.save(&first.job).await?;
+    first.owner.release().await?;
+    if let Some(error) = first.error {
+        return Err(error);
+    }
+    pooled
+}
+
+fn metric_delta(before: &serde_json::Value, mut after: serde_json::Value) -> serde_json::Value {
+    if let Some(stages) = after
+        .get_mut("stages")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for (name, stage) in stages {
+            for key in ["calls", "seconds", "bytes", "rows"] {
+                if key == "seconds" {
+                    stage[key] = serde_json::json!(
+                        stage[key].as_f64().unwrap_or(0.0)
+                            - before["stages"][name][key].as_f64().unwrap_or(0.0)
+                    );
+                } else {
+                    stage[key] = serde_json::json!(stage[key]
+                        .as_u64()
+                        .unwrap_or(0)
+                        .saturating_sub(before["stages"][name][key].as_u64().unwrap_or(0)));
+                }
+            }
+        }
+    }
+    after["measurement_scope"] =
+        serde_json::json!("chunk counters; process lifetime resource peaks");
+    after
 }
 async fn provider_secret(
     http: &reqwest::Client,

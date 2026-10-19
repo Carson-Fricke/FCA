@@ -245,7 +245,7 @@ impl MarketEvent {
     }
 
     /// Canonical JSON for fingerprinting.
-    fn to_json(&self) -> JsonValue {
+    pub(super) fn to_json(&self) -> JsonValue {
         match self {
             Self::Quote {
                 event_id,
@@ -595,6 +595,8 @@ pub struct ReplayFixture {
     pub sessions: Vec<ExchangeSession>,
     /// Materialized events in replay order.
     pub events: Vec<MarketEvent>,
+    /// Pinned, re-iterable full input; `events` retains only bars for frame assembly.
+    pub stream: Option<std::sync::Arc<super::stream::StreamedReplay>>,
     /// Fixture source identifier.
     pub source_id: String,
     /// Instrument symbols.
@@ -613,9 +615,20 @@ impl ReplayFixture {
     }
 
     /// Replay the fixture once and return its events and fingerprints.
-    #[must_use]
-    pub fn materialize(&self) -> (&[MarketEvent], &ReplayFingerprints) {
-        (&self.events, &self.fingerprints)
+    pub fn open_events(
+        &self,
+    ) -> Result<
+        Box<dyn Iterator<Item = Result<MarketEvent, BacktestError>> + Send + '_>,
+        BacktestError,
+    > {
+        match &self.stream {
+            Some(stream) => stream.open(),
+            None => {
+                let mut events = self.events.clone();
+                events.sort_by_key(super::stream::key);
+                Ok(Box::new(events.into_iter().map(Ok)))
+            }
+        }
     }
 }
 
@@ -764,6 +777,7 @@ pub fn synthetic_fixture(
         None => ReplayFingerprints::of_events(&all_events),
     };
     Ok(ReplayFixture {
+        stream: None,
         sessions,
         events: all_events,
         source_id: "synthetic".to_string(),
@@ -915,6 +929,9 @@ pub fn date_string(days: i64) -> String {
 /// Return the sorted set of symbols carried by a fixture.
 #[must_use]
 pub fn fixture_symbols(fixture: &ReplayFixture) -> Vec<String> {
+    if let Some(stream) = &fixture.stream {
+        return stream.evidence.symbols.clone();
+    }
     let set: BTreeSet<String> = fixture
         .events
         .iter()

@@ -1,12 +1,9 @@
 //! Local-mode submitters for the harness MCP server.
 //!
-//! These adapters are composed by [`crate::mcp_cli`] so that the MCP
-//! `run_backtest` tool works in local mode. They drive the
-//! native Rust engine with JIT-authored Rust programs, persist every job and
-//! artifact into the shared durable job store, and return the same
-//! payload shapes the remote API would return. Each submission parses its
-//! configuration exactly once and passes the parsed value to background
-//! execution; the mutable configuration path is never reloaded.
+//! Submission adapters freeze authored input and admit it into the shared
+//! execution store before notifying finite workers. Worker-only adapters drive
+//! the native engine and publish exact result files. Execution never reloads a
+//! mutable caller configuration or runs inside an API request process.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -45,225 +42,209 @@ fn created_receipt(job_id: &str, kind: JobKind) -> Value {
     })
 }
 
-/// Local backtest submitter that runs the native engine and records the job.
+/// Admission adapter; execution belongs to the isolated worker pool.
 pub struct NativeBacktestSubmitter {
     job_store: Arc<dyn JobStore>,
-    access: Option<Arc<dyn harness_lakeclient::MarketAccess>>,
+    wake: Arc<dyn crate::execution::Wake>,
 }
-
 impl NativeBacktestSubmitter {
-    /// Compose a submitter over the shared durable job store.
-    #[must_use]
-    pub fn new(job_store: Arc<dyn JobStore>) -> Self {
-        Self {
-            job_store,
-            access: None,
-        }
-    }
-    pub fn with_access(
-        job_store: Arc<dyn JobStore>,
-        access: Arc<dyn harness_lakeclient::MarketAccess>,
-    ) -> Self {
-        Self {
-            job_store,
-            access: Some(access),
-        }
+    pub fn new(job_store: Arc<dyn JobStore>, wake: Arc<dyn crate::execution::Wake>) -> Self {
+        Self { job_store, wake }
     }
 }
-
 impl mcp::tools::BacktestSubmitter for NativeBacktestSubmitter {
     fn submit(
         &self,
-        config_path: &str,
-        workspace: Option<&str>,
+        path: &str,
+        _workspace: Option<&str>,
         job_id: Option<&str>,
     ) -> Result<Value, String> {
-        let (configuration, accepted_input) = backtest::backtest::job::load_replay_submission(
-            Path::new(config_path),
+        admit_replay(
+            &self.job_store,
+            &self.wake,
+            path,
             job_id,
             "backtest",
-        )
-        .map_err(|error| error.to_string())?;
-        let job_id = configuration.job_id.clone();
-        let started = Utc::now();
-        let mut record = JobRecord::new(
-            &job_id,
             JobKind::Backtest,
-            configuration.configuration_hash(),
-            started,
-        );
-        populate_replay_record(&mut record, &configuration);
-        record.accepted_input = accepted_input;
-        match self
-            .job_store
-            .admit(record)
-            .map_err(|error| error.to_string())?
-        {
-            Admission::Joined(existing) => return Ok(receipt(&existing)),
-            Admission::Created(_) => {}
-        }
-        let output_dir = workspace.map(PathBuf::from).unwrap_or_else(|| {
-            std::env::temp_dir()
-                .join("harness-mcp-backtests")
-                .join(&job_id)
-        });
-        let job_store = self.job_store.clone();
-        let background_job_id = job_id.clone();
-        let access = self.access.clone();
-        let _handle = std::thread::spawn(move || {
-            run_background_backtest(
-                job_store,
-                background_job_id,
-                configuration,
-                output_dir,
-                started,
-                access,
-            );
-        });
-        Ok(created_receipt(&job_id, JobKind::Backtest))
+        )
     }
 }
-
-/// Local study submitter that runs the native engine study path and records it.
 pub struct NativeStudySubmitter {
     job_store: Arc<dyn JobStore>,
-    access: Option<Arc<dyn harness_lakeclient::MarketAccess>>,
+    wake: Arc<dyn crate::execution::Wake>,
 }
-
 impl NativeStudySubmitter {
-    /// Compose a submitter over the shared durable job store.
-    #[must_use]
-    pub fn new(job_store: Arc<dyn JobStore>) -> Self {
-        Self {
-            job_store,
-            access: None,
-        }
-    }
-    pub fn with_access(
-        job_store: Arc<dyn JobStore>,
-        access: Arc<dyn harness_lakeclient::MarketAccess>,
-    ) -> Self {
-        Self {
-            job_store,
-            access: Some(access),
-        }
+    pub fn new(job_store: Arc<dyn JobStore>, wake: Arc<dyn crate::execution::Wake>) -> Self {
+        Self { job_store, wake }
     }
 }
-
 impl mcp::tools::StudySubmitter for NativeStudySubmitter {
     fn submit(
         &self,
-        config_path: &str,
-        workspace: Option<&str>,
+        path: &str,
+        _workspace: Option<&str>,
         job_id: Option<&str>,
     ) -> Result<Value, String> {
-        let (configuration, accepted_input) = backtest::backtest::job::load_replay_submission(
-            Path::new(config_path),
+        admit_replay(
+            &self.job_store,
+            &self.wake,
+            path,
             job_id,
             "study",
-        )
-        .map_err(|error| error.to_string())?;
-        let job_id = configuration.job_id.clone();
-        let started = Utc::now();
-        let mut record = JobRecord::new(
-            &job_id,
             JobKind::Study,
-            configuration.configuration_hash(),
-            started,
-        );
-        populate_replay_record(&mut record, &configuration);
-        record.accepted_input = accepted_input;
-        match self
-            .job_store
-            .admit(record)
-            .map_err(|error| error.to_string())?
-        {
-            Admission::Joined(existing) => return Ok(receipt(&existing)),
-            Admission::Created(_) => {}
-        }
-        let output_dir = workspace.map(PathBuf::from).unwrap_or_else(|| {
-            std::env::temp_dir()
-                .join("harness-mcp-studies")
-                .join(&job_id)
-        });
-        let job_store = self.job_store.clone();
-        let background_job_id = job_id.clone();
-        let access = self.access.clone();
-        let _handle = std::thread::spawn(move || {
-            run_background_study(
-                job_store,
-                background_job_id,
-                configuration,
-                output_dir,
-                started,
-                access,
-            );
-        });
-        Ok(created_receipt(&job_id, JobKind::Study))
+        )
     }
 }
+fn admit_replay(
+    store: &Arc<dyn JobStore>,
+    wake: &Arc<dyn crate::execution::Wake>,
+    path: &str,
+    job_id: Option<&str>,
+    shell: &str,
+    kind: JobKind,
+) -> Result<Value, String> {
+    let record = prepare_replay(Path::new(path), job_id, shell, kind)?;
+    let id = record.job_id.clone();
+    match store.admit(record).map_err(|e| e.to_string())? {
+        Admission::Joined(record) => return Ok(receipt(&record)),
+        Admission::Created(_) => {}
+    }
+    if let Err(e) = wake.wake() {
+        eprintln!("execution remains queued; capacity hint failed: {e}");
+    }
+    Ok(created_receipt(&id, kind))
+}
 
-/// Local screening submitter that runs the injected screening runner and
-/// records the job.
+pub(crate) fn prepare_replay(
+    path: &Path,
+    job_id: Option<&str>,
+    shell: &str,
+    kind: JobKind,
+) -> Result<JobRecord, String> {
+    let (configuration, accepted_input) =
+        backtest::backtest::job::load_replay_submission(path, job_id, shell)
+            .map_err(|e| e.to_string())?;
+    let id = configuration.job_id.clone();
+    let mut record = JobRecord::new(&id, kind, configuration.configuration_hash(), Utc::now());
+    populate_replay_record(&mut record, &configuration);
+    record.accepted_input = accepted_input;
+    Ok(record)
+}
 pub struct NativeScreeningSubmitter {
     job_store: Arc<dyn JobStore>,
-    runner: Arc<dyn ScreeningRunner>,
+    wake: Arc<dyn crate::execution::Wake>,
 }
-
 impl NativeScreeningSubmitter {
-    /// Compose a submitter over the shared durable job store and runner.
-    #[must_use]
-    pub fn new(job_store: Arc<dyn JobStore>, runner: Arc<dyn ScreeningRunner>) -> Self {
-        Self { job_store, runner }
+    pub fn new(job_store: Arc<dyn JobStore>, wake: Arc<dyn crate::execution::Wake>) -> Self {
+        Self { job_store, wake }
     }
 }
-
 impl mcp::tools::ScreeningSubmitter for NativeScreeningSubmitter {
     fn submit(
         &self,
-        config_path: &str,
-        workspace: Option<&str>,
+        path: &str,
+        _workspace: Option<&str>,
         job_id: Option<&str>,
     ) -> Result<Value, String> {
         let configuration =
-            backtest::backtest::job::load_screen_config_with_job_id(Path::new(config_path), job_id)
-                .map_err(|error| error.to_string())?;
-        let job_id = configuration.job_id.clone();
-        let started = Utc::now();
+            backtest::backtest::job::load_screen_config_with_job_id(Path::new(path), job_id)
+                .map_err(|e| e.to_string())?;
+        let id = configuration.job_id.clone();
         let mut record = JobRecord::new(
-            &job_id,
+            &id,
             JobKind::Screen,
             configuration.configuration_digest(),
-            started,
+            Utc::now(),
         );
         populate_screen_record(&mut record, &configuration);
-        match self
-            .job_store
-            .admit(record)
-            .map_err(|error| error.to_string())?
-        {
-            Admission::Joined(existing) => return Ok(receipt(&existing)),
+        record.accepted_input = configuration.submission_document();
+        match self.job_store.admit(record).map_err(|e| e.to_string())? {
+            Admission::Joined(record) => return Ok(receipt(&record)),
             Admission::Created(_) => {}
         }
-        let output_dir = workspace.map(PathBuf::from).unwrap_or_else(|| {
-            std::env::temp_dir()
-                .join("harness-mcp-screens")
-                .join(&job_id)
-        });
-        let job_store = self.job_store.clone();
-        let runner = self.runner.clone();
-        let background_job_id = job_id.clone();
-        let _handle = std::thread::spawn(move || {
-            run_background_screen(
-                job_store,
-                runner,
-                background_job_id,
-                configuration,
-                output_dir,
-                started,
-            );
-        });
-        Ok(created_receipt(&job_id, JobKind::Screen))
+        if let Err(e) = self.wake.wake() {
+            eprintln!("execution remains queued; capacity hint failed: {e}");
+        }
+        Ok(created_receipt(&id, JobKind::Screen))
+    }
+}
+
+/// Execute one already-admitted immutable input inside a finite worker process.
+/// It never admits, allocates a replacement ID, or reopens caller files.
+pub fn execute_admitted(
+    store: Arc<dyn JobStore>,
+    record: JobRecord,
+    access: Arc<dyn harness_lakeclient::MarketAccess>,
+) {
+    let output = match tempfile::tempdir() {
+        Ok(dir) => dir,
+        Err(error) => {
+            record_failed_run(&store, &record.job_id, error.to_string());
+            return;
+        }
+    };
+    let id = record.job_id.clone();
+    let started = Utc::now();
+    let result = (|| -> Result<(), String> {
+        match record.kind {
+            JobKind::Backtest | JobKind::Study => {
+                let configuration = BacktestConfig::from_yaml(&record.accepted_input.to_string())
+                    .map_err(|e| e.to_string())?;
+                if configuration.job_id != id
+                    || configuration.configuration_hash()
+                        != record
+                            .configuration_digest
+                            .clone()
+                            .ok_or("accepted configuration digest missing")?
+                {
+                    return Err("accepted replay identity mismatch".into());
+                }
+                if record.kind == JobKind::Study {
+                    run_background_study(
+                        store.clone(),
+                        id.clone(),
+                        configuration,
+                        output.path().into(),
+                        started,
+                        Some(access),
+                    );
+                } else {
+                    run_background_backtest(
+                        store.clone(),
+                        id.clone(),
+                        configuration,
+                        output.path().into(),
+                        started,
+                        Some(access),
+                    );
+                }
+            }
+            JobKind::Screen => {
+                let configuration = ScreenConfig::from_json_value(&record.accepted_input)
+                    .map_err(|e| e.to_string())?;
+                if configuration.job_id != id {
+                    return Err("accepted screen identity mismatch".into());
+                }
+                let runner = Arc::new(crate::http::native::NativeScreenRunner {
+                    lake_client: Some(Arc::new(
+                        BlockingLakeClient::from_access(access).map_err(|e| e.to_string())?,
+                    )),
+                    ..Default::default()
+                });
+                run_background_screen(
+                    store.clone(),
+                    runner,
+                    id.clone(),
+                    configuration,
+                    output.path().into(),
+                    started,
+                );
+            }
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        record_failed_run(&store, &id, error);
     }
 }
 
@@ -511,7 +492,44 @@ fn validate_authored_program(
     model: &Value,
     shell: &str,
 ) -> Result<Value, mcp::tools::ToolExecutionError> {
+    cached_authored_validation(model, shell, || inspect_authored_program(model, shell))
+}
+
+pub(crate) fn inspect_authored_program(
+    model: &Value,
+    shell: &str,
+) -> Result<Value, harness_strategy_jit::ValidationFailure> {
     use harness_strategy_jit::ValidationFailure;
+    let mut document =
+        authored_program_document(model, shell).map_err(ValidationFailure::configuration)?;
+    backtest::backtest::job::overlay_job_id_json(
+        &mut document,
+        Some(backtest::backtest::job::VALIDATION_JOB_ID),
+    )
+    .map_err(|error| ValidationFailure::configuration(error.to_string()))?;
+    let configuration = if shell == "study" {
+        backtest::backtest::job::parse_study_document(&document)
+            .map_err(|error| ValidationFailure::configuration(error.to_string()))?
+    } else {
+        BacktestConfig::from_yaml(&document.to_string())
+            .map_err(|error| ValidationFailure::configuration(error.to_string()))?
+    };
+    let mut result = harness_strategy_jit::inspect_configuration(&configuration)?;
+    let sdk = harness_strategy_jit::validation_service()
+        .sdk_reference(&serde_json::Map::new())
+        .map_err(ValidationFailure::from)?;
+    result["sdkIdentity"] = sdk["sdkIdentity"].clone();
+    result["sdkVersion"] = sdk["sdkVersion"].clone();
+    result["sdkAbiVersion"] = sdk["sdkAbiVersion"].clone();
+    result["boundary"] = json!("local");
+    Ok(result)
+}
+
+pub(crate) fn cached_authored_validation(
+    model: &Value,
+    shell: &str,
+    inspect: impl FnOnce() -> Result<Value, harness_strategy_jit::ValidationFailure>,
+) -> Result<Value, mcp::tools::ToolExecutionError> {
     let kind = if shell == "study" {
         "study"
     } else {
@@ -519,31 +537,7 @@ fn validate_authored_program(
     };
     let cache_input = json!({"kind": kind, "model": model});
     harness_strategy_jit::validation_service()
-        .validate(&cache_input, || {
-            let mut document = authored_program_document(model, shell)
-                .map_err(ValidationFailure::configuration)?;
-            backtest::backtest::job::overlay_job_id_json(
-                &mut document,
-                Some(backtest::backtest::job::VALIDATION_JOB_ID),
-            )
-            .map_err(|error| ValidationFailure::configuration(error.to_string()))?;
-            let configuration = if shell == "study" {
-                backtest::backtest::job::parse_study_document(&document)
-                    .map_err(|error| ValidationFailure::configuration(error.to_string()))?
-            } else {
-                BacktestConfig::from_yaml(&document.to_string())
-                    .map_err(|error| ValidationFailure::configuration(error.to_string()))?
-            };
-            let mut result = harness_strategy_jit::inspect_configuration(&configuration)?;
-            let sdk = harness_strategy_jit::validation_service()
-                .sdk_reference(&serde_json::Map::new())
-                .map_err(ValidationFailure::from)?;
-            result["sdkIdentity"] = sdk["sdkIdentity"].clone();
-            result["sdkVersion"] = sdk["sdkVersion"].clone();
-            result["sdkAbiVersion"] = sdk["sdkAbiVersion"].clone();
-            result["boundary"] = json!("local");
-            Ok(result)
-        })
+        .validate(&cache_input, inspect)
         .map_err(|error| {
             mcp::tools::ToolExecutionError::with_payload(
                 &error.message,
@@ -736,15 +730,17 @@ fn run_background_study_inner(
     ) {
         Ok((outcome, _artifact_path)) => {
             let mut artifacts = BTreeMap::new();
-            collect_artifacts(&output_dir, &output_dir, &mut artifacts);
+            collect_artifact_paths(&output_dir, &output_dir, &mut artifacts);
             if artifacts.is_empty() {
-                artifacts.insert(
-                    "study.json".to_string(),
-                    outcome.artifact_json().into_bytes(),
+                record_failed_run(
+                    &job_store,
+                    &job_id,
+                    "execution produced no artifact files".into(),
                 );
+                return;
             }
-            let metrics = headline_metrics(&artifacts, &configuration);
-            publish_result(
+            let metrics = headline_file_metrics(&artifacts, &configuration);
+            publish_files(
                 &job_store,
                 &job_id,
                 outcome.completed(),
@@ -831,15 +827,17 @@ fn run_background_backtest_inner(
     ) {
         Ok((outcome, _artifact_path)) => {
             let mut artifacts = BTreeMap::new();
-            collect_artifacts(&output_dir, &output_dir, &mut artifacts);
+            collect_artifact_paths(&output_dir, &output_dir, &mut artifacts);
             if artifacts.is_empty() {
-                artifacts.insert(
-                    "backtest.json".to_string(),
-                    outcome.artifact_json().into_bytes(),
+                record_failed_run(
+                    &job_store,
+                    &job_id,
+                    "execution produced no artifact files".into(),
                 );
+                return;
             }
-            let metrics = headline_metrics(&artifacts, &configuration);
-            publish_result(
+            let metrics = headline_file_metrics(&artifacts, &configuration);
+            publish_files(
                 &job_store,
                 &job_id,
                 outcome.completed(),
@@ -991,23 +989,61 @@ fn fail_job(job_store: &Arc<dyn JobStore>, job_id: &str, started: DateTime<Utc>,
     let _ = job_store.put_result(record, BTreeMap::new());
 }
 
-/// Read every file under `directory` into `output` keyed by relative path.
-fn collect_artifacts(base: &Path, directory: &Path, output: &mut BTreeMap<String, Vec<u8>>) {
+/// Inventory sealed engine outputs without retaining their payloads.
+fn collect_artifact_paths(base: &Path, directory: &Path, output: &mut BTreeMap<String, PathBuf>) {
     let Ok(entries) = fs::read_dir(directory) else {
         return;
     };
-    let mut paths: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .collect();
-    paths.sort();
-    for path in paths {
+    for entry in entries.flatten() {
+        let path = entry.path();
         if path.is_dir() {
-            collect_artifacts(base, &path, output);
-        } else if let Ok(payload) = fs::read(&path) {
-            if let Ok(relative) = path.strip_prefix(base) {
-                output.insert(relative.to_string_lossy().replace('\\', "/"), payload);
-            }
+            collect_artifact_paths(base, &path, output);
+        } else if let Ok(relative) = path.strip_prefix(base) {
+            output.insert(relative.to_string_lossy().replace('\\', "/"), path);
+        }
+    }
+}
+fn headline_file_metrics(
+    files: &BTreeMap<String, PathBuf>,
+    configuration: &BacktestConfig,
+) -> BTreeMap<String, String> {
+    let mut bytes = BTreeMap::new();
+    if let Some(path) = files.get("metrics.json") {
+        if let Ok(payload) = fs::read(path) {
+            bytes.insert("metrics.json".into(), payload);
+        }
+    }
+    headline_metrics(&bytes, configuration)
+}
+fn publish_files(
+    store: &Arc<dyn JobStore>,
+    id: &str,
+    completed: bool,
+    metrics: BTreeMap<String, String>,
+    bounds: Option<(Option<NaiveDate>, Option<NaiveDate>)>,
+    error: Option<String>,
+    files: BTreeMap<String, PathBuf>,
+) -> bool {
+    let Some(mut record) = store.get(id) else {
+        return false;
+    };
+    record.state = if completed {
+        JobState::Succeeded
+    } else {
+        JobState::Failed
+    };
+    record.updated_at = Utc::now();
+    record.metrics = metrics;
+    record.error_message = error;
+    if let Some((start, end)) = bounds {
+        record.data_start = start;
+        record.data_end = end;
+    }
+    match store.put_files(record, files) {
+        Ok(_) => true,
+        Err(error) => {
+            fail_job(store, id, Utc::now(), error.to_string());
+            false
         }
     }
 }

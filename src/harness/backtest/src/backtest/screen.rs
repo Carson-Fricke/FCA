@@ -258,6 +258,14 @@ impl ScreenConfig {
         self.as_of.clone()
     }
 
+    /// Immutable, self-contained worker input, including exact authored source.
+    pub fn submission_document(&self) -> serde_json::Value {
+        let mut document = self.content_document();
+        document["job_id"] = serde_json::json!(self.job_id);
+        document["source"] = serde_json::json!(self.source);
+        document
+    }
+
     fn content_document(&self) -> serde_json::Value {
         serde_json::json!({
             "as_of": self.as_of,

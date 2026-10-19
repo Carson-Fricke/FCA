@@ -16,7 +16,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::auth::{BearerTokenSource, BEARER_TOKEN_VARIABLE};
-use crate::store::{artifact_digest, artifact_prefix, JobStore};
+use crate::store::JobStore;
 
 /// Tool name for the backtest runner.
 pub const TOOL_RUN_BACKTEST: &str = "run_backtest";
@@ -1042,7 +1042,10 @@ impl HarnessTools {
         let store = self.context.job_store.as_ref().ok_or_else(|| {
             ToolExecutionError::new("local jobs require a durable job store in this MCP server")
         })?;
-        match store.get(job_id) {
+        match store
+            .try_get(job_id)
+            .map_err(|e| ToolExecutionError::new(e.to_string()))?
+        {
             Some(record) => serde_json::to_value(&record)
                 .map_err(|error| ToolExecutionError::new(error.to_string())),
             None => Err(ToolExecutionError::new(format!(
@@ -1055,55 +1058,35 @@ impl HarnessTools {
         let store = self.context.job_store.as_ref().ok_or_else(|| {
             ToolExecutionError::new("local jobs require a durable job store in this MCP server")
         })?;
-        let stored = store
-            .fetch(job_id)
+        let inventory = store
+            .artifacts(job_id)
+            .map_err(|e| ToolExecutionError::new(e.to_string()))?
             .ok_or_else(|| ToolExecutionError::new(format!("job '{job_id}' does not exist")))?;
-        let prefix = artifact_prefix(&stored.record.job_id)
-            .map_err(|error| ToolExecutionError::new(error.to_string()))?;
-        let artifacts: Vec<Value> = stored
-            .artifacts
-            .iter()
-            .map(|(name, payload)| {
-                let uri = format!("{prefix}/{name}");
-                json!({
-                    "name": name,
-                    "uri": uri,
-                    "sha256": artifact_digest(payload),
-                    "sizeBytes": payload.len() as u64,
-                    "sas_url": Value::Null,
-                })
-            })
-            .collect();
-        Ok(json!({"job_id": stored.record.job_id, "artifacts": artifacts}))
+        let artifacts:Vec<Value>=inventory.into_iter().map(|info|json!({"name":info.name,"uri":info.uri,"sha256":info.sha256,"sizeBytes":info.size_bytes,"sas_url":Value::Null})).collect();
+        Ok(json!({"job_id":job_id,"artifacts":artifacts}))
     }
-
     fn local_artifact(&self, job_id: &str, name: &str) -> Result<Value, ToolExecutionError> {
-        let store = self.context.job_store.as_ref().ok_or_else(|| {
-            ToolExecutionError::new("local jobs require a durable job store in this MCP server")
-        })?;
-        let stored = store
-            .fetch(job_id)
-            .ok_or_else(|| ToolExecutionError::new(format!("job '{job_id}' does not exist")))?;
-        let payload = stored.artifacts.get(name).ok_or_else(|| {
-            ToolExecutionError::new(format!(
-                "artifact '{name}' does not exist for job '{job_id}'"
-            ))
-        })?;
-        let document = match std::str::from_utf8(payload) {
-            Ok(content) => json!({
-                "job_id": job_id,
-                "name": name,
-                "encoding": "utf-8",
-                "content": content,
-            }),
-            Err(_) => json!({
-                "job_id": job_id,
-                "name": name,
-                "encoding": "hex",
-                "content": hex::encode(payload),
-            }),
-        };
-        Ok(document)
+        let store = self
+            .context
+            .job_store
+            .as_ref()
+            .ok_or_else(|| ToolExecutionError::new("local jobs require a durable job store"))?;
+        let payload = store
+            .artifact(job_id, name)
+            .map_err(|e| ToolExecutionError::new(e.to_string()))?
+            .ok_or_else(|| {
+                ToolExecutionError::new(format!(
+                    "artifact '{name}' does not exist for job '{job_id}'"
+                ))
+            })?;
+        Ok(match std::str::from_utf8(&payload) {
+            Ok(content) => {
+                json!({"job_id":job_id,"name":name,"encoding":"utf-8","content":content})
+            }
+            Err(_) => {
+                json!({"job_id":job_id,"name":name,"encoding":"hex","content":hex::encode(payload)})
+            }
+        })
     }
 
     fn invoke_process(&self, tail: &[String], process: &str) -> Result<Value, ToolExecutionError> {

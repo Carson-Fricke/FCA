@@ -63,6 +63,12 @@ impl<R: WorkerRunner, S: JobPersistence> IngestionJobs<R, S> {
             jobs.push(job);
         }
         let mut active = 0usize;
+        let mut counted = std::collections::BTreeSet::new();
+        let mut per_job = std::collections::BTreeMap::<String, usize>::new();
+        let anchors: std::collections::BTreeMap<_, _> = partitions
+            .iter()
+            .map(|p| (p.reference(), p.terminal()))
+            .collect();
         let mut pending = Vec::new();
         for work in &mut partitions {
             if work.execution_deleted {
@@ -75,36 +81,62 @@ impl<R: WorkerRunner, S: JobPersistence> IngestionJobs<R, S> {
             lock.renew().await?;
             let reference = work.reference();
             let runner = self.runner.for_work(&work.execution)?;
-            let state = runner.inspect(&reference).await?;
+            let executor = work
+                .executor
+                .as_ref()
+                .ok_or_else(|| DataError::value("dispatched chunk has no retained executor"))?;
+            let state = runner.inspect(executor).await?;
             if work.terminal() {
-                runner.delete(&reference).await?;
+                if executor != &reference && anchors.get(executor) == Some(&false) {
+                    continue;
+                }
+                runner.delete(executor).await?;
                 if state == ExecutionState::Active
-                    && runner.inspect(&reference).await? == ExecutionState::Active
+                    && runner.inspect(executor).await? == ExecutionState::Active
                 {
-                    active += 1;
+                    if counted.insert(executor.clone()) {
+                        active += 1;
+                        *per_job.entry(work.record.job_id.clone()).or_default() += 1;
+                    }
                     continue;
                 }
                 self.mark_cleaned(&reference).await?;
                 work.execution_deleted = true;
                 continue;
             }
-            active += 1;
+            if counted.insert(executor.clone()) {
+                active += 1;
+                *per_job.entry(work.record.job_id.clone()).or_default() += 1;
+            }
             let expired = crate::model::now().micros()
                 - work
                     .dispatched_at
                     .ok_or_else(|| DataError::value("partition dispatch timestamp is missing"))?
                 > work.execution.timeout_seconds() as i64 * 1_000_000;
             match state {
-                ExecutionState::Active if expired => { runner.delete(&reference).await?; }
+                ExecutionState::Active if expired => { runner.delete(executor).await?; }
                 ExecutionState::Stopped => self.fail(&reference, "ingestion worker stopped before durable completion; inspect its execution logs").await?,
                 ExecutionState::Absent if expired || work.record.state == JobState::Running => self.fail(&reference, "ingestion dispatch outcome is unknown or its worker disappeared; automatic replay is prohibited").await?,
                 // A missing execution after POST is an unknown outcome, never permission to POST again.
                 _ => {}
             }
         }
-        // Interleave executions instead of letting one multi-year plan monopolize every slot.
-        pending.sort_by(|a, b| a.partition.cmp(&b.partition).then(a.job_id.cmp(&b.job_id)));
-        let starts = stream::iter(pending.into_iter().take(limit.saturating_sub(active)))
+        // Fair, work-conserving starts across roots, using actual occupied
+        // executor slots rather than counting every chunk a reused worker owns.
+        let mut selected = Vec::new();
+        while selected.len() < limit.saturating_sub(active) && !pending.is_empty() {
+            pending.sort_by_key(|work| {
+                (
+                    per_job.get(&work.job_id).copied().unwrap_or(0),
+                    work.job_id.clone(),
+                    work.partition.clone(),
+                )
+            });
+            let next = pending.remove(0);
+            *per_job.entry(next.job_id.clone()).or_default() += 1;
+            selected.push(next);
+        }
+        let starts = stream::iter(selected)
             .map(|reference| async move {
                 lock.renew().await?;
                 let owner = match self.store.own_work(&reference).await {
@@ -117,6 +149,7 @@ impl<R: WorkerRunner, S: JobPersistence> IngestionJobs<R, S> {
                     owner.release().await?;
                     return Ok(());
                 }
+                work.executor = Some(reference.clone());
                 work.dispatch_started = true;
                 work.dispatched_at = Some(crate::model::now().micros());
                 work.record.updated_at = crate::model::now();

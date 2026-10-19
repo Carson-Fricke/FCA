@@ -1,9 +1,8 @@
 use std::path::PathBuf;
-use std::sync::{mpsc, Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
 
 use api::local::{NativeBacktestSubmitter, NativeScreeningSubmitter, NativeStudySubmitter};
-use mcp::store::{FileSystemJobStore, InMemoryJobStore, JobState, JobStore, StoreError};
+use mcp::store::{InMemoryJobStore, JobStore};
 use mcp::tools::{BacktestSubmitter, ScreeningSubmitter, StudySubmitter};
 use serde_json::{json, Value};
 
@@ -52,7 +51,7 @@ fn screen_document() -> Value {
 #[test]
 fn backtest_receipt_echoes_the_submitted_job_id() {
     let store = Arc::new(InMemoryJobStore::new());
-    let submitter = NativeBacktestSubmitter::new(store.clone());
+    let submitter = NativeBacktestSubmitter::new(store.clone(), Arc::new(Wake));
     let path = write_temp("backtest", &replay_document("backtest"));
     let receipt = submitter
         .submit(path.to_str().unwrap(), None, Some("job-receipt-backtest"))
@@ -70,7 +69,7 @@ fn backtest_receipt_echoes_the_submitted_job_id() {
 #[test]
 fn study_receipt_echoes_the_submitted_job_id() {
     let store = Arc::new(InMemoryJobStore::new());
-    let submitter = NativeStudySubmitter::new(store.clone());
+    let submitter = NativeStudySubmitter::new(store.clone(), Arc::new(Wake));
     let path = write_temp("study", &replay_document("study"));
     let receipt = submitter
         .submit(path.to_str().unwrap(), None, Some("job-receipt-study"))
@@ -87,10 +86,7 @@ fn study_receipt_echoes_the_submitted_job_id() {
 #[test]
 fn screen_receipt_echoes_the_submitted_job_id() {
     let store = Arc::new(InMemoryJobStore::new());
-    let submitter = NativeScreeningSubmitter::new(
-        store.clone(),
-        Arc::new(api::http::screener::UnavailableScreeningRunner),
-    );
+    let submitter = NativeScreeningSubmitter::new(store.clone(), Arc::new(Wake));
     let path = write_temp("screen", &screen_document());
     let receipt = submitter
         .submit(path.to_str().unwrap(), None, Some("job-receipt-screen"))
@@ -107,7 +103,7 @@ fn screen_receipt_echoes_the_submitted_job_id() {
 #[test]
 fn submitted_job_id_overrides_a_document_job_id() {
     let store = Arc::new(InMemoryJobStore::new());
-    let submitter = NativeBacktestSubmitter::new(store.clone());
+    let submitter = NativeBacktestSubmitter::new(store.clone(), Arc::new(Wake));
     let mut document = replay_document("backtest");
     document["job_id"] = json!("job-document");
     let path = write_temp("backtest-overlay", &document);
@@ -120,85 +116,9 @@ fn submitted_job_id_overrides_a_document_job_id() {
     std::fs::remove_file(path).unwrap();
 }
 
-/// Keep the external execution boundary busy while querying its durable job.
-struct WaitingScreenRunner {
-    entered: mpsc::Sender<()>,
-    release: Mutex<mpsc::Receiver<()>>,
-}
-
-impl api::http::screener::ScreeningRunner for WaitingScreenRunner {
-    fn run(
-        &self,
-        _configuration: &backtest::backtest::screen::ScreenConfig,
-        _output_dir: Option<&std::path::Path>,
-    ) -> Result<api::http::screener::ScreenRunOutcome, String> {
-        self.entered.send(()).unwrap();
-        self.release
-            .lock()
-            .unwrap()
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap();
-        Err("observed runner failure".to_string())
+struct Wake;
+impl api::execution::Wake for Wake {
+    fn wake(&self) -> Result<(), String> {
+        Ok(())
     }
-}
-
-#[test]
-fn active_local_worker_is_durably_running_and_duplicate_submission_joins() {
-    let root = std::env::temp_dir().join(format!("harness-worker-state-{}", std::process::id()));
-    let store = Arc::new(FileSystemJobStore::new(&root));
-    let (entered_tx, entered_rx) = mpsc::channel();
-    let (release_tx, release_rx) = mpsc::channel();
-    let submitter = NativeScreeningSubmitter::new(
-        store.clone(),
-        Arc::new(WaitingScreenRunner {
-            entered: entered_tx,
-            release: Mutex::new(release_rx),
-        }),
-    );
-    let job_id = "job-active-worker";
-    let path = write_temp("active-worker", &screen_document());
-    submitter
-        .submit(path.to_str().unwrap(), None, Some(job_id))
-        .unwrap();
-    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-    // A separately opened reader observes the same running state and identity.
-    let reader = FileSystemJobStore::new(&root);
-    let running = reader.get(job_id).unwrap();
-    assert_eq!(running.state, JobState::Running);
-    assert!(running.updated_at >= running.created_at);
-    assert_eq!(
-        store.mark_running(job_id, chrono::Utc::now()).unwrap(),
-        running
-    );
-    let joined = submitter
-        .submit(path.to_str().unwrap(), None, Some(job_id))
-        .unwrap();
-    assert_eq!(joined["state"], "running");
-    assert_eq!(joined["job_id"], job_id);
-    assert_eq!(reader.get(job_id).unwrap(), running);
-    release_tx.send(()).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let terminal = loop {
-        if let Some(record) = reader.get(job_id) {
-            if record.state.is_terminal() {
-                break record;
-            }
-        }
-        assert!(Instant::now() < deadline, "worker did not settle");
-        std::thread::sleep(Duration::from_millis(1));
-    };
-    assert_eq!(terminal.state, JobState::Failed);
-    assert_eq!(
-        terminal.error_message.as_deref(),
-        Some("observed runner failure")
-    );
-    assert_eq!(terminal.input_digest, running.input_digest);
-    assert_eq!(terminal.accepted_input, running.accepted_input);
-    assert!(matches!(
-        store.mark_running(job_id, chrono::Utc::now()),
-        Err(StoreError::Terminal(_))
-    ));
-    assert_eq!(reader.get(job_id).unwrap(), terminal);
-    std::fs::remove_file(path).unwrap();
-    std::fs::remove_dir_all(root).unwrap();
 }

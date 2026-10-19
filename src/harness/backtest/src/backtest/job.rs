@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use harness_contracts::progress::{ExecutionProgress, ExecutionStage};
-use harness_lakeclient::{BlockingLakeClient, EnsureSpec, LakeClientError, ReadSpec};
+use harness_lakeclient::{BlockingLakeClient, EnsureSpec, ReadSpec};
 use num::{Decimal18, DecimalError};
 
 use marketdata::{DataType, Date};
@@ -26,15 +26,13 @@ use crate::backtest::engine_core::{
     BacktestOutcome, EngineOptions, MarketSubscription, StrategyInstance,
 };
 use crate::backtest::errors::{BacktestError, ONE_DAY_NS};
-use crate::backtest::fixture::{
-    ExchangeSession, MarketEvent, ReplayFingerprints, ReplayFixture, SyntheticDataOptions,
-};
+use crate::backtest::fixture::{MarketEvent, ReplayFixture, SyntheticDataOptions};
 use crate::backtest::preflight::preflight_data;
 use crate::backtest::screen::ScreenConfig;
 use crate::canonical_json::JsonValue;
 use crate::results::metrics::{
-    equity_curve_metrics, execution_stats, trade_stats, EquityMetrics, EquityPoint, ExecutionStats,
-    FillRow, MetricsError, OrderRow, Outcome, TradeRow, TradeStats,
+    equity_curve_metrics_stream, execution_stats, trade_stats, EquityMetrics, EquityPoint,
+    ExecutionStats, FillRow, MetricsError, OrderRow, Outcome, TradeRow, TradeStats,
 };
 use crate::results::recorder::{
     ActionKind, ActionRecord, EquityRecord, FillRecord, RecorderConfig, RunManifest, RunRecorder,
@@ -291,6 +289,25 @@ pub fn load_replay_submission(
         config_path,
     )?;
     document["job_id"] = serde_json::Value::String(configuration.job_id.clone());
+    if let Some(instances) = document
+        .get_mut("strategy_instances")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for (document, instance) in instances.iter_mut().zip(&configuration.strategy_instances) {
+            if let Some(source) = instance.parameters.get("source") {
+                let source =
+                    serde_json::from_str::<serde_json::Value>(&source.to_canonical_string())
+                        .map_err(|e| BacktestJobError::Io(e.to_string()))?;
+                document["parameters"]["source"] = source;
+                if let Some(parameters) = document
+                    .get_mut("parameters")
+                    .and_then(serde_json::Value::as_object_mut)
+                {
+                    parameters.remove("source_path");
+                }
+            }
+        }
+    }
     Ok((configuration, document))
 }
 
@@ -467,6 +484,7 @@ fn resolve_authored_sources(
         instance
             .parameters
             .insert("source".to_string(), JsonValue::String(source));
+        instance.parameters.remove("source_path");
     }
     Ok(configuration)
 }
@@ -794,7 +812,7 @@ pub fn lake_fixture_with_subscriptions(
                 .map_err(|e| BacktestJobError::Io(e.to_string()))?,
         );
     }
-    let mut events = lake_subscription_events(
+    let (stream, events, sessions) = lake_subscription_events(
         configuration,
         client,
         &start_text,
@@ -802,33 +820,17 @@ pub fn lake_fixture_with_subscriptions(
         &acquisition,
         &resolved,
     )?;
-    if events.is_empty() {
-        return Err(BacktestJobError::Io(format!(
-            "the market lake served no requested events for the configured window \
-             {start_text}..{end_text} (symbols: {}); ensure the lake covers the run window",
-            configuration.symbols.join(", ")
-        )));
+    if stream.evidence.event_count == 0 {
+        return Err(BacktestJobError::Io(
+            "the market lake served no requested events for the configured window".into(),
+        ));
     }
-    events.sort_by(|left, right| {
-        left.timestamp_ns()
-            .cmp(&right.timestamp_ns())
-            .then_with(|| left.sequence().cmp(&right.sequence()))
-            .then_with(|| class_priority(left).cmp(&class_priority(right)))
-    });
-    let sessions = sessions_from_events(&events);
-    let fingerprints = ReplayFingerprints::of_events(&events);
+    let fingerprints = stream.evidence.fingerprints.clone();
     let fixture = ReplayFixture {
         sessions,
         events,
-        source_id: if resolved.is_empty() {
-            format!("lake:{}", client.base_url())
-        } else {
-            format!(
-                "lake:{};options={}",
-                client.base_url(),
-                serde_json::to_string(&resolved).expect("option resolution JSON")
-            )
-        },
+        stream: Some(stream.clone()),
+        source_id: stream.evidence.source_id.clone(),
         symbols: configuration.symbols.clone(),
         fingerprints,
         expected_data_fingerprint: None,
@@ -859,7 +861,7 @@ fn lake_subscription_events(
     end_text: &str,
     subscriptions: &[MarketSubscription],
     resolved: &BTreeMap<String, harness_contracts::ResolvedOption>,
-) -> Result<Vec<MarketEvent>, BacktestJobError> {
+) -> Result<super::stream::ScannedReplay, BacktestJobError> {
     let mut windows = Vec::new();
     for input in subscriptions {
         let data_type = match input.data_type.as_str() {
@@ -911,50 +913,48 @@ fn lake_subscription_events(
     for (_, outcome) in windows.iter().zip(client.ensure_many(&ensures)) {
         outcome.map_err(|error| BacktestJobError::Io(error.to_string()))?;
     }
-    let mut events: Vec<MarketEvent> = Vec::new();
-    for (symbol, lake_symbol, data_type, _, read) in &windows {
+    client
+        .report_progress(ExecutionProgress::stage(ExecutionStage::ReadingData))
+        .map_err(|e| BacktestJobError::Io(e.to_string()))?;
+    let cursor = std::sync::Arc::new(
         client
-            .visit_arrow(read, |batch| {
-                let decoded = marketdata::events_from_arrow(
-                    *data_type,
-                    lake_symbol,
-                    std::slice::from_ref(&batch),
-                )
-                .map_err(|error| LakeClientError::Decode(error.to_string()))?;
-                // Marketdata DateTime is microsecond-based. Restore Arrow row precision
-                // before enforcing the nanosecond run bounds; decoding preserves row order.
-                let timestamps = std::iter::once(&batch).flat_map(|batch| {
-                    let nanos = batch.column_by_name("timestamp").and_then(|column| {
-                        column
-                            .as_any()
-                            .downcast_ref::<arrow_array::TimestampNanosecondArray>()
-                    });
-                    (0..batch.num_rows()).map(move |row| nanos.map(|array| array.value(row)))
-                });
-                for (event, timestamp) in decoded.iter().zip(timestamps) {
-                    let mut event = lake_event(event, symbol);
-                    if let Some(timestamp) = timestamp {
-                        match &mut event {
-                            MarketEvent::Quote { timestamp_ns, .. }
-                            | MarketEvent::Trade { timestamp_ns, .. }
-                            | MarketEvent::Bar { timestamp_ns, .. } => *timestamp_ns = timestamp,
-                        }
-                    }
-                    if event.timestamp_ns() >= configuration.start_ns
-                        && event.timestamp_ns() < configuration.end_ns
-                    {
-                        events.push(event);
-                    }
-                }
-                Ok(())
-            })
-            .map_err(|error| BacktestJobError::Io(error.to_string()))?;
-    }
-    Ok(events)
+            .replay_cursor()
+            .map_err(|e| BacktestJobError::Io(e.to_string()))?,
+    );
+    let inputs = windows
+        .into_iter()
+        .map(
+            |(symbol, lake_symbol, data_type, _, read)| super::stream::LakeInput {
+                symbol,
+                lake_symbol,
+                data_type,
+                read,
+            },
+        )
+        .collect();
+    let factory =
+        super::stream::lake_factory(cursor, inputs, configuration.start_ns, configuration.end_ns);
+    let source_id = if resolved.is_empty() {
+        format!("lake:{}", client.base_url())
+    } else {
+        format!(
+            "lake:{};options={}",
+            client.base_url(),
+            serde_json::to_string(resolved).map_err(|e| BacktestJobError::Io(e.to_string()))?
+        )
+    };
+    super::stream::StreamedReplay::scan(
+        factory,
+        source_id,
+        configuration.start_ns,
+        configuration.end_ns,
+        client.progress_reporter(),
+    )
+    .map_err(BacktestJobError::from)
 }
 
 /// Convert one normalized lake event into the engine's fixture event.
-fn lake_event(event: &marketdata::MarketEvent, symbol: &str) -> MarketEvent {
+pub(super) fn lake_event(event: &marketdata::MarketEvent, symbol: &str) -> MarketEvent {
     match event {
         marketdata::MarketEvent::Quote(quote) => MarketEvent::Quote {
             event_id: quote.event_id.clone(),
@@ -991,32 +991,8 @@ fn lake_event(event: &marketdata::MarketEvent, symbol: &str) -> MarketEvent {
     }
 }
 
-const fn class_priority(event: &MarketEvent) -> u8 {
-    match event {
-        MarketEvent::Quote { .. } => 0,
-        MarketEvent::Trade { .. } => 1,
-        MarketEvent::Bar { .. } => marketdata::EventType::Bar.priority(),
-    }
-}
-
-/// One deterministic UTC session window per day carrying events.
-fn sessions_from_events(events: &[MarketEvent]) -> Vec<ExchangeSession> {
-    let mut days: Vec<i64> = events
-        .iter()
-        .map(|event| event.timestamp_ns().div_euclid(ONE_DAY_NS))
-        .collect();
-    days.sort_unstable();
-    days.dedup();
-    days.into_iter()
-        .map(|day| ExchangeSession {
-            session_date_days: day,
-            open_ns: day * ONE_DAY_NS,
-            close_ns: (day + 1) * ONE_DAY_NS,
-        })
-        .collect()
-}
-
 /// One point of the deterministic job ledger derived from the run's fills.
+#[derive(Clone, Debug)]
 struct LedgerRow {
     timestamp_ns: i64,
     cash: Decimal18,
@@ -1024,6 +1000,31 @@ struct LedgerRow {
     market_value: Decimal18,
     position_count: u32,
     fill_count: u64,
+}
+
+impl super::history::Record for LedgerRow {
+    fn encode(&self, output: &mut Vec<u8>) {
+        output.extend(self.timestamp_ns.to_le_bytes());
+        for value in [self.cash, self.equity, self.market_value] {
+            output.extend(value.unscaled().to_le_bytes());
+        }
+        output.extend(self.position_count.to_le_bytes());
+        output.extend(self.fill_count.to_le_bytes());
+    }
+    fn decode(input: &mut &[u8]) -> std::io::Result<Self> {
+        use super::history::take;
+        Ok(Self {
+            timestamp_ns: i64::from_le_bytes(take(input)?),
+            cash: Decimal18::from_unscaled(i128::from_le_bytes(take(input)?))
+                .map_err(std::io::Error::other)?,
+            equity: Decimal18::from_unscaled(i128::from_le_bytes(take(input)?))
+                .map_err(std::io::Error::other)?,
+            market_value: Decimal18::from_unscaled(i128::from_le_bytes(take(input)?))
+                .map_err(std::io::Error::other)?,
+            position_count: u32::from_le_bytes(take(input)?),
+            fill_count: u64::from_le_bytes(take(input)?),
+        })
+    }
 }
 
 /// Counts rendered in the `metrics.json` `counts` object.
@@ -1038,8 +1039,7 @@ struct JobCounts {
 /// The deterministic metrics the job derives from the engine's fills. Every
 /// statistic is computed once here, before any artifact is written.
 struct JobLedger {
-    equity: Vec<EquityPoint>,
-    rows: Vec<LedgerRow>,
+    rows: super::history::History<LedgerRow>,
     trades: ClosedTrades,
     trade_stats: TradeStats,
     equity_metrics: EquityMetrics,
@@ -1312,31 +1312,44 @@ fn closed_trades(fills: &[LedgerFill]) -> Result<ClosedTrades, BacktestJobError>
     Ok(ClosedTrades { rows, open_fees })
 }
 
+fn equity_points(
+    rows: &super::history::History<LedgerRow>,
+) -> std::io::Result<impl Iterator<Item = std::io::Result<EquityPoint>> + '_> {
+    Ok(rows.iter()?.map(|row| {
+        row.map(|row| EquityPoint {
+            timestamp_ns: row.timestamp_ns,
+            equity: row.equity,
+        })
+    }))
+}
+
 fn build_ledger(
     configuration: &BacktestConfig,
     fills: &[LedgerFill],
     orders: &[LedgerOrder],
-    valuations: &[super::engine_core::ValuationSample],
+    valuations: &super::history::History<super::engine_core::ValuationSample>,
 ) -> Result<JobLedger, BacktestJobError> {
     let mut cash = ledger_decimal(&configuration.initial_cash, "initial_cash")?;
     let mut positions: BTreeMap<String, Decimal18> = BTreeMap::new();
     let mut marks: BTreeMap<String, Decimal18> = BTreeMap::new();
-    let mut equity = vec![EquityPoint {
-        timestamp_ns: configuration.start_ns,
-        equity: cash,
-    }];
-    let mut rows = vec![LedgerRow {
+    let mut rows = super::history::History::default();
+    rows.push(LedgerRow {
         timestamp_ns: configuration.start_ns,
         cash,
         equity: cash,
         market_value: Decimal18::ZERO,
         position_count: 0,
         fill_count: 0,
-    }];
+    })
+    .map_err(|e| BacktestJobError::Io(e.to_string()))?;
     let mut ledger_fills = Vec::new();
     let mut last_timestamp_ns = configuration.start_ns;
     let mut consumed_fills = 0;
-    for sample in valuations {
+    for sample in valuations
+        .iter()
+        .map_err(|e| BacktestJobError::Io(e.to_string()))?
+    {
+        let sample = sample.map_err(|e| BacktestJobError::Io(e.to_string()))?;
         if sample.timestamp_ns < last_timestamp_ns
             || sample.fill_count < consumed_fills
             || sample.fill_count > fills.len()
@@ -1411,10 +1424,6 @@ fn build_ledger(
             market_value = overflow_ledger(market_value.checked_add(value), "market value")?;
         }
         let equity_value = overflow_ledger(cash.checked_add(market_value), "equity")?;
-        equity.push(EquityPoint {
-            timestamp_ns: sample.timestamp_ns,
-            equity: equity_value,
-        });
         rows.push(LedgerRow {
             timestamp_ns: sample.timestamp_ns,
             cash,
@@ -1422,7 +1431,8 @@ fn build_ledger(
             market_value,
             position_count: positions.values().filter(|held| !held.is_zero()).count() as u32,
             fill_count: sample.fill_count as u64,
-        });
+        })
+        .map_err(|e| BacktestJobError::Io(e.to_string()))?;
     }
     if consumed_fills != fills.len() {
         return Err(BacktestJobError::Engine(
@@ -1439,14 +1449,14 @@ fn build_ledger(
         .collect();
     let trades = closed_trades(fills)?;
     let trade_stats = trade_stats(&trades.rows, trades.open_fees).map_err(metrics_overflow)?;
-    let equity_metrics = equity_curve_metrics(&equity);
+    let equity_metrics = equity_curve_metrics_stream(|| equity_points(&rows))
+        .map_err(|e| BacktestJobError::Io(e.to_string()))?;
     let execution = execution_stats(&ledger_fills, &ledger_orders).map_err(metrics_overflow)?;
     let net_pnl = overflow_ledger(
-        equity
-            .last()
+        rows.last()
             .expect("opening capital sample")
             .equity
-            .checked_sub(equity[0].equity),
+            .checked_sub(ledger_decimal(&configuration.initial_cash, "initial_cash")?),
         "marked net PnL",
     )?;
     let gross_pnl = overflow_ledger(
@@ -1454,7 +1464,6 @@ fn build_ledger(
         "marked gross PnL",
     )?;
     Ok(JobLedger {
-        equity,
         rows,
         trades,
         trade_stats,
@@ -1560,7 +1569,7 @@ fn metrics_json(
         (
             "equity",
             JsonValue::object([
-                ("samples", JsonValue::UInt(ledger.equity.len() as u64)),
+                ("samples", JsonValue::UInt(ledger.rows.len() as u64)),
                 ("net_pnl", decimal_text(ledger.net_pnl)),
                 ("net_pnl_reason", JsonValue::Null),
                 ("gross_pnl", decimal_text(ledger.gross_pnl)),
@@ -1698,7 +1707,16 @@ fn write_report(
     let document = render_report(
         &header,
         &ledger.equity_metrics,
-        &ledger.equity,
+        &ledger
+            .rows
+            .sample(2000)
+            .map_err(|e| BacktestJobError::Io(e.to_string()))?
+            .into_iter()
+            .map(|row| EquityPoint {
+                timestamp_ns: row.timestamp_ns,
+                equity: row.equity,
+            })
+            .collect::<Vec<_>>(),
         &ledger.trade_stats,
     );
     let path = directory.join("report.html");
@@ -1774,7 +1792,12 @@ fn record_artifacts(
         realized_prefix.push((trade.exit_sequence, cumulative_net));
     }
 
-    for row in &ledger.rows {
+    for row in ledger
+        .rows
+        .iter()
+        .map_err(|e| BacktestJobError::Io(e.to_string()))?
+    {
+        let row = row.map_err(|e| BacktestJobError::Io(e.to_string()))?;
         let total_pnl =
             overflow_ledger(row.equity.checked_sub(initial_cash), "snapshot total PnL")?;
         let last_sequence = if row.fill_count == 0 {

@@ -122,16 +122,35 @@ fn native_strategy_validation_really_compiles_loads_constructs_and_checks_depend
 async fn authenticated_http_mcp_exposes_and_executes_native_strategy_validation() {
     let mut config = api::http::state::AppConfig::in_memory();
     config.bearer_token = Some("test-token".into());
-    config.mcp_server =
-        Some(api::http::mcp::compose_local_server(config.job_store.clone()).unwrap());
+    config.mcp_server = Some(
+        api::http::mcp::compose_with_validator(
+            config.job_store.clone(),
+            std::sync::Arc::new(api::execution::dispatch::ConfiguredWake),
+            std::sync::Arc::new(api::execution::validation::ProcessValidator {
+                binary: std::path::PathBuf::from(env!("CARGO_BIN_EXE_harness-worker")),
+            }),
+        )
+        .unwrap(),
+    );
     let app = api::http::create_app(config).unwrap();
-    for (method, params) in [
+    let input = model(&format!("{SOURCE}\n// isolated HTTP transport"));
+    let request = json!({"name": "validate_strategy", "arguments": {"model": input}});
+    let exits = SOURCE.replace(
+        "Self { dependency: Dependency { sequence: IndicatorSequence::ticks(60_000_000_000).unwrap() } }",
+        "std::process::exit(91)",
+    );
+    for (index, (method, params)) in [
         ("tools/list", json!({})),
+        ("tools/call", request.clone()),
+        ("tools/call", request),
         (
             "tools/call",
-            json!({"name": "validate_strategy", "arguments": {"model": model(SOURCE)}}),
+            json!({"name":"validate_strategy","arguments":{"model":model(&exits)}}),
         ),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let response = app
             .clone()
             .oneshot(
@@ -158,12 +177,21 @@ async fn authenticated_http_mcp_exposes_and_executes_native_strategy_validation(
                 .unwrap()
                 .iter()
                 .any(|tool| tool["name"] == "validate_strategy"));
+        } else if index == 3 {
+            assert_eq!(body["result"]["isError"], true, "{body}");
+            assert_eq!(body["result"]["structuredContent"]["cacheable"], false);
         } else {
             assert_eq!(body["result"]["isError"], false, "{body}");
             assert_eq!(body["result"]["structuredContent"]["kind"], "strategy");
             assert_eq!(body["result"]["structuredContent"]["shell"], "backtest");
+            assert_eq!(body["result"]["structuredContent"]["reused"], index == 2);
         }
     }
+    let healthy = app
+        .oneshot(Request::get("/health").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(healthy.status(), StatusCode::OK);
 }
 
 #[test]

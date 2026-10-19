@@ -5,7 +5,7 @@
 The runtime implements one harness-hosted HTTP composition, a shared read-only
 reader, durable local/ACA ingestion and snapshot/cache reuse. Ingestion now
 streams bounded typed pages through canonical external runs and file-backed
-Parquet staging; finite workers consume balanced immutable lanes with background
+Parquet staging; finite workers consume independently claimable immutable chunks with background
 request-permit prefetch and durable final metrics. Publication uses immutable
 SHA-256 object paths and a renewed, fenced symbol-day manifest. CPU, wire/decode,
 session, scratch and publication resources have explicit process budgets.
@@ -23,7 +23,8 @@ historical deployment and performance evidence.
 | Catalog and availability | `src/lake/catalog`, `coverage`, `query` | Classify committed data and plan availability. No provider work occurs during reads. |
 | HTTP | `src/lake/http` | Authenticated catalog, admission, snapshot, read and reference routes, composed under the harness API's `/market-data` prefix. |
 | Ingestion execution control | `src/lake/ingest-jobs` | Conditional durable admission, immutable worker specifications, lease-fenced job state, ACA execution reconciliation and aggregate worker limits. |
-| Finite ingestion process | `src/lake/ingest-worker` | Own one immutable plan lane, fetch provider secrets once, consume its disjoint chunks, persist progress/final metrics, settle and exit. |
+| Finite ingestion process | `src/lake/ingest-worker` | Own a renewable executor anchor, fetch provider secrets once, claim compatible disjoint chunks, persist progress/final metrics, settle and exit. |
+| Harness execution control | `src/harness/api/src/execution` | Retain accepted input and results, reserve finite local/ACA execution capacity, claim jobs with renewable fencing and classify expired owners as interrupted. |
 | Provider acquisition/publication | `src/lake/providers`, `ingestion`, `storage` | Provider paging/governance, staging, canonical Parquet writing and symbol-day publication leases. |
 | Local deployment adapters | `src/lake/local` | Atomic contract files, durable job documents, kernel-fenced manifest ownership and content-pinned finite worker processes. |
 | Ingestion resources and measurements | `src/lake/pipeline` | Shared CPU/wire/decode/session/scratch/publication admission, cancellation fencing, stage/pool counters and OS CPU/RSS. |
@@ -78,16 +79,21 @@ different inputs conflict and terminal outcomes are immutable. Option selection
 is one standalone operation; dataset batches may contain multiple requirements.
 The API admits and observes work without fetching provider data.
 
-The planner divides each dataset window into short disjoint calendar chunks: at
-most the configured 31-day cap and approximately four chunks per available
-worker for shorter plans. It distributes those chunks across at most the accepted
-worker limit, spreading dates rather than assigning contiguous months to workers.
-Each finite worker consumes its immutable lane sequentially, sharing provider
-connections, secrets, governor and process startup across chunks. The lane keeps
-the original `job_id` and a hash of its complete ordered request list as an
-internal partition key. State lives at `ingestion/partitions/<job_id>/<key>.json`;
-these are work addresses, never additional execution job IDs. Root and lane
-records are durable before any external start. Accepted inputs never change.
+The planner divides each dataset window into independently claimable disjoint
+calendar chunks: at most the configured 31-day cap and approximately four chunks
+per available worker for shorter plans. Bar-only ranges coalesce into one chunk.
+Starts favor roots with fewer occupied executors. A warm worker claims the next
+unstarted chunk with the identical accepted worker specification, alternating
+roots when possible. It shares provider connections, secrets, governor and
+startup across chunks; it cannot steal running or ambiguously dispatched work.
+The chunk keeps the original `job_id` and a request-list hash as its internal
+partition key. State lives at `ingestion/partitions/<job_id>/<key>.json`; these
+are work addresses, never additional execution job IDs. Each dispatched chunk
+retains its physical executor's anchor reference. The anchor remains owned and
+running until that process drains its work, so cleanup cannot stop a live reused
+executor. Global admission counts unique executors, including startup, rather
+than chunks. Root and chunk records precede external starts. Accepted requests
+and worker specifications never change.
 
 A renewable dispatcher lease bounds the aggregate fleet across all API replicas
 and the scheduled coordinator. Existing partition records are read with bounded
@@ -203,6 +209,41 @@ worker identity, image, resource group and provider Key Vault are explicit input
 The partition default amortizes worker startup over month/year requests. Smaller
 partitions favor short-plan fan-out; larger partitions reduce startup waves for
 bulk history. Changing the setting affects new admissions only.
+
+Backtest, study and screening submissions use a separate finite worker pool.
+`harness-worker` runs as local child processes or the manual ACA backtest Job
+(4 vCPU / 8 GiB, two workers by default); the API executes no JIT constructors or
+simulations. Jobs and artifact inventories live under `execution/jobs/` in the
+shared results backend. Immutable file objects publish before the owner-fenced
+terminal update. Startup reservations count cold boots, are consumed once and
+expire after ten minutes; attached fleet/job ownership renews every ten seconds
+with a sixty-second expiry. Recovery marks lost owners interrupted and never
+replays them. A 0.25-vCPU / 0.5-GiB scheduled execution dispatcher recovers and
+notifies queued work even while the API is scaled to zero. Local API recovery
+performs the same control work. Notification loss does not lose durable work.
+
+Synchronous control operations run behind bounded blocking admission; async
+health probes remain independent. Validation runs in a memory/deadline-bounded
+compiler child while complete validation results retain their existing cache.
+Result inventory and status reads never hydrate all artifacts; raw downloads
+stream with bounded buffers and validate byte counts/checksums. Reading,
+simulation, artifact publication and interruption are distinct durable stages.
+
+Replay uses a chronological merge of independently admitted source cursors,
+without a whole-window tick vector or event-bus queue. Preflight scans exact
+fingerprints once and reopens the same pinned snapshot. Exact valuation and
+ledger histories spill checksummed compressed frames; financial metrics and
+Parquet consume every row. Only report visualization points are sampled.
+Memory is bounded by active cursors/batches and history frames, rather than the
+length of the tick window. Explicit cursor, tie-group and scratch capacities
+fail visibly; they do not truncate input.
+
+The pooled-ingestion contract requires an explicit nullable `executor` field.
+Its cutover deletes only obsolete, drained ingestion job/partition coordination
+documents, after stopping old API/dispatcher writers. Preserve all published
+market objects, publication manifests, references, contracts and request-budget
+charges. Existing harness filesystem execution metadata is obsolete when moving
+to the new shared `execution/` authority; it is not silently reinterpreted.
 
 The coordinator and API use the quant identity for control. The worker uses the
 separately declared runtime identity attached to the ACA Job; coordinator identity

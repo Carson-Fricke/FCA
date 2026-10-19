@@ -4,7 +4,8 @@ This folder owns authenticated HTTP composition and injected execution ports. Th
 
 - `mod.rs`: Exports HTTP composition modules.
 - `auth.rs`: Authenticates configured bearer credentials.
-- `cli.rs`: Resolves HTTP CLI settings, composes the complete local/Azure market-data capability under `/market-data` and injects native access and launches the combined server.
+- `blocking.rs`: bounds synchronous control admission and moves it to the blocking executor, keeping async health probes responsive.
+- `cli.rs`: Resolves settings, composes the complete local/Azure market-data capability under `/market-data`, durable queued execution ports and control recovery, then launches the combined server.
 - `clock.rs`: Defines injectable timestamps.
 - `configuration.rs`: Validates submitted configurations and immutable admission fingerprints.
 - `launcher.rs`: Defines execution ports and composes admitted job start, progress persistence and terminal publication.

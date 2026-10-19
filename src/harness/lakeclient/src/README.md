@@ -16,3 +16,7 @@ Callers own waiting and execution policy. A combined host injects native catalog
 The standalone client defaults to the local combined harness at `http://127.0.0.1:8001/market-data`. Remote executions explicitly configure `LAKE_API_URL` and `LAKE_API__BEARER_TOKEN`. The native host injects access directly.
 
 Ensure completion polling starts at 100 ms and caps at 500 ms, avoiding multi-second completion detection delays.
+
+`client.rs` and `blocking.rs` expose replay cursors sharing pinned manifests and
+content caches with independent reader admission. Replay reopen does not emit
+acquisition progress; the engine reports its actual read and replay row counts.

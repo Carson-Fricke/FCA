@@ -33,6 +33,11 @@ path = "src/bin/mcp.rs"
 futures-util = "0.3"
 lake-hosted = { path = "../../lake/hosted" }
 lake-contracts = { path = "../../lake/contracts" }
+lake-storage = { path = "../../lake/storage" }
+azure_core = { version = "0.21", features = ["tokio-fs"] }
+azure_identity = "0.21"
+uuid = { version = "1", features = ["v4"] }
+tempfile = "3"
 harness-contracts = { path = "../contracts" }
 config = { path = "../config" }
 axum = "0.8"
@@ -58,6 +63,16 @@ harness-lakeclient = { path = "../lakeclient", features = ["test-support"] }
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
+
 [[bin]]
 name = "market-data-profile"
 path = "src/bin/market_data_profile.rs"
+
+[[bin]]
+name = "harness-worker"
+path = "src/bin/harness_worker.rs"

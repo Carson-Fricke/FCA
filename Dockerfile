@@ -165,6 +165,7 @@ COPY --link --from=rust \
     /build/target/release/harness \
     /build/target/release/api \
     /build/target/release/backtest-job \
+    /build/target/release/harness-worker \
     /build/target/release/screen-job \
     /build/target/release/market-data-profile \
     /build/target/release/mcp \

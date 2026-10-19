@@ -51,4 +51,19 @@ describe('shared harness execution status', () => {
         await waitFor(() => expect(screen.queryByText('stale failure')).toBeNull());
         expect(screen.getByText('new-job')).toBeInTheDocument();
     });
+    it('surfaces a lost execution owner without continuing to display ingestion', async () => {
+        vi.mocked(getHarnessJob).mockResolvedValue({job_id:'interrupted-job',state:'failed',error_message:'Execution worker disappeared; automatic replay is prohibited',progress:[{...reading,stage:'interrupted',symbol:null,data_type:null}]});
+        render(HarnessExecutionCard,{props:{jobId:'interrupted-job'}});
+        await screen.findAllByText('Execution interrupted');
+        expect(screen.getByText('Execution worker disappeared; automatic replay is prohibited')).toBeInTheDocument();
+        expect(screen.queryByText('Preparing market data')).toBeNull();
+    });
+    it('labels unavailable observations without inventing a running phase', async () => {
+        vi.mocked(getHarnessJob).mockRejectedValue(new Error('harness unavailable'));
+        render(HarnessExecutionCard, { props: { jobId: 'unavailable-job' } });
+        await screen.findByText('Execution status unavailable');
+        expect(screen.getByText(/Status unavailable: harness unavailable/)).toBeInTheDocument();
+        expect(screen.queryByText('Preparing market data')).toBeNull();
+    });
+
 });

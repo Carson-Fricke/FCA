@@ -215,6 +215,15 @@ pub struct StoredJob {
     pub artifacts: BTreeMap<String, Vec<u8>>,
 }
 
+/// Artifact inventory is metadata; listing it must not download result files.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactInfo {
+    pub name: String,
+    pub uri: String,
+    pub sha256: String,
+    pub size_bytes: u64,
+}
+
 /// The outcome of an atomic admission.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Admission {
@@ -288,6 +297,49 @@ impl std::error::Error for StoreError {}
 pub trait JobStore: Send + Sync {
     /// Return one job record.
     fn get(&self, job_id: &str) -> Option<JobRecord>;
+    fn try_get(&self, job_id: &str) -> Result<Option<JobRecord>, StoreError> {
+        Ok(self.get(job_id))
+    }
+    fn try_list(
+        &self,
+        kind: Option<JobKind>,
+        state: Option<JobState>,
+        strategy: Option<&str>,
+    ) -> Result<Vec<JobRecord>, StoreError> {
+        Ok(self.list(kind, state, strategy))
+    }
+    fn artifacts(&self, job_id: &str) -> Result<Option<Vec<ArtifactInfo>>, StoreError> {
+        self.fetch(job_id)
+            .map(|job| {
+                let prefix = artifact_prefix(job_id)?;
+                Ok(job
+                    .artifacts
+                    .into_iter()
+                    .map(|(name, payload)| ArtifactInfo {
+                        uri: format!("{prefix}/{name}"),
+                        sha256: artifact_digest(&payload),
+                        size_bytes: payload.len() as u64,
+                        name,
+                    })
+                    .collect())
+            })
+            .transpose()
+    }
+    fn artifact(&self, job_id: &str, name: &str) -> Result<Option<Vec<u8>>, StoreError> {
+        validate_artifact_name(name)?;
+        Ok(self
+            .fetch(job_id)
+            .and_then(|mut job| job.artifacts.remove(name)))
+    }
+    fn open_artifact(
+        &self,
+        job_id: &str,
+        name: &str,
+    ) -> Result<Option<Box<dyn std::io::Read + Send>>, StoreError> {
+        Ok(self
+            .artifact(job_id, name)?
+            .map(|bytes| Box::new(std::io::Cursor::new(bytes)) as Box<dyn std::io::Read + Send>))
+    }
     /// Atomically create the job, or join an existing job with the same
     /// accepted-input digest. The same job ID with a different digest is a
     /// conflict; persistence failures are returned, never swallowed.
@@ -325,6 +377,22 @@ pub trait JobStore: Send + Sync {
         record: JobRecord,
         artifacts: BTreeMap<String, Vec<u8>>,
     ) -> Result<JobRecord, StoreError>;
+    /// Publish sealed artifact files without retaining their payloads in RAM.
+    fn put_files(
+        &self,
+        record: JobRecord,
+        files: BTreeMap<String, std::path::PathBuf>,
+    ) -> Result<JobRecord, StoreError> {
+        let artifacts = files
+            .into_iter()
+            .map(|(name, path)| {
+                std::fs::read(path)
+                    .map(|bytes| (name, bytes))
+                    .map_err(io_error)
+            })
+            .collect::<Result<_, _>>()?;
+        self.put_result(record, artifacts)
+    }
     /// List job records sorted by job ID with optional filters.
     fn list(
         &self,
@@ -339,7 +407,7 @@ pub trait JobStore: Send + Sync {
     fn delete(&self, job_id: &str) -> bool;
 }
 
-fn apply_progress(
+pub fn apply_progress(
     record: &mut JobRecord,
     snapshot: harness_contracts::progress::ExecutionProgress,
     now: DateTime<Utc>,
@@ -376,6 +444,52 @@ fn apply_progress(
     Ok(())
 }
 
+/// Canonical terminal transition, independent of artifact transport.
+pub fn commit_result(
+    existing: &JobRecord,
+    mut record: JobRecord,
+    artifacts: &[ArtifactInfo],
+) -> Result<JobRecord, StoreError> {
+    if !record.state.is_terminal() {
+        return Err(StoreError::Io(
+            "result publication requires a terminal state".into(),
+        ));
+    }
+    if existing.state.is_terminal() {
+        return Err(StoreError::Terminal(existing.job_id.clone()));
+    }
+    if existing.job_id != record.job_id
+        || existing.kind != record.kind
+        || existing.input_digest != record.input_digest
+        || existing.accepted_input != record.accepted_input
+    {
+        return Err(StoreError::Conflict(record.job_id));
+    }
+    if artifacts.is_empty() && !matches!(record.state, JobState::Failed | JobState::Cancelled) {
+        return Err(StoreError::EmptyArtifacts);
+    }
+    let mut digests = BTreeMap::new();
+    let mut total = 0u64;
+    for info in artifacts {
+        validate_artifact_name(&info.name)?;
+        total = total
+            .checked_add(info.size_bytes)
+            .ok_or_else(|| StoreError::Io("artifact size overflow".into()))?;
+        digests.insert(info.name.clone(), info.sha256.clone());
+    }
+    record.progress = existing.progress.clone();
+    record.updated_at = record.updated_at.max(existing.updated_at);
+    for entry in &mut record.progress {
+        if entry.finished_at.is_none() {
+            entry.finished_at = Some(record.updated_at);
+        }
+    }
+    record.run_digest = Some(run_digest(&record.job_id, &digests));
+    record.artifact_count = digests.len() as u64;
+    record.total_bytes = total;
+    Ok(record)
+}
+
 /// Compose the same job telemetry port for MCP and HTTP execution callers.
 pub fn progress_reporter(
     store: std::sync::Arc<dyn JobStore>,
@@ -402,7 +516,7 @@ fn path_segment(value: &str) -> Result<&str, StoreError> {
     Ok(value)
 }
 
-fn object_path(value: &str) -> Result<&str, StoreError> {
+pub fn validate_artifact_name(value: &str) -> Result<&str, StoreError> {
     if value.is_empty()
         || value.contains('\\')
         || value.starts_with('/')
@@ -576,50 +690,28 @@ impl JobStore for InMemoryJobStore {
         record: JobRecord,
         artifacts: BTreeMap<String, Vec<u8>>,
     ) -> Result<JobRecord, StoreError> {
-        if artifacts.is_empty() && !matches!(record.state, JobState::Failed | JobState::Cancelled) {
-            return Err(StoreError::EmptyArtifacts);
-        }
-        let job_id = path_segment(&record.job_id)?.to_string();
-        let prefix = format!("{ARTIFACT_PREFIX}/{job_id}/");
-        let mut prepared: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-        let mut digests: BTreeMap<String, String> = BTreeMap::new();
-        let mut total_bytes: u64 = 0;
-        for (name, payload) in artifacts {
-            let safe_name = object_path(&name)?.to_string();
-            digests.insert(safe_name.clone(), artifact_digest(&payload));
-            total_bytes += payload.len() as u64;
-            prepared.insert(format!("{prefix}{safe_name}"), payload);
-        }
+        let id = path_segment(&record.job_id)?.to_string();
+        let inventory: Vec<_> = artifacts
+            .iter()
+            .map(|(name, bytes)| ArtifactInfo {
+                name: name.clone(),
+                uri: String::new(),
+                sha256: artifact_digest(bytes),
+                size_bytes: bytes.len() as u64,
+            })
+            .collect();
         let mut inner = self.lock();
         let existing = inner
             .jobs
-            .get(&job_id)
-            .ok_or_else(|| StoreError::JobNotFound(job_id.clone()))?;
-        if existing.state.is_terminal() {
-            return Err(StoreError::Terminal(job_id));
+            .get(&id)
+            .ok_or_else(|| StoreError::JobNotFound(id.clone()))?;
+        let updated = commit_result(existing, record, &inventory)?;
+        for (name, bytes) in artifacts {
+            inner
+                .blobs
+                .insert(format!("{ARTIFACT_PREFIX}/{id}/{name}"), bytes);
         }
-        if existing.input_digest != record.input_digest
-            || existing.accepted_input != record.accepted_input
-        {
-            return Err(StoreError::Conflict(job_id));
-        }
-        let progress = existing.progress.clone();
-        let updated_at = record.updated_at.max(existing.updated_at);
-        for (path, payload) in prepared {
-            inner.blobs.insert(path, payload);
-        }
-        let mut updated = record;
-        updated.progress = progress;
-        updated.updated_at = updated_at;
-        for entry in &mut updated.progress {
-            if entry.finished_at.is_none() {
-                entry.finished_at = Some(updated.updated_at);
-            }
-        }
-        updated.run_digest = Some(run_digest(&job_id, &digests));
-        updated.artifact_count = digests.len() as u64;
-        updated.total_bytes = total_bytes;
-        inner.jobs.insert(job_id, updated.clone());
+        inner.jobs.insert(id, updated.clone());
         Ok(updated)
     }
 
@@ -826,52 +918,37 @@ impl JobStore for FileSystemJobStore {
         record: JobRecord,
         artifacts: BTreeMap<String, Vec<u8>>,
     ) -> Result<JobRecord, StoreError> {
-        if artifacts.is_empty() && !matches!(record.state, JobState::Failed | JobState::Cancelled) {
-            return Err(StoreError::EmptyArtifacts);
-        }
-        let job_id = path_segment(&record.job_id)?.to_string();
+        let id = path_segment(&record.job_id)?.to_string();
         let _guard = self.lock.lock().unwrap_or_else(|error| error.into_inner());
         let existing = self
-            .read_job(&job_id)?
-            .ok_or_else(|| StoreError::JobNotFound(job_id.clone()))?;
-        if existing.state.is_terminal() {
-            return Err(StoreError::Terminal(job_id));
-        }
-        if existing.input_digest != record.input_digest
-            || existing.accepted_input != record.accepted_input
-        {
-            return Err(StoreError::Conflict(job_id));
-        }
-        let directory = self.job_object_dir(&job_id);
-        let mut digests: BTreeMap<String, String> = BTreeMap::new();
-        let mut total_bytes: u64 = 0;
-        for (name, payload) in artifacts {
-            let safe_name = object_path(&name)?.to_string();
-            let target = directory.join(&safe_name);
+            .read_job(&id)?
+            .ok_or_else(|| StoreError::JobNotFound(id.clone()))?;
+        let inventory: Vec<_> = artifacts
+            .iter()
+            .map(|(name, bytes)| ArtifactInfo {
+                name: name.clone(),
+                uri: String::new(),
+                sha256: artifact_digest(bytes),
+                size_bytes: bytes.len() as u64,
+            })
+            .collect();
+        let updated = commit_result(&existing, record, &inventory)?;
+        for (name, bytes) in artifacts {
+            let target = self.job_object_dir(&id).join(name);
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent).map_err(io_error)?;
             }
-            fs::write(&target, &payload).map_err(io_error)?;
-            digests.insert(safe_name, artifact_digest(&payload));
-            total_bytes += payload.len() as u64;
+            fs::write(target, bytes).map_err(io_error)?;
         }
-        let progress = existing.progress.clone();
-        let updated_at = record.updated_at.max(existing.updated_at);
-        let mut updated = record;
-        updated.progress = progress;
-        updated.updated_at = updated_at;
-        for entry in &mut updated.progress {
-            if entry.finished_at.is_none() {
-                entry.finished_at = Some(updated.updated_at);
-            }
-        }
-        updated.run_digest = Some(run_digest(&job_id, &digests));
-        updated.artifact_count = digests.len() as u64;
-        updated.total_bytes = total_bytes;
         fs::create_dir_all(self.jobs_dir()).map_err(io_error)?;
-        let text = serde_json::to_string_pretty(&updated)
-            .map_err(|error| StoreError::Io(error.to_string()))?;
-        fs::write(self.job_path(&job_id), text).map_err(io_error)?;
+        let temporary = self.job_path(&id).with_extension("json.tmp");
+        fs::write(
+            &temporary,
+            serde_json::to_vec_pretty(&updated)
+                .map_err(|error| StoreError::Io(error.to_string()))?,
+        )
+        .map_err(io_error)?;
+        fs::rename(temporary, self.job_path(&id)).map_err(io_error)?;
         Ok(updated)
     }
 

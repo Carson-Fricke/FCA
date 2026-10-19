@@ -22,7 +22,7 @@
 	const terminal=$derived(['succeeded','failed','cancelled','completed'].includes(execution.job?.state??''));
 	const awaiting=$derived(tracksExecution&&!terminal);
 	const progress=$derived([...(execution.job?.progress??[])].sort((a,b)=>Date.parse(b.updated_at)-Date.parse(a.updated_at))[0]);
-	const labels:Record<string,string>={compiling:'Compiling program',preparing_data:'Preparing market data',reading_data:'Reading market data',running_study:'Running study',writing_artifacts:'Writing results'};
+	const labels:Record<string,string>={compiling:'Compiling program',preparing_data:'Preparing market data',reading_data:'Reading market data',running_study:'Running study',writing_artifacts:'Writing results',interrupted:'Execution interrupted'};
 	const status=$derived(!tracksExecution?'Published evidence':execution.error&&!execution.job?'Status unavailable':execution.job?.state==='failed'?'Failed':execution.job?.state==='cancelled'?'Cancelled':terminal?'Completed':execution.job?.state==='queued'?'Queued':execution.job?'Running':'Loading status');
 	const elapsed=$derived(execution.job?.created_at?Math.max(0,Math.floor(((terminal?Date.parse(execution.job.updated_at??''):observedAt)-Date.parse(execution.job.created_at))/1000)):null);
 	$effect(()=>{execution={job:null,error:''};if(jobId&&tracksExecution)return observeJob(jobId,observation=>{execution=observation;observedAt=Date.now();},jobReader);});

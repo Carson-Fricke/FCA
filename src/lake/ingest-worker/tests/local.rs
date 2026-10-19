@@ -100,7 +100,7 @@ async fn local_worker_publishes_all_datasets_and_retained_admission_survives_hos
         .unwrap()
         .partitions()
         .unwrap();
-    assert_eq!(partitions.len(), 2);
+    assert_eq!(partitions.len(), 3);
     assert!(partitions
         .iter()
         .all(|partition| partition.record.job_id == "local-worker"));
@@ -144,10 +144,15 @@ async fn local_worker_publishes_all_datasets_and_retained_admission_survives_hos
             .join("ingestion/scratch")
             .join(reference.worker_key().unwrap())
             .exists());
-        let log = layout
-            .root()
-            .join("ingestion/logs")
-            .join(format!("{}.log", reference.worker_key().unwrap()));
+        let log = layout.root().join("ingestion/logs").join(format!(
+            "{}.log",
+            persisted
+                .executor
+                .as_ref()
+                .expect("retained executor")
+                .worker_key()
+                .unwrap()
+        ));
         let log = std::fs::read_to_string(log).unwrap();
         assert!(log.contains("worker_started"));
         let metrics = persisted

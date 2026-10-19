@@ -59,6 +59,8 @@ fn temp_root(tag: &str) -> PathBuf {
 fn durable_app(root: &Path) -> Router {
     let mut config = AppConfig::durable_with_runner(root.to_path_buf(), Arc::new(StubRunner));
     config.bearer_token = Some(BEARER.to_string());
+    config.mcp_server =
+        Some(api::http::mcp::compose_local_server(config.job_store.clone()).unwrap());
     create_app(config).expect("app")
 }
 

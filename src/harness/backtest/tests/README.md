@@ -18,3 +18,4 @@ Tests exercise the public application and acquisition boundaries; fake transport
 - `runtime_decimal_failures.rs` — Malformed, overflowed, and unknown values on the paper, shadow, reconciler,
 - `study_frames.rs` — Atomic frame dispatch, separate backtest execution feeds
   and causal tick fills without expanding consumer callbacks.
+- `streamed_replay.rs` — Streamed replay preserves dispatch and full valuation evidence; compressed histories retain every row, exact metrics and independent cloned snapshots.

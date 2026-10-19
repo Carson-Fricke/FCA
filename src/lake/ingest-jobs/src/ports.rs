@@ -37,6 +37,20 @@ pub trait JobPersistence: crate::RequestAuthority {
     async fn own(&self, id: &str) -> Result<Self::Owner, DataError>;
     async fn dispatch_lock(&self) -> Result<Self::Owner, DataError>;
     async fn active_jobs(&self) -> Result<Vec<ActiveJob>, DataError>;
+    /// Unstarted immutable work addresses; implementations may use an atomic
+    /// metadata listing to avoid reading an entire multi-year plan per claim.
+    async fn pending_work(&self) -> Result<Vec<WorkRef>, DataError> {
+        let mut pending = Vec::new();
+        for root in self.active_jobs().await? {
+            for part in self.get(&root.id).await?.partitions()? {
+                let work = self.get_work(&part.reference()).await?;
+                if !work.dispatch_started && !work.terminal() {
+                    pending.push(work.reference());
+                }
+            }
+        }
+        Ok(pending)
+    }
 }
 
 pub async fn while_owned<T>(

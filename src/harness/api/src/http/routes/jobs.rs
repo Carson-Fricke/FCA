@@ -13,7 +13,7 @@ use crate::http::models::{
     ApiError, ArtifactListResponse, ArtifactSummary, JobListResponse, JobStatusResponse,
 };
 use crate::http::state::AppState;
-use crate::http::store::{artifact_digest, artifact_prefix, JobKind, JobState};
+use crate::http::store::{JobKind, JobState};
 
 const IDENTIFIER_MAX: usize = 128;
 const ARTIFACT_NAME_MAX: usize = 512;
@@ -42,94 +42,102 @@ async fn list_jobs(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<JobListResponse>, ApiError> {
-    let kind = match params.get("kind") {
-        Some(value) => Some(JobKind::parse(value).map_err(|_| {
-            ApiError::validation_error("request validation failed").with_details(json!({
-                "loc": ["query", "kind"],
-                "msg": "unknown job kind",
-            }))
-        })?),
-        None => None,
-    };
-    let state_filter = match params.get("state") {
-        Some(value) => Some(JobState::parse(value).map_err(|_| {
-            ApiError::validation_error("request validation failed").with_details(json!({
-                "loc": ["query", "state"],
-                "msg": "unknown job state",
-            }))
-        })?),
-        None => None,
-    };
-    if let Some(strategy_id) = params.get("strategy_id") {
-        if strategy_id.len() > IDENTIFIER_MAX {
-            return Err(ApiError::validation_error("request validation failed")
-                .with_details(json!({"loc": ["query", "strategy_id"]})));
+    super::super::blocking::run(state.control.clone(), move || {
+        let kind = match params.get("kind") {
+            Some(value) => Some(JobKind::parse(value).map_err(|_| {
+                ApiError::validation_error("request validation failed").with_details(json!({
+                    "loc": ["query", "kind"],
+                    "msg": "unknown job kind",
+                }))
+            })?),
+            None => None,
+        };
+        let state_filter = match params.get("state") {
+            Some(value) => Some(JobState::parse(value).map_err(|_| {
+                ApiError::validation_error("request validation failed").with_details(json!({
+                    "loc": ["query", "state"],
+                    "msg": "unknown job state",
+                }))
+            })?),
+            None => None,
+        };
+        if let Some(strategy_id) = params.get("strategy_id") {
+            if strategy_id.len() > IDENTIFIER_MAX {
+                return Err(ApiError::validation_error("request validation failed")
+                    .with_details(json!({"loc": ["query", "strategy_id"]})));
+            }
         }
-    }
-    let jobs = state.job_store.list(
-        kind,
-        state_filter,
-        params.get("strategy_id").map(String::as_str),
-    );
-    Ok(Json(JobListResponse { jobs }))
+        let jobs = state
+            .job_store
+            .try_list(
+                kind,
+                state_filter,
+                params.get("strategy_id").map(String::as_str),
+            )
+            .map_err(|error| ApiError::store_error(&error.to_string()))?;
+        Ok(Json(JobListResponse { jobs }))
+    })
+    .await?
 }
 
 async fn get_job(
     State(state): State<AppState>,
     Path(job_id): Path<String>,
 ) -> Result<Json<JobStatusResponse>, ApiError> {
-    identifier(&job_id)?;
-    state
-        .job_store
-        .get(&job_id)
-        .map(Json)
-        .ok_or_else(ApiError::job_not_found)
+    super::super::blocking::run(state.control.clone(), move || {
+        identifier(&job_id)?;
+        state
+            .job_store
+            .try_get(&job_id)
+            .map_err(|e| ApiError::store_error(&e.to_string()))?
+            .map(Json)
+            .ok_or_else(ApiError::job_not_found)
+    })
+    .await?
 }
 
 async fn delete_job(
     State(state): State<AppState>,
     Path(job_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    identifier(&job_id)?;
-    if state.job_store.delete(&job_id) {
-        Ok(StatusCode::NO_CONTENT)
-    } else {
-        Err(ApiError::job_not_found())
-    }
+    super::super::blocking::run(state.control.clone(), move || {
+        identifier(&job_id)?;
+        if state.job_store.delete(&job_id) {
+            Ok(StatusCode::NO_CONTENT)
+        } else {
+            Err(ApiError::job_not_found())
+        }
+    })
+    .await?
 }
 
 async fn list_artifacts(
     State(state): State<AppState>,
     Path(job_id): Path<String>,
 ) -> Result<Json<ArtifactListResponse>, ApiError> {
-    identifier(&job_id)?;
-    let stored = state
-        .job_store
-        .fetch(&job_id)
-        .ok_or_else(ApiError::job_not_found)?;
-    let prefix = artifact_prefix(&stored.record.job_id).map_err(|_| ApiError::job_not_found())?;
-    let artifacts = stored
-        .artifacts
-        .iter()
-        .map(|(name, payload)| {
-            let object_path = format!("{prefix}/{name}");
-            let sas_url = state
-                .sas_issuer
-                .as_ref()
-                .map(|issuer| issuer.issue(&object_path));
-            ArtifactSummary {
-                name: name.clone(),
-                uri: object_path,
-                sha256: artifact_digest(payload),
-                size_bytes: payload.len() as u64,
-                sas_url,
-            }
-        })
-        .collect();
-    Ok(Json(ArtifactListResponse {
-        job_id: stored.record.job_id,
-        artifacts,
-    }))
+    super::super::blocking::run(state.control.clone(), move || {
+        identifier(&job_id)?;
+        let inventory = state
+            .job_store
+            .artifacts(&job_id)
+            .map_err(|e| ApiError::store_error(&e.to_string()))?
+            .ok_or_else(ApiError::job_not_found)?;
+        let artifacts = inventory
+            .into_iter()
+            .map(|info| ArtifactSummary {
+                name: info.name,
+                sas_url: state
+                    .sas_issuer
+                    .as_ref()
+                    .map(|issuer| issuer.issue(&info.uri)),
+                uri: info.uri,
+                sha256: info.sha256,
+                size_bytes: info.size_bytes,
+            })
+            .collect();
+        Ok(Json(ArtifactListResponse { job_id, artifacts }))
+    })
+    .await?
 }
 
 async fn download_artifact(
@@ -137,34 +145,81 @@ async fn download_artifact(
     Path((job_id, artifact_name)): Path<(String, String)>,
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Response, ApiError> {
-    identifier(&job_id)?;
-    if artifact_name.is_empty() || artifact_name.len() > ARTIFACT_NAME_MAX {
-        return Err(ApiError::artifact_not_found());
-    }
-    let stored = state
-        .job_store
-        .fetch(&job_id)
-        .ok_or_else(ApiError::job_not_found)?;
-    let payload = stored
-        .artifacts
-        .get(&artifact_name)
-        .ok_or_else(ApiError::artifact_not_found)?;
-    if query
-        .get("representation")
-        .is_some_and(|value| value == "json")
-    {
-        let (encoding, content) = match std::str::from_utf8(payload) {
-            Ok(text) => ("utf-8", text.to_string()),
-            Err(_) => ("hex", hex::encode(payload)),
-        };
-        return Ok(Json(
-            json!({"job_id":job_id,"name":artifact_name,"encoding":encoding,"content":content}),
+    super::super::blocking::run(state.control.clone(), move || {
+        identifier(&job_id)?;
+        if artifact_name.is_empty() || artifact_name.len() > ARTIFACT_NAME_MAX {
+            return Err(ApiError::artifact_not_found());
+        }
+        if state
+            .job_store
+            .try_get(&job_id)
+            .map_err(|error| ApiError::store_error(&error.to_string()))?
+            .is_none()
+        {
+            return Err(ApiError::job_not_found());
+        }
+        if query
+            .get("representation")
+            .is_some_and(|value| value == "json")
+        {
+            let payload = state
+                .job_store
+                .artifact(&job_id, &artifact_name)
+                .map_err(|e| ApiError::store_error(&e.to_string()))?
+                .ok_or_else(ApiError::artifact_not_found)?;
+            let (encoding, content) = match std::str::from_utf8(&payload) {
+                Ok(text) => ("utf-8", text.to_string()),
+                Err(_) => ("hex", hex::encode(&payload)),
+            };
+            return Ok(Json(
+                json!({"job_id":job_id,"name":artifact_name,"encoding":encoding,"content":content}),
+            )
+            .into_response());
+        }
+        let transfer = state.transfers.clone().try_acquire_owned().map_err(|_| {
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "transfer_busy",
+                "artifact transfer capacity is occupied",
+            )
+        })?;
+        let mut reader = state
+            .job_store
+            .open_artifact(&job_id, &artifact_name)
+            .map_err(|e| ApiError::store_error(&e.to_string()))?
+            .ok_or_else(ApiError::artifact_not_found)?;
+        let (sender, receiver) = tokio::sync::mpsc::channel(2);
+        std::thread::spawn(move || {
+            let _transfer = transfer;
+            use std::io::Read;
+            loop {
+                let mut bytes = vec![0; 64 * 1024];
+                match reader.read(&mut bytes) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        bytes.truncate(n);
+                        if sender
+                            .blocking_send(Ok::<_, std::io::Error>(bytes))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = sender.blocking_send(Err(error));
+                        break;
+                    }
+                }
+            }
+        });
+        let stream = futures_util::stream::unfold(receiver, |mut receiver| async move {
+            receiver.recv().await.map(|value| (value, receiver))
+        });
+        Ok((
+            [(header::CONTENT_TYPE, "application/octet-stream")],
+            axum::body::Body::from_stream(stream),
         )
-        .into_response());
-    }
-    Ok((
-        [(header::CONTENT_TYPE, "application/octet-stream")],
-        payload.clone(),
-    )
-        .into_response())
+            .into_response())
+    })
+    .await?
 }

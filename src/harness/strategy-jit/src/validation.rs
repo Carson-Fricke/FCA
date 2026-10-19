@@ -13,7 +13,7 @@ use crate::toolchain::resolve_toolchain;
 use crate::workspace::ManagedWorkspace;
 
 /// Structured validation failure with an explicit deterministic cacheability boundary.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ValidationFailure {
     /// Compact actionable detail; compiler locations and suggestions are in diagnostics.
     pub message: String,

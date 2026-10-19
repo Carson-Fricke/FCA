@@ -32,6 +32,7 @@ runtime image puts the binaries on `PATH` under `/opt/rust/bin`.
 | --- | --- | --- | --- |
 | `harness` | `harness` | `api` | flipped; facade dispatches `api`, `mcp`, `backtest-job`, `study-job`, `screen-job`, and `trader` |
 | `api` | `api` | `api` | flipped (axum HTTP boundary, bearer auth, provenance) |
+| `harness-worker` | `harness-worker` | `api` | finite queued execution, dispatcher, isolated validation and durable smoke observer |
 | `backtest-job` | `backtest-job` | `api` | flipped (native engine, parity-proven) |
 | `screen-job` | `screen-job` | `api` | flipped (JIT-authored screening programs, `screen.json` schema `fca-harness-screen-v2`) |
 | `trader` | `trader` | `live` | flipped (native supervision runner: config, sessions, feed supervision, reconciler, kill-switch, snapshots) |
@@ -39,27 +40,32 @@ runtime image puts the binaries on `PATH` under `/opt/rust/bin`.
 
 Configuration is ported behavior-identically in `config` (loader,
 strict models, canonical hashing); the authoring surface is the
-`harness-strategy-sdk` / `harness-strategy-jit` pair, and `harness-lakeclient`
-carries every market-data read over the lake routes.
+`harness-strategy-sdk` / `harness-strategy-jit` pair. `harness-lakeclient`
+coordinates acquisition and verified snapshot reads through injected native
+ports in a combined host or authenticated routes for separate clients.
 
 A missing binary fails with an actionable message; it never falls back to a
 deleted Python implementation.
 
-### Backtest lake data (HTTP routes)
+### Backtest market-data and execution boundaries
 
-The harness has no local lake path: `--data-dir`, `HARNESS_DATA_DIR`,
-`LAKE_LOCAL_DATA_DIR`, `.local/market-lake`, and `marketdata::LocalLakeReader`
-were deleted. Every market-data read streams from the market-lake HTTP routes
-through `harness-lakeclient` (async `reqwest`, with a blocking facade for the
-JIT path): ensure, job status, and coverage for the run window; `GET /v1/read`
-for the Arrow IPC stream of trades, quotes, and bars (bars select their
-`interval`); and `GET /v1/reference/universe` / `GET /v1/reference/facts` for
-screening context. The lake endpoint resolves from `LAKE_API_URL` (then
-`LAKE_API_BASE_URL`) and `LAKE_API__BEARER_TOKEN`; a missing or rejected lake
-configuration fails the run loudly and never falls back to local files or a
-synthetic fixture.
+The complete harness runs locally or in Azure. Combined API and finite worker
+composition inject native catalog/acquisition and snapshot-reading ports; HTTP
+serves separate clients. `harness-market-reader` verifies immutable Parquet and
+visits ordered Arrow batches, sharing snapshot/cache identity with the client.
+There are no HTTP self-calls or synthetic-data fallbacks. Backtests always
+acquire quotes/trades for execution in addition to consumer subscriptions;
+studies acquire only the compiled subscription union.
 
-Before a run, the harness API asks the market-lake ensure contract (`LAKE_API_URL`, `LAKE_API__BEARER_TOKEN`) to fetch every configured symbol/data-type for the run window, then polls coverage until every session is terminal. One request covers the whole window: the lake plans, resumes, and retries its own fetches server-side, so callers never split ranges and a repeat request continues an interrupted ensure. Coverage polling has no overall deadline and backs off to a fixed ceiling; it ends only on a lake-reported failure. The lake pages each fetch until the provider cursor is exhausted, so a closed session is complete rather than truncated. The lake owns provider credentials and the fetch; the harness never reads them. A symbol set the lake has not ingested before is thus fetched on demand rather than failing preflight with a missing-symbol error.
+Admission freezes authored source and input under the caller's retained job ID.
+The API notifies finite workers; it runs no simulation or authored constructor.
+Workers own durable claims, acquire missing data, report read/replay/publication
+progress, publish result files and exit. API restarts do not lose work. Expired
+worker ownership becomes interrupted, with no automatic replay. Ingestion uses
+separate local/ACA workers and provider credentials; admission retries join one
+retained ID. Ambiguous provider/publication/control outcomes are reconciled,
+never inferred absent or blindly replayed. See
+[market-data runtime](market-data-runtime.md) for resource and recovery contracts.
 
 A closed session left `partial`, or an errored fetch, is a repairable gap rather than a terminal failure: the lake classifies both as actionable and re-fetches them inside the running ensure job, and the harness keeps polling while that job is in flight. Only a job that settles with coverage still short fails the ensure, naming the sessions the lake could not complete. A session that is still trading is accepted as partial.
 

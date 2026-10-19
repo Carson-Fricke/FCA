@@ -31,6 +31,24 @@ impl fmt::Debug for BlockingLakeClient {
 }
 
 impl BlockingLakeClient {
+    pub fn progress_reporter(&self) -> Option<harness_contracts::progress::ProgressReporter> {
+        self.client.progress_reporter()
+    }
+
+    /// Reuse pinned immutable manifests and transports for a pull replay cursor.
+    /// Cursor telemetry is owned by the replay, not by repeated data reads.
+    pub fn replay_cursor(&self) -> Result<Self, LakeClientError> {
+        Ok(Self {
+            client: self.client.replay_cursor(),
+            runtime: Some(
+                Builder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_all()
+                    .build()
+                    .map_err(|error| LakeClientError::Config(error.to_string()))?,
+            ),
+        })
+    }
     pub fn resolve_option(
         &self,
         selector: &harness_contracts::OptionSelector,

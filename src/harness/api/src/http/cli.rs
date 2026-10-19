@@ -15,7 +15,6 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
-use crate::http::state::AppConfig;
 use crate::http::{create_app, server};
 
 /// The `api` configuration subsets the process boundary needs.
@@ -213,10 +212,9 @@ pub async fn serve_api(args: &crate::ApiArgs) -> Result<(), ApiConfigError> {
         &format!("http://{host}:{}/market-data", settings.port),
     )
     .map_err(|e| ApiConfigError(e.to_string()))?;
-    let mut config = AppConfig::durable_default()
-        .with_market_access(market.access)
-        .map_err(ApiConfigError)?;
+    let mut config = crate::execution::composed().map_err(|e| ApiConfigError(e.to_string()))?;
     config.bearer_token = bearer;
+    let _execution_control = crate::execution::start_control_reconciler();
     let app = create_app(config)
         .map_err(|e| ApiConfigError(e.to_string()))?
         .nest("/market-data", market.router);

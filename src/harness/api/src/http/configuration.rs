@@ -74,6 +74,20 @@ impl ConfigurationParser for StrictJsonConfigurationParser {
                 Some(screen),
             )
         } else {
+            if document
+                .get("strategy_instances")
+                .and_then(Value::as_array)
+                .is_some_and(|instances| {
+                    instances.iter().any(|instance| {
+                        instance
+                            .get("parameters")
+                            .and_then(Value::as_object)
+                            .is_some_and(|parameters| parameters.contains_key("source_path"))
+                    })
+                })
+            {
+                return Err(ConfigurationError("HTTP programs require inline parameters.source; resolve file sources before submission".into()));
+            }
             let configuration = BacktestConfig::from_yaml(&document.to_string())
                 .map_err(|e| ConfigurationError(e.to_string()))?;
             let date = |key: &str| {

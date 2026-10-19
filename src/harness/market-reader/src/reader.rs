@@ -42,6 +42,15 @@ impl std::fmt::Debug for MarketDataReader {
 }
 
 impl MarketDataReader {
+    /// Share verified caches while giving an independently backpressured cursor
+    /// its own decode slots. A merge must be able to obtain every source head.
+    pub fn cursor(&self) -> Self {
+        Self {
+            cache: self.cache.clone(),
+            slots: Arc::new(tokio::sync::Semaphore::new(1)),
+            prefetch_slots: Arc::new(tokio::sync::Semaphore::new(0)),
+        }
+    }
     pub fn new(config: CacheConfig) -> Self {
         Self {
             cache: Arc::new(PartitionCache::new(config)),

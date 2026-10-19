@@ -480,7 +480,7 @@ export interface HarnessStatus {
 export interface HarnessJobProgress {
     completed: boolean;
     finished_at: string | null;
-    stage: 'compiling' | 'preparing_data' | 'reading_data' | 'running_study' | 'running_backtest' | 'writing_artifacts';
+    stage: 'compiling' | 'preparing_data' | 'reading_data' | 'running_study' | 'running_backtest' | 'writing_artifacts' | 'interrupted';
     symbol: string | null;
     data_type: string | null;
     start_date: string | null;

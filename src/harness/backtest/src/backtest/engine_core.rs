@@ -1381,6 +1381,42 @@ pub struct ValuationSample {
     pub marks: BTreeMap<String, Decimal>,
 }
 
+impl super::history::Record for ValuationSample {
+    fn encode(&self, output: &mut Vec<u8>) {
+        output.extend(self.timestamp_ns.to_le_bytes());
+        output.extend((self.fill_count as u64).to_le_bytes());
+        output.extend((self.marks.len() as u32).to_le_bytes());
+        for (symbol, value) in &self.marks {
+            super::history::text(output, symbol);
+            output.push(value.is_signed() as u8);
+            output.extend(value.coefficient().to_le_bytes());
+            output.extend(value.scale().to_le_bytes());
+        }
+    }
+    fn decode(input: &mut &[u8]) -> std::io::Result<Self> {
+        use super::history::{read_text, take};
+        let timestamp_ns = i64::from_le_bytes(take(input)?);
+        let fill_count = u64::from_le_bytes(take(input)?) as usize;
+        let count = u32::from_le_bytes(take(input)?);
+        if count as usize > input.len() / 25 {
+            return Err(std::io::Error::other("invalid valuation mark count"));
+        }
+        let mut marks = BTreeMap::new();
+        for _ in 0..count {
+            let symbol = read_text(input)?;
+            let sign = take::<1>(input)?[0] != 0;
+            let coefficient = u128::from_le_bytes(take(input)?);
+            let scale = i32::from_le_bytes(take(input)?);
+            marks.insert(symbol, Decimal::from_parts(sign, coefficient, scale));
+        }
+        Ok(Self {
+            timestamp_ns,
+            fill_count,
+            marks,
+        })
+    }
+}
+
 /// The complete outcome of one native engine run.
 #[derive(Clone, Debug)]
 pub struct BacktestOutcome {
@@ -1405,7 +1441,7 @@ pub struct BacktestOutcome {
     /// Booked fills.
     pub fills: Vec<EngineFill>,
     /// Causal market and fill valuation history for canonical financial reporting.
-    pub valuations: Vec<ValuationSample>,
+    pub valuations: super::history::History<ValuationSample>,
     /// Fee assessments.
     pub fee_assessments: Vec<FeeAssessment>,
     /// Fee aggregation.
@@ -1965,41 +2001,86 @@ pub fn run_native_engine(
     let mut order_owners: BTreeMap<String, String> = BTreeMap::new();
     let mut order_counts: BTreeMap<String, u64> = BTreeMap::new();
     let mut fills: Vec<EngineFill> = Vec::new();
-    let mut valuations = Vec::new();
+    let mut valuations = super::history::History::default();
     let mut assessments: Vec<FeeAssessment> = Vec::new();
     let mut risk_decisions: Vec<RiskDecision> = Vec::new();
-    let market_event_count = fixture.events.len() as u64;
-    let mut replay_events: Vec<_> = fixture
-        .events
-        .iter()
-        .filter(|event| !matches!(event, MarketEvent::Bar { .. }))
-        .map(|event| market_event(event, synthetic_options).map(EngineEvent::Market))
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .chain(frames.into_iter().map(EngineEvent::BarFrame))
-        .collect();
-    // Sort by actual availability before draining; raw bar starts are not dispatch times.
-    replay_events.sort_by_key(|event| {
+    let mut market_event_count = 0u64;
+    let mut last_progress = std::time::Instant::now();
+    let mut input = fixture.open_events()?;
+    let mut frames = frames.into_iter().peekable();
+    let mut next_tick = None;
+    let mut exhausted = false;
+    let frame_replay = bus.frame_replay;
+    let external_key = |event: &EngineEvent| {
         (
             event.timestamp_ns(),
+            if frame_replay {
+                match event {
+                    EngineEvent::Market(_) => 0,
+                    EngineEvent::BarFrame(_) => 1,
+                    _ => 2,
+                }
+            } else {
+                0
+            },
             event.sequence(),
             event.class_priority(),
         )
-    });
-    if bus.frame_replay {
-        for event in replay_events.drain(..) {
-            bus.schedule(event);
+    };
+    loop {
+        while next_tick.is_none() && !exhausted {
+            match input.next() {
+                Some(event) => {
+                    let event = event?;
+                    market_event_count += 1;
+                    if !matches!(event, MarketEvent::Bar { .. }) {
+                        next_tick = Some(EngineEvent::Market(market_event(
+                            &event,
+                            synthetic_options,
+                        )?));
+                    }
+                }
+                None => exhausted = true,
+            }
         }
-    }
-    for event in replay_events
-        .into_iter()
-        .map(Some)
-        .chain(std::iter::once(None))
-    {
-        if let Some(event) = event {
-            bus.schedule(event);
+        if market_event_count.is_multiple_of(65536)
+            && last_progress.elapsed() >= std::time::Duration::from_secs(1)
+        {
+            if let Some(report) = fixture.stream.as_ref().and_then(|s| s.reporter.as_ref()) {
+                let mut progress = harness_contracts::progress::ExecutionProgress::stage(
+                    if configuration.shell == "study" {
+                        harness_contracts::progress::ExecutionStage::RunningStudy
+                    } else {
+                        harness_contracts::progress::ExecutionStage::RunningBacktest
+                    },
+                );
+                progress.rows = market_event_count;
+                report(progress).map_err(BacktestError::DataPreflight)?;
+            }
+            last_progress = std::time::Instant::now();
         }
-        while let Some(dispatched) = bus.dispatch_next() {
+        let use_frame = frames.peek().is_some_and(|frame| {
+            next_tick.as_ref().is_none_or(|tick| {
+                external_key(&EngineEvent::BarFrame(frame.clone())) < external_key(tick)
+            })
+        });
+        let incoming = if use_frame {
+            frames.next().map(EngineEvent::BarFrame)
+        } else {
+            next_tick.take()
+        };
+        let boundary = incoming.as_ref().map(&external_key);
+        while bus.heap.peek().is_some_and(|queued| {
+            boundary.is_none_or(|key| {
+                (
+                    queued.event.timestamp_ns(),
+                    queued.phase,
+                    queued.event.sequence(),
+                    queued.event.class_priority(),
+                ) < key
+            })
+        }) {
+            let dispatched = bus.dispatch_next().expect("nonempty event bus");
             dispatch_event(
                 &dispatched,
                 configuration,
@@ -2032,12 +2113,18 @@ pub fn run_native_engine(
                 EngineEvent::Report(_) => None,
             };
             if let Some(marks) = marks {
-                valuations.push(ValuationSample {
-                    timestamp_ns: dispatched.timestamp_ns(),
-                    fill_count: fills.len(),
-                    marks,
-                });
+                valuations
+                    .push(ValuationSample {
+                        timestamp_ns: dispatched.timestamp_ns(),
+                        fill_count: fills.len(),
+                        marks,
+                    })
+                    .map_err(|e| BacktestError::DataPreflight(e.to_string()))?;
             }
+        }
+        match incoming {
+            Some(event) => bus.schedule(event),
+            None => break,
         }
     }
 

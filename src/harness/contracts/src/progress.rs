@@ -12,6 +12,7 @@ pub enum ExecutionStage {
     RunningStudy,
     RunningBacktest,
     WritingArtifacts,
+    Interrupted,
 }
 
 /// One observed stage/dataset snapshot. Absent counters are unknown, never estimates.

@@ -3,7 +3,7 @@ use super::*;
 use crate::{BudgetState, DurableJob, IngestionJobs, JobStore, WorkRequest};
 use axum::{
     body::Bytes,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, Method, StatusCode},
     response::{IntoResponse, Response},
     routing::any,
@@ -64,6 +64,7 @@ struct Azure {
 async fn azure(
     State(state): State<Arc<Azure>>,
     Path(path): Path<String>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
     method: Method,
     headers: HeaderMap,
     body: Bytes,
@@ -75,10 +76,14 @@ async fn azure(
         }
         let blobs = state.blobs.lock().unwrap();
         let mut xml = String::from("<EnumerationResults><Blobs>");
-        for (name, payload) in blobs
-            .iter()
-            .filter(|(name, _)| name.starts_with("ingestion/jobs/"))
-        {
+        for (name, payload) in blobs.iter().filter(|(name, _)| {
+            name.starts_with(
+                query
+                    .get("prefix")
+                    .map(String::as_str)
+                    .unwrap_or("ingestion/jobs/"),
+            )
+        }) {
             let job: DurableJob = serde_json::from_slice(payload).unwrap();
             xml.push_str(&format!("<Blob><Name>{name}</Name><Metadata><active>{}</active><dispatched>{}</dispatched><created>{}</created></Metadata></Blob>",!job.execution_deleted,job.dispatch_started,job.record.created_at.micros()));
         }
@@ -454,6 +459,7 @@ async fn durable_admission_joins_conflicts_and_survives_ambiguous_post_without_r
         let owner = jobs.store.own(&id).await.unwrap();
         let mut finished = jobs.store.get(&id).await.unwrap();
         finished.record.state = JobState::Complete;
+        finished.executor = Some(finished.reference());
         finished.dispatch_started = true;
         finished.dispatched_at = Some(finished.record.created_at.micros());
         finished.execution_deleted = true;
@@ -596,6 +602,7 @@ async fn absent_ambiguous_dispatch_expires_without_a_new_execution() {
     jobs.store.admit_work(partition).await.unwrap();
     let owner = jobs.store.own_work(&reference).await.unwrap();
     let mut partition = jobs.store.get_work(&reference).await.unwrap();
+    partition.executor = Some(partition.reference());
     partition.dispatch_started = true;
     partition.dispatched_at = Some(job.record.created_at.micros() - 7_200_000_000);
     owner.save(&partition).await.unwrap();
@@ -660,7 +667,7 @@ async fn partition_fleet_is_bounded_disjoint_complete_and_aggregates_one_public_
         .await
         .unwrap();
     let plan = root.partitions().unwrap();
-    assert_eq!(plan.len(), 2);
+    assert_eq!(plan.len(), 5);
     let mut dates = Vec::new();
     for partition in &plan {
         assert_eq!(partition.record.job_id, "months");
@@ -684,7 +691,7 @@ async fn partition_fleet_is_bounded_disjoint_complete_and_aggregates_one_public_
             .map(|day| format!("2024-01-{day}"))
             .collect::<Vec<_>>()
     );
-    for expected in [2] {
+    for expected in [2, 4, 5] {
         jobs.reconcile().await.unwrap();
         assert_eq!(state.starts.load(Ordering::SeqCst), expected);
         let root = jobs.store.get("months").await.unwrap();
@@ -716,7 +723,7 @@ async fn partition_fleet_is_bounded_disjoint_complete_and_aggregates_one_public_
     assert!(outcome.execution_deleted);
     let progress = outcome.record.progress.unwrap();
     assert_eq!((progress.sessions_done, progress.sessions_total), (5, 5));
-    assert_eq!(state.starts.load(Ordering::SeqCst), 2);
+    assert_eq!(state.starts.load(Ordering::SeqCst), 5);
     let roots: Vec<_> = state
         .blobs
         .lock()
@@ -726,6 +733,48 @@ async fn partition_fleet_is_bounded_disjoint_complete_and_aggregates_one_public_
         .cloned()
         .collect();
     assert_eq!(roots, vec!["ingestion/jobs/months.json"]);
+    server.abort();
+}
+
+#[tokio::test]
+async fn warm_worker_claims_an_unstarted_chunk_without_another_container_start() {
+    let (jobs, state, server) = fixture(2).await;
+    let root = jobs
+        .submit(
+            "reuse".into(),
+            work_range("AAPL", "2024-01-18", "2024-01-22"),
+        )
+        .await
+        .unwrap();
+    jobs.reconcile().await.unwrap();
+    let mut anchor = None;
+    for part in root.partitions().unwrap() {
+        let part = jobs.store.get_work(&part.reference()).await.unwrap();
+        if part.dispatch_started {
+            anchor = Some(part);
+            break;
+        }
+    }
+    let mut anchor = anchor.unwrap();
+    let owner = jobs.store.own_work(&anchor.reference()).await.unwrap();
+    anchor.record.state = JobState::Running;
+    owner.save(&anchor).await.unwrap();
+    owner.release().await.unwrap();
+    let next = crate::claim_next(&jobs.store, &anchor, "reuse")
+        .await
+        .unwrap()
+        .unwrap();
+    let stolen = jobs.store.get_work(&next).await.unwrap();
+    assert_eq!(stolen.executor, Some(anchor.reference()));
+    assert!(stolen.dispatch_started);
+    complete(&jobs, &next).await;
+    jobs.reconcile().await.unwrap();
+    assert_eq!(state.starts.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        jobs.runner.inspect(&anchor.reference()).await.unwrap(),
+        ExecutionState::Active
+    );
+    assert!(!jobs.store.get_work(&next).await.unwrap().execution_deleted);
     server.abort();
 }
 

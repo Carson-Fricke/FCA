@@ -10,8 +10,7 @@ use super::configuration::{ConfigurationParser, StrictJsonConfigurationParser};
 use super::launcher::{
     BacktestLauncher, BacktestRunner, InProcessLauncher, UnportedBacktestRunner,
 };
-use super::mcp::compose_local_server;
-use super::native::{NativeBacktestRunner, NativeScreenRunner};
+use super::native::NativeScreenRunner;
 use super::screener::{InProcessScreenLauncher, ScreenLauncher};
 use super::store::{FileSystemJobStore, InMemoryJobStore, JobStore, SasIssuer};
 
@@ -34,6 +33,8 @@ pub fn results_root_from_env() -> PathBuf {
 /// Resolved, immutable state shared by every request handler.
 #[derive(Clone)]
 pub struct AppState {
+    pub control: Arc<tokio::sync::Semaphore>,
+    pub transfers: Arc<tokio::sync::Semaphore>,
     /// Static bearer token, or `None` to fail closed.
     pub bearer_token: Option<String>,
     /// Authoritative job store.
@@ -104,15 +105,6 @@ impl AppConfig {
         }
     }
 
-    /// Build a durable app config rooted at `root` driving the native engine.
-    ///
-    /// Jobs and artifacts persist under `root` and remain queryable by a
-    /// fresh process composed from the same root.
-    #[must_use]
-    pub fn durable(root: impl Into<PathBuf>) -> Self {
-        Self::durable_with_runner(root, Arc::new(NativeBacktestRunner::default()))
-    }
-
     /// Build a durable app config rooted at `root` with an injected runner.
     #[must_use]
     pub fn durable_with_runner(root: impl Into<PathBuf>, runner: Arc<dyn BacktestRunner>) -> Self {
@@ -141,47 +133,7 @@ impl AppConfig {
         }
     }
 
-    /// Build a durable app config rooted at the environment-resolved root.
-    #[must_use]
-    pub fn durable_default() -> Self {
-        Self::durable(results_root_from_env())
-    }
-
-    pub fn with_market_access(
-        mut self,
-        access: Arc<dyn harness_lakeclient::MarketAccess>,
-    ) -> Result<Self, String> {
-        let client = Arc::new(
-            harness_lakeclient::BlockingLakeClient::from_access(access.clone())
-                .map_err(|e| e.to_string())?,
-        );
-        self.launcher = Arc::new(InProcessLauncher::new(
-            self.job_store.clone(),
-            Arc::new(NativeBacktestRunner {
-                lake_client: Some(client.clone()),
-                ..Default::default()
-            }),
-            self.clock.clone(),
-        ));
-        self.screener_launcher = Arc::new(InProcessScreenLauncher::new(
-            self.job_store.clone(),
-            Arc::new(NativeScreenRunner {
-                lake_client: Some(client),
-                ..Default::default()
-            }),
-            self.clock.clone(),
-        ));
-        self.mcp_server = Some(
-            super::mcp::compose_server(self.job_store.clone(), Some(access))
-                .map_err(|e| e.to_string())?,
-        );
-        Ok(self)
-    }
     pub(crate) fn into_state(self, bearer_token: Option<String>) -> AppState {
-        let mcp_server = match self.mcp_server {
-            Some(server) => Some(server),
-            None => compose_local_server(self.job_store.clone()).ok(),
-        };
         AppState {
             bearer_token,
             job_store: self.job_store,
@@ -190,7 +142,9 @@ impl AppConfig {
             sas_issuer: self.sas_issuer,
             clock: self.clock,
             configuration_parser: self.configuration_parser,
-            mcp_server,
+            mcp_server: self.mcp_server,
+            control: Arc::new(tokio::sync::Semaphore::new(8)),
+            transfers: Arc::new(tokio::sync::Semaphore::new(4)),
         }
     }
 }

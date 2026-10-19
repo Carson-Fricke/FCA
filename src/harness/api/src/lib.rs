@@ -38,6 +38,7 @@ use std::process::ExitCode;
 
 use clap::{Args, CommandFactory, Parser, Subcommand};
 
+pub mod execution;
 pub mod http;
 pub mod local;
 pub mod mcp_cli;

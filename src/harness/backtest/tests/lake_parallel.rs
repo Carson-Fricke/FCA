@@ -71,7 +71,15 @@ fn studies_acquire_exact_inputs_and_backtests_add_tick_execution_feeds() {
         }
         acquired.sort();
         acquired.dedup();
-        assert_eq!(fixture.events.len(), acquired.len());
+        assert_eq!(
+            fixture
+                .open_events()
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+                .len(),
+            acquired.len()
+        );
         let requests = server.requests();
         let ensures: Vec<_> = requests
             .iter()
@@ -183,9 +191,9 @@ fn exclusive_end_dates_and_nanosecond_row_bounds_are_exact() {
         let fixture = lake_fixture_with_subscriptions(&config, &client(&server), &inputs).unwrap();
         assert_eq!(
             fixture
-                .events
-                .iter()
-                .map(|event| event.timestamp_ns())
+                .open_events()
+                .unwrap()
+                .map(|event| event.unwrap().timestamp_ns())
                 .collect::<Vec<_>>(),
             [start, end_ns - 1]
         );
@@ -240,7 +248,7 @@ fn multi_symbol_study_acquires_every_symbol_and_keeps_canonical_order() {
     let server = FakeLakeServer::start(FakeLakeConfig {
         partitions_by_type: BTreeMap::from([(
             "bars".to_string(),
-            bars_parquet("SPY", &[bar_row(1), bar_row(0)]),
+            bars_parquet("SPY", &[bar_row(0), bar_row(1)]),
         )]),
         ..FakeLakeConfig::new(TOKEN)
     });

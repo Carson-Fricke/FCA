@@ -137,6 +137,16 @@ impl fmt::Debug for LakeClient {
 }
 
 impl LakeClient {
+    pub(crate) fn progress_reporter(&self) -> Option<ProgressReporter> {
+        self.reporter.clone()
+    }
+    pub(crate) fn replay_cursor(&self) -> Self {
+        Self {
+            reader: self.reader.cursor(),
+            reporter: None,
+            ..self.clone()
+        }
+    }
     pub fn from_access(
         access: std::sync::Arc<dyn crate::MarketAccess>,
     ) -> Result<Self, LakeClientError> {

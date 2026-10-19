@@ -2,7 +2,9 @@
 mod aca;
 mod budget;
 mod model;
+mod pool;
 mod service;
+pub use pool::claim_next;
 mod store;
 pub use aca::{AcaConfig, AcaRunner, ExecutionState};
 pub use budget::{budget_scope, BudgetGrant, BudgetState};

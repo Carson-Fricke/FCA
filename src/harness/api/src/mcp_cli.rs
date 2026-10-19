@@ -15,7 +15,7 @@ use std::sync::Arc;
 use clap::Parser;
 use mcp::auth::{EnvironmentBearerTokenSource, BEARER_TOKEN_VARIABLE};
 use mcp::server::McpServer;
-use mcp::store::{FileSystemJobStore, JobStore};
+use mcp::store::JobStore;
 use mcp::tools::{
     Boundary, ConfigurationLoader, HarnessToolsContext, ProcessOutcome, ProcessRunner,
     RemoteResponse, RemoteTransport,
@@ -23,9 +23,7 @@ use mcp::tools::{
 use mcp::transport::serve_stdio;
 use serde_json::{Map, Value};
 
-use crate::local::{
-    NativeBacktestSubmitter, NativeScreeningSubmitter, NativeStudySubmitter, NativeStudyValidator,
-};
+use crate::local::{NativeBacktestSubmitter, NativeScreeningSubmitter, NativeStudySubmitter};
 
 /// Environment variable consulted for the remote API base URL.
 pub const API_BASE_URL_VARIABLE: &str = "HARNESS_API_BASE_URL";
@@ -166,17 +164,24 @@ pub fn build_mcp_server(args: &crate::McpArgs) -> Result<McpServer, McpServeErro
     context.runner = Some(Arc::new(SubprocessRunner));
     context.configuration_loader = default_loader();
     if boundary == Boundary::Local {
-        let root = crate::http::state::results_root_from_env();
-        let job_store: Arc<dyn JobStore> = Arc::new(FileSystemJobStore::new(&root));
+        let job_store: Arc<dyn JobStore> = Arc::new(
+            crate::execution::configured_store().map_err(|e| McpServeError(e.to_string()))?,
+        );
+        let wake = Arc::new(crate::execution::dispatch::ConfiguredWake);
         context.job_store = Some(job_store.clone());
-        context.backtest_submitter =
-            Some(Arc::new(NativeBacktestSubmitter::new(job_store.clone())));
-        context.study_submitter = Some(Arc::new(NativeStudySubmitter::new(job_store.clone())));
-        context.screening_submitter = Some(Arc::new(NativeScreeningSubmitter::new(
-            job_store,
-            Arc::new(crate::http::native::NativeScreenRunner::default()),
+        context.backtest_submitter = Some(Arc::new(NativeBacktestSubmitter::new(
+            job_store.clone(),
+            wake.clone(),
         )));
-        context.study_validator = Some(Arc::new(NativeStudyValidator));
+        context.study_submitter = Some(Arc::new(NativeStudySubmitter::new(
+            job_store.clone(),
+            wake.clone(),
+        )));
+        context.screening_submitter =
+            Some(Arc::new(NativeScreeningSubmitter::new(job_store, wake)));
+        context.study_validator = Some(Arc::new(
+            crate::execution::validation::ProcessValidator::configured().map_err(McpServeError)?,
+        ));
     }
     let context = context
         .validate()

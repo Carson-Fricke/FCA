@@ -169,9 +169,9 @@ function Build-NativeServer {
         if (-not $cargoExe) { throw 'cargo is required to build the harness binary' }
         $taskToolchain = (Select-String -LiteralPath (Join-Path $repo 'src\harness\rust-toolchain.toml') -Pattern '^channel = "([^"]+)"').Matches[0].Groups[1].Value
         Write-Host '==> Building optimized harness and ingestion worker binaries'
-        & $cargoExe "+$taskToolchain" build --release --locked --manifest-path (Join-Path $repo 'src\harness\Cargo.toml') -p api --bin harness
+        & $cargoExe "+$taskToolchain" build --release --locked --jobs 2 --manifest-path (Join-Path $repo 'src\harness\Cargo.toml') -p api --bin harness --bin harness-worker
         if ($LASTEXITCODE -ne 0) { throw "cargo build for harness failed (exit $LASTEXITCODE)" }
-        & $cargoExe "+$taskToolchain" build --release --locked --manifest-path (Join-Path $repo 'src\lake\Cargo.toml') -p lake-ingest-worker --bin lake-ingest-worker
+        & $cargoExe "+$taskToolchain" build --release --locked --jobs 2 --manifest-path (Join-Path $repo 'src\lake\Cargo.toml') -p lake-ingest-worker --bin lake-ingest-worker
         if ($LASTEXITCODE -ne 0) { throw "cargo build for the local ingestion worker failed (exit $LASTEXITCODE)" }
         return
     }

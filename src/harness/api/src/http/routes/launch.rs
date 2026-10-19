@@ -24,17 +24,23 @@ async fn launch_backtest_job(
     State(state): State<AppState>,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    launch_with_shell(&state, &body, "backtest", JobKind::Backtest).await
+    super::super::blocking::run(state.control.clone(), move || {
+        launch_with_shell(&state, &body, "backtest", JobKind::Backtest)
+    })
+    .await?
 }
 
 async fn launch_study_job(
     State(state): State<AppState>,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    launch_with_shell(&state, &body, "study", JobKind::Study).await
+    super::super::blocking::run(state.control.clone(), move || {
+        launch_with_shell(&state, &body, "study", JobKind::Study)
+    })
+    .await?
 }
 
-async fn launch_with_shell(
+fn launch_with_shell(
     state: &AppState,
     body: &[u8],
     expected_shell: &str,
@@ -65,7 +71,11 @@ async fn launch_with_shell(
     record.strategy_id = configuration.strategy_ids.join(",");
     record.data_start = configuration.data_start;
     record.data_end = configuration.data_end;
-    record.configuration_digest = Some(configuration.configuration_digest.clone());
+    record.configuration_digest = Some(
+        backtest::backtest::config::BacktestConfig::from_yaml(&configuration.document.to_string())
+            .map_err(|e| ApiError::validation_error(&e.to_string()))?
+            .configuration_hash(),
+    );
     record.accepted_input = configuration.document.clone();
     match state.job_store.admit(record) {
         Err(StoreError::Conflict(detail)) => return Err(ApiError::job_conflict(&detail)),
@@ -91,7 +101,8 @@ async fn launch_with_shell(
 
     let record = state
         .job_store
-        .get(&job_id)
+        .try_get(&job_id)
+        .map_err(|error| ApiError::store_error(&error.to_string()))?
         .ok_or_else(ApiError::job_not_found)?;
     accepted(&record)
 }

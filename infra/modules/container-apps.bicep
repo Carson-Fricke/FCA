@@ -187,6 +187,11 @@ var quantApiSecrets = concat(backtestSecrets, [
 var rthTraderSecrets = traderSecrets
 var cryptoTraderSecrets = traderSecrets
 var quantBaseEnvironment = [
+  { name: 'CARGO_BUILD_JOBS', value: '2' }
+  { name: 'HARNESS_EXECUTION_MAX_WORKERS', value: '2' }
+  { name: 'HARNESS_EXECUTION_IMAGE', value: sharedImageReference }
+  { name: 'HARNESS_EXECUTION_JOB_RESOURCE_ID', value: resourceId('Microsoft.App/jobs', backtestJobName) }
+
   {
     name: 'AZURE_CLIENT_ID'
     value: quantIdentityClientId
@@ -666,6 +671,38 @@ resource cryptoTraderApp 'Microsoft.App/containerApps@2025-07-01' = if (enableCr
   }
 }
 
+// Finite, low-resource recovery control survives API scale-to-zero. Capacity
+// hints may overlap; fenced queue claims prevent duplicate engine execution.
+resource executionDispatcher 'Microsoft.App/jobs@2025-07-01' = {
+  name: '${quantApiAppName}-execution-dispatch'
+  location: location
+  tags: tags
+  identity: { type: 'UserAssigned', userAssignedIdentities: { '${quantIdentityResourceId}': {} } }
+  properties: {
+    environmentId: containerAppsEnvironment.id
+    workloadProfileName: consumptionProfileName
+    configuration: {
+      triggerType: 'Schedule'
+      scheduleTriggerConfig: { cronExpression: '* * * * *', parallelism: 1, replicaCompletionCount: 1 }
+      replicaRetryLimit: 0
+      replicaTimeout: 120
+      registries: [{ server: registryLoginServer, identity: quantIdentityResourceId }]
+      secrets: backtestSecrets
+      identitySettings: [{ identity: quantIdentityResourceId, lifecycle: 'Main' }]
+    }
+    template: {
+      containers: [{
+        name: 'dispatcher'
+        image: sharedImageReference
+        command: ['/bin/sh', '-c']
+        args: ['export IDENTITY_ENDPOINT="$IDENTITY_ENDPOINT?client_id=$AZURE_CLIENT_ID"; exec harness-worker --dispatch']
+        env: concat(backtestEnvironment, ingestionEnvironment)
+        resources: { cpu: json('0.25'), memory: '0.5Gi' }
+      }]
+    }
+  }
+}
+
 resource backtestJob 'Microsoft.App/jobs@2025-07-01' = {
   name: backtestJobName
   location: location
@@ -692,7 +729,7 @@ resource backtestJob 'Microsoft.App/jobs@2025-07-01' = {
         replicaCompletionCount: 1
       }
       secrets: backtestSecrets
-      replicaRetryLimit: 1
+      replicaRetryLimit: 0
       replicaTimeout: backtestReplicaTimeoutSeconds
       identitySettings: [
         {
@@ -706,24 +743,12 @@ resource backtestJob 'Microsoft.App/jobs@2025-07-01' = {
         {
           name: backtestContainerName
           image: sharedImageReference
-          // The `backtest-job` console script execs the Rust engine binary.
-          // The bounded synthetic smoke configuration ships inside the shared
-          // image and the job runs it verbatim. Per-run argument overrides are
-          // not possible here: az containerapp job start --args cannot pass
-          // leading-dash tokens and its --yaml override drops container args,
-          // so future per-run backtests need a different transport (env-var
-          // configuration or a dedicated job).
-          command: [
-            'backtest-job'
-          ]
-          args: [
-            '--config'
-            'config/harness/backtest.yaml'
-          ]
-          env: backtestEnvironment
+          // Every worker claims a durable accepted job; this template contains
+          // no fixed smoke configuration and cannot invent an execution ID.
+          command: ['/bin/sh', '-c']
+          args: ['export IDENTITY_ENDPOINT="$IDENTITY_ENDPOINT?client_id=$AZURE_CLIENT_ID"; exec harness-worker']
+          env: concat(backtestEnvironment, ingestionEnvironment)
           resources: {
-            // The three-session SIP quote smoke peaks above 7.5 GiB while
-            // materializing its replay; both 1 GiB and 4 GiB were killed.
             cpu: json('4.0')
             memory: '8Gi'
           }

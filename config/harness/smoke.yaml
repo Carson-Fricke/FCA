@@ -1,0 +1,22 @@
+# One closed symbol-session. The caller supplies its retained execution ID.
+schema_version: 1
+shell: backtest
+job_id: smoke-caller-must-override
+start: "2026-07-30T13:30:00Z"
+end: "2026-07-30T20:00:00Z"
+initial_cash: 100000.00
+data:
+  symbols: [MSFT]
+  subscriptions:
+    - data_type: quote
+      symbols: [MSFT]
+strategy_instances:
+  - instance_id: msft-momentum
+    implementation: jit
+    bundle_hash: dca3e6dda63c83d8a9d7cc0688e180a42e3d3e0dd502c3d4d731db505c2d8998
+    capital_fraction: 1.0
+    symbols: [MSFT]
+    parameters:
+      lookback: 4
+      quantity: 20
+      source_path: momentum.rs

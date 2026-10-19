@@ -19,12 +19,9 @@ use mcp::server::{error_response, McpServer, PARSE_ERROR};
 use mcp::tools::{Boundary, ContextError, HarnessToolsContext};
 use serde_json::{json, Value};
 
-use crate::local::{
-    NativeBacktestSubmitter, NativeScreeningSubmitter, NativeStudySubmitter, NativeStudyValidator,
-};
+use crate::local::{NativeBacktestSubmitter, NativeScreeningSubmitter, NativeStudySubmitter};
 
 use super::models::error_body;
-use super::native::NativeScreenRunner;
 use super::state::AppState;
 use super::store::JobStore;
 
@@ -38,34 +35,39 @@ use super::store::JobStore;
 ///
 /// Returns [`ContextError`] when the local tool context cannot be composed.
 pub fn compose_local_server(job_store: Arc<dyn JobStore>) -> Result<Arc<McpServer>, ContextError> {
-    compose_server(job_store, None)
+    compose_queued_server(
+        job_store,
+        Arc::new(crate::execution::dispatch::ConfiguredWake),
+    )
 }
-pub fn compose_server(
+pub fn compose_queued_server(
     job_store: Arc<dyn JobStore>,
-    access: Option<Arc<dyn harness_lakeclient::MarketAccess>>,
+    wake: Arc<dyn crate::execution::Wake>,
+) -> Result<Arc<McpServer>, ContextError> {
+    let validator =
+        crate::execution::validation::ProcessValidator::configured().map_err(ContextError)?;
+    compose_with_validator(job_store, wake, Arc::new(validator))
+}
+pub fn compose_with_validator(
+    job_store: Arc<dyn JobStore>,
+    wake: Arc<dyn crate::execution::Wake>,
+    validator: Arc<dyn mcp::tools::StudyValidator>,
 ) -> Result<Arc<McpServer>, ContextError> {
     let mut context =
         HarnessToolsContext::new(Boundary::Local, Arc::new(EnvironmentBearerTokenSource));
-    context.backtest_submitter = Some(Arc::new(match &access {
-        Some(access) => NativeBacktestSubmitter::with_access(job_store.clone(), access.clone()),
-        None => NativeBacktestSubmitter::new(job_store.clone()),
-    }));
-    context.study_submitter = Some(Arc::new(match &access {
-        Some(access) => NativeStudySubmitter::with_access(job_store.clone(), access.clone()),
-        None => NativeStudySubmitter::new(job_store.clone()),
-    }));
+    context.backtest_submitter = Some(Arc::new(NativeBacktestSubmitter::new(
+        job_store.clone(),
+        wake.clone(),
+    )));
+    context.study_submitter = Some(Arc::new(NativeStudySubmitter::new(
+        job_store.clone(),
+        wake.clone(),
+    )));
     context.screening_submitter = Some(Arc::new(NativeScreeningSubmitter::new(
         job_store.clone(),
-        Arc::new(NativeScreenRunner {
-            lake_client: access
-                .map(harness_lakeclient::BlockingLakeClient::from_access)
-                .transpose()
-                .map_err(|e| ContextError(e.to_string()))?
-                .map(Arc::new),
-            ..Default::default()
-        }),
+        wake,
     )));
-    context.study_validator = Some(Arc::new(NativeStudyValidator));
+    context.study_validator = Some(validator);
     context.job_store = Some(job_store);
     let context = context.validate()?;
     Ok(Arc::new(mcp::create_server(context)?))
@@ -113,7 +115,13 @@ pub async fn mcp_post(State(state): State<AppState>, body: Bytes) -> Response {
         Ok(request) => request,
         Err(error) => return parse_error(&error.to_string()),
     };
-    match server.handle(&request) {
+    let server = server.clone();
+    let response =
+        match super::blocking::run(state.control.clone(), move || server.handle(&request)).await {
+            Ok(response) => response,
+            Err(response) => return response.into_response(),
+        };
+    match response {
         Some(response) => Json(response).into_response(),
         None => StatusCode::ACCEPTED.into_response(),
     }
