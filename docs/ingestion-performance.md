@@ -5,10 +5,13 @@ for measured throughput, startup skew, publication parity, and reader timings.
 
 Workers emit JSON `ingestion_metrics` every ten seconds and a final `worker_settled`
 snapshot, with the retained `job_id`, internal partition and elapsed wall seconds.
-Local logs are under the selected lake root's `ingestion/logs/`; remote events are
+Local logs are under the selected lake root's `ingestion/logs/`, named by the
+executor anchor rather than every chunk it subsequently claims; remote events are
 in ACA execution stdout/stderr. Final counters are also persisted in each terminal
 `ingestion/partitions/<job_id>/<key>.json` document under `metrics`, so execution
 cleanup cannot erase them. Counters describe attempted work; job state remains the outcome.
+Reused workers report per-chunk counter differences. Process lifetime peaks remain
+labeled as lifetime measurements and must not be added across those chunks.
 
 Each stage records calls, service seconds, payload bytes, maximum single payload bytes and rows where applicable:
 provider-secret setup, coverage discovery, progress persistence, network, JSON
@@ -76,15 +79,21 @@ Final Parquet encoding and local/Azure uploads stream files. Scratch limits fail
 rather than waiting for capacity held by that session. The 4-vCPU/8-GiB worker and
 1-vCPU/2-GiB API allocations remain unchanged.
 
-Plans expose up to eight balanced finite worker lanes by default. Each consumes
-several short, disjoint chunks before exit, amortizing startup and sharing provider
-connections. Compare end-to-end admission-to-terminal time separately from active
-worker time, and compare durable committed row counts and logical records.
+Plans expose independently claimable disjoint chunks to a fleet of up to eight
+finite executors by default. Starts favor roots with fewer occupied executors;
+warm workers rotate between compatible roots and claim unstarted chunks before
+exiting, amortizing startup and sharing provider connections. Bar-only windows
+coalesce to avoid paying a worker startup per short range. Compare end-to-end
+admission-to-terminal time separately from active worker time, and compare durable
+committed row counts and logical records.
 
 ## Plan/admission cutover
 
-The current lane identity hashes its ordered request list, and durable jobs include
-a required `metrics` field (null before settlement). Local execution input includes
+The current chunk identity hashes its ordered request list, and durable partition
+documents include required `metrics` and `executor` fields (null before settlement
+and dispatch respectively). A worker retains its executor anchor while processing
+further chunks; fleet accounting counts physical executors, including cold starts.
+Local execution input includes
 the accepted host-memory budget. Drain/stop old ingestion writers before replacing
 API/dispatcher/worker images together; remove obsolete ingestion job, partition and
 executor/admission records within the selected development store. Existing current
