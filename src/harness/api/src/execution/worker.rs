@@ -230,7 +230,9 @@ pub fn smoke() -> Result<()> {
     )
     .map_err(error)?;
     store.admit(record)?;
-    super::dispatch::notify_pool().map_err(error)?;
+    if let Err(error) = super::dispatch::notify_pool() {
+        eprintln!("durable smoke remains admitted; capacity acknowledgement unavailable: {error}");
+    }
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(540);
     loop {
         store.recover_interrupted()?;

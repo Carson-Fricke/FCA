@@ -15,3 +15,4 @@ acknowledgement coverage required by the execution contract.
 - `strategy_validation.rs`: real authored strategy compilation, loading, configuration diagnostics and isolated HTTP validation.
 - `study_validation.rs`: study validation and authored SDK contracts.
 - `fixtures/`: authored programs used at these public boundaries.
+- `unit/`: pure Azure protocol identity parsing; ownership, interruption and publication remain public-boundary behavior tests.

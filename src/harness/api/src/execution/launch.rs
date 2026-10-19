@@ -160,19 +160,67 @@ impl AzureStart {
             let rejected=matches!(&e,ureq::Error::Status(code,_) if matches!(*code,400|401|403|404|409|422));(rejected,e.to_string())
         })?;
         let value: serde_json::Value = response.into_json().map_err(|e| (false, e.to_string()))?;
-        let id = value["id"].as_str().ok_or((
-            false,
-            "worker start acknowledgement has no resource ID; reservation retained".into(),
-        ))?;
-        if !id
-            .to_ascii_lowercase()
-            .starts_with(&format!("{}/executions/", self.resource).to_ascii_lowercase())
+        let id = acknowledged_execution(&self.resource, &value).map_err(|error| (false, error))?;
+        // Azure may return only an execution name. Verify the exact execution
+        // through GET; neither a minimal nor an ambiguous ACK permits a second POST.
+        let execution: serde_json::Value = self
+            .agent
+            .get(&format!(
+                "https://management.azure.com{id}?api-version=2025-07-01"
+            ))
+            .set("Authorization", &self.authorization)
+            .call()
+            .map_err(|error| (false, error.to_string()))?
+            .into_json()
+            .map_err(|error| (false, error.to_string()))?;
+        let container = &execution["properties"]["template"]["containers"][0];
+        if container["image"] != self.template["containers"][0]["image"]
+            || !container["env"].as_array().is_some_and(|rows| {
+                rows.iter().any(|row| {
+                    row["name"] == "HARNESS_EXECUTION_SLOT_TOKEN"
+                        && row["value"].as_str() == Some(ticket)
+                })
+            })
         {
             return Err((
                 false,
-                "worker acknowledgement names another resource; reservation retained".into(),
+                "worker acknowledgement has mismatched image or startup ownership; reservation retained".into(),
             ));
         }
         Ok(())
     }
 }
+
+fn acknowledged_execution(resource: &str, value: &serde_json::Value) -> Result<String, String> {
+    let prefix = format!("{resource}/executions/");
+    let id = value["id"].as_str();
+    let name = value["name"].as_str();
+    let safe = |name: &str| {
+        !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    };
+    let Some(candidate) = id.map(str::to_owned).or_else(|| {
+        name.filter(|name| safe(name))
+            .map(|name| format!("{prefix}{name}"))
+    }) else {
+        return Err(
+            "worker start acknowledgement has no valid execution identity; reservation retained"
+                .into(),
+        );
+    };
+    let suffix = candidate.get(prefix.len()..).filter(|suffix| safe(suffix));
+    if !candidate
+        .to_ascii_lowercase()
+        .starts_with(&prefix.to_ascii_lowercase())
+        || suffix.is_none()
+        || name.is_some_and(|name| !suffix.unwrap().eq_ignore_ascii_case(name))
+    {
+        return Err(
+            "worker start acknowledgement names another execution; reservation retained".into(),
+        );
+    }
+    Ok(candidate)
+}
+
+#[cfg(test)]
+#[path = "../../tests/unit/execution_launch.rs"]
+mod tests;
