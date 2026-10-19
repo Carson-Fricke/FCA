@@ -6,7 +6,7 @@ One current job document retains immutable requests and the accepted worker spec
 - `model.rs`: validates dataset/option work and durable lifecycle fields.
 - `execution.rs`: declares accepted local/ACA partition execution specifications and adapts ACA execution to the worker port.
 - `ports.rs`: defines worker, persistence and ownership contracts and the shared heartbeat guard.
-- `store.rs`: implements conditional Azure Blob admission, leases and the read-only job repository.
+- `store.rs`: implements conditional Azure Blob admission, leases and the read-only job repository. Flat HNS listings exclude physical directories before requiring lifecycle metadata on job/chunk JSON objects; missing application metadata fails visibly.
 - `aca.rs`: validates Azure configuration and starts/reconciles exactly attributed ACA Job executions. Start responses contain only an execution name/resource ID; the adapter validates that identity then GETs the exact execution to verify its retained job/partition/image. Accepted asynchronous starts use bounded GET-only polling of same-origin, same-subscription operation locations. Unresolved outcomes are reconciled by attribution without replaying POST.
 - `budget.rs`: defines restart-safe rolling request reservations and the conditional Blob adapter.
 - `service.rs`: reconciles retained intents under dispatcher ownership and enforces shared worker limits and deadlines.

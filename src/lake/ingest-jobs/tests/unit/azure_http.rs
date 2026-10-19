@@ -56,6 +56,7 @@ struct Azure {
     budget_reads: AtomicUsize,
     budget_conflicts: AtomicUsize,
     budget_interrupt: AtomicBool,
+    missing_metadata: AtomicBool,
     budget_barrier: Mutex<Option<Arc<tokio::sync::Barrier>>>,
     listing_entered: tokio::sync::Notify,
     listing_release: tokio::sync::Notify,
@@ -76,6 +77,13 @@ async fn azure(
         }
         let blobs = state.blobs.lock().unwrap();
         let mut xml = String::from("<EnumerationResults><Blobs>");
+        // ADLS/HNS directory entries are included in flat Blob listings. Their
+        // metadata belongs to storage, not to the ingestion lifecycle contract.
+        let prefix = query
+            .get("prefix")
+            .map(String::as_str)
+            .unwrap_or("ingestion/jobs/");
+        xml.push_str(&format!("<Blob><Name>{prefix}directory</Name><Metadata><hdi_isfolder>true</hdi_isfolder></Metadata></Blob>"));
         for (name, payload) in blobs.iter().filter(|(name, _)| {
             name.starts_with(
                 query
@@ -85,7 +93,12 @@ async fn azure(
             )
         }) {
             let job: DurableJob = serde_json::from_slice(payload).unwrap();
-            xml.push_str(&format!("<Blob><Name>{name}</Name><Metadata><active>{}</active><dispatched>{}</dispatched><created>{}</created></Metadata></Blob>",!job.execution_deleted,job.dispatch_started,job.record.created_at.micros()));
+            let active = if state.missing_metadata.load(Ordering::SeqCst) {
+                String::new()
+            } else {
+                format!("<active>{}</active>", !job.execution_deleted)
+            };
+            xml.push_str(&format!("<Blob><Name>{name}</Name><Metadata>{active}<dispatched>{}</dispatched><created>{}</created></Metadata></Blob>",job.dispatch_started,job.record.created_at.micros()));
         }
         xml.push_str("</Blobs><NextMarker/></EnumerationResults>");
         return xml.into_response();
@@ -775,6 +788,11 @@ async fn warm_worker_claims_an_unstarted_chunk_without_another_container_start()
         ExecutionState::Active
     );
     assert!(!jobs.store.get_work(&next).await.unwrap().execution_deleted);
+    state.missing_metadata.store(true, Ordering::SeqCst);
+    assert!(jobs.reconcile().await.is_err());
+    assert!(crate::claim_next(&jobs.store, &anchor, "reuse")
+        .await
+        .is_err());
     server.abort();
 }
 

@@ -147,13 +147,13 @@ impl JobStore {
             #[serde(rename = "Name")]
             name: String,
             #[serde(rename = "Metadata")]
-            metadata: Metadata,
+            metadata: Option<Metadata>,
         }
         #[derive(serde::Deserialize)]
         struct Metadata {
-            active: String,
-            dispatched: String,
-            created: String,
+            active: Option<String>,
+            dispatched: Option<String>,
+            created: Option<String>,
         }
         let mut marker = String::new();
         let mut jobs = Vec::new();
@@ -174,7 +174,23 @@ impl JobStore {
             let payload = success(response).await?.text().await.map_err(io)?;
             let page: Listing = quick_xml::de::from_str(&payload).map_err(io)?;
             for blob in page.blobs.items {
-                match blob.metadata.active.as_str() {
+                // HNS lists physical directory entries with storage-owned
+                // metadata. Only JSON job objects carry our required facts.
+                if !blob.name.ends_with(".json") {
+                    continue;
+                }
+                let metadata = blob.metadata.ok_or_else(|| {
+                    DataError::Protocol("ingestion lifecycle metadata is missing".into())
+                })?;
+                let (Some(active), Some(dispatched), Some(created)) =
+                    (metadata.active, metadata.dispatched, metadata.created)
+                else {
+                    return Err(DataError::Protocol(
+                        "ingestion lifecycle metadata is incomplete".into(),
+                    ));
+                };
+                let created = created.parse().map_err(io)?;
+                match active.as_str() {
                     "false" => continue,
                     "true" => {}
                     _ => {
@@ -191,7 +207,7 @@ impl JobStore {
                         DataError::Protocol("invalid ingestion job object path".into())
                     })?;
                 validate_id(id)?;
-                let dispatched = match blob.metadata.dispatched.as_str() {
+                let dispatched = match dispatched.as_str() {
                     "true" => true,
                     "false" => false,
                     _ => {
@@ -203,7 +219,7 @@ impl JobStore {
                 jobs.push(ActiveJob {
                     id: id.into(),
                     dispatched,
-                    created: blob.metadata.created.parse().map_err(io)?,
+                    created,
                 });
             }
             if page.marker.is_empty() {
@@ -467,8 +483,8 @@ impl crate::JobPersistence for JobStore {
         }
         #[derive(serde::Deserialize)]
         struct Metadata {
-            active: String,
-            dispatched: String,
+            active: Option<String>,
+            dispatched: Option<String>,
         }
         let mut marker = String::new();
         let mut out = Vec::new();
@@ -495,10 +511,16 @@ impl crate::JobPersistence for JobStore {
                 let metadata = blob.metadata.ok_or_else(|| {
                     DataError::Protocol("ingestion chunk metadata is missing".into())
                 })?;
-                if metadata.active == "false" || metadata.dispatched == "true" {
+                let (Some(active), Some(dispatched)) = (metadata.active, metadata.dispatched)
+                else {
+                    return Err(DataError::Protocol(
+                        "ingestion chunk metadata is incomplete".into(),
+                    ));
+                };
+                if active == "false" || dispatched == "true" {
                     continue;
                 }
-                if metadata.active != "true" || metadata.dispatched != "false" {
+                if active != "true" || dispatched != "false" {
                     return Err(DataError::Protocol(
                         "invalid ingestion chunk metadata".into(),
                     ));
