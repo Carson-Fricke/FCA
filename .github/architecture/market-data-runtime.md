@@ -200,9 +200,11 @@ The combined quant API hosts `/market-data` at 1 vCPU / 2 GiB.
 API activation follows both worker Job template updates; scheduled dispatchers
 also depend on their worker templates. A newly active API cannot dispatch into
 an older template during deployment. When a push changes both products, the
-Thesis workflow waits for that commit's
-main deployment outside the shared deployment lock before reapplying shared
-infrastructure with its retained harness images. Azure's finite
+Thesis workflow waits for that commit's main deployment outside the shared
+deployment lock before reapplying shared infrastructure with its retained
+harness images. The main release classifies changes since the last successful push deployment,
+so failed or cancelled intermediate releases cannot cause reuse of an older
+runtime image with a newer contract. Azure's finite
 ingestion Job uses the narrow worker image at 4 vCPU / 8 GiB on Consumption,
 with platform replica retries disabled. Defaults are eight concurrent worker
 executions, two sessions per worker, 31-day partitions and an 86,400-second

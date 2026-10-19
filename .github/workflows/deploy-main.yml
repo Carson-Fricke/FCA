@@ -35,6 +35,9 @@ jobs:
     name: Select affected harness inputs
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     outputs:
       main_image: ${{ steps.changes.outputs.main_image }}
       main_deploy: ${{ steps.changes.outputs.main_deploy }}
@@ -46,10 +49,22 @@ jobs:
       - name: Select changed products
         id: changes
         env:
+          GH_TOKEN: ${{ github.token }}
           CHANGE_BASE: ${{ github.event.before }}
           CHANGE_HEAD: ${{ github.sha }}
           CHANGE_EVENT: ${{ github.event_name }}
-        run: node scripts/ci/changes.mjs
+        run: |
+          set -euo pipefail
+          if [[ "$CHANGE_EVENT" == 'push' ]]; then
+            # A failed/cancelled intermediate release is not a deployed baseline.
+            # Reusing its predecessor's image would apply new worker contracts
+            # against old binaries on an infrastructure-only follow-up commit.
+            CHANGE_BASE="$(gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-main.yml/runs" \
+              -f branch=master -f status=success -f per_page=100 \
+              --jq '.workflow_runs | map(select(.event == "push")) | sort_by(.created_at) | last | .head_sha // empty')"
+            export CHANGE_BASE
+          fi
+          node scripts/ci/changes.mjs
 
   publish-image:
     name: Publish immutable image
