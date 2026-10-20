@@ -15,13 +15,16 @@ cash book and rejects negative or excessive allocations.
 
 `job.rs` consumes ensured lake Arrow batches incrementally into replay events.
 `stream.rs` merges chronological per-symbol/type cursors with bounded lookahead,
-collects exact preflight fingerprints without retaining ticks and reopens the
-same pinned snapshot for simulation. Each pull cursor has an independent decode
+plans coverage and provenance from committed catalog snapshots without scanning ticks.
+Only bars needed for consumer frame assembly are read before simulation; the
+reader verifies immutable objects during the one tick replay. Each pull cursor has an independent decode
 slot to avoid head-of-line deadlock while sharing immutable caches.
 `history.rs` retains exact valuation and ledger rows in 8,192-row compressed,
 checksummed scratch frames, with independent clone snapshots and a configurable
 2 GiB per-history scratch cap (`HARNESS_HISTORY_SCRATCH_BYTES`). Financial metrics
-and Parquet consume every row; only HTML chart points are sampled. Replay bounds
+and Parquet consume every row; bounded HTML chart points are selected while
+building the ledger. The first metric pass shares that build; the second metric
+pass shares Parquet encoding, preserving the decimal mean and ordered deviation sum. Replay bounds
 are 32 symbol/type cursors and 65,536 events sharing one timestamp per cursor;
 exceeding a bound fails explicitly.
 Studies acquire the compiled program-and-indicator subscription union; backtests
@@ -29,7 +32,7 @@ also acquire quotes and trades for every input symbol for `simple_touch`
 execution. Execution feeds do not expand consumer callbacks or the subscription
 echo. Bars use one canonical minute source and never fill orders themselves.
 
-`job.rs` reports native execution and artifact-writing stages through the injected lake
+`job.rs` reports native execution, result computation and artifact-writing stages through the injected lake
 client progress port, and computes the canonical ledger from those checkpoints and engine fills.
 It preserves all configured initial capital, values open positions between
 fills and after the final fill, and writes the same equity history into metrics,
@@ -49,3 +52,12 @@ Option input aliases resolve once at as_of no later than replay start. Acquisiti
 plans, including empty plans. Acquired inputs are the normalized consumer source
 plan plus backtest execution feeds; execution inputs are quote/trade feeds for
 every backtest input symbol, empty for studies. No legacy omission is supported.
+
+Catalog fingerprints hash the pinned manifest inventory and exact accepted window;
+`replay_row_fingerprint` is explicitly null when no materialized row digest exists.
+Synthetic materialized fixtures retain their canonical row digests. This describes
+source evidence, not selectable historical contract versions. In-window replay
+counts are finalized from observed rows; full-day plans also verify catalog totals.
+Missing objects, checksums, schemas and physical row counts fail in the reader.
+Null transformations derive provenance from the pinned inputs and deterministic
+transform, and transform only bars during planning; ticks transform during replay.

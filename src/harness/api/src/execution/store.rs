@@ -263,6 +263,10 @@ impl JobStore for ExecutionStore {
         use sha2::Digest;
         use std::io::Read;
         let id = record.job_id.clone();
+        let mut progress = harness_contracts::progress::ExecutionProgress::stage(
+            harness_contracts::progress::ExecutionStage::PublishingArtifacts,
+        );
+        self.update_progress(&id, progress.clone(), Utc::now())?;
         let mut inventory = Vec::new();
         for (name, path) in &files {
             validate_artifact_name(name)?;
@@ -288,7 +292,11 @@ impl JobStore for ExecutionStore {
         }
         for info in &inventory {
             self.backend.create_file(&info.uri, &files[&info.name])?;
+            progress.bytes += info.size_bytes;
+            self.update_progress(&id, progress.clone(), Utc::now())?;
         }
+        progress.completed = true;
+        self.update_progress(&id, progress, Utc::now())?;
         self.write(&id, |doc| {
             let mut record = record.clone();
             record.updated_at = Utc::now();

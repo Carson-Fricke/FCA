@@ -7,7 +7,7 @@ use super::{
     errors::BacktestError,
     fixture::{DataPreflight, ExchangeSession, MarketEvent, ReplayFingerprints},
 };
-use crate::sha256::{digest_hex, Sha256};
+use crate::sha256::digest_hex;
 use harness_lakeclient::{BlockingLakeClient, LakeClientError, ReadSpec};
 use marketdata::lake::DataType;
 use std::{
@@ -17,15 +17,15 @@ use std::{
 
 pub type Events = Box<dyn Iterator<Item = Result<MarketEvent, BacktestError>> + Send>;
 type Factory = Arc<dyn Fn() -> Result<Events, BacktestError> + Send + Sync>;
-pub type ScannedReplay = (Arc<StreamedReplay>, Vec<MarketEvent>, Vec<ExchangeSession>);
+pub type PlannedReplay = (Arc<StreamedReplay>, Vec<MarketEvent>, Vec<ExchangeSession>);
 
 /// Immutable replay factory and evidence collected without retaining tick rows.
 pub struct StreamedReplay {
     factory: Factory,
     pub evidence: DataPreflight,
     pub reporter: Option<harness_contracts::progress::ProgressReporter>,
-    coverage: BTreeSet<(String, String)>,
-    pub bounds: Option<(i64, i64)>,
+    pub(crate) coverage: BTreeSet<(String, String)>,
+    pub expected_count: Option<usize>,
 }
 impl std::fmt::Debug for StreamedReplay {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -48,116 +48,147 @@ impl StreamedReplay {
         self.coverage.contains(&(kind.into(), symbol.into()))
     }
 
-    /// Scan once for preflight and row fingerprints, retaining only source bars.
-    pub fn scan(
+    /// Build a bounded replay from already-established metadata, without opening ticks.
+    pub fn new(
         factory: Factory,
+        evidence: DataPreflight,
+        coverage: BTreeSet<(String, String)>,
+        expected_count: Option<usize>,
+        reporter: Option<harness_contracts::progress::ProgressReporter>,
+    ) -> Self {
+        Self {
+            factory,
+            evidence,
+            coverage,
+            expected_count,
+            reporter,
+        }
+    }
+
+    /// Committed catalog manifests establish availability and immutable provenance.
+    /// Only the small bar stream is opened to assemble completed consumer frames.
+    pub fn catalog(
+        client: Arc<BlockingLakeClient>,
+        inputs: Vec<LakeInput>,
         source_id: String,
         start: i64,
         end: i64,
         reporter: Option<harness_contracts::progress::ProgressReporter>,
-    ) -> Result<ScannedReplay, BacktestError> {
+    ) -> Result<PlannedReplay, BacktestError> {
+        if inputs.len() > 32 {
+            return Err(BacktestError::DataPreflight(
+                "replay supports at most 32 concurrent symbol/type inputs".into(),
+            ));
+        }
+        let fail =
+            |e: harness_lakeclient::LakeClientError| BacktestError::DataPreflight(e.to_string());
         let mut coverage = BTreeSet::new();
         let mut days = BTreeSet::new();
         let mut symbols = BTreeSet::new();
-        let mut bars = Vec::new();
-        let (mut quote_count, mut trade_count, mut bar_count) = (0, 0, 0);
-        let mut rows = Sha256::new();
-        rows.update(b"fca:harness-replay-rows:v1\0");
-        let mut last_report = std::time::Instant::now();
-        let mut bounds: Option<(i64, i64)> = None;
-        for event in factory()? {
-            let event = event?;
-            if event.timestamp_ns() < start || event.timestamp_ns() >= end {
-                return Err(BacktestError::DataPreflight(
-                    "stream event outside accepted run window".into(),
-                ));
+        let mut counts = [0usize; 3];
+        let mut file_count = 0usize;
+        let mut pins = Vec::new();
+        for input in &inputs {
+            let snapshot = client.snapshot(&input.read).map_err(fail)?;
+            snapshot
+                .validate()
+                .map_err(|e| BacktestError::DataPreflight(e.to_string()))?;
+            let count = snapshot
+                .files
+                .iter()
+                .try_fold(0usize, |total, p| {
+                    usize::try_from(p.row_count)
+                        .ok()
+                        .and_then(|n| total.checked_add(n))
+                })
+                .ok_or_else(|| {
+                    BacktestError::DataPreflight("catalog row count overflows".into())
+                })?;
+            if count > 0 {
+                coverage.insert((input.data_type.value().into(), input.symbol.clone()));
+                symbols.insert(input.symbol.clone());
             }
-            days.insert(event.timestamp_ns().div_euclid(86_400_000_000_000));
-            bounds = Some(bounds.map_or(
-                (event.timestamp_ns(), event.timestamp_ns()),
-                |(first, last)| {
-                    (
-                        first.min(event.timestamp_ns()),
-                        last.max(event.timestamp_ns()),
-                    )
-                },
-            ));
-            symbols.insert(event.symbol().to_string());
-            let kind = match &event {
-                MarketEvent::Quote { .. } => {
-                    quote_count += 1;
-                    "quote"
+            for file in &snapshot.files {
+                if file.row_count > 0 {
+                    days.insert(file.session_date.clone());
                 }
-                MarketEvent::Trade { .. } => {
-                    trade_count += 1;
-                    "trade"
-                }
-                MarketEvent::Bar { .. } => {
-                    bar_count += 1;
-                    "bars"
+            }
+            let kind = match input.data_type {
+                DataType::Quote => 0,
+                DataType::Trade => 1,
+                DataType::Bars => 2,
+                _ => {
+                    return Err(BacktestError::DataPreflight(
+                        "reference data cannot be replayed".into(),
+                    ))
                 }
             };
-            coverage.insert((kind.into(), event.symbol().to_string()));
-            rows.update(event.to_json().to_canonical_string().as_bytes());
-            rows.update(b"\n");
-            if matches!(event, MarketEvent::Bar { .. }) {
-                bars.push(event);
-            }
-            if (quote_count + trade_count + bar_count) % 8192 == 0
-                && last_report.elapsed() >= std::time::Duration::from_secs(1)
-            {
-                if let Some(report) = &reporter {
-                    let mut progress = harness_contracts::progress::ExecutionProgress::stage(
-                        harness_contracts::progress::ExecutionStage::ReadingData,
-                    );
-                    progress.rows = (quote_count + trade_count + bar_count) as u64;
-                    report(progress).map_err(BacktestError::DataPreflight)?;
-                }
-                last_report = std::time::Instant::now();
-            }
+            counts[kind] = counts[kind].checked_add(count).ok_or_else(|| {
+                BacktestError::DataPreflight("catalog row count overflows".into())
+            })?;
+            file_count += snapshot.files.len();
+            pins.push((input.symbol.clone(), snapshot));
         }
-        let file = {
-            let mut hash = Sha256::new();
-            hash.update(b"fca:harness-replay-files:v1\0");
-            hash.finalize_hex()
-        };
-        let row = rows.finalize_hex();
-        let data = digest_hex(format!("fca:harness-replay-data:v1\0{file}\0{row}").as_bytes());
-        let sessions = days
+        let file = digest_hex(
+            &serde_json::to_vec(&pins).map_err(|e| BacktestError::DataPreflight(e.to_string()))?,
+        );
+        let data =
+            digest_hex(format!("fca:harness-catalog-replay\0{start}\0{end}\0{file}").as_bytes());
+        let event_count = counts
+            .iter()
+            .try_fold(0usize, |sum, n| sum.checked_add(*n))
+            .ok_or_else(|| BacktestError::DataPreflight("catalog row count overflows".into()))?;
+        let sessions: Vec<_> = days
             .into_iter()
-            .map(|day| ExchangeSession {
-                session_date_days: day,
-                open_ns: day * 86_400_000_000_000,
-                close_ns: (day + 1) * 86_400_000_000_000,
+            .map(|text| {
+                let day = marketdata::Date::parse(&text)
+                    .expect("validated catalog date")
+                    .days() as i64;
+                ExchangeSession {
+                    session_date_days: day,
+                    open_ns: day * 86_400_000_000_000,
+                    close_ns: (day + 1) * 86_400_000_000_000,
+                }
             })
-            .collect::<Vec<_>>();
+            .collect();
         let evidence = DataPreflight {
             source_id,
             session_count: sessions.len(),
-            event_count: quote_count + trade_count + bar_count,
-            quote_count,
-            trade_count,
-            bar_count,
-            file_count: 0,
+            event_count,
+            quote_count: counts[0],
+            trade_count: counts[1],
+            bar_count: counts[2],
+            file_count,
             symbols: symbols.into_iter().collect(),
-            fingerprints: ReplayFingerprints { file, row, data },
+            fingerprints: ReplayFingerprints {
+                file,
+                row: None,
+                data,
+            },
         };
-        if let Some(report) = &reporter {
-            let mut progress = harness_contracts::progress::ExecutionProgress::stage(
-                harness_contracts::progress::ExecutionStage::ReadingData,
-            );
-            progress.rows = evidence.event_count as u64;
-            progress.completed = true;
-            report(progress).map_err(BacktestError::DataPreflight)?;
-        }
+        let bar_inputs = inputs
+            .iter()
+            .filter(|input| input.data_type == DataType::Bars)
+            .cloned()
+            .collect::<Vec<_>>();
+        let bars = if bar_inputs.is_empty() {
+            Vec::new()
+        } else {
+            lake_factory(client.clone(), bar_inputs, start, end)()?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let expected_count = (start.rem_euclid(86_400_000_000_000) == 0
+            && end.rem_euclid(86_400_000_000_000) == 0)
+            .then_some(event_count);
+        let factory = lake_factory(client, inputs, start, end);
         Ok((
-            Arc::new(Self {
+            Arc::new(Self::new(
                 factory,
                 evidence,
                 coverage,
+                expected_count,
                 reporter,
-                bounds,
-            }),
+            )),
             bars,
             sessions,
         ))

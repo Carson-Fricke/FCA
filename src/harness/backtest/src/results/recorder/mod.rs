@@ -9,6 +9,7 @@
 //! reference output and tests.
 
 pub mod artifacts;
+mod columns;
 pub mod config;
 pub mod ids;
 pub mod manifest;
@@ -30,7 +31,7 @@ pub use manifest::{
 pub use parquet::ParquetArtifactWriter;
 pub use run::{
     ActionRecord, EquityRecord, EventRecord, ExecutionReportRecord, FillRecord,
-    PositionTransitionRecord, RecorderError, RunRecorder,
+    PortfolioEquityRecord, PositionTransitionRecord, RecorderError, RunRecorder,
 };
 pub use schemas::{
     Artifact, FieldDef, LogicalType, DECIMAL_ENCODING, SCHEMA_VERSION, STREAM_ARTIFACTS,

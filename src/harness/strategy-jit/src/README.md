@@ -23,7 +23,7 @@ subscription filtering, including direct runtime calls in tests.
 - `provenance.rs` fingerprints SDK sources, compiler tools, Cargo configuration,
   and environment. Rustup settings changes invalidate cached probes. The sibling
   `build.rs` embeds a hash of the complete JIT source tree, manifest, and build
-  script, together with the host target, without a build dependency.
+  script, together with the host target, using a direct SHA-256 build dependency.
 - `validation.rs` owns the full-input validation cache (64 entries and 4 MiB).
   It covers loading and construction; infrastructure failures are never memoized.
   Failures point to compact diagnostics or a minimal SDK missing-export template;

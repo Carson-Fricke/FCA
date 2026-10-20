@@ -142,6 +142,11 @@ impl BlockingLakeClient {
         self.block_on(self.client.visit_arrow(spec, consume))
     }
 
+    /// Resolve committed catalog metadata without reading market objects.
+    pub fn snapshot(&self, spec: &ReadSpec) -> Result<crate::MarketDataSnapshot, LakeClientError> {
+        self.block_on(self.client.snapshot(spec))
+    }
+
     /// The resolved base URL with any trailing slash removed.
     #[must_use]
     pub fn base_url(&self) -> &str {

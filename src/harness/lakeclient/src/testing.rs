@@ -164,6 +164,11 @@ impl FakeLakeServer {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clear();
     }
+
+    /// Simulate external deletion after a manifest has already been published.
+    pub fn remove_object(&self, checksum: &str) {
+        self.state.objects.lock().unwrap().remove(checksum);
+    }
 }
 
 impl Drop for FakeLakeServer {

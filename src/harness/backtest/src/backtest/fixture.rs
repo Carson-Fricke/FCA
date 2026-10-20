@@ -320,8 +320,8 @@ impl MarketEvent {
 pub struct ReplayFingerprints {
     /// Fingerprint of the addressed files.
     pub file: String,
-    /// Fingerprint of the replayed rows.
-    pub row: String,
+    /// Canonical row digest for materialized fixtures; catalog replay pins object hashes instead.
+    pub row: Option<String>,
     /// Domain-separated fingerprint over file and rows.
     pub data: String,
 }
@@ -351,7 +351,11 @@ impl ReplayFingerprints {
             payload.push_str(&row);
             digest_hex(payload.as_bytes())
         };
-        Self { file, row, data }
+        Self {
+            file,
+            row: Some(row),
+            data,
+        }
     }
 }
 
@@ -583,7 +587,7 @@ pub fn synthetic_fingerprints(
     }
     ReplayFingerprints {
         file,
-        row: row.finalize_hex(),
+        row: Some(row.finalize_hex()),
         data: data.finalize_hex(),
     }
 }
@@ -682,7 +686,10 @@ impl DataPreflight {
             ),
             (
                 "replay_row_fingerprint",
-                JsonValue::String(self.fingerprints.row.clone()),
+                self.fingerprints
+                    .row
+                    .clone()
+                    .map_or(JsonValue::Null, JsonValue::String),
             ),
             (
                 "replay_data_fingerprint",

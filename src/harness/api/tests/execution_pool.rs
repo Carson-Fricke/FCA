@@ -188,11 +188,32 @@ async fn artifact_inventory_is_metadata_and_binary_download_preserves_the_publis
     record.state = JobState::Succeeded;
     let payload = vec![42u8; 200_000];
     owner
-        .put_result(
-            record,
-            std::collections::BTreeMap::from([("results.parquet".into(), payload.clone())]),
+        .update_progress(
+            "retained-job",
+            harness_contracts::progress::ExecutionProgress::stage(
+                harness_contracts::progress::ExecutionStage::ComputingResults,
+            ),
+            chrono::Utc::now(),
         )
         .unwrap();
+    let source = dir.path().join("results.parquet");
+    std::fs::write(&source, &payload).unwrap();
+    let finished = owner
+        .put_files(
+            record,
+            std::collections::BTreeMap::from([("results.parquet".into(), source)]),
+        )
+        .unwrap();
+    assert!(finished
+        .progress
+        .iter()
+        .all(|p| p.snapshot.completed && p.finished_at.is_some()));
+    let publication = finished.progress.last().unwrap();
+    assert_eq!(
+        publication.snapshot.stage,
+        harness_contracts::progress::ExecutionStage::PublishingArtifacts
+    );
+    assert_eq!(publication.snapshot.bytes, payload.len() as u64);
     let list = api
         .clone()
         .oneshot(

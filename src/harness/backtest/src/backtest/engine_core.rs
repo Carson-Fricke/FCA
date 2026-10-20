@@ -188,6 +188,14 @@ pub fn runtime_subscriptions(
         })?);
     }
     let union = normalize_subscriptions(&inputs)?;
+    validate_subscription_echo(configuration, &union)?;
+    Ok(union)
+}
+
+fn validate_subscription_echo(
+    configuration: &BacktestConfig,
+    union: &[MarketSubscription],
+) -> Result<(), BacktestError> {
     if configuration.has_subscription_echo()
         && normalize_subscriptions(&configuration.data_subscriptions)? != union
     {
@@ -195,7 +203,7 @@ pub fn runtime_subscriptions(
             "data.subscriptions does not match runtime subscription union".into(),
         ));
     }
-    Ok(union)
+    Ok(())
 }
 
 /// One reconstructed OHLCV bar carrying Python-scale decimals.
@@ -1820,12 +1828,21 @@ fn py_from(
     field: &str,
     symbol: &str,
 ) -> Result<Decimal, BacktestError> {
-    let text = crate::backtest::fixture::python_decimal(value, scale);
-    text.parse::<Decimal>().map_err(|error| {
-        BacktestError::DataPreflight(format!(
-            "market {field} {text:?} for symbol {symbol:?} is not a representable decimal: {error}"
-        ))
-    })
+    let rounded = value
+        .round_to(num::RoundingMode::HalfEven, scale)
+        .map_err(|error| {
+            BacktestError::DataPreflight(format!(
+                "market {field} for symbol {symbol:?} cannot be rounded: {error}"
+            ))
+        })?;
+    let power = num::SCALE
+        .checked_sub(scale)
+        .ok_or_else(|| BacktestError::DataPreflight("market scale exceeds 18".into()))?;
+    Ok(Decimal::from_parts(
+        rounded.is_negative(),
+        rounded.unscaled().unsigned_abs() / 10u128.pow(power),
+        scale as i32,
+    ))
 }
 
 /// Evaluate one configured rule against a candidate order.
@@ -1919,7 +1936,21 @@ pub fn run_native_engine(
     strategies: Vec<StrategyInstance>,
     synthetic_options: &SyntheticDataOptions,
 ) -> Result<BacktestOutcome, BacktestError> {
-    let requirements = runtime_subscriptions(configuration, &strategies)?;
+    let subscriptions = strategies
+        .iter()
+        .map(|instance| {
+            instance
+                .runtime
+                .subscriptions()
+                .ok_or_else(|| {
+                    BacktestError::Configuration("runtime must declare its subscriptions".into())
+                })
+                .and_then(|inputs| normalize_subscriptions(&inputs))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let requirements =
+        normalize_subscriptions(&subscriptions.iter().flatten().cloned().collect::<Vec<_>>())?;
+    validate_subscription_echo(configuration, &requirements)?;
     super::preflight::validate_subscription_coverage(fixture, &requirements)?;
     manifest.effective_subscriptions = requirements.clone();
     let execution = if configuration.shell == "study" {
@@ -2005,6 +2036,9 @@ pub fn run_native_engine(
     let mut assessments: Vec<FeeAssessment> = Vec::new();
     let mut risk_decisions: Vec<RiskDecision> = Vec::new();
     let mut market_event_count = 0u64;
+    let mut observed: BTreeMap<String, [usize; 3]> = BTreeMap::new();
+    let mut observed_days = std::collections::BTreeSet::new();
+    let mut last_observed_day = None;
     let mut last_progress = std::time::Instant::now();
     let mut input = fixture.open_events()?;
     let mut frames = frames.into_iter().peekable();
@@ -2033,6 +2067,30 @@ pub fn run_native_engine(
                 Some(event) => {
                     let event = event?;
                     market_event_count += 1;
+                    let kind = match &event {
+                        MarketEvent::Quote { .. } => 0,
+                        MarketEvent::Trade { .. } => 1,
+                        MarketEvent::Bar { .. } => 2,
+                    };
+                    if let Some(counts) = observed.get_mut(event.symbol()) {
+                        counts[kind] += 1;
+                    } else {
+                        let mut counts = [0; 3];
+                        counts[kind] = 1;
+                        observed.insert(event.symbol().to_string(), counts);
+                    }
+                    let day = event.timestamp_ns().div_euclid(86_400_000_000_000);
+                    if last_observed_day != Some(day) {
+                        observed_days.insert(day);
+                        last_observed_day = Some(day);
+                    }
+                    if event.timestamp_ns() < configuration.start_ns
+                        || event.timestamp_ns() >= configuration.end_ns
+                    {
+                        return Err(BacktestError::DataPreflight(
+                            "stream event outside accepted window".into(),
+                        ));
+                    }
                     if !matches!(event, MarketEvent::Bar { .. }) {
                         next_tick = Some(EngineEvent::Market(market_event(
                             &event,
@@ -2061,7 +2119,12 @@ pub fn run_native_engine(
         }
         let use_frame = frames.peek().is_some_and(|frame| {
             next_tick.as_ref().is_none_or(|tick| {
-                external_key(&EngineEvent::BarFrame(frame.clone())) < external_key(tick)
+                (
+                    frame.available_at_ns,
+                    if frame_replay { 1 } else { 0 },
+                    0,
+                    9,
+                ) < external_key(tick)
             })
         });
         let incoming = if use_frame {
@@ -2097,6 +2160,7 @@ pub fn run_native_engine(
                 &mut assessments,
                 &mut risk_decisions,
                 &mut strategies,
+                &subscriptions,
             )?;
             let marks = match &dispatched {
                 EngineEvent::Market(market) => {
@@ -2169,6 +2233,27 @@ pub fn run_native_engine(
 
     let order_count: u64 = order_counts.values().sum();
     verify_replay(fixture, preflight, market_event_count)?;
+    for input in &requirements {
+        for symbol in &input.symbols {
+            let kind = match input.data_type.as_str() {
+                "quote" => 0,
+                "trade" => 1,
+                _ => 2,
+            };
+            if observed.get(symbol).is_none_or(|counts| counts[kind] == 0) {
+                return Err(BacktestError::DataPreflight(format!(
+                    "replay has no requested {}/{symbol} events inside the window",
+                    input.data_type
+                )));
+            }
+        }
+    }
+    let mut actual_preflight = preflight.clone();
+    actual_preflight.event_count = market_event_count as usize;
+    actual_preflight.quote_count = observed.values().map(|n| n[0]).sum();
+    actual_preflight.trade_count = observed.values().map(|n| n[1]).sum();
+    actual_preflight.bar_count = observed.values().map(|n| n[2]).sum();
+    actual_preflight.session_count = observed_days.len();
     let fee_totals = aggregate_fees(&assessments);
     if let Some(report) = fixture.stream.as_ref().and_then(|s| s.reporter.as_ref()) {
         let mut progress = harness_contracts::progress::ExecutionProgress::stage(
@@ -2186,7 +2271,7 @@ pub fn run_native_engine(
         manifest,
         status: BacktestStatus::Completed,
         reason: None,
-        preflight: preflight.clone(),
+        preflight: actual_preflight,
         dispatch_hash: bus.dispatch_hash(),
         dispatched_count: bus.dispatched_count(),
         market_event_count,
@@ -2224,6 +2309,7 @@ fn dispatch_event(
     assessments: &mut Vec<FeeAssessment>,
     risk_decisions: &mut Vec<RiskDecision>,
     strategies: &mut [StrategyInstance],
+    subscriptions: &[Vec<MarketSubscription>],
 ) -> Result<(), BacktestError> {
     match event {
         EngineEvent::BarFrame(frame) => {
@@ -2231,14 +2317,7 @@ fn dispatch_event(
                 prices.insert(bar.symbol.clone(), bar.close);
                 hub.mark(&bar.symbol, bar.close);
             }
-            for instance in strategies.iter_mut() {
-                let inputs = normalize_subscriptions(
-                    &instance.runtime.subscriptions().ok_or_else(|| {
-                        BacktestError::Configuration(
-                            "runtime must declare its subscriptions".into(),
-                        )
-                    })?,
-                )?;
+            for (instance, inputs) in strategies.iter_mut().zip(subscriptions) {
                 let Some(input) = inputs.iter().find(|s| {
                     s.data_type == "bars" && s.interval.as_deref() == Some(frame.interval.as_str())
                 }) else {
@@ -2288,10 +2367,7 @@ fn dispatch_event(
             let mark = market.mark_price();
             prices.insert(market.symbol().to_string(), mark);
             hub.mark(market.symbol(), mark);
-            for instance in strategies.iter_mut() {
-                let inputs = instance.runtime.subscriptions().ok_or_else(|| {
-                    BacktestError::Configuration("runtime must declare its subscriptions".into())
-                })?;
+            for (instance, inputs) in strategies.iter_mut().zip(subscriptions) {
                 let kind = match market {
                     EngineMarket::Quote { .. } => "quote",
                     EngineMarket::Trade { .. } => "trade",
@@ -2502,7 +2578,11 @@ fn verify_replay(
     preflight: &DataPreflight,
     market_event_count: u64,
 ) -> Result<(), BacktestError> {
-    if market_event_count != preflight.event_count as u64 {
+    let expected = fixture
+        .stream
+        .as_ref()
+        .map_or(Some(preflight.event_count), |s| s.expected_count);
+    if market_event_count == 0 || expected.is_some_and(|count| market_event_count != count as u64) {
         return Err(BacktestError::DataPreflight(
             "replayed event count does not match the preflighted fixture".to_string(),
         ));

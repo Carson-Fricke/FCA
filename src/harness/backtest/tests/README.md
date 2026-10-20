@@ -19,3 +19,5 @@ Tests exercise the public application and acquisition boundaries; fake transport
 - `study_frames.rs` — Atomic frame dispatch, separate backtest execution feeds
   and causal tick fills without expanding consumer callbacks.
 - `streamed_replay.rs` — Streamed replay preserves dispatch and full valuation evidence; compressed histories retain every row, exact metrics and independent cloned snapshots.
+
+- `result_encoding.rs` — Numeric and text equity inputs produce identical Parquet bytes and manifest digests across flush boundaries.

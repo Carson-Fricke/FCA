@@ -10,7 +10,7 @@
     const labels: Record<HarnessJobProgress['stage'], string> = {
         compiling: 'Compiling program', preparing_data: 'Preparing market data',
         reading_data: 'Reading market data', running_study: 'Running study',
-        running_backtest: 'Running backtest', writing_artifacts: 'Writing results', interrupted: 'Execution interrupted'
+        running_backtest: 'Running backtest', computing_results: 'Computing results', writing_artifacts: 'Writing results', publishing_artifacts: 'Publishing results', interrupted: 'Execution interrupted'
     };
     const progress = $derived(job?.progress ?? []);
     const current = $derived([...progress].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0]);
@@ -43,7 +43,7 @@
         {#if current.sessions_total != null && current.sessions_ready != null}
             <p class="text-xs text-slate-600">{current.sessions_ready} / {current.sessions_total} sessions ready{current.sessions_cached != null ? ` · ${current.sessions_cached} cached before acquisition` : ''}</p>
         {/if}
-        {#if current.rows || current.bytes}<p class="text-xs text-slate-600">{current.rows.toLocaleString()} rows{current.bytes ? ` · ${bytes(current.bytes)} received` : ''}</p>{/if}
+        {#if current.rows || current.bytes}<p class="text-xs text-slate-600">{#if current.rows}{current.rows.toLocaleString()} rows{/if}{current.bytes ? `${current.rows ? ' · ' : ''}${bytes(current.bytes)} ${current.stage === 'publishing_artifacts' ? 'uploaded' : 'received'}` : ''}</p>{/if}
         {#if !stopped}<p class="text-[11px] text-slate-500">Last observation {elapsed(current.updated_at)} ago</p>{/if}
     {/if}
     {#if job?.error_message}<p class="text-xs text-loss" role="alert">{job.error_message}</p>{/if}

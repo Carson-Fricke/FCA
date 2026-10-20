@@ -219,7 +219,7 @@ pub struct BacktestManifest {
     /// Replay file fingerprint.
     pub replay_file_fingerprint: String,
     /// Replay row fingerprint.
-    pub replay_row_fingerprint: String,
+    pub replay_row_fingerprint: Option<String>,
     /// Replay data fingerprint.
     pub replay_data_fingerprint: String,
     /// Fill model name.
@@ -299,7 +299,9 @@ impl BacktestManifest {
             ),
             (
                 "replay_row_fingerprint",
-                JsonValue::String(self.replay_row_fingerprint.clone()),
+                self.replay_row_fingerprint
+                    .clone()
+                    .map_or(JsonValue::Null, JsonValue::String),
             ),
             (
                 "replay_data_fingerprint",

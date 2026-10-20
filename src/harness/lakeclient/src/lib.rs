@@ -40,3 +40,6 @@ pub use client::{LakeClient, LakeClientConfig, DEFAULT_LAKE_BASE_URL, MAX_PARALL
 pub use error::{EnsureFailure, LakeClientError};
 pub use models::{CoverageEntry, CoverageReport, EnsureResponse, JobStatus};
 pub use spec::{EnsureSpec, ReadSpec};
+
+// The manifest is a value contract shared by planning and actual reads.
+pub use harness_market_reader::MarketDataSnapshot;

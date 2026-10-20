@@ -11,7 +11,7 @@ use super::config::Seed;
 /// Issue reproducible UUID-shaped identifier strings from a seed and counter.
 #[derive(Clone, Debug)]
 pub struct EngineIdSource {
-    seed: Seed,
+    seed_bytes: Vec<u8>,
     counter: u64,
 }
 
@@ -27,7 +27,15 @@ impl EngineIdSource {
             Seed::Bytes(value) if value.is_empty() => return Err(IdError::EmptySeed),
             _ => {}
         }
-        Ok(Self { seed, counter: 0 })
+        let seed_bytes = match seed {
+            Seed::Text(value) => format!("str:{value}").into_bytes(),
+            Seed::Int(value) => format!("int:{value}").into_bytes(),
+            Seed::Bytes(value) => value,
+        };
+        Ok(Self {
+            seed_bytes,
+            counter: 0,
+        })
     }
 
     /// Return the number of identifiers issued by this source.
@@ -47,9 +55,8 @@ impl EngineIdSource {
         }
         let ordinal = self.counter;
         self.counter += 1;
-        let seed_bytes = self.seed_bytes();
         let mut hasher = Sha256::new();
-        hasher.update(&seed_bytes);
+        hasher.update(&self.seed_bytes);
         hasher.update(&[0]);
         hasher.update(kind.as_bytes());
         hasher.update(&[0]);
@@ -58,14 +65,6 @@ impl EngineIdSource {
         digest[6] = (digest[6] & 0x0f) | 0x50;
         digest[8] = (digest[8] & 0x3f) | 0x80;
         Ok(format_uuid(&digest[..16]))
-    }
-
-    fn seed_bytes(&self) -> Vec<u8> {
-        match &self.seed {
-            Seed::Text(value) => format!("str:{value}").into_bytes(),
-            Seed::Int(value) => format!("int:{value}").into_bytes(),
-            Seed::Bytes(value) => value.clone(),
-        }
     }
 }
 

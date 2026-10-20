@@ -24,3 +24,6 @@ serde_json = "1"
 [dev-dependencies]
 harness-lakeclient = { path = "../lakeclient", features = ["test-support"] }
 marketdata = { path = "../marketdata" }
+
+[build-dependencies]
+sha2 = "0.10"

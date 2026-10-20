@@ -68,17 +68,22 @@ fn streamed_replay_preserves_the_dispatch_hash_and_exact_valuation_history() {
     });
     let progress = Arc::new(std::sync::Mutex::new(Vec::new()));
     let received = progress.clone();
-    let (source, bars, sessions) = StreamedReplay::scan(
+    let source = Arc::new(StreamedReplay::new(
         factory,
-        memory.source_id.clone(),
-        config.start_ns,
-        config.end_ns,
+        preflight_data(&config, &memory).unwrap(),
+        [
+            ("quote".into(), "SPY".into()),
+            ("trade".into(), "SPY".into()),
+        ]
+        .into(),
+        Some(memory.events.len()),
         Some(Arc::new(move |snapshot| {
             received.lock().unwrap().push(snapshot);
             Ok(())
         })),
-    )
-    .unwrap();
+    ));
+    let bars = Vec::new();
+    let sessions = memory.sessions.clone();
     assert!(bars.is_empty());
     assert_eq!(source.evidence.event_count, memory.events.len());
     let stream = ReplayFixture {
@@ -141,7 +146,6 @@ fn compressed_histories_preserve_every_row_and_exact_full_resolution_metrics() {
         equity_curve_metrics_stream(|| history.iter()).unwrap(),
         equity_curve_metrics(&points)
     );
-    assert!(history.sample(100).unwrap().len() <= 101);
     let snapshot = history.clone();
     for point in &points[..8192] {
         history.push(*point).unwrap();

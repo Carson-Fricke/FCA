@@ -112,18 +112,6 @@ impl<T: Record> History<T> {
         }
         .chain(self.tail.iter().cloned().map(Ok)))
     }
-    /// A bounded visualization sample; full-resolution data and metrics remain exact.
-    pub fn sample(&self, limit: usize) -> io::Result<Vec<T>> {
-        let stride = self.len().div_ceil(limit.max(1)).max(1);
-        let mut out = Vec::new();
-        for (i, record) in self.iter()?.enumerate() {
-            let record = record?;
-            if i % stride == 0 || i + 1 == self.len() {
-                out.push(record);
-            }
-        }
-        Ok(out)
-    }
 }
 struct HistoryReader<T: Record> {
     file: Option<io::Take<File>>,

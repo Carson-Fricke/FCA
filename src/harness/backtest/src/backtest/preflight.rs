@@ -86,13 +86,6 @@ pub fn preflight_data(
         ));
     }
     if let Some(stream) = &fixture.stream {
-        if stream.bounds.is_some_and(|(first, last)| {
-            first < configuration.start_ns || last >= configuration.end_ns
-        }) {
-            return Err(BacktestError::DataPreflight(
-                "an event falls outside the configured run window".into(),
-            ));
-        }
         if configuration.shell != "study"
             && configuration
                 .symbols

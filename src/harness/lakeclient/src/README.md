@@ -17,6 +17,6 @@ The standalone client defaults to the local combined harness at `http://127.0.0.
 
 Ensure completion polling starts at 100 ms and caps at 500 ms, avoiding multi-second completion detection delays.
 
-`client.rs` and `blocking.rs` expose replay cursors sharing pinned manifests and
+`client.rs` and `blocking.rs` expose metadata-only `snapshot` planning and replay cursors sharing pinned manifests and
 content caches with independent reader admission. Replay reopen does not emit
-acquisition progress; the engine reports its actual read and replay row counts.
+acquisition progress; the engine reports actual replay row counts, including storage verification.

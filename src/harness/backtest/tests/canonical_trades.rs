@@ -667,3 +667,68 @@ fn unrepresentable_annualization_is_undefined_without_losing_valid_job_results()
         "0.2".parse().unwrap()
     );
 }
+
+#[test]
+fn spilled_results_retain_every_sample_and_finish_both_result_stages() {
+    use harness_contracts::progress::ExecutionStage;
+    use std::sync::{Arc, Mutex};
+    let config = config();
+    let quotes: Vec<_> = (0..20000)
+        .map(|i| quote(config.start_ns + i * 1000, "10", "11"))
+        .collect();
+    let server = FakeLakeServer::start(FakeLakeConfig {
+        partitions_by_type: BTreeMap::from([("quote".into(), quote_parquet("SPY", &quotes))]),
+        ..FakeLakeConfig::new(TOKEN)
+    });
+    let progress = Arc::new(Mutex::new(Vec::new()));
+    let received = progress.clone();
+    let client = client(&server).with_progress(Arc::new(move |p| {
+        received.lock().unwrap().push(p);
+        Ok(())
+    }));
+    let directory = tempfile::tempdir().unwrap();
+    let (outcome, _) = run_native_job_with_lake_client(
+        &config,
+        &EngineOptions::default(),
+        Some(directory.path()),
+        vec![StrategyInstance {
+            instance_id: "idle".into(),
+            runtime: Box::new(ScriptedTrader {
+                script: VecDeque::new(),
+                next_id: 0,
+            }),
+        }],
+        &client,
+    )
+    .unwrap();
+    let metrics: Value =
+        serde_json::from_slice(&std::fs::read(directory.path().join("metrics.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        metrics["equity"]["samples"].as_u64().unwrap(),
+        outcome.valuations.len() as u64 + 1
+    );
+    let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+        std::fs::File::open(directory.path().join("artifacts/equity.parquet")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        builder.metadata().file_metadata().num_rows() as u64,
+        metrics["equity"]["samples"].as_u64().unwrap()
+    );
+    assert!(
+        std::fs::metadata(directory.path().join("report.html"))
+            .unwrap()
+            .len()
+            < 200000
+    );
+    let progress = progress.lock().unwrap();
+    for stage in [
+        ExecutionStage::ComputingResults,
+        ExecutionStage::WritingArtifacts,
+    ] {
+        let last = progress.iter().rev().find(|p| p.stage == stage).unwrap();
+        assert!(last.completed);
+        assert_eq!(last.rows, metrics["equity"]["samples"].as_u64().unwrap());
+    }
+}

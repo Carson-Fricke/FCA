@@ -71,6 +71,33 @@ Content garbage collection needs an explicit retention contract; no publication
 path deletes old generations. Local signed URLs encode canonical paths once at
 the HTTP transport boundary, including symbols containing percent escapes.
 
+## Catalog planning and exact replay results
+
+Backtest preflight resolves committed catalog snapshots to establish coverage,
+row inventories and content provenance. It never opens quote/trade objects to
+check availability. Only the bounded bar source needed for completed consumer
+frames is decoded before execution. Simulation then reads each tick stream once
+through the same pinned reader, which still verifies bytes, checksums, schema and
+physical partition row counts. External deletion or corruption fails execution;
+readers never repair catalog entries or fetch providers as a hidden fallback.
+Full-day plans verify total rows; partial-day executions finalize actual counts
+from in-window events. Input identity includes manifests, symbol mapping and exact
+window. A materialized-row fingerprint is explicitly absent for catalog replay;
+object checksums supply content identity without another row-serialization pass.
+Null replay pins the same source and derives deterministic transform evidence,
+then transforms ticks during the sole replay pass.
+
+Result composition retains full-resolution causal samples. Ledger construction
+also computes the first metric pass and a bounded chart sample. A single ledger
+read supplies the ordered Sharpe variance pass and direct typed Arrow encoding.
+The same result schemas, ids, canonical decimal text and Parquet properties apply
+to numeric and textual recorder callers. `ComputingResults`, `WritingArtifacts`
+and `PublishingArtifacts` are separate observed stages with row/byte counters.
+Successful terminal publication completes stages; artifact visibility remains
+an atomic inventory commit after immutable object upload. Kernel hashing uses
+accelerated SHA-256 while preserving digest bytes. JIT build identity uses a
+normal build dependency rather than including another crate's source module.
+
 ## Durable partitioned ingestion
 
 Admission retains immutable requests and the accepted executor specification in

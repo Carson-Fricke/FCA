@@ -40,6 +40,18 @@ describe('shared harness execution status', () => {
         expect(screen.queryByText(/ETA/)).toBeNull();
     });
 
+    it.each([
+        ['computing_results', 'Computing results'],
+        ['writing_artifacts', 'Writing results'],
+        ['publishing_artifacts', 'Publishing results'],
+    ] as const)('shows %s progress separately', async (stage, label) => {
+        vi.mocked(getHarnessJob).mockResolvedValue({job_id: `results-${stage}`, state:'running',
+            progress:[{...reading,stage,rows:stage==='publishing_artifacts'?0:reading.rows,bytes:stage==='publishing_artifacts'?2000000:0,finished_at:null}]});
+        render(HarnessExecutionCard,{props:{jobId:`results-${stage}`}});
+        await screen.findAllByText(label);
+        if(stage==='publishing_artifacts') expect(screen.getByText(/2.0 MB uploaded/)).toBeInTheDocument();
+    });
+
     it('ignores a stale response after navigation to a different job', async () => {
         let finish!: (job: HarnessJobStatus) => void;
         vi.mocked(getHarnessJob).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))

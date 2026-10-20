@@ -11,7 +11,9 @@ pub enum ExecutionStage {
     ReadingData,
     RunningStudy,
     RunningBacktest,
+    ComputingResults,
     WritingArtifacts,
+    PublishingArtifacts,
     Interrupted,
 }
 

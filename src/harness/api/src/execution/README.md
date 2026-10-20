@@ -31,3 +31,7 @@ Validation is serialized, limited to 1 GiB and 180 seconds, with an 8 MiB
 response bound. Control requests and artifact transfers have separate bounds.
 Inline artifact reads are limited to 64 MiB; raw downloads stream larger files
 with four concurrent transfers and two 64 KiB queued buffers per transfer.
+
+File publication reports its own stage and committed upload-byte counters. The
+terminal commit preserves current progress and marks successful stages complete;
+metrics and the artifact inventory become visible atomically after upload.

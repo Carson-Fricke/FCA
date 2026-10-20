@@ -418,7 +418,7 @@ impl LakeClient {
     pub async fn snapshot(
         &self,
         spec: &ReadSpec,
-    ) -> Result<harness_market_reader::MarketDataSnapshot, LakeClientError> {
+    ) -> Result<crate::MarketDataSnapshot, LakeClientError> {
         Ok(self
             .resolve_snapshot(spec)
             .await?

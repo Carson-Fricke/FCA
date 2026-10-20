@@ -14,7 +14,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 
-use harness_contracts::progress::{ExecutionProgress, ExecutionStage};
+use harness_contracts::progress::{ExecutionProgress, ExecutionStage, ProgressReporter};
 use harness_lakeclient::{BlockingLakeClient, EnsureSpec, ReadSpec};
 use num::{Decimal18, DecimalError};
 
@@ -31,11 +31,11 @@ use crate::backtest::preflight::preflight_data;
 use crate::backtest::screen::ScreenConfig;
 use crate::canonical_json::JsonValue;
 use crate::results::metrics::{
-    equity_curve_metrics_stream, execution_stats, trade_stats, EquityMetrics, EquityPoint,
-    ExecutionStats, FillRow, MetricsError, OrderRow, Outcome, TradeRow, TradeStats,
+    execution_stats, trade_stats, EquityAccumulator, EquityMetrics, EquityPoint, ExecutionStats,
+    FillRow, MetricsError, OrderRow, Outcome, TradeRow, TradeStats,
 };
 use crate::results::recorder::{
-    ActionKind, ActionRecord, EquityRecord, FillRecord, RecorderConfig, RunManifest, RunRecorder,
+    ActionKind, ActionRecord, FillRecord, PortfolioEquityRecord, RecorderConfig, RunRecorder,
 };
 use crate::results::report::{render_report, ReportHeader};
 
@@ -528,7 +528,7 @@ pub fn run_native_job_with_lake_client(
         &lake_scale_options(),
     )?;
     client
-        .report_progress(ExecutionProgress::stage(ExecutionStage::WritingArtifacts))
+        .report_progress(ExecutionProgress::stage(ExecutionStage::ComputingResults))
         .map_err(|error| BacktestJobError::Io(error.to_string()))?;
     let artifact_path = write_run_artifacts(
         configuration,
@@ -536,6 +536,7 @@ pub fn run_native_job_with_lake_client(
         output_dir,
         "backtests",
         "backtest.json",
+        client.progress_reporter().as_ref(),
     )?;
     Ok((outcome, artifact_path))
 }
@@ -570,10 +571,16 @@ pub fn run_native_study_job_with_lake_client(
         &lake_scale_options(),
     )?;
     client
-        .report_progress(ExecutionProgress::stage(ExecutionStage::WritingArtifacts))
+        .report_progress(ExecutionProgress::stage(ExecutionStage::ComputingResults))
         .map_err(|error| BacktestJobError::Io(error.to_string()))?;
-    let artifact_path =
-        write_run_artifacts(configuration, &outcome, output_dir, "studies", "study.json")?;
+    let artifact_path = write_run_artifacts(
+        configuration,
+        &outcome,
+        output_dir,
+        "studies",
+        "study.json",
+        client.progress_reporter().as_ref(),
+    )?;
     Ok((outcome, artifact_path))
 }
 
@@ -608,14 +615,16 @@ fn run_native_engine_outcome(
 
 /// Write the canonical artifact and complete result set for one native outcome.
 ///
-/// Every derived ledger and metric is computed before the first write, so a
-/// malformed fill fails the job without leaving a partial result set behind.
+/// Ledger arithmetic is validated before encoding. The exact variance pass
+/// shares the artifact reader; immutable upload and atomic visibility belong
+/// to the result store, after this complete local result set has been written.
 fn write_run_artifacts(
     configuration: &BacktestConfig,
     outcome: &BacktestOutcome,
     output_dir: Option<&Path>,
     default_subdir: &str,
     artifact_name: &str,
+    reporter: Option<&ProgressReporter>,
 ) -> Result<PathBuf, BacktestJobError> {
     for program in outcome.exploratory_outputs.values() {
         for output in program.as_object().into_iter().flat_map(|map| map.values()) {
@@ -648,7 +657,20 @@ fn write_run_artifacts(
     }
     let fills = ledger_fills_from_outcome(outcome);
     let orders = ledger_orders_from_outcome(outcome);
-    let ledger = build_ledger(configuration, &fills, &orders, &outcome.valuations)?;
+    let ledger = build_ledger(
+        configuration,
+        &fills,
+        &orders,
+        &outcome.valuations,
+        reporter,
+    )?;
+    report_results(
+        reporter,
+        ExecutionStage::ComputingResults,
+        ledger.rows.len() as u64,
+        true,
+    )?;
+    report_results(reporter, ExecutionStage::WritingArtifacts, 0, false)?;
     let directory = output_dir.map_or_else(
         || {
             PathBuf::from(".local")
@@ -663,13 +685,27 @@ fn write_run_artifacts(
     payload.push(b'\n');
     std::fs::write(&artifact_path, payload)
         .map_err(|error| BacktestJobError::Artifact(error.to_string()))?;
-    write_native_results(&directory, configuration, outcome, &fills, &orders, &ledger)?;
+    write_native_results(
+        &directory,
+        configuration,
+        outcome,
+        &fills,
+        &orders,
+        &ledger,
+        reporter,
+    )?;
     let outputs = serde_json::json!({"schema_version":1,"job_id":outcome.manifest.job_id,"programs":outcome.exploratory_outputs});
     std::fs::write(
         directory.join("exploratory_outputs.json"),
         serde_json::to_vec_pretty(&outputs).map_err(|e| BacktestJobError::Io(e.to_string()))?,
     )
     .map_err(|e| BacktestJobError::Io(e.to_string()))?;
+    report_results(
+        reporter,
+        ExecutionStage::WritingArtifacts,
+        ledger.rows.len() as u64,
+        true,
+    )?;
     Ok(artifact_path)
 }
 
@@ -690,6 +726,7 @@ fn write_native_results(
     fills: &[LedgerFill],
     orders: &[LedgerOrder],
     ledger: &JobLedger,
+    reporter: Option<&ProgressReporter>,
 ) -> Result<(), BacktestJobError> {
     let counts = JobCounts {
         market_events: outcome.market_event_count,
@@ -698,6 +735,15 @@ fn write_native_results(
         orders: outcome.order_count,
         fills: outcome.fills.len() as u64,
     };
+    let equity = record_artifacts(
+        &directory.join("artifacts"),
+        configuration,
+        orders,
+        fills,
+        ledger,
+        &outcome.custom_metrics,
+        reporter,
+    )?;
     write_metrics(
         directory,
         &outcome.manifest.job_id,
@@ -705,21 +751,14 @@ fn write_native_results(
         &counts,
         ledger,
         &outcome.custom_metrics,
+        &equity,
     )?;
     write_report(
         directory,
         &outcome.manifest.job_id,
         configuration.seed,
         ledger,
-    )?;
-    let artifact_dir = directory.join("artifacts");
-    record_artifacts(
-        &artifact_dir,
-        configuration,
-        orders,
-        fills,
-        ledger,
-        &outcome.custom_metrics,
+        &equity,
     )?;
     Ok(())
 }
@@ -861,7 +900,7 @@ fn lake_subscription_events(
     end_text: &str,
     subscriptions: &[MarketSubscription],
     resolved: &BTreeMap<String, harness_contracts::ResolvedOption>,
-) -> Result<super::stream::ScannedReplay, BacktestJobError> {
+) -> Result<super::stream::PlannedReplay, BacktestJobError> {
     let mut windows = Vec::new();
     for input in subscriptions {
         let data_type = match input.data_type.as_str() {
@@ -932,8 +971,6 @@ fn lake_subscription_events(
             },
         )
         .collect();
-    let factory =
-        super::stream::lake_factory(cursor, inputs, configuration.start_ns, configuration.end_ns);
     let source_id = if resolved.is_empty() {
         format!("lake:{}", client.base_url())
     } else {
@@ -943,8 +980,9 @@ fn lake_subscription_events(
             serde_json::to_string(resolved).map_err(|e| BacktestJobError::Io(e.to_string()))?
         )
     };
-    super::stream::StreamedReplay::scan(
-        factory,
+    super::stream::StreamedReplay::catalog(
+        cursor,
+        inputs,
         source_id,
         configuration.start_ns,
         configuration.end_ns,
@@ -1042,7 +1080,8 @@ struct JobLedger {
     rows: super::history::History<LedgerRow>,
     trades: ClosedTrades,
     trade_stats: TradeStats,
-    equity_metrics: EquityMetrics,
+    equity_summary: EquityAccumulator,
+    chart: Vec<EquityPoint>,
     net_pnl: Decimal18,
     gross_pnl: Decimal18,
     execution: ExecutionStats,
@@ -1312,15 +1351,19 @@ fn closed_trades(fills: &[LedgerFill]) -> Result<ClosedTrades, BacktestJobError>
     Ok(ClosedTrades { rows, open_fees })
 }
 
-fn equity_points(
-    rows: &super::history::History<LedgerRow>,
-) -> std::io::Result<impl Iterator<Item = std::io::Result<EquityPoint>> + '_> {
-    Ok(rows.iter()?.map(|row| {
-        row.map(|row| EquityPoint {
-            timestamp_ns: row.timestamp_ns,
-            equity: row.equity,
-        })
-    }))
+fn report_results(
+    reporter: Option<&ProgressReporter>,
+    stage: ExecutionStage,
+    rows: u64,
+    completed: bool,
+) -> Result<(), BacktestJobError> {
+    if let Some(report) = reporter {
+        let mut progress = ExecutionProgress::stage(stage);
+        progress.rows = rows;
+        progress.completed = completed;
+        report(progress).map_err(BacktestJobError::Io)?;
+    }
+    Ok(())
 }
 
 fn build_ledger(
@@ -1328,12 +1371,40 @@ fn build_ledger(
     fills: &[LedgerFill],
     orders: &[LedgerOrder],
     valuations: &super::history::History<super::engine_core::ValuationSample>,
+    reporter: Option<&ProgressReporter>,
 ) -> Result<JobLedger, BacktestJobError> {
     let mut cash = ledger_decimal(&configuration.initial_cash, "initial_cash")?;
     let mut positions: BTreeMap<String, Decimal18> = BTreeMap::new();
     let mut marks: BTreeMap<String, Decimal18> = BTreeMap::new();
     let mut rows = super::history::History::default();
-    rows.push(LedgerRow {
+    let mut summary = EquityAccumulator::default();
+    let mut chart = Vec::new();
+    let total = valuations.len() + 1;
+    let stride = total.div_ceil(2000).max(1);
+    let mut last_report = std::time::Instant::now();
+    let mut push_row = |row: LedgerRow| -> Result<(), BacktestJobError> {
+        let point = EquityPoint {
+            timestamp_ns: row.timestamp_ns,
+            equity: row.equity,
+        };
+        summary.push(point);
+        if rows.len().is_multiple_of(stride) || rows.len() + 1 == total {
+            chart.push(point);
+        }
+        rows.push(row)
+            .map_err(|e| BacktestJobError::Io(e.to_string()))?;
+        if rows.len().is_multiple_of(8192) && last_report.elapsed().as_secs() >= 1 {
+            report_results(
+                reporter,
+                ExecutionStage::ComputingResults,
+                rows.len() as u64,
+                false,
+            )?;
+            last_report = std::time::Instant::now();
+        }
+        Ok(())
+    };
+    push_row(LedgerRow {
         timestamp_ns: configuration.start_ns,
         cash,
         equity: cash,
@@ -1407,7 +1478,9 @@ fn build_ledger(
         for (symbol, mark) in &sample.marks {
             marks.insert(
                 symbol.clone(),
-                ledger_decimal(&mark.to_string(), "valuation mark")?,
+                Decimal18::from_decimal(*mark).map_err(|e| {
+                    BacktestJobError::Engine(format!("valuation mark cannot be represented: {e}"))
+                })?,
             );
         }
         let mut market_value = Decimal18::ZERO;
@@ -1424,7 +1497,7 @@ fn build_ledger(
             market_value = overflow_ledger(market_value.checked_add(value), "market value")?;
         }
         let equity_value = overflow_ledger(cash.checked_add(market_value), "equity")?;
-        rows.push(LedgerRow {
+        push_row(LedgerRow {
             timestamp_ns: sample.timestamp_ns,
             cash,
             equity: equity_value,
@@ -1449,8 +1522,6 @@ fn build_ledger(
         .collect();
     let trades = closed_trades(fills)?;
     let trade_stats = trade_stats(&trades.rows, trades.open_fees).map_err(metrics_overflow)?;
-    let equity_metrics = equity_curve_metrics_stream(|| equity_points(&rows))
-        .map_err(|e| BacktestJobError::Io(e.to_string()))?;
     let execution = execution_stats(&ledger_fills, &ledger_orders).map_err(metrics_overflow)?;
     let net_pnl = overflow_ledger(
         rows.last()
@@ -1467,7 +1538,8 @@ fn build_ledger(
         rows,
         trades,
         trade_stats,
-        equity_metrics,
+        equity_summary: summary,
+        chart,
         net_pnl,
         gross_pnl,
         execution,
@@ -1546,8 +1618,8 @@ fn metrics_json(
     counts: &JobCounts,
     ledger: &JobLedger,
     custom_metrics: &BTreeMap<String, String>,
+    equity: &EquityMetrics,
 ) -> JsonValue {
-    let equity = &ledger.equity_metrics;
     let execution = &ledger.execution;
     let trades = &ledger.trade_stats;
     let mut count_values = BTreeMap::from([
@@ -1685,9 +1757,10 @@ fn write_metrics(
     counts: &JobCounts,
     ledger: &JobLedger,
     custom_metrics: &BTreeMap<String, String>,
+    equity: &EquityMetrics,
 ) -> Result<PathBuf, BacktestJobError> {
     let path = directory.join("metrics.json");
-    let mut payload = metrics_json(job_id, status, counts, ledger, custom_metrics)
+    let mut payload = metrics_json(job_id, status, counts, ledger, custom_metrics, equity)
         .to_canonical_string()
         .into_bytes();
     payload.push(b'\n');
@@ -1701,24 +1774,11 @@ fn write_report(
     job_id: &str,
     seed: u64,
     ledger: &JobLedger,
+    equity: &EquityMetrics,
 ) -> Result<PathBuf, BacktestJobError> {
     let mut header = ReportHeader::new(job_id);
     header.seed = seed.to_string();
-    let document = render_report(
-        &header,
-        &ledger.equity_metrics,
-        &ledger
-            .rows
-            .sample(2000)
-            .map_err(|e| BacktestJobError::Io(e.to_string()))?
-            .into_iter()
-            .map(|row| EquityPoint {
-                timestamp_ns: row.timestamp_ns,
-                equity: row.equity,
-            })
-            .collect::<Vec<_>>(),
-        &ledger.trade_stats,
-    );
+    let document = render_report(&header, equity, &ledger.chart, &ledger.trade_stats);
     let path = directory.join("report.html");
     std::fs::write(&path, document.into_bytes())
         .map_err(|error| BacktestJobError::Artifact(error.to_string()))?;
@@ -1732,7 +1792,8 @@ fn record_artifacts(
     fills: &[LedgerFill],
     ledger: &JobLedger,
     custom_metrics: &BTreeMap<String, String>,
-) -> Result<RunManifest, BacktestJobError> {
+    reporter: Option<&ProgressReporter>,
+) -> Result<EquityMetrics, BacktestJobError> {
     let config = RecorderConfig::new(&configuration.job_id, directory)
         .map_err(|error| BacktestJobError::Artifact(error.to_string()))?
         .with_seed(configuration.seed as i64)
@@ -1792,6 +1853,9 @@ fn record_artifacts(
         realized_prefix.push((trade.exit_sequence, cumulative_net));
     }
 
+    let mut variance = ledger.equity_summary.variance();
+    let mut recorded = 0u64;
+    let mut last_report = std::time::Instant::now();
     for row in ledger
         .rows
         .iter()
@@ -1819,23 +1883,28 @@ fn record_artifacts(
             total_pnl.checked_sub(realized_pnl),
             "snapshot unrealized PnL",
         )?;
+        variance.push(EquityPoint {
+            timestamp_ns: row.timestamp_ns,
+            equity: row.equity,
+        });
         recorder
-            .record_equity(&EquityRecord {
-                source: "portfolio".to_string(),
-                account_id: None,
-                book_id: None,
-                cash: row.cash.to_string(),
-                equity: Some(row.equity.to_string()),
-                market_value: Some(row.market_value.to_string()),
-                realized_pnl: realized_pnl.to_string(),
-                unrealized_pnl: Some(unrealized_pnl.to_string()),
-                total_pnl: Some(total_pnl.to_string()),
+            .record_portfolio_equity(&PortfolioEquityRecord {
+                timestamp_ns: row.timestamp_ns,
+                cash: row.cash,
+                equity: row.equity,
+                market_value: row.market_value,
+                realized_pnl,
+                unrealized_pnl,
+                total_pnl,
                 position_count: row.position_count,
                 fill_count: row.fill_count,
-                at_ns: Some(row.timestamp_ns),
-                snapshot_id: None,
             })
             .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
+        recorded += 1;
+        if recorded.is_multiple_of(8192) && last_report.elapsed().as_secs() >= 1 {
+            report_results(reporter, ExecutionStage::WritingArtifacts, recorded, false)?;
+            last_report = std::time::Instant::now();
+        }
     }
     for (name, value) in custom_metrics {
         recorder
@@ -1853,5 +1922,6 @@ fn record_artifacts(
     }
     recorder
         .close()
-        .map_err(|error| BacktestJobError::Engine(error.to_string()))
+        .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
+    Ok(ledger.equity_summary.clone().finish(variance))
 }

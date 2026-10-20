@@ -480,6 +480,9 @@ pub fn commit_result(
     record.progress = existing.progress.clone();
     record.updated_at = record.updated_at.max(existing.updated_at);
     for entry in &mut record.progress {
+        if record.state == JobState::Succeeded {
+            entry.snapshot.completed = true;
+        }
         if entry.finished_at.is_none() {
             entry.finished_at = Some(record.updated_at);
         }

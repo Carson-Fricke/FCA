@@ -472,155 +472,231 @@ pub fn equity_curve_metrics(points: &[EquityPoint]) -> EquityMetrics {
     }
 }
 
-/// Exact full-resolution metrics over a repeatable bounded reader. The second
-/// pass preserves the existing decimal mean and ordered f64 deviation sum.
+/// First pass of exact equity statistics, fed while the ledger is constructed.
+#[derive(Clone, Debug)]
+pub struct EquityAccumulator {
+    first: Option<EquityPoint>,
+    last: Option<EquityPoint>,
+    count: usize,
+    negative: bool,
+    zero_predecessor: bool,
+    sum: Result<Decimal18, MetricsError>,
+    peak: Decimal18,
+    peak_ts: i64,
+    opened: Option<i64>,
+    closed: i64,
+    duration_overflow: bool,
+    worst: Result<Decimal18, MetricsError>,
+}
+impl Default for EquityAccumulator {
+    fn default() -> Self {
+        Self {
+            first: None,
+            last: None,
+            count: 0,
+            negative: false,
+            zero_predecessor: false,
+            sum: Ok(Decimal18::ZERO),
+            peak: Decimal18::ZERO,
+            peak_ts: 0,
+            opened: None,
+            closed: 0,
+            duration_overflow: false,
+            worst: Ok(Decimal18::ZERO),
+        }
+    }
+}
+impl EquityAccumulator {
+    pub fn push(&mut self, point: EquityPoint) {
+        self.negative |= point.equity.is_negative();
+        if self.first.is_none() {
+            self.first = Some(point);
+            self.peak = point.equity;
+            self.peak_ts = point.timestamp_ns;
+        }
+        if let Some(previous) = self.last {
+            self.zero_predecessor |= previous.equity.is_zero();
+            self.sum = self.sum.and_then(|total| {
+                sample_return(point.equity, previous.equity)
+                    .and_then(|r| add(total, r, "sharpe_per_sample"))
+            });
+            if point.equity >= self.peak {
+                if let Some(start) = self.opened.take() {
+                    match span_ns(start, point.timestamp_ns) {
+                        Ok(span) => self.closed = self.closed.max(span),
+                        Err(_) => self.duration_overflow = true,
+                    }
+                }
+                self.peak = point.equity;
+                self.peak_ts = point.timestamp_ns;
+            } else if self.opened.is_none() {
+                self.opened = Some(self.peak_ts);
+            }
+        }
+        if self.peak.is_positive()
+            && point.equity < self.peak
+            && self.last.is_none_or(|last| last.equity != point.equity)
+        {
+            self.worst = self.worst.and_then(|old| {
+                div(point.equity, self.peak, "max_drawdown")
+                    .and_then(|r| sub(Decimal18::ONE, r, "max_drawdown"))
+                    .map(|dip| old.max(dip))
+            });
+        }
+        self.last = Some(point);
+        self.count += 1;
+    }
+    pub fn variance(&self) -> EquityVariance {
+        let mean = if self.count < 4 {
+            Err("fewer_than_three_returns")
+        } else if self.negative || self.zero_predecessor {
+            Err("negative_equity")
+        } else {
+            self.sum
+                .as_ref()
+                .map_err(|_| "arithmetic_overflow")
+                .and_then(|sum| {
+                    div(
+                        *sum,
+                        Decimal18::from_i64((self.count - 1) as i64),
+                        "sharpe_per_sample",
+                    )
+                    .map_err(|_| "arithmetic_overflow")
+                })
+        };
+        EquityVariance {
+            mean,
+            previous: None,
+            squares: Ok(0.0),
+            count: self.count,
+        }
+    }
+    pub fn finish(self, variance: EquityVariance) -> EquityMetrics {
+        let Self {
+            first,
+            last,
+            count,
+            negative,
+            zero_predecessor: _,
+            sum: _,
+            peak: _,
+            peak_ts: _,
+            opened,
+            closed,
+            duration_overflow,
+            worst,
+        } = self;
+        let endpoints = first
+            .into_iter()
+            .chain(last.filter(|_| count > 1))
+            .collect::<Vec<_>>();
+        let total_return = if negative && count >= 2 && endpoints[0].equity.is_positive() {
+            Err("negative_equity")
+        } else {
+            total_return(&endpoints).unwrap_or(Err("arithmetic_overflow"))
+        };
+        let cagr = if negative && count >= 2 && endpoints[0].equity.is_positive() {
+            Err("negative_equity")
+        } else {
+            cagr(&endpoints).unwrap_or(Err("arithmetic_overflow"))
+        };
+        let max_drawdown = if negative {
+            Err("negative_equity")
+        } else {
+            worst.map_err(|_| "arithmetic_overflow")
+        };
+        let mut drawdown = if negative {
+            Err("negative_equity")
+        } else if duration_overflow {
+            Err("arithmetic_overflow")
+        } else {
+            Ok(DrawdownSpan {
+                duration_ns: closed,
+                recovered: true,
+            })
+        };
+        if !negative && !duration_overflow {
+            if let (Some(start), Some(last)) = (opened, last) {
+                match span_ns(start, last.timestamp_ns) {
+                    Ok(span) if span > closed => {
+                        drawdown = Ok(DrawdownSpan {
+                            duration_ns: span,
+                            recovered: false,
+                        })
+                    }
+                    Err(_) => drawdown = Err("arithmetic_overflow"),
+                    _ => {}
+                }
+            }
+        }
+        EquityMetrics {
+            total_return,
+            cagr,
+            max_drawdown,
+            drawdown,
+            sharpe_per_sample: variance.finish(),
+        }
+    }
+}
+
+/// Second pass shares the ledger reader with artifact encoding, preserving
+/// the exact ordered floating-point deviation sum and decimal mean.
+pub struct EquityVariance {
+    mean: Outcome<Decimal18>,
+    previous: Option<EquityPoint>,
+    squares: Result<f64, MetricsError>,
+    count: usize,
+}
+impl EquityVariance {
+    pub fn push(&mut self, point: EquityPoint) {
+        if let (Ok(mean), Some(previous)) = (self.mean, self.previous) {
+            self.squares = self.squares.and_then(|s| {
+                sample_return(point.equity, previous.equity)
+                    .and_then(|r| sub(r, mean, "sharpe_per_sample"))
+                    .map(|d| s + d.to_f64() * d.to_f64())
+            });
+        }
+        self.previous = Some(point);
+    }
+    fn finish(self) -> Outcome<f64> {
+        let mean = self.mean?;
+        match self.squares {
+            Ok(s) if s <= 0.0 => Err("zero_volatility"),
+            Ok(s) => {
+                let result = mean.to_f64() / (s / (self.count - 2) as f64).sqrt();
+                if result.is_finite() {
+                    Ok(result)
+                } else {
+                    Err("arithmetic_overflow")
+                }
+            }
+            Err(_) => Err("arithmetic_overflow"),
+        }
+    }
+}
+fn sample_return(current: Decimal18, previous: Decimal18) -> Result<Decimal18, MetricsError> {
+    if current == previous && !previous.is_zero() {
+        return Ok(Decimal18::ZERO);
+    }
+    div(current, previous, "sharpe_per_sample")
+        .and_then(|r| sub(r, Decimal18::ONE, "sharpe_per_sample"))
+}
+
+/// Exact full-resolution metrics over a repeatable bounded reader.
 pub fn equity_curve_metrics_stream<F, I, E>(read: F) -> Result<EquityMetrics, E>
 where
     F: Fn() -> Result<I, E>,
     I: Iterator<Item = Result<EquityPoint, E>>,
 {
-    let mut first = None;
-    let mut last: Option<EquityPoint> = None;
-    let mut count = 0usize;
-    let mut negative = false;
-    let mut zero_predecessor = false;
-    let mut sum = Ok(Decimal18::ZERO);
-    let mut peak = Decimal18::ZERO;
-    let mut peak_ts = 0;
-    let mut opened = None;
-    let mut closed = 0;
-    let mut duration_overflow = false;
-    let mut worst = Ok(Decimal18::ZERO);
+    let mut summary = EquityAccumulator::default();
     for point in read()? {
-        let point = point?;
-        negative |= point.equity.is_negative();
-        if first.is_none() {
-            first = Some(point);
-            peak = point.equity;
-            peak_ts = point.timestamp_ns;
-        }
-        if let Some(previous) = last {
-            zero_predecessor |= previous.equity.is_zero();
-            sum = sum.and_then(|total| {
-                div(point.equity, previous.equity, "sharpe_per_sample")
-                    .and_then(|r| sub(r, Decimal18::ONE, "sharpe_per_sample"))
-                    .and_then(|r| add(total, r, "sharpe_per_sample"))
-            });
-            if point.equity >= peak {
-                if let Some(start) = opened.take() {
-                    match span_ns(start, point.timestamp_ns) {
-                        Ok(span) => closed = closed.max(span),
-                        Err(_) => duration_overflow = true,
-                    }
-                }
-                peak = point.equity;
-                peak_ts = point.timestamp_ns;
-            } else if opened.is_none() {
-                opened = Some(peak_ts);
-            }
-        }
-        if peak.is_positive() && point.equity < peak {
-            worst = worst.and_then(|old| {
-                div(point.equity, peak, "max_drawdown")
-                    .and_then(|r| sub(Decimal18::ONE, r, "max_drawdown"))
-                    .map(|dip| old.max(dip))
-            });
-        }
-        last = Some(point);
-        count += 1;
+        summary.push(point?);
     }
-    let endpoints = first
-        .into_iter()
-        .chain(last.filter(|_| count > 1))
-        .collect::<Vec<_>>();
-    let total_return = if negative && count >= 2 && endpoints[0].equity.is_positive() {
-        Err("negative_equity")
-    } else {
-        total_return(&endpoints).unwrap_or(Err("arithmetic_overflow"))
-    };
-    let cagr = if negative && count >= 2 && endpoints[0].equity.is_positive() {
-        Err("negative_equity")
-    } else {
-        cagr(&endpoints).unwrap_or(Err("arithmetic_overflow"))
-    };
-    let max_drawdown = if negative {
-        Err("negative_equity")
-    } else {
-        worst.map_err(|_| "arithmetic_overflow")
-    };
-    let mut drawdown = if negative {
-        Err("negative_equity")
-    } else if duration_overflow {
-        Err("arithmetic_overflow")
-    } else {
-        Ok(DrawdownSpan {
-            duration_ns: closed,
-            recovered: true,
-        })
-    };
-    if !negative && !duration_overflow {
-        if let (Some(start), Some(last)) = (opened, last) {
-            match span_ns(start, last.timestamp_ns) {
-                Ok(span) if span > closed => {
-                    drawdown = Ok(DrawdownSpan {
-                        duration_ns: span,
-                        recovered: false,
-                    })
-                }
-                Err(_) => drawdown = Err("arithmetic_overflow"),
-                _ => {}
-            }
-        }
+    let mut variance = summary.variance();
+    for point in read()? {
+        variance.push(point?);
     }
-    let sharpe_per_sample = if count < 4 {
-        Err("fewer_than_three_returns")
-    } else if negative || zero_predecessor {
-        Err("negative_equity")
-    } else if let Ok(sum) = sum {
-        if let Ok(mean) = div(
-            sum,
-            Decimal18::from_i64((count - 1) as i64),
-            "sharpe_per_sample",
-        ) {
-            let mut previous: Option<EquityPoint> = None;
-            let mut squares = Ok(0.0);
-            for point in read()? {
-                let point = point?;
-                if let Some(previous) = previous {
-                    squares = squares.and_then(|s| {
-                        div(point.equity, previous.equity, "sharpe_per_sample")
-                            .and_then(|r| sub(r, Decimal18::ONE, "sharpe_per_sample"))
-                            .and_then(|r| sub(r, mean, "sharpe_per_sample"))
-                            .map(|d| s + d.to_f64() * d.to_f64())
-                    });
-                }
-                previous = Some(point);
-            }
-            match squares {
-                Ok(s) if s <= 0.0 => Err("zero_volatility"),
-                Ok(s) => {
-                    let result = mean.to_f64() / (s / (count - 2) as f64).sqrt();
-                    if result.is_finite() {
-                        Ok(result)
-                    } else {
-                        Err("arithmetic_overflow")
-                    }
-                }
-                Err(_) => Err("arithmetic_overflow"),
-            }
-        } else {
-            Err("arithmetic_overflow")
-        }
-    } else {
-        Err("arithmetic_overflow")
-    };
-    Ok(EquityMetrics {
-        total_return,
-        cagr,
-        max_drawdown,
-        drawdown,
-        sharpe_per_sample,
-    })
+    Ok(summary.finish(variance))
 }
 
 /// Mean of a slice of decimals, or `None` when it is empty.

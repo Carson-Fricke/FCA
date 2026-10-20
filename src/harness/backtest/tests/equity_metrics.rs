@@ -13,6 +13,35 @@ use num::Decimal18;
 
 const DAY: i64 = 86_400_000_000_000;
 
+#[test]
+fn fused_passes_preserve_reference_statistics_and_undefined_reasons() {
+    use backtest::results::metrics::{equity_curve_metrics, EquityAccumulator};
+    for values in [
+        vec![],
+        vec!["100"],
+        vec!["100", "101", "99", "102"],
+        vec!["100", "100", "100", "100"],
+        vec!["100", "0", "5", "6"],
+        vec!["100", "90", "90", "100", "80"],
+        vec!["10", "-1", "0", "10"],
+    ] {
+        let points = curve(&values, DAY);
+        let mut summary = EquityAccumulator::default();
+        for &point in &points {
+            summary.push(point);
+        }
+        let mut variance = summary.variance();
+        for &point in &points {
+            variance.push(point);
+        }
+        assert_eq!(
+            summary.finish(variance),
+            equity_curve_metrics(&points),
+            "{values:?}"
+        );
+    }
+}
+
 /// Equity points at a fixed spacing, starting at time zero.
 fn curve(values: &[&str], step_ns: i64) -> Vec<EquityPoint> {
     values

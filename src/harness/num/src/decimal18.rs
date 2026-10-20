@@ -494,6 +494,13 @@ impl FromStr for Decimal18 {
 }
 
 impl Decimal18 {
+    /// Convert a variable-scale decimal with the same checked half-even rules
+    /// as parsing its canonical text, without formatting or allocating.
+    pub fn from_decimal(value: crate::Decimal) -> Result<Self, DecimalError> {
+        let mantissa = i128::try_from(value.coefficient()).map_err(|_| DecimalError::Overflow)?;
+        Self::from_mantissa(mantissa, 0, i64::from(value.scale()), value.is_signed())
+    }
+
     /// Assemble `mantissa * 10^(exponent - fraction_digits)` at scale 18.
     fn from_mantissa(
         mantissa: i128,

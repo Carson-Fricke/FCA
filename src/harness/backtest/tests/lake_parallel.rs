@@ -65,12 +65,27 @@ fn studies_acquire_exact_inputs_and_backtests_add_tick_execution_feeds() {
         configuration.data_subscriptions_declared = true;
         let fixture =
             lake_fixture_with_subscriptions(&configuration, &client(&server), &inputs).unwrap();
+        let before_replay = server.requests();
+        let snapshots = before_replay
+            .iter()
+            .filter(|r| r.path == "/v1/snapshot")
+            .count();
+        let opened = before_replay
+            .iter()
+            .filter(|r| r.path.starts_with("/objects/"))
+            .count();
+        assert!(
+            opened <= usize::from(kinds.contains(&"bars")),
+            "preflight must not read ticks"
+        );
+        assert!(fixture.fingerprints.row.is_none());
         let mut acquired = kinds.clone();
         if shell == "backtest" {
             acquired.extend(["quote", "trade"]);
         }
         acquired.sort();
         acquired.dedup();
+        assert_eq!(snapshots, acquired.len());
         assert_eq!(
             fixture
                 .open_events()
@@ -329,5 +344,55 @@ fn multiple_timeframes_acquire_one_canonical_minute_source_window() {
             .filter(|request| request.path == "/v1/snapshot")
             .count(),
         1
+    );
+}
+
+#[test]
+fn catalog_preflight_pins_objects_without_reading_ticks_and_external_deletion_fails_replay() {
+    let start = config().start_ns;
+    let server = FakeLakeServer::start(FakeLakeConfig {
+        partitions_by_type: BTreeMap::from([(
+            "quote".into(),
+            quote_parquet(
+                "SPY",
+                &[FakeQuoteRow::new(
+                    start,
+                    "137.125793",
+                    "138.125793",
+                    100,
+                    100,
+                    "XNYS",
+                )],
+            ),
+        )]),
+        ..FakeLakeConfig::new(TOKEN)
+    });
+    let client = client(&server);
+    let input = MarketSubscription {
+        data_type: "quote".into(),
+        symbols: vec!["SPY".into()],
+        interval: None,
+    };
+    let fixture = lake_fixture_with_subscriptions(&config(), &client, &[input]).unwrap();
+    assert!(!server
+        .requests()
+        .iter()
+        .any(|r| r.path.starts_with("/objects/")));
+    let snapshot = client
+        .snapshot(&harness_lakeclient::ReadSpec::new(
+            "equity",
+            "quote",
+            "SPY",
+            "2024-01-02",
+            "2024-01-02",
+        ))
+        .unwrap();
+    server.remove_object(&snapshot.files[0].checksum);
+    let result = fixture
+        .open_events()
+        .and_then(|events| events.collect::<Result<Vec<_>, _>>());
+    assert!(
+        result.is_err(),
+        "catalog coverage never hides a missing immutable object"
     );
 }

@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use crate::canonical_json::JsonValue;
 
 use super::artifacts::artifact_path;
+use super::columns::Cell;
 use super::config::{text, ActionKind, MarkerScope, RecorderConfig, TransitionReason};
 use super::ids::{EngineIdSource, IdError};
 use super::manifest::{
@@ -22,6 +23,20 @@ use super::manifest::{
 use super::parquet::ParquetArtifactWriter;
 use super::schemas::{Artifact, STREAM_ARTIFACTS};
 use super::writer::{build_row, Row, RowSink, Value, WriterError};
+
+/// Exact numeric portfolio sample. Decimal text is encoded once at the sink;
+/// equal consecutive values reuse their canonical formatting.
+pub struct PortfolioEquityRecord {
+    pub timestamp_ns: i64,
+    pub cash: num::Decimal18,
+    pub equity: num::Decimal18,
+    pub market_value: num::Decimal18,
+    pub realized_pnl: num::Decimal18,
+    pub unrealized_pnl: num::Decimal18,
+    pub total_pnl: num::Decimal18,
+    pub position_count: u32,
+    pub fill_count: u64,
+}
 
 /// Recorder construction or streaming failure.
 #[derive(Debug)]
@@ -575,6 +590,9 @@ impl RunRecorder {
     ///
     /// Returns [`RecorderError`] on timestamp, identifier, or write failure.
     pub fn record_equity(&mut self, equity: &EquityRecord) -> Result<String, RecorderError> {
+        if self.closed {
+            return Err(RecorderError::Closed);
+        }
         let snapshot_id = match &equity.snapshot_id {
             Some(value) => text(value, "snapshot_id")?,
             None => self.reserve_id("equity")?,
@@ -583,32 +601,63 @@ impl RunRecorder {
         let sequence = self.next_sequence();
         let account = self.account_id(equity.account_id.as_deref())?;
         let book = self.book_id(equity.book_id.as_deref())?;
-        self.record_cells(
-            Artifact::Equity,
-            [
-                ("snapshot_id", Value::utf8(snapshot_id.clone())),
-                ("sequence", Value::UInt64(sequence)),
-                ("timestamp", Value::TimestampNs(timestamp)),
-                ("account_id", Value::utf8(account)),
-                ("book_id", Value::optional_utf8(book)),
-                ("source", Value::utf8(equity.source.clone())),
-                ("cash", Value::utf8(equity.cash.clone())),
-                ("equity", Value::optional_utf8(equity.equity.clone())),
-                (
-                    "market_value",
-                    Value::optional_utf8(equity.market_value.clone()),
-                ),
-                ("realized_pnl", Value::utf8(equity.realized_pnl.clone())),
-                (
-                    "unrealized_pnl",
-                    Value::optional_utf8(equity.unrealized_pnl.clone()),
-                ),
-                ("total_pnl", Value::optional_utf8(equity.total_pnl.clone())),
-                ("position_count", Value::UInt32(equity.position_count)),
-                ("fill_count", Value::UInt64(equity.fill_count)),
-            ],
-        )?;
+        self.writers
+            .get_mut(&Artifact::Equity)
+            .expect("equity writer")
+            .append_cells([
+                Cell::Text(Some(&snapshot_id)),
+                Cell::U64(sequence),
+                Cell::Time(timestamp),
+                Cell::Text(Some(&account)),
+                Cell::Text(book.as_deref()),
+                Cell::Text(Some(&equity.source)),
+                Cell::Text(Some(&equity.cash)),
+                Cell::Text(equity.equity.as_deref()),
+                Cell::Text(equity.market_value.as_deref()),
+                Cell::Text(Some(&equity.realized_pnl)),
+                Cell::Text(equity.unrealized_pnl.as_deref()),
+                Cell::Text(equity.total_pnl.as_deref()),
+                Cell::U32(equity.position_count),
+                Cell::U64(equity.fill_count),
+            ])?;
         Ok(snapshot_id)
+    }
+
+    /// Encode a full-resolution numeric portfolio sample directly into Arrow columns.
+    pub fn record_portfolio_equity(
+        &mut self,
+        equity: &PortfolioEquityRecord,
+    ) -> Result<(), RecorderError> {
+        if self.closed {
+            return Err(RecorderError::Closed);
+        }
+        let snapshot_id = self.reserve_id("equity")?;
+        let sequence = self.next_sequence();
+        let account = self
+            .config
+            .account_id
+            .as_deref()
+            .ok_or(RecorderError::AccountRequired)?;
+        self.writers
+            .get_mut(&Artifact::Equity)
+            .expect("equity writer")
+            .append_cells([
+                Cell::Text(Some(&snapshot_id)),
+                Cell::U64(sequence),
+                Cell::Time(equity.timestamp_ns),
+                Cell::Text(Some(account)),
+                Cell::Text(self.config.book_id.as_deref()),
+                Cell::Text(Some("portfolio")),
+                Cell::Decimal(equity.cash),
+                Cell::Decimal(equity.equity),
+                Cell::Decimal(equity.market_value),
+                Cell::Decimal(equity.realized_pnl),
+                Cell::Decimal(equity.unrealized_pnl),
+                Cell::Decimal(equity.total_pnl),
+                Cell::U32(equity.position_count),
+                Cell::U64(equity.fill_count),
+            ])?;
+        Ok(())
     }
 
     /// Record one structured emission and return its `emission_id`.

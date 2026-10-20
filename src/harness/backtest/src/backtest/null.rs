@@ -119,49 +119,40 @@ pub fn apply_null_transform(
 
     if let Some(source) = &fixture.stream {
         let reporter = source.reporter.clone();
-        let source = source.clone();
         let references = std::sync::Arc::new(references);
-        let factory = std::sync::Arc::new(move || {
-            let references = references.clone();
-            Ok(Box::new(source.open()?.map(move |event| {
-                let mut event = event?;
-                let symbol = event.symbol().to_string();
-                let timestamp = event.timestamp_ns();
-                let (synthetic, original) = tick_reference(&references[&symbol], timestamp);
-                match &mut event {
-                    MarketEvent::Bar {
-                        open,
-                        high,
-                        low,
-                        close,
-                        ..
-                    } => {
-                        *open = scale_price(*open, synthetic, original, &symbol)?;
-                        *high = scale_price(*high, synthetic, original, &symbol)?;
-                        *low = scale_price(*low, synthetic, original, &symbol)?;
-                        *close = scale_price(*close, synthetic, original, &symbol)?;
-                    }
-                    MarketEvent::Quote { bid, ask, .. } => {
-                        require_positive_tick(*bid, "bid", &symbol, timestamp)?;
-                        require_positive_tick(*ask, "ask", &symbol, timestamp)?;
-                        *bid = scale_price(*bid, synthetic, original, &symbol)?;
-                        *ask = scale_price(*ask, synthetic, original, &symbol)?;
-                    }
-                    MarketEvent::Trade { price, .. } => {
-                        require_positive_tick(*price, "trade price", &symbol, timestamp)?;
-                        *price = scale_price(*price, synthetic, original, &symbol)?;
-                    }
-                }
-                Ok(event)
-            })) as super::stream::Events)
-        });
-        let (stream, events, sessions) = super::stream::StreamedReplay::scan(
+        let events = fixture
+            .events
+            .iter()
+            .cloned()
+            .map(|event| rescale_stream_event(event, &references))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut evidence = source.evidence.clone();
+        evidence.fingerprints.row = None;
+        evidence.fingerprints.data = crate::sha256::digest_hex(
+            format!(
+                "fca:null-replay\0{}\0{}\0{}\0{}",
+                source.evidence.fingerprints.data, null.mode, null.block_size, null.seed
+            )
+            .as_bytes(),
+        );
+        let coverage = source.coverage.clone();
+        let expected_count = source.expected_count;
+        let source = source.clone();
+        let factory =
+            std::sync::Arc::new(move || {
+                let references = references.clone();
+                Ok(Box::new(source.open()?.map(move |event| {
+                    event.and_then(|event| rescale_stream_event(event, &references))
+                })) as super::stream::Events)
+            });
+        let stream = std::sync::Arc::new(super::stream::StreamedReplay::new(
             factory,
-            fixture.source_id.clone(),
-            configuration.start_ns,
-            configuration.end_ns,
+            evidence,
+            coverage,
+            expected_count,
             reporter,
-        )?;
+        ));
+        let sessions = fixture.sessions.clone();
         return Ok(ReplayFixture {
             fingerprints: stream.evidence.fingerprints.clone(),
             stream: Some(stream),
@@ -293,6 +284,41 @@ fn permuted_close_path(
         })?);
     }
     Ok(synthetic)
+}
+
+fn rescale_stream_event(
+    event: MarketEvent,
+    references: &BTreeMap<String, Vec<(i64, Decimal18, Decimal18)>>,
+) -> Result<MarketEvent, BacktestError> {
+    let mut event = event;
+    let symbol = event.symbol().to_string();
+    let timestamp = event.timestamp_ns();
+    let (synthetic, original) = tick_reference(&references[&symbol], timestamp);
+    match &mut event {
+        MarketEvent::Bar {
+            open,
+            high,
+            low,
+            close,
+            ..
+        } => {
+            *open = scale_price(*open, synthetic, original, &symbol)?;
+            *high = scale_price(*high, synthetic, original, &symbol)?;
+            *low = scale_price(*low, synthetic, original, &symbol)?;
+            *close = scale_price(*close, synthetic, original, &symbol)?;
+        }
+        MarketEvent::Quote { bid, ask, .. } => {
+            require_positive_tick(*bid, "bid", &symbol, timestamp)?;
+            require_positive_tick(*ask, "ask", &symbol, timestamp)?;
+            *bid = scale_price(*bid, synthetic, original, &symbol)?;
+            *ask = scale_price(*ask, synthetic, original, &symbol)?;
+        }
+        MarketEvent::Trade { price, .. } => {
+            require_positive_tick(*price, "trade price", &symbol, timestamp)?;
+            *price = scale_price(*price, synthetic, original, &symbol)?;
+        }
+    }
+    Ok(event)
 }
 
 /// Fisher-Yates shuffle driven by the domain-separated symbol generator.

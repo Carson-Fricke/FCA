@@ -9,6 +9,30 @@ fn decimal(text: &str) -> Decimal {
 }
 
 #[test]
+fn fixed_conversion_matches_checked_text_rounding_and_overflow() {
+    for text in [
+        "0",
+        "-0",
+        "0E-900",
+        "1.5",
+        "1.50E+2",
+        "-999.001",
+        "1.0000000000000000005",
+        "1.0000000000000000015",
+        "-1.0000000000000000015",
+        "1E-99",
+        "1E+30",
+        "99999999999999999999.999999999999999999",
+    ] {
+        assert_eq!(
+            num::Decimal18::from_decimal(decimal(text)),
+            text.parse::<num::Decimal18>(),
+            "{text}"
+        );
+    }
+}
+
+#[test]
 fn exact_values_convert_to_the_nearest_float() {
     assert_eq!(decimal("1.5").to_f64(), 1.5);
     assert_eq!(decimal("150").to_f64(), 150.0);

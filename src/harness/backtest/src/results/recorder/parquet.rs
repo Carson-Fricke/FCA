@@ -17,10 +17,7 @@ use std::io::{self, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use arrow_array::{
-    ArrayRef, BooleanArray, RecordBatch, StringArray, TimestampNanosecondArray, UInt32Array,
-    UInt64Array,
-};
+use arrow_array::RecordBatch;
 use arrow_schema::{DataType as ArrowDataType, Field, Schema, TimeUnit};
 use parquet::arrow::arrow_writer::ArrowWriterOptions;
 use parquet::arrow::ArrowWriter;
@@ -28,15 +25,16 @@ use parquet::basic::Compression;
 use parquet::file::metadata::KeyValue;
 use parquet::file::properties::{WriterProperties, WriterVersion};
 
-use super::schemas::{Artifact, FieldDef, LogicalType};
-use super::writer::{validate, Row, RowSink, Value, WriterError};
+use super::columns::{Cell, Columns};
+use super::schemas::{Artifact, LogicalType};
+use super::writer::{validate, Row, RowSink, WriterError};
 
 /// A [`RowSink`] that writes one artifact as a real Parquet object.
 pub struct ParquetArtifactWriter {
     artifact: Artifact,
     path: PathBuf,
     batch_size: usize,
-    pending: Vec<Row>,
+    pending: Columns,
     row_count: u64,
     schema: Arc<Schema>,
     metadata: Vec<KeyValue>,
@@ -53,12 +51,23 @@ impl ParquetArtifactWriter {
             artifact,
             path: path.into(),
             batch_size: batch_size.max(1),
-            pending: Vec::new(),
+            pending: Columns::new(artifact),
             row_count: 0,
             schema: parquet_schema(artifact),
             metadata: parquet_metadata(artifact),
             writer: None,
         }
+    }
+
+    pub(super) fn append_cells<'a>(
+        &mut self,
+        cells: impl IntoIterator<Item = Cell<'a>>,
+    ) -> Result<(), WriterError> {
+        self.pending.append(cells)?;
+        if self.pending.rows >= self.batch_size {
+            self.flush()?;
+        }
+        Ok(())
     }
 
     /// The artifact written by this sink.
@@ -118,24 +127,23 @@ impl RowSink for ParquetArtifactWriter {
         for (field, value) in fields.iter().zip(row.iter()) {
             validate(field, value)?;
         }
-        self.pending.push(row.clone());
-        if self.pending.len() >= self.batch_size {
+        self.pending.append(row.iter().map(Cell::from))?;
+        if self.pending.rows >= self.batch_size {
             self.flush()?;
         }
         Ok(())
     }
 
     fn flush(&mut self) -> Result<(), WriterError> {
-        if self.pending.is_empty() {
+        if self.pending.rows == 0 {
             return Ok(());
         }
-        let columns = build_columns(self.artifact, &self.pending)?;
+        let rows = self.pending.rows as u64;
+        let columns = self.pending.finish();
         let batch = RecordBatch::try_new(Arc::clone(&self.schema), columns).map_err(io_error)?;
-        let rows = self.pending.len() as u64;
         let writer = self.require_writer()?;
         writer.write(&batch).map_err(io_error)?;
         self.row_count += rows;
-        self.pending.clear();
         Ok(())
     }
 
@@ -157,7 +165,7 @@ impl RowSink for ParquetArtifactWriter {
     }
 
     fn pending_rows(&self) -> usize {
-        self.pending.len()
+        self.pending.rows
     }
 }
 
@@ -195,86 +203,4 @@ fn parquet_metadata(artifact: Artifact) -> Vec<KeyValue> {
             value: Some(value),
         })
         .collect()
-}
-
-fn build_columns(artifact: Artifact, rows: &[Row]) -> Result<Vec<ArrayRef>, WriterError> {
-    artifact
-        .fields()
-        .iter()
-        .enumerate()
-        .map(|(index, field)| build_column(field, rows, index))
-        .collect()
-}
-
-fn build_column(field: &FieldDef, rows: &[Row], index: usize) -> Result<ArrayRef, WriterError> {
-    match field.logical_type {
-        LogicalType::Utf8 => {
-            let mut values: Vec<Option<String>> = Vec::with_capacity(rows.len());
-            for row in rows {
-                match &row[index] {
-                    Value::Utf8(text) => values.push(Some(text.clone())),
-                    Value::Null => values.push(None),
-                    Value::UInt32(_)
-                    | Value::UInt64(_)
-                    | Value::Bool(_)
-                    | Value::TimestampNs(_) => {
-                        return Err(mismatch(field));
-                    }
-                }
-            }
-            Ok(Arc::new(StringArray::from(values)))
-        }
-        LogicalType::UInt32 => {
-            let mut values: Vec<Option<u32>> = Vec::with_capacity(rows.len());
-            for row in rows {
-                match &row[index] {
-                    Value::UInt32(value) => values.push(Some(*value)),
-                    Value::Null => values.push(None),
-                    _ => return Err(mismatch(field)),
-                }
-            }
-            Ok(Arc::new(UInt32Array::from(values)))
-        }
-        LogicalType::UInt64 => {
-            let mut values: Vec<Option<u64>> = Vec::with_capacity(rows.len());
-            for row in rows {
-                match &row[index] {
-                    Value::UInt64(value) => values.push(Some(*value)),
-                    Value::Null => values.push(None),
-                    _ => return Err(mismatch(field)),
-                }
-            }
-            Ok(Arc::new(UInt64Array::from(values)))
-        }
-        LogicalType::Bool => {
-            let mut values: Vec<Option<bool>> = Vec::with_capacity(rows.len());
-            for row in rows {
-                match &row[index] {
-                    Value::Bool(value) => values.push(Some(*value)),
-                    Value::Null => values.push(None),
-                    _ => return Err(mismatch(field)),
-                }
-            }
-            Ok(Arc::new(BooleanArray::from(values)))
-        }
-        LogicalType::TimestampNsUtc => {
-            let mut values: Vec<Option<i64>> = Vec::with_capacity(rows.len());
-            for row in rows {
-                match &row[index] {
-                    Value::TimestampNs(value) => values.push(Some(*value)),
-                    Value::Null => values.push(None),
-                    _ => return Err(mismatch(field)),
-                }
-            }
-            let array = TimestampNanosecondArray::from(values).with_timezone("UTC".to_string());
-            Ok(Arc::new(array))
-        }
-    }
-}
-
-fn mismatch(field: &FieldDef) -> WriterError {
-    WriterError::TypeMismatch {
-        field: field.name,
-        expected: field.logical_type.name(),
-    }
 }
