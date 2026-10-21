@@ -77,6 +77,7 @@ def parse_completion_stream(
     calls: dict[int, dict[str, object]] = {}
     metadata: dict[str, object] = {}
     finished = False
+    finish_reason = None
     size = 0
     for raw in events:
         if raw == "[DONE]":
@@ -88,7 +89,14 @@ def parse_completion_stream(
                 "tool_calls": [calls[index] for index in sorted(calls)],
             }
             yield parse_chat_completion(
-                body=json.dumps({**metadata, "choices": [{"message": message}]}),
+                body=json.dumps(
+                    {
+                        **metadata,
+                        "choices": [
+                            {"message": message, "finish_reason": finish_reason}
+                        ],
+                    }
+                ),
                 provider=provider,
                 fallback_model=model,
                 role=role,
@@ -214,6 +222,7 @@ def parse_completion_stream(
                         destination[key] += value
             if choice.get("finish_reason") is not None:
                 finished = True
+                finish_reason = choice["finish_reason"]
     raise ProviderRejectedError("provider stream ended before DONE", transient=True)
 
 

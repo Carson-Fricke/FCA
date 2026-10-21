@@ -8,7 +8,13 @@ from typing import Any
 from thesis.workspaces.sketch_contract import SKETCH_REFERENCE_SCHEMA
 
 WORKFLOW_ID = "research-investigation"
-VERSION = "2.0.0"
+VERSION = "3.0.0"
+REVIEW_PHASES = {
+    "implementation": "implementation_critique",
+    "experimental": "experimental_critique",
+    "alignment": "alignment_critique",
+}
+CRITIC_PHASES = (*REVIEW_PHASES.values(), "focused_critique")
 
 
 def text(limit: int = 4096) -> dict[str, object]:
@@ -47,7 +53,7 @@ PROPOSAL_SCHEMA = record(
         "interpretationLimits": text(),
         "repairs": {
             "type": "array",
-            "maxItems": 16,
+            "maxItems": 48,
             "items": record({"issueId": text(128), "response": text()}),
         },
     }
@@ -60,7 +66,7 @@ CRITIQUE_SCHEMA = record(
             "type": "array",
             "maxItems": 16,
             "uniqueItems": True,
-            "items": text(128),
+            "items": record({"issueId": text(128), "evidence": text()}),
         },
         "issues": {
             "type": "array",
@@ -69,6 +75,7 @@ CRITIQUE_SCHEMA = record(
                 {
                     "issueId": text(128),
                     "concern": text(),
+                    "evidence": text(),
                     "consequence": text(),
                     "repair": text(),
                 }
@@ -81,7 +88,7 @@ ADJUDICATION_SCHEMA = record(
         "reason": text(),
         "resolutions": {
             "type": "array",
-            "maxItems": 16,
+            "maxItems": 48,
             "items": record(
                 {
                     "issueId": text(128),
@@ -112,16 +119,20 @@ INVESTIGATION_SCHEMA = record(
     }
 )
 TRANSITIONS = {
-    "proposal": ("critique",),
-    "critique": ("adjudicate",),
+    "proposal": ("critique", "focused_critique"),
+    "critique": tuple(REVIEW_PHASES.values()),
+    **{phase: ("collect_critiques",) for phase in REVIEW_PHASES.values()},
+    "collect_critiques": ("adjudicate",),
+    "focused_critique": ("adjudicate",),
     "adjudicate": ("proposal", "investigation", "completed"),
-    "investigation": ("critique",),
+    "investigation": ("critique", "focused_critique"),
     "completed": (),
     "failed": (),
 }
 PAYLOADS = {
     "proposal": PROPOSAL_SCHEMA,
-    "critique": CRITIQUE_SCHEMA,
+    **{phase: CRITIQUE_SCHEMA for phase in CRITIC_PHASES},
+    "collect_critiques": record({name: CRITIQUE_SCHEMA for name in REVIEW_PHASES}),
     "adjudicate": ADJUDICATION_SCHEMA,
     "investigation": INVESTIGATION_SCHEMA,
 }
@@ -129,7 +140,15 @@ PAYLOADS = {
 
 def completion_schema(phase: str) -> dict[str, Any]:
     """Advertise the same contract the extension validates on acceptance."""
-    field = "adjudication" if phase == "adjudicate" else phase
+    field = (
+        "adjudication"
+        if phase == "adjudicate"
+        else "critique"
+        if phase in CRITIC_PHASES
+        else "critiques"
+        if phase == "collect_critiques"
+        else phase
+    )
     return record(
         {
             "target": {"enum": list(TRANSITIONS[phase])},

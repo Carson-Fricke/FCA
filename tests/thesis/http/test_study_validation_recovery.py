@@ -446,15 +446,18 @@ def test_root_catalog_failure_is_a_durable_notice_without_fake_tool(monkeypatch)
         chat_service=chat,
         model_provider=cast(OpenRouterProvider, SimpleNamespace(model="test/model")),
     )
-    assert stack.conversations is not None
-    assert stack.conversations.root("workspace", thread.chat_id).run_turn() is None
-    canonical = from_record(chat.list_messages("workspace", thread.chat_id)[-1])
-    assert canonical.direction == "incoming"
-    assert canonical.content.source == "runtime"
-    assert canonical.content.result is not None
-    assert canonical.content.result["failure"] == failure.as_dict()
-    assert canonical.content.correlation is None
-    assert canonical.content.requests == ()
+    try:
+        assert stack.conversations is not None
+        assert stack.conversations.root("workspace", thread.chat_id).run_turn() is None
+        canonical = from_record(chat.list_messages("workspace", thread.chat_id)[-1])
+        assert canonical.direction == "incoming"
+        assert canonical.content.source == "runtime"
+        assert canonical.content.result is not None
+        assert canonical.content.result["failure"] == failure.as_dict()
+        assert canonical.content.correlation is None
+        assert canonical.content.requests == ()
+    finally:
+        chat.delete_chat("workspace", thread.chat_id)
 
 
 def test_failed_validation_requires_patch_and_revalidate_id(tmp_path, monkeypatch):
@@ -708,8 +711,8 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         {
             "program_id": "alpha",
             "expected_version": reference["version"],
-            "expected": "struct AuthoredStrategy;",
-            "replacement": "struct AuthoredStrategy; // changed latest",
+            "expected": "struct AuthoredStrategy {",
+            "replacement": "struct AuthoredStrategy /* changed latest */ {",
             "configuration": {**config, "end": "2024-01-03T00:00:00Z"},
         },
         context=context,
@@ -800,7 +803,7 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
     )
     instance = launch["config"]["strategy_instances"][0]
     latest_source = STRATEGY_TEMPLATE.replace(
-        "struct AuthoredStrategy;", "struct AuthoredStrategy; // changed latest"
+        "struct AuthoredStrategy {", "struct AuthoredStrategy /* changed latest */ {"
     )
     assert instance["parameters"]["source"] == latest_source
     assert launch["config"]["end"] == "2024-01-03T00:00:00Z"

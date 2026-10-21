@@ -29,10 +29,12 @@ class ProviderRejectedError(RuntimeError):
         status: int | None = None,
         transient: bool = False,
         retry_after: float | None = None,
+        diagnostics: Mapping[str, object] | None = None,
     ) -> None:
         super().__init__(message)
         self.status = status
         self.retry_after = retry_after
+        self.diagnostics = dict(diagnostics or {})
         self.recoverable = (
             status in (408, 429) or 500 <= status <= 599
             if status is not None

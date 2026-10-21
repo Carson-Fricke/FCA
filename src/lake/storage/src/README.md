@@ -14,6 +14,10 @@ Market-data decoding and caching belong to `harness-market-reader`; this crate o
 
 `azure.rs::container_from_account_url` exposes the same conditional Blob adapter
 to durable harness execution; the application layer owns job claims and policy.
+Application metadata supports bounded version reads and ETag-conditional PUTs,
+so progress and heartbeat writers never wait behind an application metadata blob
+lease. HTTP failures retain status and service code; object and market-publication
+lease behavior remains at its existing boundary.
 
 - `staged.rs` — Owned, sealed scratch files with byte admission, bounded hashing and automatic cleanup.
 

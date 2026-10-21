@@ -55,6 +55,18 @@ def _mapping_json(value: object) -> dict[str, object]:
     raise TypeError("provider request must contain only JSON values")
 
 
+def _failed_output_excerpt(value: str, message_id: str) -> str:
+    """Bound failed-generation replay, retaining the full canonical evidence."""
+    if len(value) <= 4096:
+        return value
+    return (
+        value[:1024]
+        + f"\n[Interrupted-output excerpt: {len(value) - 4096} characters omitted; "
+        + f"full evidence retained in canonical message {message_id}.]\n"
+        + value[-3072:]
+    )
+
+
 def project_native_messages(
     messages: Sequence[SessionMessage],
 ) -> tuple[ChatMessage, ...]:
@@ -189,6 +201,12 @@ def project_native_messages(
                 # answer or an executable tool envelope. Preserve its reasoning
                 # in ordinary context for providers without a reasoning replay
                 # channel; live execution and replay share this pure projection.
+                reasoning = str(result.get("reasoning") or "")
+                if result.get("failure") is not None:
+                    # Reasoning-only failures can otherwise make the next request
+                    # exceed context limits before it can take a smaller action.
+                    reasoning = _failed_output_excerpt(reasoning, message.message_id)
+                    content = _failed_output_excerpt(content, message.message_id)
                 content = (
                     (
                         "Model output interrupted by provider failure; partial evidence only.\n"
@@ -196,7 +214,7 @@ def project_native_messages(
                         else "Model output interrupted by operator steering.\n"
                     )
                     + "Reasoning so far:\n"
-                    + str(result.get("reasoning") or "")
+                    + reasoning
                     + "\nPartial answer:\n"
                     + content
                 )
@@ -273,7 +291,7 @@ class NativeSessionAdapter:
         snapshot = json.loads(
             json.dumps(
                 {
-                    "projection": "native-session-v2",
+                    "projection": "native-session-v3",
                     "messages": native_messages,
                     "role": role,
                     "tools": [
@@ -389,14 +407,32 @@ class NativeSessionAdapter:
                         "provider emitted an invalid completion"
                     )
         if completion is None:
-            raise ProviderRejectedError("provider stream ended without completion")
-        if not completion.content.strip() and not completion.tool_calls:
-            raise ProviderRejectedError("provider returned no answer or tool requests")
+            raise ProviderRejectedError(
+                "provider stream ended without completion", transient=True
+            )
+        diagnostics = {
+            "model": completion.model,
+            "provider": completion.provider,
+            "upstream_provider": completion.upstream_provider,
+            "generation_id": completion.generation_id,
+            "finish_reason": completion.finish_reason,
+            "prompt_tokens": completion.prompt_tokens,
+            "completion_tokens": completion.completion_tokens,
+        }
+        if completion.finish_reason == "length" or (
+            not completion.content.strip() and not completion.tool_calls
+        ):
+            raise ProviderRejectedError(
+                "provider completion was truncated or contained no answer/tool requests; continue with a smaller actionable step",
+                transient=True,
+                diagnostics=diagnostics,
+            )
         reasoning = normalise_reasoning(completion.reasoning)
         result: dict[str, object] = {"reasoning": reasoning} if reasoning else {}
         if (
             completion.upstream_provider is not None
             or completion.generation_id is not None
+            or completion.finish_reason is not None
         ):
             result["provider_metadata"] = {
                 "model": completion.model,
@@ -405,6 +441,7 @@ class NativeSessionAdapter:
                 "generation_id": completion.generation_id,
                 "model_family": self._family.family,
                 "family_adapter_version": self._family.version,
+                **diagnostics,
             }
         yield SessionMessage(
             message_id=message_id,

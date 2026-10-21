@@ -103,3 +103,49 @@ def test_registered_schema_is_detached_from_both_caller_and_advertisement() -> N
         {"count": 0},
         context=ToolContext("workspace", "chat", "conversation", "actor"),
     ).ok
+
+
+@pytest.mark.parametrize(
+    ("keyword", "limit", "value"),
+    [
+        ("maxLength", 4096, "x" * 5000),
+        ("minLength", 3, "x"),
+        ("maximum", 8, 9),
+        ("pattern", "^[a-z]+$", "INVALID"),
+    ],
+)
+def test_constraint_diagnostics_reach_tool_caller_without_echoing_large_arguments(
+    keyword, limit, value
+):
+    registry = SessionToolRegistry(
+        [
+            RegisteredTool(
+                {
+                    "name": "bounded",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "completion": {
+                                "type": "object",
+                                "properties": {"reason": {keyword: limit}},
+                            }
+                        },
+                    },
+                },
+                lambda args, ctx: ToolExecution(ok=True),
+            )
+        ]
+    )
+    result = registry.dispatch(
+        "bounded",
+        {"completion": {"reason": value}},
+        context=ToolContext("workspace", "chat", "conversation", "actor"),
+    )
+    assert not result.ok and result.failure is not None
+    assert result.failure["certainty"] == "not_started"
+    miss = cast(list[dict[str, str]], result.failure["violations"])[0]
+    assert miss["path"] == "completion.reason"
+    assert keyword in miss["message"] and str(limit) in miss["message"]
+    assert len(miss["message"]) < 512
+    if keyword == "maxLength":
+        assert "5000" in miss["message"] and value not in str(result.failure["message"])

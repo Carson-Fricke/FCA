@@ -5,8 +5,8 @@ sub-agent, and a workflow phase sub-agent.  It sends the merged tool catalog
 (harness tools plus Thesis control tools) with every completion, persists each
 model invocation and each tool call as a first-class durable record, threads
 tool results back to the model as canonical incoming messages, and repeats until the model
-answers in text, a terminal control tool is accepted, or the safety budget stops
-the turn.
+answers in text, a terminal control tool is accepted, or the execution slice
+yields for automatic continuation.
 
 The session never decides a workflow transition: a terminal control tool returns
 a constructed completion, and the owning deterministic state machine evaluates
@@ -65,7 +65,7 @@ from thesis_runtime.tools.registry import (
     ToolExecution,
 )
 
-#: How many model/tool round trips one session allows before forcing a stop.
+#: Model/tool round trips in one execution slice; the conversation resumes yielded work.
 DEFAULT_MAX_TOOL_ITERATIONS = 64
 
 AGENT_SYSTEM_PROMPT = (
@@ -431,7 +431,9 @@ class AgentSession:
                                 text=f"Model provider interrupted generation. Automatically continuing this agent "
                                 f"in {delay:g}s (recovery {provider_failures}/{len(RECOVERY_DELAYS)}). "
                                 "Continue the existing task from retained messages and tool results; "
-                                "reconcile retained job IDs rather than repeating submissions.",
+                                "reconcile retained job IDs rather than repeating submissions. "
+                                "If the response was unusable, take a smaller actionable step; "
+                                "author incrementally rather than reasoning through the entire program again.",
                                 source="runtime",
                                 result={
                                     "providerRecovery": {
@@ -783,7 +785,7 @@ class AgentSession:
                     },
                 )
         return SessionResult(
-            status="iterations_exhausted",
+            status="yielded",
             content="".join(reasoning_parts),
             turns=tuple(turns),
         )

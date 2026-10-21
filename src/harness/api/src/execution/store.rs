@@ -24,6 +24,7 @@ pub struct Document {
 pub struct ExecutionStore {
     pub backend: Arc<dyn Backend>,
     pub owner: Option<(String, String)>,
+    claimed_until: Option<DateTime<Utc>>,
 }
 fn path(id: &str) -> Result<String> {
     validate_id(id)?;
@@ -53,11 +54,12 @@ impl ExecutionStore {
         Self {
             backend,
             owner: None,
+            claimed_until: None,
         }
     }
     pub fn document(&self, id: &str) -> Result<Option<Document>> {
         self.backend
-            .read(&path(id)?)?
+            .read_metadata(&path(id)?)?
             .map(|bytes| {
                 let doc: Document = decode(&bytes)?;
                 if doc.record.job_id != id {
@@ -74,12 +76,13 @@ impl ExecutionStore {
     ) -> Result<JobRecord> {
         let mut record = None;
         self.backend.update(&path(id)?, &mut |bytes| {
+            record = None;
             let mut doc: Document = decode(&bytes)?;
             if let Some(owner) = &doc.owner {
                 if self.owner.as_ref() != Some(&(id.into(), owner.token.clone()))
                     || owner.expires <= Utc::now()
                 {
-                    return Err(error("execution ownership was lost"));
+                    return Err(StoreError::OwnershipLost(id.into()));
                 }
             }
             change(&mut doc)?;
@@ -91,7 +94,10 @@ impl ExecutionStore {
     pub fn claim(&self, id: &str) -> Result<Option<Self>> {
         let token = uuid::Uuid::new_v4().to_string();
         let mut claimed = false;
+        let mut claimed_until = None;
         self.backend.update(&path(id)?, &mut |bytes| {
+            claimed = false;
+            claimed_until = None;
             let mut doc: Document = decode(&bytes)?;
             if doc.record.state == JobState::Queued && doc.owner.is_none() {
                 doc.owner = Some(Owner {
@@ -100,6 +106,14 @@ impl ExecutionStore {
                 });
                 doc.record.state = JobState::Running;
                 doc.record.updated_at = Utc::now();
+            }
+            if doc.record.state == JobState::Running
+                && doc
+                    .owner
+                    .as_ref()
+                    .is_some_and(|owner| owner.token == token && owner.expires > Utc::now())
+            {
+                claimed_until = doc.owner.as_ref().map(|o| o.expires);
                 claimed = true;
             }
             encode(&doc)
@@ -107,20 +121,27 @@ impl ExecutionStore {
         Ok(claimed.then(|| Self {
             backend: self.backend.clone(),
             owner: Some((id.into(), token)),
+            claimed_until,
         }))
     }
-    pub fn heartbeat(&self, id: &str) -> Result<()> {
+    pub fn claimed_until(&self) -> Option<DateTime<Utc>> {
+        self.claimed_until
+    }
+    pub fn heartbeat(&self, id: &str) -> Result<Option<DateTime<Utc>>> {
+        let mut expires = None;
         self.write(id, |doc| {
+            expires = None;
             if doc.record.state.is_terminal() {
                 return Ok(());
             }
             doc.owner
                 .as_mut()
-                .ok_or_else(|| error("worker ownership missing"))?
+                .ok_or_else(|| StoreError::OwnershipLost(id.into()))?
                 .expires = Utc::now() + chrono::Duration::seconds(60);
+            expires = doc.owner.as_ref().map(|o| o.expires);
             Ok(())
         })
-        .map(|_| ())
+        .map(|_| expires)
     }
     pub fn recover_interrupted(&self) -> Result<()> {
         for id in self.ids()? {

@@ -31,6 +31,8 @@ pub enum DataError {
     NotFound(String),
     /// An object already exists or state conflicts with the request.
     Conflict(String),
+    /// A remote service rejected an operation; retain status without credentials.
+    Http { status: u16, code: Option<String> },
     /// A filesystem or object-store operation failed.
     Io(String),
 }
@@ -70,6 +72,13 @@ impl DataError {
 impl fmt::Display for DataError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Http { status, code } => {
+                write!(formatter, "storage HTTP {status}")?;
+                if let Some(code) = code {
+                    write!(formatter, " ({code})")?;
+                }
+                Ok(())
+            }
             Self::TypeError(message)
             | Self::ValueError(message)
             | Self::Lookahead(message)

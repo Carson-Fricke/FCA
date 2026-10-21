@@ -23,6 +23,8 @@ opaque provenance, structured diagnostics, and complete-result reuse metadata.
   snapshots and rejects subsequent telemetry.
   `mark_running` persists worker start while preserving accepted input and
   rejecting terminal jobs; local MCP workers call it before doing any work.
+  Storage failures retain their operation, resource and category separately from
+  confirmed execution ownership loss; job admission conflicts remain distinct.
 - `transport.rs` serves the composed protocol through stdio and HTTP transports.
 
 Focused protocol tests live in the sibling `tests/` folder. The API crate

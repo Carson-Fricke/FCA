@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -73,6 +74,7 @@ from thesis_runtime.conversations.incoming import write_incoming
 from thesis_runtime.conversations.service import ChatService
 from thesis_runtime.conversations.turns import NodeTurnCoordinator, is_external_input
 from thesis_runtime.execution.worker import Work, WorkStore
+from thesis_runtime.sessions.recovery import wait_for_recovery
 from thesis_runtime.sessions.session import (
     AGENT_SYSTEM_PROMPT,
     AgentSession,
@@ -1035,6 +1037,10 @@ class Conversations:
             record.status in _TERMINAL or record.role in RECORD_ANCHOR_ROLES
         ):
             return SessionResult(status=record.status.value, content="", turns=())
+        if record is not None and record.status is SubAgentStatus.NEEDS_INPUT:
+            # A prior recovery wake cannot override a deliberate approval pause.
+            # Authorized operator intake resumes the lifecycle before scheduling.
+            return SessionResult(status="needs_input", content="", turns=())
         if record is not None and _execution_closed(self._chat, record):
             return SessionResult(status="cancelled", content="", turns=())
         if record is not None and record.status is SubAgentStatus.PENDING:
@@ -1102,28 +1108,29 @@ class Conversations:
             )
         )
 
-        def interrupted(failure: Mapping[str, object]) -> None:
-            if record is not None:
-                if not cancelled():
-                    self._record_interruption(record, failure)
-                return
-            detail = (
-                failure.get("message") or "the model or tool catalog is unavailable"
-            )
-            body = f"Reply interrupted: {detail}"
-            self.deliver_session_message(
-                anchor,
-                SessionMessage(
-                    f"message-{uuid.uuid4().hex}",
-                    "incoming",
-                    MessageContent(body, "runtime", result={"failure": dict(failure)}),
-                ),
-                actor_id=context.actor_id,
-                body=body,
-                role=MessageRole.SYSTEM,
-                data={"status": "interrupted", "failure": dict(failure)},
-                schedule=False,
-            )
+        def interrupted(failure: Mapping[str, object], *, resume: bool = True) -> None:
+            if not cancelled():
+                if not resume:
+                    # Programming/persistence faults are not provider recovery.
+                    # Preserve the diagnostic, then let the owning worker fail
+                    # this attempt without creating an automatic retry loop.
+                    self.deliver_session_message(
+                        anchor,
+                        SessionMessage(
+                            f"message-{uuid.uuid4().hex}",
+                            "incoming",
+                            MessageContent(
+                                f"Reply interrupted: {failure.get('message')}",
+                                "runtime",
+                                result={"failure": dict(failure)},
+                            ),
+                        ),
+                        role=MessageRole.SYSTEM,
+                        data={"status": "interrupted", "failure": dict(failure)},
+                        schedule=False,
+                    )
+                else:
+                    self._continue_turn(anchor, failure)
 
         def cancelled() -> bool:
             try:
@@ -1158,6 +1165,36 @@ class Conversations:
                 and not _execution_closed(self._chat, current)
             )
 
+        # A retained continuation is executable input, not a consumed wake. Its
+        # delay survives restart and yields cooperatively to steering/cancellation.
+        for message in reversed(selected):
+            continuation = (
+                (from_record(message).content.result or {}).get("continuation")
+                if message.role is MessageRole.SYSTEM
+                and message.created_by == "thesis-runtime"
+                else None
+            )
+            if isinstance(continuation, Mapping):
+                resume_at = continuation.get("resume_at", 0)
+                if isinstance(resume_at, int | float) and math.isfinite(resume_at):
+                    wait_for_recovery(
+                        max(0.0, resume_at - time.time()),
+                        cancelled=cancelled,
+                        steered=lambda: any(
+                            from_record(row).content.source == "user"
+                            for row in self._chat.read_message_window(
+                                workspace_id,
+                                chat_id,
+                                anchor.sub_agent_id or chat_id,
+                                after_position=consumed_position,
+                            )
+                        ),
+                    )
+                break
+            if message.role is MessageRole.USER:
+                break
+        if cancelled():
+            return SessionResult(status="cancelled", content="", turns=())
         try:
             registry = (
                 self._registry_factory(context)
@@ -1341,6 +1378,11 @@ class Conversations:
             )
         except OwnershipLost:
             raise
+        except ToolCatalogError as error:
+            interrupted(error.outcome)
+            return SessionResult(
+                status="interrupted", content="", turns=(), failure=error.outcome
+            )
         except Exception as error:  # noqa: BLE001 - a phase fault fails the node
             _LOGGER.exception("conversation turn failed: %s", chat_id)
             message = str(error) or type(error).__name__
@@ -1353,7 +1395,8 @@ class Conversations:
                         "message": message,
                         "certainty": "unknown_outcome",
                         "retry_safe": False,
-                    }
+                    },
+                    resume=False,
                 )
                 raise
             current = self._store.get_sub_agent(workspace_id, sub_agent_id)
@@ -1372,6 +1415,10 @@ class Conversations:
         if result.status == "interrupted":
             interrupted(result.failure or {})
         if result.status == "interrupted":
+            return result
+        if result.status == "yielded":
+            if not cancelled():
+                self._continue_turn(anchor)
             return result
         if result.status == "cancelled":
             return result
@@ -1554,34 +1601,120 @@ class Conversations:
             ) from error
         return result
 
-    def _record_interruption(
-        self, record: SubAgentRecord, failure: Mapping[str, object]
+    def _continue_turn(
+        self, anchor: Anchor, failure: Mapping[str, object] | None = None
     ) -> None:
-        """Keep a recoverable infrastructure interruption at its own anchor."""
-        current = self._store.get_sub_agent(record.workspace_id, record.sub_agent_id)
-        if current is None or current.status in _TERMINAL:
-            return
-        self._lifecycle.request_input(record.workspace_id, record.sub_agent_id)
-        detail = failure.get("message") or "the model or tool catalog is unavailable"
-        body = f"Agent turn interrupted: {detail}. Send a message to retry or steer this agent."
+        """Yield a bounded attempt through canonical durable delivery, without a lifetime cap."""
+        history = self._chat.read_message_window(
+            anchor.workspace_id,
+            anchor.chat_id,
+            anchor.sub_agent_id or anchor.chat_id,
+            limit=32,
+        )
+        attempt = 1
+        for row in reversed(history):
+            message = from_record(row)
+            result = message.content.result or {}
+            previous = (
+                result.get("continuation")
+                if row.role is MessageRole.SYSTEM and row.created_by == "thesis-runtime"
+                else None
+            )
+            if isinstance(previous, Mapping):
+                value = previous.get("attempt")
+                attempt = value + 1 if isinstance(value, int) and value > 0 else 1
+                break
+            datums = result.get("datums", ())
+            if not isinstance(datums, list | tuple):
+                datums = ()
+            if message.content.source == "user" or any(
+                isinstance(datum, Mapping) and datum.get("ok") is True
+                for datum in datums
+            ):
+                break
+            if (
+                message.direction == "outgoing"
+                and not message.content.requests
+                and not result.get("interrupted")
+            ):
+                break
+        delay = 0.0 if failure is None else min(300.0, 30.0 * 2 ** min(attempt - 1, 4))
+        requested = (failure or {}).get("retry_after")
+        if isinstance(requested, int | float) and math.isfinite(requested):
+            delay = max(delay, requested)
+        detail = (failure or {}).get(
+            "message", "Execution slice finished with work remaining"
+        )
+        body = (
+            f"Automatically continuing this task: {detail}. "
+            "Resume from retained results and pending job IDs; reconcile uncertain mutations before any new submission. "
+            "Repair rejected arguments from their exact violations. If an approach repeatedly fails, change it, "
+            "use smaller executable steps, or return a scoped technical blocker to your supervisor. "
+            "Routine recovery requires no operator response."
+        )
         self.deliver_session_message(
-            Anchor(record.workspace_id, record.chat_id, record.sub_agent_id),
+            anchor,
             SessionMessage(
                 f"message-{uuid.uuid4().hex}",
                 "incoming",
-                MessageContent(body, "runtime", result={"failure": dict(failure)}),
+                MessageContent(
+                    body,
+                    "runtime",
+                    result={
+                        "continuation": {
+                            "attempt": attempt,
+                            "resume_at": time.time() + delay,
+                        },
+                        **({"failure": dict(failure)} if failure is not None else {}),
+                    },
+                ),
             ),
             actor_id="thesis-runtime",
             body=body,
             role=MessageRole.SYSTEM,
-            kind=TranscriptItemKind.SUB_AGENT,
+            kind=TranscriptItemKind.TOOL
+            if anchor.is_root
+            else TranscriptItemKind.SUB_AGENT,
             data={
-                "subAgentId": record.sub_agent_id,
-                "status": "interrupted",
-                "failure": dict(failure),
+                "status": "continuing",
+                **({"failure": dict(failure)} if failure is not None else {}),
             },
-            schedule=False,
         )
+        # Report explicit technical evidence, never the private child transcript.
+        # Record-only workflow containers cannot supervise; walk to their caller.
+        if failure is not None and anchor.sub_agent_id and attempt in (1, 4, 16, 64):
+            child = self._store.get_sub_agent(anchor.workspace_id, anchor.sub_agent_id)
+            target = None if child is None else child.returns_to_sub_agent_id
+            visited = {anchor.sub_agent_id}
+            notify = True
+            while target:
+                if target in visited:
+                    notify = False
+                    break
+                visited.add(target)
+                parent = self._store.get_sub_agent(anchor.workspace_id, target)
+                if parent is None or parent.role not in RECORD_ANCHOR_ROLES:
+                    break
+                target = parent.parent_sub_agent_id
+            if notify:
+                self.deliver_session_message(
+                    Anchor(anchor.workspace_id, anchor.chat_id, target),
+                    SessionMessage(
+                        f"recovery-notice-{uuid.uuid4().hex}",
+                        "incoming",
+                        MessageContent(
+                            f"Child {anchor.sub_agent_id} encountered a technical interruption and is automatically continuing. "
+                            "Inspect retained outcomes and redirect if useful; do not duplicate pending submissions.",
+                            "runtime",
+                            result={
+                                "childRecovery": {
+                                    "sub_agent_id": anchor.sub_agent_id,
+                                    "failure": dict(failure),
+                                }
+                            },
+                        ),
+                    ),
+                )
 
     def _child_turn_ended(self, record: SubAgentRecord, result: SessionResult) -> None:
         """Apply the child's turn-end policy after one persisted turn.

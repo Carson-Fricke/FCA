@@ -608,7 +608,7 @@ def test_blank_native_reply_is_rejected_with_reserved_output_identity(
     messages = [incoming("input")]
     canonical = [message.as_dict() for message in messages]
     with pytest.raises(
-        ProviderRejectedError, match="no answer or tool requests"
+        ProviderRejectedError, match="no answer/tool requests"
     ) as raised:
         NativeSessionAdapter(Provider(), id_factory=new_id).complete(messages=messages)
     assert raised.value.status is None
@@ -681,7 +681,7 @@ def test_request_snapshot_is_pure_detached_and_matches_emitted_request(
             response_format: Mapping[str, object] | None = None,
         ) -> ModelCompletion:
             seen.update(
-                projection="native-session-v2",
+                projection="native-session-v3",
                 model_family="generic",
                 family_adapter_version="1",
                 catalog_version="sha256:"
@@ -726,7 +726,7 @@ def test_request_snapshot_is_pure_detached_and_matches_emitted_request(
         messages_payload(project_native_messages(messages))
     )
     assert snapshot["role"] == "research"
-    assert snapshot["projection"] == "native-session-v2"
+    assert snapshot["projection"] == "native-session-v3"
     assert (
         snapshot["catalog_version"]
         == "sha256:"
@@ -782,7 +782,7 @@ def test_request_snapshot_preserves_absent_and_empty_options() -> None:
         Provider(), id_factory=lambda: pytest.fail("snapshot must not allocate IDs")
     )
     assert adapter.request_snapshot(messages=[]) == {
-        "projection": "native-session-v2",
+        "projection": "native-session-v3",
         "stream": True,
         "model_family": "generic",
         "family_adapter_version": "1",
@@ -793,7 +793,7 @@ def test_request_snapshot_preserves_absent_and_empty_options() -> None:
         "catalog_version": "sha256:" + hashlib.sha256(b"null").hexdigest(),
     }
     assert adapter.request_snapshot(messages=[], tools=[], response_format={}) == {
-        "projection": "native-session-v2",
+        "projection": "native-session-v3",
         "stream": True,
         "model_family": "generic",
         "family_adapter_version": "1",

@@ -24,6 +24,7 @@ pub struct Slot {
     store: ExecutionStore,
     token: String,
     worker: String,
+    attached_until: chrono::DateTime<Utc>,
 }
 impl Slot {
     /// Reserve before starting compute, including its cold boot interval.
@@ -40,9 +41,14 @@ impl Slot {
         store
             .backend
             .update("execution/control/fleet.json", &mut |bytes| {
+                claimed = false;
                 let mut fleet: Fleet = decode(&bytes)?;
                 fleet.owners.retain(|o| o.expires > Utc::now());
-                if fleet.owners.len() < max {
+                if fleet.owners.iter().any(|owner| owner.token == token) {
+                    // A committed PUT may lose its acknowledgement; an SDK
+                    // retry then reports a conflict against that same write.
+                    claimed = true;
+                } else if fleet.owners.len() < max {
                     fleet.owners.push(PoolOwner {
                         token: token.clone(),
                         expires: Utc::now() + chrono::Duration::seconds(600),
@@ -56,6 +62,7 @@ impl Slot {
     }
     pub fn attach(store: &ExecutionStore, token: String) -> Result<Self> {
         let worker = uuid::Uuid::new_v4().to_string();
+        let mut attached_until = Utc::now();
         store
             .backend
             .update("execution/control/fleet.json", &mut |bytes| {
@@ -64,17 +71,27 @@ impl Slot {
                     .owners
                     .iter_mut()
                     .find(|owner| {
-                        owner.token == token && owner.expires > Utc::now() && owner.worker.is_none()
+                        owner.token == token
+                            && owner.expires > Utc::now()
+                            && (owner.worker.is_none() || owner.worker.as_deref() == Some(&worker))
                     })
-                    .ok_or_else(|| error("worker reservation expired or was already consumed"))?;
-                owner.worker = Some(worker.clone());
-                owner.expires = Utc::now() + chrono::Duration::seconds(60);
+                    .ok_or_else(|| {
+                        mcp::store::StoreError::OwnershipLost(
+                            "worker reservation expired or was already consumed".into(),
+                        )
+                    })?;
+                if owner.worker.is_none() {
+                    owner.worker = Some(worker.clone());
+                    owner.expires = Utc::now() + chrono::Duration::seconds(60);
+                }
+                attached_until = owner.expires;
                 encode(&fleet)
             })?;
         Ok(Self {
             store: store.clone(),
             token,
             worker,
+            attached_until,
         })
     }
     pub fn acquire(store: &ExecutionStore, max: usize) -> Result<Option<Self>> {
@@ -93,7 +110,11 @@ impl Slot {
                 encode(&fleet)
             })
     }
-    pub fn renew(&self) -> Result<()> {
+    pub fn attached_until(&self) -> chrono::DateTime<Utc> {
+        self.attached_until
+    }
+    pub fn renew(&self) -> Result<chrono::DateTime<Utc>> {
+        let mut expires = Utc::now();
         self.store
             .backend
             .update("execution/control/fleet.json", &mut |bytes| {
@@ -106,10 +127,16 @@ impl Slot {
                             && o.worker.as_deref() == Some(&self.worker)
                             && o.expires > Utc::now()
                     })
-                    .ok_or_else(|| error("execution fleet slot expired"))?;
+                    .ok_or_else(|| {
+                        mcp::store::StoreError::OwnershipLost(
+                            "execution fleet slot expired or replaced".into(),
+                        )
+                    })?;
                 owner.expires = Utc::now() + chrono::Duration::seconds(60);
+                expires = owner.expires;
                 encode(&fleet)
             })
+            .map(|_| expires)
     }
 }
 impl Drop for Slot {
@@ -144,6 +171,41 @@ pub fn run() -> Result<()> {
             slot
         }
     };
+    let ownership = super::renewal::Ownership::new(slot);
+    let renew = ownership.clone();
+    let renewer = std::thread::spawn(move || renew.run());
+    let work = ownership.clone();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_jobs(store, work)))
+                .unwrap_or_else(|_| Err(error("execution thread panicked")));
+        let _ = sender.send(result);
+    });
+    let result = loop {
+        // Storage renewal runs separately: a stalled SDK cannot stall fencing.
+        let remaining = match ownership.check(Utc::now()) {
+            Ok(remaining) => remaining,
+            Err(cause) => {
+                eprintln!(
+                    "{}",
+                    serde_json::json!({"event":"worker_ownership_lost", "error":cause.to_string()})
+                );
+                std::process::exit(2);
+            }
+        };
+        match receiver.recv_timeout(remaining.min(std::time::Duration::from_millis(250))) {
+            Ok(result) => break result,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(cause) => break Err(error(cause)),
+        }
+    };
+    ownership.stop();
+    let _ = renewer.join();
+    result
+}
+
+fn run_jobs(store: ExecutionStore, ownership: super::renewal::Ownership) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new().map_err(error)?;
     let env = std::env::vars().collect();
     let host = runtime
@@ -156,7 +218,7 @@ pub fn run() -> Result<()> {
         })
         .map_err(error)?;
     loop {
-        slot.renew()?;
+        ownership.check(Utc::now())?;
         store.recover_interrupted()?;
         let mut claimed = None;
         for job in store.queued()? {
@@ -169,29 +231,9 @@ pub fn run() -> Result<()> {
             break;
         };
         let id = job.job_id.clone();
+        ownership.track(owned.clone(), id.clone())?;
         let access = host.access.clone();
-        let executor = owned.clone();
-        let (sender, receiver) = std::sync::mpsc::channel();
-        // The worker process, not the API, hosts JIT code. Losing its heartbeat
-        // terminates this process; an old token cannot publish a terminal result.
-        std::thread::spawn(move || {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                crate::local::execute_admitted(Arc::new(executor), job, access)
-            }));
-            let _ = sender.send(result);
-        });
-        loop {
-            match receiver.recv_timeout(std::time::Duration::from_secs(10)) {
-                Ok(_) => break,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    if slot.renew().and_then(|_| owned.heartbeat(&id)).is_err() {
-                        eprintln!("worker ownership lost; stopping execution process");
-                        std::process::exit(2);
-                    }
-                }
-                Err(error) => return Err(super::backend::error(error)),
-            }
-        }
+        crate::local::execute_admitted(Arc::new(owned.clone()), job, access);
         if owned.get(&id).is_some_and(|r| !r.state.is_terminal()) {
             let mut failed = owned
                 .get(&id)
@@ -201,6 +243,7 @@ pub fn run() -> Result<()> {
                 Some("execution worker terminated without a durable result".into());
             owned.put_result(failed, Default::default())?;
         }
+        ownership.clear(&id);
     }
     Ok(())
 }

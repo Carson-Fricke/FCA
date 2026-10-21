@@ -253,6 +253,15 @@ impl Admission {
 /// Failures surfaced by a job store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoreError {
+    /// A storage failure, distinct from losing application execution ownership.
+    Storage {
+        kind: StorageFailureKind,
+        operation: &'static str,
+        path: String,
+        message: String,
+    },
+    /// The authoritative ownership token changed or its deadline expired.
+    OwnershipLost(String),
     /// A successful job must carry at least one artifact.
     EmptyArtifacts,
     /// A job identifier or artifact name was not a safe path segment.
@@ -270,6 +279,18 @@ pub enum StoreError {
 impl fmt::Display for StoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Storage {
+                kind,
+                operation,
+                path,
+                message,
+            } => write!(
+                formatter,
+                "storage {kind:?} during {operation} at {path}: {message}"
+            ),
+            Self::OwnershipLost(resource) => {
+                write!(formatter, "execution ownership lost: {resource}")
+            }
             Self::EmptyArtifacts => {
                 formatter.write_str("a successful job must contain at least one artifact")
             }
@@ -292,6 +313,15 @@ impl fmt::Display for StoreError {
 }
 
 impl std::error::Error for StoreError {}
+
+/// Transport-neutral storage categories retained by worker supervision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StorageFailureKind {
+    Contention,
+    Transient,
+    Permission,
+    Permanent,
+}
 
 /// Durable boundary for one authoritative job record and its artifacts.
 pub trait JobStore: Send + Sync {

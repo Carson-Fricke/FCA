@@ -4,6 +4,8 @@ This crate-local suite exercises the public authoring SDK without the engine,
 lake, or JIT compiler. Dylib execution and persisted job artifacts are verified
 in the neighboring strategy-jit and backtest crates.
 
+- `accounting.rs` checks partial fills, duplicate/conflicting fill identities, shorts,
+  reversals, entry-notional returns and explicit quantile/slope/Haar definitions.
 - `abi.rs` checks lossless decimals, safe frame reconstruction, callback rejection,
   and panic containment across the public C shapes.
 - `consumer.rs` checks dependency-first routing, canonical requirements, topology

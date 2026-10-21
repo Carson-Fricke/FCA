@@ -232,7 +232,10 @@ fn create_permission_errors_propagate_and_object_replacement_still_overwrites() 
     let provider =
         AzureBlobLeaseProvider::new(Arc::clone(&sdk) as Arc<dyn AzureBlobContainer>, 60, "locks")
             .unwrap();
-    assert!(matches!(provider.acquire(&scope()), Err(DataError::Io(_))));
+    assert!(matches!(
+        provider.acquire(&scope()),
+        Err(DataError::Http { status: 403, .. })
+    ));
     assert!(!http.state.lock().unwrap().leased);
     http.state.lock().unwrap().deny_writes = false;
     let store = AzureBlobStore::new(sdk);
@@ -284,7 +287,10 @@ async fn independent_uploads_overlap_and_keep_their_own_results() {
     let good = tokio::spawn(async move { good_store.replace("good.parquet", b"good") });
     let denied = tokio::spawn(async move { store.replace("denied.parquet", b"denied") });
     good.await.unwrap().expect("unrelated upload succeeds");
-    assert!(matches!(denied.await.unwrap(), Err(DataError::Io(_))));
+    assert!(matches!(
+        denied.await.unwrap(),
+        Err(DataError::Http { status: 403, .. })
+    ));
 }
 
 #[derive(Debug)]
@@ -424,4 +430,88 @@ fn hierarchical_listing_exposes_files_without_directory_placeholders() {
             "publications/empty.json",
         ]
     );
+}
+
+#[derive(Debug)]
+struct ConditionalMetadataHttp(Mutex<(Vec<u8>, u64)>);
+impl HttpClient for ConditionalMetadataHttp {
+    fn execute_request<'a, 'b, 'future>(
+        &'a self,
+        request: &'b Request,
+    ) -> BoxFuture<'future, azure_core::Result<Response>>
+    where
+        'a: 'future,
+        'b: 'future,
+        Self: 'future,
+    {
+        Box::pin(async move {
+            if request.url().path().ends_with("denied") {
+                return Ok(response(StatusCode::Forbidden));
+            }
+            if request.url().path().ends_with("unavailable") {
+                return Ok(response(StatusCode::ServiceUnavailable));
+            }
+            let mut state = self.0.lock().unwrap();
+            let etag = format!("\"v{}\"", state.1);
+            if request.method() == &Method::Put {
+                assert!(request
+                    .headers()
+                    .get_optional_str(&"x-ms-lease-id".into())
+                    .is_none());
+                if request.headers().get_optional_str(&"if-match".into()) != Some(etag.as_str()) {
+                    return Ok(response(StatusCode::PreconditionFailed));
+                }
+                let Body::Bytes(bytes) = request.body() else {
+                    panic!("metadata is bytes")
+                };
+                state.0 = bytes.to_vec();
+                state.1 += 1;
+                return Ok(response(StatusCode::Created));
+            }
+            assert_eq!(request.method(), &Method::Get);
+            let payload = Bytes::from(state.0.clone());
+            let mut headers = Headers::new();
+            for (name, value) in [
+                ("date", "Fri, 18 Oct 2024 12:00:00 GMT"),
+                ("last-modified", "Fri, 18 Oct 2024 12:00:00 GMT"),
+                ("x-ms-creation-time", "Fri, 18 Oct 2024 12:00:00 GMT"),
+                ("x-ms-request-id", LEASE_ID),
+                ("x-ms-blob-type", "BlockBlob"),
+                ("x-ms-server-encrypted", "true"),
+            ] {
+                headers.insert(name, value.to_string());
+            }
+            headers.insert("content-length", payload.len().to_string());
+            headers.insert("etag", etag);
+            Ok(Response::new(
+                StatusCode::Ok,
+                headers,
+                Box::pin(stream::once(async move { Ok(payload) })),
+            ))
+        })
+    }
+}
+
+#[test]
+fn metadata_versions_fence_replacement_and_http_failures_retain_status() {
+    let sdk = container(Arc::new(ConditionalMetadataHttp(Mutex::new((
+        b"before".to_vec(),
+        1,
+    )))));
+    let (bytes, version) = sdk.download_versioned("metadata").unwrap();
+    assert_eq!(bytes, b"before");
+    sdk.upload_if_match("metadata", b"after", &version).unwrap();
+    assert!(matches!(
+        sdk.upload_if_match("metadata", b"stale", &version),
+        Err(DataError::Conflict(_))
+    ));
+    assert_eq!(sdk.download_versioned("metadata").unwrap().0, b"after");
+    assert!(matches!(
+        sdk.download_versioned("denied"),
+        Err(DataError::Http { status: 403, .. })
+    ));
+    assert!(matches!(
+        sdk.upload_if_match("unavailable", b"bytes", &version),
+        Err(DataError::Http { status: 503, .. })
+    ));
 }

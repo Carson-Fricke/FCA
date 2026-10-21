@@ -22,7 +22,10 @@ have observation-only contexts, while strategies receive an order sink.
   rolling VWAP, crossover age, directional-change confirmation, trailing-window
   vertical-distance PIP and frozen normalization. The Haar kernel is internal to
   evidence publication; trading wavelet features use the managed indicator.
-  These pure kernels hold no market subscriptions or execution capabilities;
+  It also provides FillLedger for exact partial-fill inventory/cash/fee accounting,
+  cash_return_bps with entry quantity and price, nearest-rank empirical_quantile,
+  OLS log_price_slope_bps and a ratio-of-expected-energies Haar random-walk anchor.
+  These helpers hold no market subscriptions or execution capabilities;
   authored consumers own symbol/cadence state and their output timing.
 - `wavelet.rs` implements managed completed-bar Haar features with private per-symbol
   state, exact-decimal scale energy, signed trend, explicit missing/warm-up and

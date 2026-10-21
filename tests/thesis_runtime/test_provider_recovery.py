@@ -34,6 +34,11 @@ from thesis_runtime.contracts.records import (
 )
 from thesis_runtime.conversations.conversation import Conversations
 from thesis_runtime.storage.ownership import OwnershipLost, own
+from thesis_runtime.tools.registry import (
+    RegisteredTool,
+    SessionToolRegistry,
+    ToolExecution,
+)
 
 
 def event(value):
@@ -229,12 +234,6 @@ def test_restart_retains_partial_evidence_and_resumes_same_agent_without_replayi
         spawn_thread=lambda _: None,
     )
     assert len(exchange.requests) == 4
-    restarted.lifecycle.resume(anchor.workspace_id, anchor.schedule_id)
-    restarted.deliver_session_message(
-        anchor,
-        SessionMessage("resume", "incoming", MessageContent("Continue", "user")),
-        schedule=False,
-    )
     result = restarted.run_node_turn(
         anchor.workspace_id, anchor.chat_id, anchor.schedule_id
     )
@@ -273,7 +272,18 @@ def test_persistent_disconnect_exhausts_budget_without_acknowledging_input(backo
     assert attempts == [1, 2, 3]
     assert not any(m.direction == "outgoing" for m in canonical)
     node = service.store.get_sub_agent(anchor.workspace_id, anchor.schedule_id)
-    assert node is not None and node.status is SubAgentStatus.NEEDS_INPUT
+    assert node is not None and node.status is SubAgentStatus.RUNNING
+    continuations = [
+        m for m in canonical if (m.content.result or {}).get("continuation")
+    ]
+    assert len(continuations) == 1
+    assert continuations[0].position > 0
+    assert any(
+        (m.content.result or {}).get("childRecovery")
+        for m in decode_transcript(
+            service.root(anchor.workspace_id, anchor.chat_id).transcript()
+        )
+    )
 
 
 @pytest.mark.parametrize(
@@ -288,7 +298,7 @@ def test_persistent_disconnect_exhausts_budget_without_acknowledging_input(backo
         httpx.LocalProtocolError("invalid headers"),
     ],
 )
-def test_permanent_rejection_does_not_retry(failure, backoff):
+def test_permanent_rejection_yields_to_backed_off_continuation(failure, backoff):
     exchange = Exchange(failure, SUCCESS)
     service, anchor = conversation(exchange)
     result = service.run_node_turn(
@@ -297,6 +307,10 @@ def test_permanent_rejection_does_not_retry(failure, backoff):
     assert result.status == "interrupted"
     assert len(exchange.requests) == 1 and backoff == []
     assert result.failure is not None and result.failure["recoverable"] is False
+    assert any(
+        (m.content.result or {}).get("continuation")
+        for m in decode_transcript(service.transcript(anchor))
+    )
 
 
 @pytest.mark.parametrize(
@@ -308,7 +322,7 @@ def test_permanent_rejection_does_not_retry(failure, backoff):
         ("Fri, 01 Jan 2100 00:00:00 GMT", 1, 0),
     ],
 )
-def test_retry_after_is_honored_or_long_wait_is_returned_to_operator(
+def test_retry_after_is_honored_or_retained_for_automatic_continuation(
     delay, calls, wait, backoff
 ):
     exchange = Exchange((429, {"Retry-After": delay}), SUCCESS)
@@ -366,3 +380,271 @@ def test_backoff_yields_to_operator_and_ownership(action, monkeypatch):
         assert any(
             "New direction" in m["content"] for m in exchange.requests[-1]["messages"]
         )
+
+
+@pytest.mark.parametrize("finish", ["stop", "length"])
+def test_reasoning_only_completion_is_retried_and_retains_finish_diagnostics(
+    finish, backoff
+):
+    empty = (
+        event(
+            {
+                "id": "generation-empty",
+                "usage": {"completion_tokens": 1000},
+                "choices": [
+                    {
+                        "delta": {"reasoning": "Retained thought"},
+                        "finish_reason": finish,
+                    }
+                ],
+            }
+        )
+        + b"data: [DONE]\n\n"
+    )
+    exchange = Exchange(empty, SUCCESS)
+    service, anchor = conversation(exchange)
+    result = service.run_node_turn(
+        anchor.workspace_id, anchor.chat_id, anchor.schedule_id
+    )
+    assert result.status == "completed" and len(exchange.requests) == 2
+    audits = service.chat.persistence.list_conversation(
+        AgentInvocation,
+        anchor.workspace_id,
+        anchor.chat_id,
+        conversation_id=anchor.schedule_id,
+    )
+    assert audits[0].failure["provider_metadata"]["finish_reason"] == finish
+    assert audits[0].failure["provider_metadata"]["generation_id"] == "generation-empty"
+    assert audits[0].failure["provider_metadata"]["completion_tokens"] == 1000
+    assert any(
+        "Retained thought" in m["content"] for m in exchange.requests[-1]["messages"]
+    )
+
+
+def test_serialized_worker_automatically_continues_past_64_requests_without_replaying_tools():
+    requests = [
+        event(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": f"call-{i}",
+                                    "type": "function",
+                                    "function": {"name": "check", "arguments": "{}"},
+                                }
+                            ]
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ]
+            }
+        )
+        + b"data: [DONE]\n\n"
+        for i in range(65)
+    ]
+    exchange = Exchange(*requests, SUCCESS)
+    initial, anchor = conversation(exchange, phase=False, cosmos=False)
+    wakes = []
+    dispatched = []
+
+    def check(args, ctx):
+        dispatched.append(ctx.conversation_id)
+        return ToolExecution(ok=True)
+
+    service = Conversations(
+        chat=initial.chat,
+        provider=NativeSessionAdapter(openrouter(exchange)),
+        spawn_thread=wakes.append,
+        registry_factory=lambda _: SessionToolRegistry(
+            [RegisteredTool({"name": "check", "parameters": {"type": "object"}}, check)]
+        ),
+    )
+    service.schedule_input(service.transcript(anchor)[-1])
+    assert len(wakes) == 1
+    wakes.pop()()
+    assert len(exchange.requests) == 66 and len(dispatched) == 65
+    messages = decode_transcript(service.transcript(anchor))
+    assert (
+        len([m for m in messages if (m.content.result or {}).get("continuation")]) == 1
+    )
+    assert messages[-1].content.text == "Recovered"
+    assert not service.in_flight(
+        anchor.workspace_id, anchor.chat_id, anchor.schedule_id
+    )
+
+
+def test_provider_outage_leaves_runnable_continuation_for_a_replacement_worker(backoff):
+    from tests.thesis.http.test_stateless_ownership import replica
+
+    container = LimitedContainer()
+    exchange = Exchange(httpx.ReadError("offline"))
+    client, chat, worker, work, _ = replica(container, openrouter(exchange))
+    thread = chat.create_chat("workspace", title="Recover", owner_actor_id="operator")
+    response = client.post(
+        f"/v1/workspaces/workspace/chats/{thread.chat_id}/messages",
+        headers={"Authorization": "Bearer token"},
+        json={"actor_id": "operator", "body": "Initial"},
+    )
+    assert response.status_code == 200
+    assert worker.tick() == 1 and len(exchange.requests) == 4
+    pending = work.ready()
+    assert len(pending) == 1 and pending[0].state == "pending"
+    exchange.responses = [SUCCESS]
+    _, restarted, next_worker, next_work, _ = replica(container, openrouter(exchange))
+    assert next_worker.tick() == 1 and len(exchange.requests) == 5
+    messages = restarted.list_messages("workspace", thread.chat_id)
+    assert len([m for m in messages if m.role.value == "user"]) == 1
+    assert messages[-1].body == "Recovered" and not next_work.ready()
+
+
+@pytest.mark.parametrize("kind", ["catalog_unavailable", "runtime_fault"])
+def test_catalog_failure_is_retried_without_calling_provider_or_requesting_input(
+    backoff,
+    kind,
+):
+    from thesis_runtime.contracts.errors import ToolCatalogError
+
+    exchange = Exchange(SUCCESS)
+    initial, anchor = conversation(exchange, phase=False, cosmos=False)
+    wakes = []
+    catalogs = 0
+
+    def registry(_):
+        nonlocal catalogs
+        catalogs += 1
+        if catalogs == 1:
+            raise ToolCatalogError({"kind": kind, "message": "offline"})
+        return SessionToolRegistry()
+
+    service = Conversations(
+        chat=initial.chat,
+        provider=NativeSessionAdapter(openrouter(exchange)),
+        spawn_thread=wakes.append,
+        registry_factory=registry,
+    )
+    service.schedule_input(service.transcript(anchor)[-1])
+    wakes.pop()()
+    assert catalogs >= 2 and len(exchange.requests) == 1
+    assert service.transcript(anchor)[-1].body == "Recovered"
+
+
+def test_technical_continuation_cannot_override_deliberate_operator_approval_pause(
+    backoff,
+):
+    exchange = Exchange(httpx.ReadError("offline"))
+    service, anchor = conversation(exchange, cosmos=False)
+    service.run_node_turn(anchor.workspace_id, anchor.chat_id, anchor.schedule_id)
+    service.lifecycle.request_input(anchor.workspace_id, anchor.schedule_id)
+    exchange.responses = [SUCCESS]
+    result = service.run_node_turn(
+        anchor.workspace_id, anchor.chat_id, anchor.schedule_id
+    )
+    assert result.status == "needs_input" and len(exchange.requests) == 4
+    service.get(anchor.workspace_id, anchor.schedule_id).send("Approved", "operator")
+    result = service.run_node_turn(
+        anchor.workspace_id, anchor.chat_id, anchor.schedule_id
+    )
+    assert result.status == "completed" and len(exchange.requests) == 5
+
+
+def test_large_failed_reasoning_is_retained_but_does_not_poison_recovery_context(
+    backoff,
+):
+    thought = "start " + "x" * 440000 + " end"
+    empty = (
+        event(
+            {"choices": [{"delta": {"reasoning": thought}, "finish_reason": "length"}]}
+        )
+        + b"data: [DONE]\n\n"
+    )
+    exchange = Exchange(empty, SUCCESS)
+    service, anchor = conversation(exchange, cosmos=False)
+    result = service.run_node_turn(
+        anchor.workspace_id, anchor.chat_id, anchor.schedule_id
+    )
+    assert result.status == "completed"
+    partial = next(
+        m
+        for m in decode_transcript(service.transcript(anchor))
+        if (m.content.result or {}).get("interrupted")
+    )
+    assert (
+        partial.content.result is not None
+        and partial.content.result["reasoning"] == thought
+    )
+    replay = next(
+        m["content"]
+        for m in exchange.requests[-1]["messages"]
+        if partial.message_id in m["content"]
+    )
+    assert len(replay) < 5000 and "start " in replay and " end" in replay
+
+
+def test_repeated_schema_failures_yield_then_repair_without_replaying_a_mutation(
+    backoff,
+):
+    responses = [
+        event(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": f"call-{i}",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "check",
+                                        "arguments": json.dumps(args),
+                                    },
+                                }
+                            ]
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ]
+            }
+        )
+        + b"data: [DONE]\n\n"
+        for i, args in enumerate([{}, {}, {}, {"count": 1}])
+    ]
+    exchange = Exchange(*responses, SUCCESS)
+    initial, anchor = conversation(exchange, phase=False, cosmos=False)
+    wakes, dispatched = [], []
+
+    def check(args, ctx):
+        dispatched.append(args["count"])
+        return ToolExecution(ok=True)
+
+    service = Conversations(
+        chat=initial.chat,
+        provider=NativeSessionAdapter(openrouter(exchange)),
+        spawn_thread=wakes.append,
+        registry_factory=lambda _: SessionToolRegistry(
+            [
+                RegisteredTool(
+                    {
+                        "name": "check",
+                        "parameters": {
+                            "type": "object",
+                            "required": ["count"],
+                            "properties": {"count": {"type": "integer"}},
+                        },
+                    },
+                    check,
+                )
+            ]
+        ),
+    )
+    service.schedule_input(service.transcript(anchor)[-1])
+    wakes.pop()()
+    assert len(exchange.requests) == 5 and dispatched == [1]
+    assert any(
+        isinstance((failure := (m.content.result or {}).get("failure")), Mapping)
+        and failure.get("kind") == "tool_schema_loop"
+        for m in decode_transcript(service.transcript(anchor))
+    )

@@ -40,6 +40,18 @@ pub fn container_from_account_url(
 /// overwrite-aware upload, whole-object download, prefix listing and delete,
 /// and lease maintenance for one blob.
 pub trait AzureBlobContainer: Send + Sync {
+    /// Read bounded application metadata and its exact version for conditional replacement.
+    fn download_versioned(&self, _path: &str) -> Result<(Vec<u8>, String), DataError> {
+        Err(DataError::Unsupported(
+            "conditional metadata reads are unavailable".into(),
+        ))
+    }
+    /// Replace metadata only if no writer changed the version read by this caller.
+    fn upload_if_match(&self, _path: &str, _payload: &[u8], _etag: &str) -> Result<(), DataError> {
+        Err(DataError::Unsupported(
+            "conditional metadata writes are unavailable".into(),
+        ))
+    }
     fn upload_file(&self, path: &str, source: &std::path::Path) -> Result<(), DataError>;
     /// Replace a leased blob only if the supplied lease still owns that blob.
     fn upload_leased(&self, path: &str, payload: &[u8], lease_id: &str) -> Result<(), DataError>;
@@ -175,6 +187,12 @@ fn http_error(error: azure_core::Error) -> DataError {
         || is_http_status(&error, StatusCode::PreconditionFailed)
     {
         return DataError::Conflict(error.to_string());
+    }
+    if let Some(http) = error.as_http_error() {
+        return DataError::Http {
+            status: http.status().into(),
+            code: http.error_code().map(str::to_owned),
+        };
     }
     DataError::Io(error.to_string())
 }
@@ -634,6 +652,45 @@ impl SdkBlobContainer {
 }
 
 impl AzureBlobContainer for SdkBlobContainer {
+    fn download_versioned(&self, path: &str) -> Result<(Vec<u8>, String), DataError> {
+        use futures_util::StreamExt;
+        let client = self.container.blob_client(path);
+        self.executor.block_on(async move {
+            tokio::time::timeout(std::time::Duration::from_secs(5), async move {
+                let mut stream = client.get().chunk_size(8u64 * 1024 * 1024).into_stream();
+                let response = stream
+                    .next()
+                    .await
+                    .ok_or_else(|| DataError::protocol("metadata response is missing"))?
+                    .map_err(http_error)?;
+                if response.remaining_range.is_some() {
+                    return Err(DataError::value("application metadata exceeds 8 MiB"));
+                }
+                let etag = response.blob.properties.etag.to_string();
+                let bytes = response.data.collect().await.map_err(http_error)?;
+                Ok((bytes.to_vec(), etag))
+            })
+            .await
+            .map_err(|_| DataError::io("metadata read timed out after 5s"))?
+        })?
+    }
+    fn upload_if_match(&self, path: &str, payload: &[u8], etag: &str) -> Result<(), DataError> {
+        let future = self
+            .container
+            .blob_client(path)
+            .put_block_blob(Body::from(payload.to_vec()))
+            .if_match(IfMatchCondition::Match(etag.into()))
+            .into_future();
+        self.executor.block_on(async move {
+            tokio::time::timeout(std::time::Duration::from_secs(5), future)
+                .await
+                .map_err(|_| {
+                    DataError::io("conditional metadata write timed out; outcome unknown")
+                })?
+                .map(|_| ())
+                .map_err(http_error)
+        })?
+    }
     fn upload_file(&self, path: &str, source: &std::path::Path) -> Result<(), DataError> {
         let client = self.container.blob_client(path);
         let source = source.to_path_buf();

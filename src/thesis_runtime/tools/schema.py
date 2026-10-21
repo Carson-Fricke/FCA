@@ -145,7 +145,34 @@ def violations(
                 location += f"[{part}]"
             else:
                 location = f"{location}.{part}" if location else part
-        detail = error.message
+        # jsonschema attaches propertyNames errors to the containing object.
+        # Report the offending key itself, just as additionalProperties does.
+        container = instance
+        for part in error.absolute_path:
+            if isinstance(container, dict):
+                container = container[part]
+            elif isinstance(container, list) and isinstance(part, int):
+                container = container[part]
+            else:
+                break
+        if (
+            "propertyNames" in error.absolute_schema_path
+            and isinstance(container, dict)
+            and isinstance(error.instance, str)
+            and error.instance in container
+        ):
+            location = f"{location}.{error.instance}" if location else error.instance
+        # jsonschema often prefixes diagnostics with the entire offending value.
+        # Never let a large argument displace the constraint needed to repair it.
+        actual = error.instance
+        if isinstance(actual, str):
+            received = f"string of length {len(actual)}: {actual[:96]!r}"
+        elif isinstance(actual, list | dict):
+            received = f"{type(actual).__name__} of length {len(actual)}"
+        else:
+            received = repr(actual)[:96]
+        expected = json.dumps(error.validator_value, ensure_ascii=False)
+        detail = f"constraint {error.validator} requires {expected[:256]}; received {received}"
         if error.validator == "required":
             for key in error.validator_value:
                 if (
@@ -197,6 +224,17 @@ def violations(
             detail = f"expected {error.validator_value}; received {actual}"
         elif error.validator in {"oneOf", "anyOf"}:
             detail = f"arguments must satisfy {error.validator} constraints"
+        elif error.validator in {"maxLength", "minLength"}:
+            detail = f"{error.validator} is {error.validator_value}; received length {len(error.instance)}"
+        elif error.validator == "enum":
+            detail = (
+                f"{repr(error.instance)[:96]} is not one of {expected[:256]} (enum)"
+            )
+        elif error.validator == "minItems":
+            detail = (
+                ("array should be non-empty; " if error.validator_value == 1 else "")
+                + f"minItems is {error.validator_value}; received length {len(error.instance)}"
+            )
         found.append(SchemaViolation(location, detail[:512]))
 
     for error in validator.iter_errors(instance):

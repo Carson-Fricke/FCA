@@ -387,7 +387,9 @@ def test_reconciliation_reorders_known_messages_without_reviving_consumed_input(
 @pytest.mark.parametrize("phase", [False, True], ids=["root", "phase"])
 def test_empty_native_completion_interrupts_without_ack_or_workflow_failure(
     phase: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("thesis_runtime.sessions.recovery.sleep", lambda _: None)
     requests: list[tuple[ChatMessage, ...]] = []
 
     class EmptyModelCompletion:
@@ -425,12 +427,14 @@ def test_empty_native_completion_interrupts_without_ack_or_workflow_failure(
     assert result.failure["kind"] == "provider_rejected"
     assert not faults
     canonical = decode_transcript(service.transcript(anchor))
-    assert len(canonical) == 2
-    initial, notice = canonical
+    assert len(canonical) == 5
+    initial, *_, notice = canonical
     assert initial.position == 1
     assert notice.direction == "incoming" and notice.content.source == "runtime"
-    assert notice.position == 2
-    assert notice.content.result == {"failure": result.failure}
+    assert notice.position == 5
+    assert notice.content.result is not None
+    assert notice.content.result["failure"] == result.failure
+    assert "continuation" in notice.content.result
     assert all(not message.content.requests for message in canonical)
     assert all(message.content.correlation is None for message in canonical)
     assert (
@@ -439,7 +443,7 @@ def test_empty_native_completion_interrupts_without_ack_or_workflow_failure(
         )
         == 0
     )
-    assert len(requests) == 1
+    assert len(requests) == 4
     assert requests[0][1:] == project_native_messages((initial,))
     replay = project_native_messages(canonical)
     assert all(message.role == "user" for message in replay)
@@ -447,7 +451,7 @@ def test_empty_native_completion_interrupts_without_ack_or_workflow_failure(
         not message.tool_calls and message.tool_call_id is None for message in replay
     )
     invocations = service.chat.persistence.list(AgentInvocation, anchor.workspace_id)
-    assert len(invocations) == 1
+    assert len(invocations) == 4
     invocation = invocations[0]
     assert invocation.kind is AgentInvocationKind.MODEL
     assert invocation.state is AgentInvocationState.FAILED
@@ -456,7 +460,7 @@ def test_empty_native_completion_interrupts_without_ack_or_workflow_failure(
     assert invocation.request_messages
     if phase:
         child = service.lifecycle.get(anchor.workspace_id, anchor.schedule_id)
-        assert child is not None and child.status is SubAgentStatus.NEEDS_INPUT
+        assert child is not None and child.status is SubAgentStatus.RUNNING
         assert (
             service.chat.get_execution(anchor.workspace_id, "execution").state.value
             == "running"

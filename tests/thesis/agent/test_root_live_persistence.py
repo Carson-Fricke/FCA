@@ -167,6 +167,7 @@ def test_root_persists_envelope_and_results_before_next_dispatch(
     )
     service = Conversations(
         chat=chat,
+        spawn_thread=lambda _: None,
         provider=NativeSessionAdapter(provider),
         registry_factory=lambda context: registry,
     )
@@ -189,7 +190,7 @@ def test_root_persists_envelope_and_results_before_next_dispatch(
         assert result is None
         notice = durable[-1]
         assert notice.data is not None
-        assert notice.data["status"] == "interrupted"
+        assert notice.data["status"] == "continuing"
         assert isinstance(notice.data["failure"], Mapping)
         assert notice.data["failure"]["kind"] == "provider_unreachable"
         assert "root model TLS failed" in notice.body
@@ -240,6 +241,7 @@ def test_root_does_not_dispatch_when_envelope_persistence_fails(
     monkeypatch.setattr(chat, "create_message", fail_write)
     root = Conversations(
         chat=chat,
+        spawn_thread=lambda _: None,
         provider=NativeSessionAdapter(Provider(completion("Checking", _CALL))),
         registry_factory=lambda context: registry,
     ).root(_WORKSPACE, thread.chat_id)
@@ -325,6 +327,7 @@ def test_repeated_schema_failures_interrupt_and_new_operator_input_resets_budget
     )
     service = Conversations(
         chat=chat,
+        spawn_thread=lambda _: None,
         provider=NativeSessionAdapter(provider),
         registry_factory=lambda context: registry,
     )
@@ -434,6 +437,7 @@ def test_root_accepts_tool_result_without_optional_metadata() -> None:
     chat.send_message(_WORKSPACE, thread.chat_id, actor_id="operator", body="Check")
     root = Conversations(
         chat=chat,
+        spawn_thread=lambda _: None,
         provider=NativeSessionAdapter(
             Provider(completion("Checking", _CALL), completion("Finished"))
         ),

@@ -238,6 +238,7 @@ def _control(
 
     return ControlToolService(
         conversations=Conversations(
+            spawn_thread=lambda _: None,
             chat=kit.chat,
             store=store,
             lifecycle=SubAgentLifecycle(kit.chat, store=store),
@@ -265,6 +266,7 @@ def _runner(
     on_fault=None,
 ) -> Conversations:
     return Conversations(
+        spawn_thread=lambda _: None,
         chat=kit.chat,
         store=store,
         provider=NativeSessionAdapter(provider),
@@ -1314,6 +1316,14 @@ def test_discovery_transcript_replays_with_matching_tool_envelopes(
     ).run_node_turn(WORKSPACE, request.chat_id, discovery_node)
     node = store.get_sub_agent(WORKSPACE, discovery_node)
     assert node is not None and node.status is SubAgentStatus.NEEDS_INPUT
+
+    kit.conversations.answer(
+        WORKSPACE,
+        request.chat_id,
+        discovery_node,
+        body="Confirmed",
+        actor=AnsweringActor(request.requested_by),
+    )
 
     # The answered turn replays the conversation with valid tool envelopes:
     # every replayed tool reply follows the assistant tool-call that requested it.

@@ -129,6 +129,7 @@ class ModelCompletion:
     schema_version: Literal[1] = 1
     upstream_provider: str | None = None
     generation_id: str | None = None
+    finish_reason: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.content, str):
@@ -182,7 +183,7 @@ def parse_chat_completion(
     tool_calls = _parse_tool_calls(message.get("tool_calls"))
     if isinstance(content, str):
         text = content
-    elif content is None and tool_calls:
+    elif content is None:
         text = ""
     else:
         raise ProviderRejectedError("provider response did not contain text content")
@@ -204,6 +205,9 @@ def parse_chat_completion(
         if isinstance(data.get("provider"), str)
         else None,
         generation_id=data.get("id") if isinstance(data.get("id"), str) else None,
+        finish_reason=choice.get("finish_reason")
+        if isinstance(choice.get("finish_reason"), str)
+        else None,
     )
 
 

@@ -33,6 +33,7 @@ from thesis.workspaces.local import WorkspaceRepositoryError
 from thesis.workspaces.repository import WorkspaceGit, WorkspaceRepositoryProvider
 from thesis.workspaces.sketches import WorkspaceSketches
 from thesis_runtime.storage.ownership import assert_owned
+from thesis_runtime.tools.schema import render_violations, validate_arguments
 
 ProgramKind = Literal["study", "strategy", "indicator"]
 
@@ -66,6 +67,58 @@ _PARAMETER_KEYS = frozenset(
     {"type", "default", "minimum", "maximum", "levels", "description"}
 )
 _RESERVED_PARAMETER_NAMES = frozenset({"source", "source_path", "symbols"})
+PARAMETER_DECLARATION_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "description": "Map parameter names directly to declarations, not a JSON Schema root.",
+    "propertyNames": {
+        "pattern": PARAMETER_NAME_PATTERN,
+        "not": {
+            "anyOf": [
+                {"enum": sorted(_RESERVED_PARAMETER_NAMES)},
+                {"pattern": r"(_path|Path)$"},
+            ]
+        },
+    },
+    "additionalProperties": {
+        "type": "object",
+        "required": ["type", "default"],
+        "additionalProperties": False,
+        "properties": {
+            "type": {"enum": list(_PARAMETER_TYPES)},
+            "default": {"type": ["number", "boolean", "string"]},
+            "minimum": {"type": "number"},
+            "maximum": {"type": "number"},
+            "levels": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": True,
+                "items": {"type": "string", "minLength": 1},
+            },
+            "description": {"type": "string"},
+        },
+        "allOf": [
+            {
+                "if": {"properties": {"type": {"const": value_type}}},
+                "then": {"properties": {"default": {"type": value_type}}},
+            }
+            for value_type in _PARAMETER_TYPES
+        ]
+        + [
+            {
+                "if": {"properties": {"type": {"enum": ["boolean", "string"]}}},
+                "then": {
+                    "not": {
+                        "anyOf": [{"required": ["minimum"]}, {"required": ["maximum"]}]
+                    }
+                },
+            },
+            {
+                "if": {"not": {"properties": {"type": {"const": "string"}}}},
+                "then": {"not": {"required": ["levels"]}},
+            },
+        ],
+    },
+}
 _DATE_PATTERN = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
 PROGRAM_CONFIGURATION_SCHEMA: dict[str, object] = {
     "type": "object",
@@ -97,10 +150,12 @@ impl StudyProgram for AuthoredStudy {
 }
 export_study_program!(AuthoredStudy);
 """
-STRATEGY_TEMPLATE = """use harness_strategy_sdk::{export_strategy_program, MarketConsumer,
+STRATEGY_TEMPLATE = """use harness_strategy_sdk::{export_strategy_program, Fill, MarketConsumer,
     OrderSink, StrategyProgram, Subscription};
+use harness_strategy_sdk::building_blocks::FillLedger;
 use harness_strategy_sdk::serde_json::Value;
-struct AuthoredStrategy;
+use std::collections::BTreeMap;
+struct AuthoredStrategy { fills: BTreeMap<String, FillLedger> }
 impl MarketConsumer for AuthoredStrategy {
     type Context = OrderSink;
     fn subscriptions(&self) -> Vec<Subscription> {
@@ -108,7 +163,14 @@ impl MarketConsumer for AuthoredStrategy {
     }
 }
 impl StrategyProgram for AuthoredStrategy {
-    fn new(_: Value) -> Self { Self }
+    fn new(_: Value) -> Self { Self { fills: BTreeMap::new() } }
+    fn on_fill(&mut self, fill: &Fill) {
+        // Every partial fill changes inventory. Entry/exit decisions must use
+        // actual quantity, not assume the first fill completed the order.
+        self.fills.entry(fill.symbol.into())
+            .or_insert_with(|| FillLedger::new(fill.symbol))
+            .apply(fill).expect("invalid booked fill");
+    }
 }
 export_strategy_program!(AuthoredStrategy);
 """
@@ -2170,6 +2232,9 @@ impl Default for AuthoredIndicator {
             raise ProgramArtifactError("parameters must be a declaration object")
         if not declaration:
             return {}
+        misses = validate_arguments(PARAMETER_DECLARATION_SCHEMA, declaration)
+        if misses:
+            raise ProgramArtifactError(render_violations(misses))
         if kind != "strategy":
             raise ProgramArtifactError("only strategies declare parameters")
         normalized: dict[str, dict[str, object]] = {}

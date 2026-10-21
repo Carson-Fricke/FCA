@@ -386,7 +386,18 @@ def test_reasoning_is_durable_and_streamed_before_provider_finishes(
         assert receipt.status_code == 200
         unsubscribe = notifications.subscribe("workspace", root.chat_id)
         version = notifications.version("workspace", root.chat_id)
-        worker = Thread(target=queued.pop(), daemon=True)
+        # Observe one bounded attempt. The serialized worker now correctly keeps
+        # retrying an unavailable provider; this test inspects streaming evidence,
+        # while dedicated recovery tests execute the scheduled continuation.
+        errors = []
+
+        def run_slice():
+            try:
+                conversations.run_node_turn("workspace", root.chat_id, anchor_id)
+            except Exception as error:
+                errors.append(error)
+
+        worker = Thread(target=run_slice, daemon=True)
         worker.start()
         try:
             assert emitted.wait(1)
@@ -438,6 +449,10 @@ def test_reasoning_is_durable_and_streamed_before_provider_finishes(
             unsubscribe()
             notifications.close()
         assert not worker.is_alive()
+        if outcome != "output-write-failure":
+            assert errors == []
+        elif scope == "root":
+            assert errors
         assert closed.is_set()
         assert dispatched == []
         final = client.get(base + "/timeline?after=0", headers=headers).json()["items"]

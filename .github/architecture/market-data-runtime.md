@@ -14,6 +14,15 @@ The [publication release record](../verification/publication-release-2026-10-17.
 and [earlier rollout](../verification/ingestion-fleet-rollout-2026-10-15.md) preserve
 historical deployment and performance evidence.
 
+Harness execution metadata uses ETag compare-and-swap, independent of market
+publication leases. Conditional mutations re-evaluate current state after a
+version conflict, including recognizing an operation's own committed token after
+the SDK retried a lost acknowledgement. A dedicated renewal thread retains acknowledged fleet/job
+deadlines and retries storage failures; an independent process watchdog enforces
+token loss or expiry even during blocked storage I/O. Metadata RPCs are bounded
+and failures retain operation, resource, category and remote status for diagnosis.
+These changes do not alter the durable job document or replay interrupted jobs.
+
 ## Boundaries
 
 | Capability | Owner | Responsibility |

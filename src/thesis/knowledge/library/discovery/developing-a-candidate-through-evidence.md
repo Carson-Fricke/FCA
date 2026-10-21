@@ -1,13 +1,13 @@
 ---
 id: developing-a-candidate-through-evidence
 title: Developing a candidate through evidence
-version: 3
+version: 5
 created: 2026-10-11
-retrieved: 2026-10-13
+retrieved: 2026-10-20
 source:
   url: https://github.com/Carson-Fricke/FCA
   publisher: FCA Thesis
-  content_hash: 016960a0fd551d5e83cabb9c429beb28ccc556732cd52b0539b46bf35a2f3004
+  content_hash: 979f68be6ea1bc66532015c63d1acbb559bfe0b52f016ac7df558a565d9ac4c2
 tags:
   - discovery
   - research-loop
@@ -37,8 +37,13 @@ trust:
 # Developing a candidate through evidence
 
 The research loop is orient, construct, explore, assess and revise. It is model
-directed, not a deterministic checklist. Root discovery owns the current sketch,
-operator conversation and triage; branches own bounded independent investigations.
+directed, not a deterministic checklist. Root discovery owns directions, allocation,
+the current sketch, operator conversation and integration. It delegates most
+substantive implementation and testing to bounded independent research workflows.
+The first construction is provisional: compare credible structural alternatives
+when they could change the decision and justify substantial concentration through
+evidence. No fixed strategy or branch quota is required. After meaningful results,
+explain what was learned, what changes and the next useful experiment.
 
 A worked example: start with daily trend context, wavelet structure, an intraday
 pullback trigger and a time/structure exit. Implement the composed strategy.
@@ -47,11 +52,13 @@ variants, then investigate whether a useful region survives higher costs and
 different sessions. Compare feature ablations on suitable opportunity sets.
 A weak unconditional return is not a veto over this composed policy.
 
-A single critic checks both fidelity (does the test answer the original question,
-and does the conclusion follow?) and correctness (source, timing, costs, signs,
-support and statistical estimand). It reconstructs the policy before checking old
-repairs. The judge independently resolves material disputes and chooses revision,
-further investigation or a scoped return. No loop is owed merely for agreement.
+Independent implementation, experimental-validity and goal-alignment critics inspect
+the original operator request, branch brief, actual construction and evidence before
+checking old repairs. Material findings and verified repairs carry concrete calculations,
+counterexamples, code traces or executed checks. A pure join preserves every report;
+one judge independently resolves material disputes and chooses revision, further
+investigation or a scoped return. Narrow repairs can receive focused verification;
+substantive changes receive the full specialist review. No loop is owed merely for agreement.
 
 Operator steering changes the CURRENT question. If the operator asks to prioritize
 failed pullbacks while jobs run, retain those jobs under their original question
@@ -61,13 +68,35 @@ plan solely because it was announced. Stop/replacement instructions take priorit
 An empirical suggestion is a hypothesis, while an instruction directs work.
 
 Launch complementary branches concurrently when useful; triage each asynchronous
-return without awaiting all others. Only discovery edits the shared sketch. Preserve
+return without awaiting all others. Distinguish hard constraints and their origins
+from provisional choices; allow branch-owned implementations rather than freezing
+the first prototype. Delegate different mechanisms when useful, not only tuning
+dimensions of one implementation. Only discovery edits the shared sketch. Preserve
 failures, technical repairs, scientific alternatives, conditional null limitations
 and pending work. Hand off sketch.prototype with the exact tested strategy version,
 selected parameters, candidate job and search evidence. Later phases refine this
 prototype, retain its selection history and perform formal validation.
 
-Propose the current integrated revision and call request_workflow_input in the same
-response; complete only after operator acceptance. A new research idea is not acceptance.
+Discovery and its research branches progress autonomously. Explain the integrated
+revision and complete when justified; routine research and technical recovery do not
+require operator acceptance. Honor explicit pause/review requests. Later hypothesis
+phases retain their mandatory approval protocols.
 No candidate is an honest possible outcome, but omitted interactions, impossible
 sample floors and budget exhaustion are not evidence that the feature family fails.
+
+
+Review working code and evidence, not only plans. Build a small informative prototype
+before committing to expensive search. Return through the existing review loop when
+consequential mechanics need verification; no extra standing review phase is needed.
+An implementation critic names the exact version and distinguishes design-only review
+from verified behavior. Trace definitions to code, multiple partial fills, remaining
+inventory and return units. Use tested SDK helpers for common mechanics and small
+independent examples for custom math. Compilation alone does not verify correctness.
+
+A diagnostic branch need only answer its representation question; trading branches
+own trading policies. Do not invent universal significance hurdles or require all
+controls before an informative implementation exists. When a gate produces no eligible
+observations, inspect its values and implementation before treating the result as
+adverse strategy evidence. Size follow-ups using measured execution cost, not the
+maximum budget. Technical interruptions go to supervision for redirection, not to
+the operator for a routine continue message.

@@ -226,6 +226,7 @@ pub(crate) fn data_error_message(error: &DataError) -> String {
         DataError::Protocol(_) => "ProtocolError",
         DataError::NotFound(_) => "NotFoundError",
         DataError::Conflict(_) => "ConflictError",
+        DataError::Http { .. } => "HttpError",
         DataError::Io(_) => "IoError",
     };
     detail_message(kind, &error.to_string())

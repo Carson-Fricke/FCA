@@ -186,6 +186,8 @@ class ModelInvocation:
         }
         if isinstance(error, ProviderRejectedError):
             failure["status"] = error.status
+            if error.diagnostics:
+                failure["provider_metadata"] = error.diagnostics
             if error.retry_after is not None:
                 failure["retry_after"] = error.retry_after
         if isinstance(error, (ProviderRejectedError, ProviderUnreachableError)):

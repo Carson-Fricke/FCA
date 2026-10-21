@@ -12,13 +12,16 @@ from thesis_runtime.tools.schema import render_violations, validate_arguments
 from thesis_runtime.workflows.builder import WorkflowBuilder
 from thesis_runtime.workflows.extensions import RunRequest, StateSnapshot
 from thesis_runtime.workflows.phase import (
+    DeterministicPhase,
     OneShotPhase,
+    SplitPhase,
     TerminalPhase,
 )
 from thesis_runtime.workflows.workflow import Workflow, WorkflowDoctrine, WorkflowPorts
 
 from .contracts import (
     LAUNCH_SCHEMA,
+    REVIEW_PHASES,
     TRANSITIONS,
     VERSION,
     WORKFLOW_ID,
@@ -79,25 +82,43 @@ def accepted_state(history: list[Mapping[str, Any]]) -> dict[str, Any]:
             for repair in completion["proposal"]["repairs"]:
                 if repair["issueId"] in state["issues"]:
                     state["issues"][repair["issueId"]]["response"] = repair["response"]
-            state.pop("critique", None)
+            state.pop("critiques", None)
             state["reviewSubject"] = "proposal"
         elif source == "investigation":
             state["investigations"].append(completion["investigation"])
             state["reviewSubject"] = "investigation"
             state["attempts"].extend(completion["investigation"]["attempts"])
             state["executions"] += len(completion["investigation"]["attempts"])
-        elif source == "critique":
-            state["critique"] = completion["critique"]
-            for issue_id in completion["critique"]["verifiedRepairs"]:
-                if issue_id in state["issues"]:
-                    state["issues"][issue_id]["status"] = "verified"
-            for issue in completion["critique"]["issues"]:
-                state["issues"][issue["issueId"]] = {
-                    **state["issues"].get(issue["issueId"], {}),
-                    **issue,
-                    "status": "open",
-                    "handoff": handoff,
-                }
+            state.pop("critiques", None)
+        elif source in ("collect_critiques", "focused_critique"):
+            reports = (
+                completion["critiques"]
+                if source == "collect_critiques"
+                else {"focused": completion["critique"]}
+            )
+            state["critiques"] = reports
+            open_ids = {
+                issue["issueId"]
+                for report in reports.values()
+                for issue in report["issues"]
+            }
+            for reviewer, report in reports.items():
+                for repair in report["verifiedRepairs"]:
+                    if repair["issueId"] in state["issues"]:
+                        carried = state["issues"][repair["issueId"]]
+                        carried["verification"] = repair["evidence"]
+                        # Preserve a current objection for adjudication regardless
+                        # of specialist iteration order; collection is not a vote.
+                        if repair["issueId"] not in open_ids:
+                            carried["status"] = "verified"
+                for issue in report["issues"]:
+                    state["issues"][issue["issueId"]] = {
+                        **state["issues"].get(issue["issueId"], {}),
+                        **issue,
+                        "reviewer": reviewer,
+                        "status": "open",
+                        "handoff": handoff,
+                    }
         elif source == "adjudicate":
             state["adjudication"] = completion["adjudication"]
             for resolution in completion["adjudication"]["resolutions"]:
@@ -201,6 +222,18 @@ class ResearchExtension:
                 completion_schema(payload["phase"]), payload["completion"]
             )
             return {"failure": render_violations(errors) if errors else None}
+        if operation == "execute":
+            # Pure collection: keep all independent findings, never select a verdict.
+            branches = payload["handoff"]["completion"]["branches"]
+            return {
+                "completion": {
+                    "target": "adjudicate",
+                    "intentEpoch": payload["request"]["intentEpoch"],
+                    "critiques": {
+                        name: branches[name]["critique"] for name in REVIEW_PHASES
+                    },
+                }
+            }
         request = payload["request"]
         state = accepted_state(payload["history"])
         state["phase"] = payload["phase"]
@@ -221,6 +254,8 @@ class ResearchExtension:
                         INSTRUCTIONS[state["phase"]],
                         mandate_section(ResearchMandate.from_dict(request["mandate"])),
                         f"Branch execution ID: {request['executionId']}",
+                        "Original operator request (runtime-preserved; branch choices may not replace it):\n"
+                        + json.dumps(request["operatorRequest"], ensure_ascii=False),
                         "Current phase context (excerpts; retrieve full accepted handoffs):\n"
                         + json.dumps(
                             phase_context(request["brief"], payload["history"], state),
@@ -241,6 +276,24 @@ def build_research_investigation_workflow(
         WORKFLOW_ID, version=VERSION, title="Research investigation"
     )
     for phase in TRANSITIONS:
+        if phase == "critique":
+            builder.phase(
+                SplitPhase(
+                    phase=phase, branches=REVIEW_PHASES, join="collect_critiques"
+                )
+            )
+            continue
+        if phase == "collect_critiques":
+            builder.phase(
+                DeterministicPhase(
+                    phase=phase,
+                    contract="execute",
+                    validate="validate",
+                    completion_schema=completion_schema(phase),
+                    on_complete="adjudicate",
+                )
+            )
+            continue
         if phase not in INSTRUCTIONS:
             builder.phase(
                 TerminalPhase(
@@ -271,7 +324,9 @@ def build_research_investigation_workflow(
             conversational_phases=frozenset(),
             orchestrators={
                 phase: (
-                    "critique" if phase in ("critique", "adjudicate") else "research",
+                    "critique"
+                    if phase.endswith("critique") or phase == "adjudicate"
+                    else "research",
                     f"Research {phase}",
                 )
                 for phase in INSTRUCTIONS

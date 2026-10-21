@@ -1519,8 +1519,8 @@ def test_parameter_declaration_update_clear_and_unchanged(
         "strategy",
         "alpha",
         expected_version=cast(str, first["version"]),
-        expected="struct AuthoredStrategy;",
-        replacement="struct AuthoredStrategy { }",
+        expected="struct AuthoredStrategy {",
+        replacement="struct AuthoredStrategy /* revised */ {",
     )
     assert (
         service.load("workspace-one", "strategy", "alpha")["parameters"] == DECLARATION
@@ -1705,8 +1705,8 @@ def test_run_batch_pins_one_snapshot_for_every_point(
             "strategy",
             "alpha",
             expected_version=cast(str, latest["version"]),
-            expected="struct AuthoredStrategy;",
-            replacement="struct AuthoredStrategy; // changed mid-batch",
+            expected="struct AuthoredStrategy {",
+            replacement="struct AuthoredStrategy /* changed mid-batch */ {",
         )
 
     harness.during = mutate

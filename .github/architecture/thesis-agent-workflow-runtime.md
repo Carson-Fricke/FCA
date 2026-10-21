@@ -241,7 +241,10 @@ This is agent guidance, not an engine gate or proof of alpha or model compliance
 ### Bounded research investigations
 
 `thesis/extensions/workflows/research_investigation/` implements workflow
-`research-investigation@2.0.0`. Discovery's skill 1.10.0 prompts recurring use and
+`research-investigation@3.0.0`. Discovery's skill 1.11.0 prompts default delegation
+of substantive implementation/testing while retaining directions, allocation and
+integration. Constructions remain provisional, structural alternatives have no fixed
+quota, and substantial concentration is justified through evidence. It prompts
 concurrent delegation of complementary independent directions, then asynchronous
 triage against the current construction and operator input. The hypothesis workflow
 retains its existing phases. Each branch has its own execution and workflow node,
@@ -249,10 +252,13 @@ parented to the launching discovery conversation, using the unchanged generic ho
 
 | Phase | Executor | Accepted successors |
 | --- | --- | --- |
-| `proposal` | Model designs/repairs an investigation of the original brief. | `critique` |
-| `critique` | Independent model context reviews design or actual implementation/results. | `adjudicate` |
+| `proposal` | Model designs/repairs an investigation of the original intent. | `critique`, `focused_critique` |
+| `critique` | Structural split, no model; three independent specialist branches. | Specialist critiques |
+| `implementation_critique`, `experimental_critique`, `alignment_critique` | Independent model contexts check implementation, experimental validity and goal alignment respectively. | `collect_critiques` |
+| `collect_critiques` | Pure deterministic collection preserving each report; no verdict. | `adjudicate` |
+| `focused_critique` | Model checks narrow repairs requested by adjudication without restarting all specialists. | `adjudicate` |
 | `adjudicate` | Model resolves objections and chooses a scoped next action. | `proposal`, `investigation`, `completed` |
-| `investigation` | Model develops training strategies, searches parameters and checks robustness with targeted diagnostics and artifacts. | `critique` |
+| `investigation` | Model develops training strategies, searches parameters and checks robustness with targeted diagnostics and artifacts. | `critique`, `focused_critique` |
 | `completed`, `failed` | Terminal metadata; no model. | None |
 
 The declared revision/execution caps bound resource use, not scientific decisions.
@@ -264,8 +270,16 @@ shared-sketch mutation, forward-window or recursive launch capabilities. Strateg
 use the existing retained submission/acknowledgement path. executionBudget counts
 each batch point, null replicate and technical repair; scientific search breadth
 is separately recorded by the model. The same cap bounds investigation entries,
-including blocked no-job rounds. Single Critique checks both strategy/decision
-fidelity and source/math/timing correctness before considering its repair ledger.
+including blocked no-job rounds. Specialist critiques inspect claims before the
+repair ledger and require concrete evidence on issues and verified repairs. Issue
+IDs are specialist-prefixed; the join collects reports without voting or selecting
+a scientific outcome. Existing split/join scopes hide current sibling reports until
+collection; the generic host is unchanged. The adjudicator owns reconciliation and
+may request focused verification for narrow repairs. The runtime snapshots the
+original operator trigger message independently of the discovery-authored brief;
+phase seeds and handoff zero expose this `operatorRequest`. Branches may extend or
+replace provisional implementations within scope. No new scientific/operator gate
+or fixed experimentation checklist is introduced.
 
 Phase seeds carry bounded brief/active-issue excerpts and accepted handoff indices,
 not accumulated phase bodies. `read_research_investigations` provides bounded reads
@@ -355,9 +369,11 @@ complete crash recovery or remote deployment verification.
 Argument-schema feedback reports concise paths and expected/received types,
 including failures nested in schema unions. Three consecutive tool rounds with
 the same structural violations interrupt the turn after persisting their results;
-operator input or execution progress resets that repair budget. This bounds
-repeated malformed calls without determining research choices or completing a
-workflow phase. Unexpected root runtime faults are logged and recorded as
+operator input or execution progress resets that slice-local repair budget. The
+conversation service durably schedules a backed-off continuation and notifies the
+nearest supervising conversation; it does not request human input. The 64-request
+execution slice yields into another durable turn with no lifetime iteration cap.
+These mechanics do not choose research directions or complete workflow phases. Unexpected root runtime faults are logged and recorded as
 interruptions when persistence is available, then propagated so durable workers
 cannot mark the failed turn completed.
 
@@ -567,17 +583,23 @@ those errors; it does not guess infrastructure failures from exception names.
 `sessions/recovery.py` supplies three cooperative backoff delays (1, 2, 4 seconds)
 for `AgentSession`. Transport interruptions, premature SSE EOF, HTTP 408/429/5xx
 and explicitly transient upstream stream failures can continue automatically.
-The parser retains numeric SSE error codes; 400/401/402/403 and malformed provider
-output/local protocol faults remain permanent. OpenRouter's
+The parser retains numeric SSE error codes and actual finish reasons. Empty or
+truncated completions retain usage/generation metadata and receive short recovery.
+400/401/402/403 and malformed output/local protocol faults bypass short retries
+and yield to backed-off continuation with supervisory notification. OpenRouter's
 [documented error contract](https://github.com/OpenRouterTeam/docs/blob/main/api_reference/errors-and-debugging.mdx)
 can report failures inside a successful HTTP stream. Numeric/date Retry-After is
-honored up to 60 seconds; longer hints stop recovery rather than retrying early.
+honored up to 60 seconds within a slice; longer hints are retained as the next
+continuation resume time rather than retried early.
 Successful model requests and new operator input reset consecutive-failure count.
 
 Each failed model invocation retains its original audit and FAILED state. Received
 reasoning/text is sealed as canonical outgoing partial evidence with
 `result.interrupted=true` and `result.failure`, without executable tool requests.
-No empty outgoing message is invented when nothing was received. The shared pure
+No empty outgoing message is invented when nothing was received. Large failed
+outputs remain complete canonically but project labeled bounded excerpts with
+message references, so reasoning-only failures cannot poison the next context.
+The current audit projection is native-session-v3. The shared pure
 provider projection distinguishes provider interruption from operator steering.
 Recovery notices enter the singular incoming writer as neutral runtime evidence,
 never fabricated operator input. Every recovery is a separately audited fresh model
@@ -588,8 +610,11 @@ partial output or recovery notice propagates and cannot start another model requ
 
 Backoff checks cancellation, steering and ownership; lost ownership escapes without
 further dispatch. Retry exhaustion returns the existing interruption outcome and
-operator-facing needs-input state, not a workflow failure. Workflow phases and
-scientific decisions are unchanged. A process/worker crash is still an unknown
+durable canonical continuation, not a needs-input state or workflow failure.
+The conversation service preserves a resume time and failure count, yields to
+steering/cancellation and schedules through the existing intake/work path.
+Explicit agent approval requests still pause; later hypothesis-phase approval
+protocols are unchanged. Only discovery and its research children drop routine approval. A process/worker crash is still an unknown
 execution: existing fenced recovery records interruption without automatic replay.
 Subsequent authorized execution rehydrates the same canonical evidence and jobs.
 No retry queue, alternative inbox or tool/submission replay path is introduced.
@@ -1317,51 +1342,23 @@ schema construction failure. It MUST return `remain` with violations and leave
 the phase active so the agent can call more tools, revise its evidence, request
 operator input, or submit again.
 
-### Nested Repair Budgets
+### Bounded execution slices and autonomous repair
 
-The following is the accepted design baseline, not current enforcement. The live
-completion path returns in-turn validation feedback but has no runtime repair-turn
-counter or compiler-repair cap. `SubAgentBudget` fields alone do not enforce these
-limits; `prompts/sdk.py` asks for operator input after three unsuccessful compiler
-repairs. The session retains its independent tool-iteration safety ceiling.
+The session bounds each execution slice, not the lifetime of an agent. Reaching
+64 iterations returns yielded and the conversation service persists a runnable
+continuation through the canonical incoming writer. Three identical schema-failure
+rounds and exhausted provider/catalog recovery also retain continuation, with
+cooperative increasing backoff and a supervisor notification. Pending inputs are
+not ACKed by failures, delays or scheduling. Actual completed tool calls and
+unknown-outcome submissions are never automatically replayed.
 
-Each agent turn permits three failed completion-contract construction attempts.
-The result of each attempt is returned to the model in the same agent turn. An
-accepted request ends the repair sequence.
-
-If an agent turn ends without an accepted request:
-
-- a conversation phase that has produced ordinary agent prose yields to the
-  operator and enters `needs_input`;
-- a one-shot phase receives a durable repair turn; and
-- either phase receives a durable repair turn if its construction-attempt
-  budget was exhausted.
-
-Before a conversation phase enters `needs_input`, the session MUST check for an
-unconsumed operator message that arrived while the turn was running. If one
-exists, the session schedules the next agent turn with that message instead of
-emitting a redundant input request.
-
-Each phase permits two repair turns after its initial turn. Each repair turn
-again permits three construction attempts. Therefore an agent can make at most
-nine failed construction submissions across the initial turn and two repair
-turns before mandatory operator escalation.
-
-After two unsuccessful repair turns, the runtime MUST enter `needs_input` and
-present the accumulated construction or acceptance shortfall to the operator.
-Before pausing, the runtime MUST give the agent one control-only escalation
-invocation in which it can author the operator request through
-`request_operator_input`. If model generation is unavailable, the raw durable
-shortfall is the fallback; deterministic code MUST NOT invent conversational
-wording.
-The operator response resumes the same durable sub-agent and phase attempt;
-it starts a new, explicitly numbered repair epoch with a fresh initial turn and
-two repair turns. Repair-epoch counters and budgets MUST be durable.
-
-The runtime SHOULD configure high execution and ordinary tool-iteration
-budgets during the initial implementation, but MUST retain a hard administrative
-ceiling, cancellation path, and idempotent recovery. It MUST NOT use an
-unbounded loop.
+Source/compiler and research repairs remain agent decisions. Discovery delegates
+most implementation/testing to research branches and redirects scoped blockers.
+Working implementations can return through the existing review loop before large
+searches; a plan review does not verify later code. Runtime recovery does not
+choose scientific outcomes. Discovery progresses autonomously, while later phases
+retain their mandatory conversational approval protocols. Explicit cancellation,
+terminal state, ownership and persistence fences remain authoritative.
 
 ## Deterministic Phase Semantics
 

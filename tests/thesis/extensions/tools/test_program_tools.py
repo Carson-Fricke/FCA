@@ -682,3 +682,45 @@ def test_job_retention_binds_the_trusted_context_before_dispatch() -> None:
     assert retained == [(context, "job-opaque", "run_study", {"programId": "alpha"})]
     settle("not_started", "refused")
     assert settled == [("not_started", "refused")]
+
+
+def test_advertised_parameter_declaration_rejects_wrong_shapes_and_reports_nested_repair_path():
+    from thesis_runtime.tools.schema import validate_arguments
+
+    tools = program_registered_tools(
+        cast(WorkspacePrograms, Service()),
+        ToolContext("workspace", "chat", "conversation", "actor"),
+    )
+    tool = next(t for t in tools if t.descriptor["name"] == "author_strategy")
+    base = {"program_id": "alpha", "template": "basic", "configuration": CONFIG}
+    errors = validate_arguments(
+        tool.input_schema,
+        {
+            **base,
+            "parameter_declaration": {
+                "lookback": {"type": "integer", "default": "wrong"}
+            },
+        },
+    )
+    assert any(
+        e.path == "parameter_declaration.lookback.default" and "integer" in e.message
+        for e in errors
+    )
+    assert validate_arguments(
+        tool.input_schema,
+        {**base, "parameter_declaration": {"type": "object", "properties": {}}},
+    )
+    assert not validate_arguments(
+        tool.input_schema,
+        {
+            **base,
+            "parameter_declaration": {
+                "lookback": {"type": "integer", "default": 20, "minimum": 2},
+                "mode": {
+                    "type": "string",
+                    "default": "slow",
+                    "levels": ["slow", "fast"],
+                },
+            },
+        },
+    )

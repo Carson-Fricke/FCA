@@ -15,6 +15,7 @@ from thesis.workspaces.programs import (
     MAX_NULL_BLOCK_SIZE,
     MAX_READ_CHARS,
     NULL_TRANSFORM_MODES,
+    PARAMETER_DECLARATION_SCHEMA,
     PROGRAM_CONFIGURATION_SCHEMA,
     PROGRAM_ID_PATTERN,
     JobRetention,
@@ -143,7 +144,7 @@ def program_registered_tools(
                     "pattern": r"^[A-Za-z_][A-Za-z0-9_]*$",
                 }
             elif kind == "strategy":
-                properties["parameter_declaration"] = {"type": "object"}
+                properties["parameter_declaration"] = PARAMETER_DECLARATION_SCHEMA
         elif operation == "update":
             properties.update(
                 {
@@ -159,7 +160,7 @@ def program_registered_tools(
             )
             required.append("expected_version")
             if kind == "strategy":
-                properties["parameter_declaration"] = {"type": "object"}
+                properties["parameter_declaration"] = PARAMETER_DECLARATION_SCHEMA
         elif operation == "read":
             properties.update(
                 {

@@ -5,7 +5,7 @@ FCA model routing, skills and harness/domain collaborators. Generic sessions, co
 - `__init__.py`: Policy-driven Thesis agent routing, context, skills, and subagents.
 - `context.py`: Precedence-aware prompt construction with explicit data boundaries.
 - `harness_tools.py`: Harness MCP tool provider for the Thesis agent.
-- `hypothesis_skills.py`: Versioned per-phase skills, including discovery's constructive research loop and conversational steering; formal model creation is explicitly phase-scoped.
+- `hypothesis_skills.py`: Versioned per-phase skills, including discovery's research-lead ownership, default delegation of implementation/testing, provisional constructions and evidence-driven adaptation; formal model creation is explicitly phase-scoped.
 - `operations.py`: CLI-equivalent workspace operations facade over composed services.
 - `residency.py`: Workspace-resident agent binding with durable session records.
 - `router.py`: Policy-driven model-role routing and invocation provenance.

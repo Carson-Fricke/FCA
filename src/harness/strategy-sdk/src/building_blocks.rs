@@ -2,6 +2,188 @@
 //! publish timing-bearing outputs; these functions never read market data.
 use std::collections::VecDeque;
 
+use crate::{Decimal, Fill};
+
+/// Exact, single-instrument fill accounting. Every partial fill changes inventory.
+/// This is an observation ledger, not an order manager: submission is not a fill,
+/// and a first exit fill is not evidence that the position is flat. Fees may be
+/// negative (rebates). Keep one ledger per instrument, including across sessions.
+/// Cash flows use price * quantity; apply an explicit contract multiplier outside
+/// this helper for instruments whose fill prices require one.
+pub struct FillLedger {
+    symbol: String,
+    quantity: Decimal,
+    cash: Decimal,
+    fees: Decimal,
+    fills: std::collections::BTreeMap<String, (String, String, Decimal, Decimal, Decimal)>,
+}
+
+impl FillLedger {
+    /// Start an empty ledger for an exact instrument identity.
+    pub fn new(symbol: &str) -> Self {
+        Self {
+            symbol: symbol.into(),
+            quantity: Decimal::ZERO,
+            cash: Decimal::ZERO,
+            fees: Decimal::ZERO,
+            fills: std::collections::BTreeMap::new(),
+        }
+    }
+
+    /// Apply one fill exactly once; return false for an identical redelivery.
+    /// # Errors
+    /// Reject invalid fills and conflicting identities without changing state.
+    pub fn apply(&mut self, fill: &Fill<'_>) -> Result<bool, String> {
+        if fill.symbol != self.symbol
+            || fill.fill_id.is_empty()
+            || !matches!(fill.side, "buy" | "sell")
+            || fill.quantity <= Decimal::ZERO
+            || fill.price <= Decimal::ZERO
+        {
+            return Err(
+                "fill requires matching symbol, identity, buy/sell, positive quantity and price"
+                    .into(),
+            );
+        }
+        let record = (
+            fill.order_id.into(),
+            fill.side.into(),
+            fill.quantity,
+            fill.price,
+            fill.fee,
+        );
+        if let Some(previous) = self.fills.get(fill.fill_id) {
+            return if previous == &record {
+                Ok(false)
+            } else {
+                Err("conflicting fill identity".into())
+            };
+        }
+        let signed = fill.signed_quantity();
+        self.quantity += signed;
+        self.cash -= signed * fill.price;
+        self.fees += fill.fee;
+        self.fills.insert(fill.fill_id.into(), record);
+        Ok(true)
+    }
+
+    /// Actual signed filled inventory; zero alone establishes flatness.
+    pub fn quantity(&self) -> Decimal {
+        self.quantity
+    }
+    /// Signed cash from all fills, before fees. This is not realized P&L while open.
+    pub fn cash_flow(&self) -> Decimal {
+        self.cash
+    }
+    /// Accumulated actual fees, including rebates.
+    pub fn fees(&self) -> Decimal {
+        self.fees
+    }
+    /// Total filled quantity for an order, across all its partial fills.
+    pub fn filled_quantity(&self, order_id: &str) -> Decimal {
+        self.fills
+            .values()
+            .filter(|record| record.0 == order_id)
+            .fold(Decimal::ZERO, |sum, record| sum + record.2)
+    }
+    /// Marked P&L from fills, inventory and fees; not a return or a closed-trade metric.
+    /// # Errors
+    /// Reject a nonpositive mark.
+    pub fn net_pnl(&self, mark: Decimal) -> Result<Decimal, String> {
+        if mark <= Decimal::ZERO {
+            return Err("mark must be positive".into());
+        }
+        Ok(self.cash + self.quantity * mark - self.fees)
+    }
+}
+
+/// Convert cash P&L to basis points of positive entry notional, never price alone.
+/// Callers provide aggregate filled entry quantity and its quantity-weighted price.
+/// # Errors
+/// Reject zero quantity and nonpositive price; use an explicit multiplier for contracts.
+pub fn cash_return_bps(
+    pnl: Decimal,
+    entry_quantity: Decimal,
+    entry_price: Decimal,
+) -> Result<f64, String> {
+    if entry_quantity == Decimal::ZERO || entry_price <= Decimal::ZERO {
+        return Err("return requires nonzero filled quantity and positive entry price".into());
+    }
+    Ok((pnl / (entry_quantity.abs() * entry_price)).to_f64() * 10_000.0)
+}
+
+/// Nearest-rank empirical quantile: rank ceil(q*n), clamped to 1..n.
+/// Supply only observations available at the decision; fitting/freeze policy is
+/// caller-owned. A quantile rank is not an absolute feature threshold.
+/// # Errors
+/// Reject empty/nonfinite samples or a probability outside [0,1].
+pub fn empirical_quantile(values: &[f64], q: f64) -> Result<f64, String> {
+    if values.is_empty()
+        || values.iter().any(|x| !x.is_finite())
+        || !q.is_finite()
+        || !(0.0..=1.0).contains(&q)
+    {
+        return Err("quantile requires finite observations and probability in [0,1]".into());
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let rank = (q * sorted.len() as f64).ceil().max(1.0) as usize;
+    Ok(sorted[rank - 1])
+}
+
+/// OLS slope of log prices against equally spaced bar indices, in bps per bar.
+/// This uses every observation, not just the endpoints. Callers own availability.
+/// # Errors
+/// Reject fewer than two finite positive prices.
+pub fn log_price_slope_bps(prices: &[f64]) -> Result<f64, String> {
+    if prices.len() < 2 || prices.iter().any(|p| !p.is_finite() || *p <= 0.0) {
+        return Err("slope requires at least two finite positive prices".into());
+    }
+    let center = (prices.len() - 1) as f64 / 2.0;
+    let mut numerator = 0.0;
+    let mut denominator = 0.0;
+    for (i, price) in prices.iter().enumerate() {
+        let x = i as f64 - center;
+        numerator += x * price.ln();
+        denominator += x * x;
+    }
+    Ok(10_000.0 * numerator / denominator)
+}
+
+/// Ratio of expected orthonormal Haar detail energies for an iid-increment
+/// random walk: E_s=(window/s)*(s*s+2)/12, for supports s=2,4,...,window.
+/// Sum supports >= coarse_support in the numerator. This is a ratio of expected
+/// energies, not the expected sample ratio and not an estimated market regime.
+/// # Errors
+/// Require power-of-two window/support with 2 <= support <= window.
+pub fn haar_random_walk_energy_share(window: usize, coarse_support: usize) -> Result<f64, String> {
+    if !window.is_power_of_two()
+        || !coarse_support.is_power_of_two()
+        || coarse_support < 2
+        || coarse_support > window
+    {
+        return Err(
+            "Haar anchor requires power-of-two window and support, 2 <= support <= window".into(),
+        );
+    }
+    let mut total = 0.0;
+    let mut coarse = 0.0;
+    let mut support = 2;
+    loop {
+        let s = support as f64;
+        let energy = (window as f64 / s) * (s * s + 2.0) / 12.0;
+        total += energy;
+        if support >= coarse_support {
+            coarse += energy;
+        }
+        if support == window {
+            break;
+        }
+        support *= 2;
+    }
+    Ok(coarse / total)
+}
+
 /// Trailing EMA, initialized from the first observation; warm-up remains caller-declared.
 pub struct Ema {
     alpha: f64,

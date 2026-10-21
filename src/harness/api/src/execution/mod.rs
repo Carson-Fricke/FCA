@@ -3,6 +3,7 @@
 pub mod backend;
 pub mod dispatch;
 pub mod launch;
+pub mod renewal;
 pub mod store;
 pub mod validation;
 pub mod worker;

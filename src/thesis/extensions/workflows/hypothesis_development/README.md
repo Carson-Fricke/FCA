@@ -3,7 +3,8 @@
 The concrete FCA research workflow. Its endpoint owns native domain state, services and phase behavior; DevelopmentActivities supplies scoped effects without exposing the host engine.
 
 Runtime contract 5.0.0 uses the generic fixed graph projection with a singleton
-frontier. The phase flow, prompts and tool policies remain unchanged.
+frontier. Its phase flow and tool policies are unchanged; discovery prompts make
+research direction/integration ownership and default delegated implementation explicit.
 
 Subdirectories: `composers/`, `contracts/`, `phases/`, `prompts/`. Each documents its local boundary.
 
@@ -27,7 +28,14 @@ Subdirectories: `composers/`, `contracts/`, `phases/`, `prompts/`. Each document
 - `spec.py`: Assemble the hypothesis-development workflow specification and object.
 - `state.py`: Workflow state and outcome records.
 
-Discovery develops executable training prototypes with parameter/interaction search
-and suitable robustness evidence; formal falsification and forward validation remain
+Discovery orchestrates development of executable training prototypes through bounded
+research-investigation workflows, with parameter/interaction and structural exploration
+and evidence-driven adaptation. Formal falsification and forward validation remain
 later phases. Sketch.prototype retains the exact tested policy, parameters and search
-references. The single research critic checks strategy/decision fidelity and correctness.
+references. Independent implementation, experimental and alignment critics feed one
+adjudicator; narrow repairs can receive focused verification.
+
+
+Discovery and its research-investigation children proceed without routine operator
+approval. Later phases retain mandatory conversational approval. Technical recovery
+is automatic and distinct from an agent's deliberate request for operator approval.

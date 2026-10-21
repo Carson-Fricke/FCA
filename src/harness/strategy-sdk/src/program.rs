@@ -57,7 +57,9 @@ pub trait StrategyProgram: MarketConsumer<Context = OrderSink> {
     /// Run once before the first market event.
     fn on_start(&mut self, _start: &ProgramStart) {}
 
-    /// Fold one booked fill owned by this program.
+    /// Fold one booked fill owned by this program. Orders may produce multiple
+    /// partial fills: update inventory on every fill and remain open until actual
+    /// quantity reaches zero. `building_blocks::FillLedger` provides exact accounting.
     fn on_fill(&mut self, _fill: &Fill) {}
 
     /// Publish final metrics once after the replay.

@@ -5,11 +5,12 @@ Jobs. Simulation remains in `backtest`, compilation in `strategy-jit`, and
 market acquisition in `lake/hosted`. The API never executes authored code.
 
 - `mod.rs`: selects one current local/Azure store, composes API ports and runs recovery notifications.
-- `backend.rs`: implements atomic filesystem metadata and leased Azure Blob metadata, plus bounded artifact transfers.
+- `backend.rs`: implements atomic filesystem metadata and ETag-conditional Azure metadata, plus bounded artifact transfers. Concurrent writers re-evaluate mutations against the latest version; no metadata blob lease blocks a heartbeat.
 - `store.rs`: retains immutable accepted input, conditional claims, renewable ownership, interrupted recovery and artifact inventories under `execution/`.
 - `dispatch.rs`: adapts admitted submissions to coalesced capacity notifications; notification loss leaves work queued.
 - `launch.rs`: reserves global startup capacity before launching a finite process or a digest-matched ACA Job. Job definitions are projected to Azure's execution-only start schema. Minimal Azure name/ID acknowledgements are scoped and verified through an exact execution GET. Unknown starts retain their reservation and are never retried.
 - `worker.rs`: consumes startup reservations once, claims queued work, renews ownership, publishes results and exits. Dispatch and smoke modes only observe/notify durable work.
+- `renewal.rs`: retains acknowledged fleet/job deadlines, retries failed renewals, and reports structured storage errors. The renewal thread is separate from the process watchdog, including during host initialization, replay and publication.
 - `validation.rs`: runs compiler/loading/constructor validation in a bounded child with a deadline. The existing provenance-keyed validation service retains complete result caching in the parent.
 
 One caller-allocated `job_id` survives admission, worker ownership and results.
@@ -31,6 +32,19 @@ Validation is serialized, limited to 1 GiB and 180 seconds, with an 8 MiB
 response bound. Control requests and artifact transfers have separate bounds.
 Inline artifact reads are limited to 64 MiB; raw downloads stream larger files
 with four concurrent transfers and two 64 KiB queued buffers per transfer.
+
+Metadata version reads and conditional writes each have a five-second SDK
+deadline. CAS conflicts may retry for five seconds; callbacks reset attempt-local
+outputs before re-evaluation. Reservation, attachment and claim callbacks reconcile
+their own operation tokens if the SDK retried an already-committed write and saw a
+version conflict; this cannot allocate duplicate capacity or strand an owned job.
+Other write failures retain unknown-outcome semantics.
+Storage contention, transient failures, permission errors and permanent failures
+are distinct from confirmed execution ownership loss. Failed renewals retry after
+one second without extending acknowledged deadlines. An independent watchdog checks
+those deadlines at most every 250 ms and stops the process on confirmed token loss
+or expiry, even if the renewal SDK call is blocked. Logs retain the operation,
+storage classification, resource, job and deadlines, and record recovery.
 
 File publication reports its own stage and committed upload-byte counters. The
 terminal commit preserves current progress and marks successful stages complete;

@@ -33,7 +33,7 @@ from thesis_runtime.workflows.registry import WorkflowRegistration, WorkflowRegi
 from thesis_runtime.workflows.spec import WorkflowContext
 from thesis_runtime.workflows.workflow import WorkflowPorts
 
-from .contracts import LAUNCH_SCHEMA, WORKFLOW_ID
+from .contracts import CRITIC_PHASES, LAUNCH_SCHEMA, WORKFLOW_ID
 from .definition import accepted_state, build_research_investigation_workflow
 
 SubmissionObserver = Callable[[Mapping[str, Any], str, str, Mapping[str, object]], None]
@@ -136,7 +136,10 @@ class ResearchInvestigationRuntime:
             request = requests[0]
             handoff = cast(int | None, arguments.get("handoff"))
             if handoff == 0:
-                product = request.payload["brief"]
+                product = {
+                    **cast(Mapping[str, object], request.payload["brief"]),
+                    "operatorRequest": request.payload["operatorRequest"],
+                }
             elif handoff is not None:
                 transitions = self.executions.get(request.execution_id).transitions
                 if handoff > len(transitions):
@@ -264,12 +267,21 @@ class ResearchInvestigationRuntime:
         self.programs.verify_strategy_sketch(
             context.workspace_id, inputs["sketchReference"]
         )
+        if parent_execution.trigger_message_id is None:
+            raise ValueError("discovery has no original operator request")
+        operator_request = self.chat.get_message(
+            context.workspace_id, parent_execution.trigger_message_id
+        )
         request = self.workflow.launch(
             context.workspace_id,
             context.chat_id,
             actor_id=context.actor_id,
             inputs={
                 "brief": dict(inputs),
+                "operatorRequest": {
+                    "messageId": operator_request.message_id,
+                    "text": operator_request.body,
+                },
                 "mandate": mandate.as_dict(),
                 "parent": {
                     "workspaceId": context.workspace_id,
@@ -515,13 +527,19 @@ class ResearchInvestigationRuntime:
                 for item in proposal.get("repairs", [])
             ):
                 return "proposal repair references an unknown issueId"
-        if record.phase == "critique":
+        if record.phase in CRITIC_PHASES:
             critique = completion.get("critique", {})
             if any(
-                item not in state["issues"]
+                item["issueId"] not in state["issues"]
                 for item in critique.get("verifiedRepairs", [])
             ):
                 return "verified repair references an unknown issueId"
+            for issue in critique.get("issues", []):
+                prefix = record.phase.removesuffix("_critique") + ":"
+                if issue["issueId"] not in state["issues"] and not issue[
+                    "issueId"
+                ].startswith(prefix):
+                    return f"new issueId must start with {prefix}"
         brief = cast(Mapping[str, Any], request.payload["brief"])
         if record.phase == "adjudicate":
             if any(
@@ -618,6 +636,7 @@ class ResearchInvestigationRuntime:
             "workflowId": WORKFLOW_ID,
             "status": execution.state.value,
             "brief": request.payload["brief"],
+            "operatorRequest": request.payload["operatorRequest"],
             "parent": request.payload["parent"],
             "jobs": [
                 {

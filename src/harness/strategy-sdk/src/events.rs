@@ -136,7 +136,7 @@ pub struct Fill<'a> {
     pub symbol: &'a str,
     /// `buy` or `sell`.
     pub side: &'a str,
-    /// Fill quantity.
+    /// This fill's quantity, not the order's requested or cumulative quantity.
     pub quantity: Decimal,
     /// Fill price.
     pub price: Decimal,

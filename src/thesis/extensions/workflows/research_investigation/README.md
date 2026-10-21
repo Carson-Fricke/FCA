@@ -1,7 +1,9 @@
 # Research investigation
 
 Discovery calls `start_workflow` with `workflow: research-investigation` to delegate
-one bounded research direction. Several instances can run concurrently and return
+one bounded research direction. This is the default home for most substantive
+strategy implementation and testing. Discovery owns directions, allocation,
+integration and the evolving shared sketch. Several instances can run concurrently and return
 independently to their launching discovery conversation. This is a separate workflow;
 the hypothesis-development phase table stays unchanged.
 
@@ -9,13 +11,19 @@ the hypothesis-development phase table stays unchanged.
 
 | Phase | Owns | Requested next phase |
 | --- | --- | --- |
-| `proposal` | Design/repair an investigation of the original brief and pinned construction. | `critique` |
-| `critique` | Independently inspect question/design alignment, implementation and interpretation; recognize sound limited work. | `adjudicate` |
+| `proposal` | Design/repair a construction, treating the supplied prototype as provisional. | `critique`, `focused_critique` |
+| `critique` | Structural split; starts all three independent reviewers, with no agent. | Three specialist phases |
+| `implementation_critique` | Check source fidelity, units, boundaries, timing, fills, state and executable controls. | `collect_critiques` |
+| `experimental_critique` | Check comparisons, confounding, denominators, selection, support and feasibility. | `collect_critiques` |
+| `alignment_critique` | Compare original operator intent with branch scope, alternatives and evidence-driven adaptation. | `collect_critiques` |
+| `collect_critiques` | Pure deterministic collection of all three reports; no verdict or vote. | `adjudicate` |
+| `focused_critique` | Verify the narrow repair and specialty requested in the accepted adjudication. | `adjudicate` |
 | `adjudicate` | Resolve specific objections against evidence; choose a useful action within the budget. | `proposal`, `investigation`, `completed` |
-| `investigation` | Author/validate/execute an training strategy or targeted diagnostic study; inspect artifacts and interpret actual findings. | `critique` |
+| `investigation` | Author/validate/execute a training strategy or targeted diagnostic; inspect artifacts and interpret findings. | `critique`, `focused_critique` |
 | `completed`, `failed` | Terminal outcomes. | None |
 
-Every active phase is model-backed. The engine routes accepted contracts; it chooses
+Proposal, reviews, adjudication and investigation are model-backed; the split and
+collection phases are deterministic. The engine routes accepted contracts; it chooses
 no statistic, research direction or scientific verdict. Review/research budgets are
 declared in the brief and visible in accepted state. Runtime caps bound resource use;
 they do not select studies or scientific conclusions. The execution cap (1..512) counts actual retained jobs, including individual batch
@@ -23,13 +31,16 @@ points, null replicates and technical repairs. Scientific variants are recorded
 separately in accepted interpretation; a repair is not automatically a new hypothesis.
 The same cap also bounds investigation entries, including blocked no-job rounds.
 Scientific sufficiency remains
-the judge's responsibility. Operator acceptance of discovery stays in discovery.
+the judge's responsibility. Discovery and its branches progress autonomously;
+mandatory approval in later hypothesis phases remains unchanged.
 
-The current runtime contract is `research-investigation@2.0.0`; the phase flow,
-single critic and model policies are unchanged. Older executions are rejected
+The current runtime contract is `research-investigation@3.0.0`. Older executions are rejected
 for execution rather than decoded under the new contracts. Proposals include `repairs`
-with original issue IDs and responses. Critics include `verifiedRepairs` only after
-independently checking the repair. The accepted issue ledger carries unresolved and
+with original issue IDs and responses. Critics supply concrete `evidence` for every
+issue and each `verifiedRepairs` entry (`issueId`, `evidence`). New issue IDs have
+specialist prefixes, avoiding collisions in the merged ledger. The join preserves
+all reports and does not decide whether a claim is valid. Only the model adjudicator
+resolves findings. The accepted issue ledger carries unresolved and
 repair-required objections across revisions; adjudication can explicitly accept a
 limitation. These fields record model decisions, not engine-selected scientific rules.
 
@@ -47,9 +58,17 @@ The public brief contains direction, question, intended decision, constraints,
 sketchReference, prior evidence references, revisionBudget and executionBudget. Runtime
 composition derives parent identity, phase attempt and frozen data mandate from the
 launching discovery agent. No model-supplied execution identity or window overrides.
-Branches own separate program IDs; only discovery edits the shared strategy sketch.
+Branches own separate program IDs and may replace/extend provisional implementations;
+only discovery edits the shared strategy sketch. Launch snapshots the original
+operator trigger message into `operatorRequest`, independently of the discovery-authored
+brief. Every phase receives it, and handoff zero returns it alongside the brief.
+Hard constraints and their origins must be distinguished from provisional choices.
 Accepted handoffs carry the original brief and phase products, never private sibling
-transcripts. Execution uses existing committed-program tools and retained job IDs.
+transcripts. Specialist attempts see identical accepted ancestors and cannot read
+the current siblings' reports before the join. Substantive changes use the full
+split; prompted narrow repairs may use `focused_critique` without restarting three
+reviews. No fixed strategy quota, experiment sequence, or scientific gate is added.
+Execution uses existing committed-program tools and retained job IDs.
 Every branch submission is also recorded as exposure in discovery before dispatch.
 Completion delivers a compact scoped finding, brief, job IDs and handoff indices
 at the caller anchor, including late outcomes after steering. Complete attempts,
@@ -64,9 +83,18 @@ resume reconciles delivery without resubmitting studies. Host fault delivery is 
 
 - `__init__.py`: Public workflow factory.
 - `contracts.py`: Current launch schema, phase payload schemas and transition table.
-- `definition.py`: General host specification, JSON extension, accepted-state fold and seeds.
-- `prompts.py`: Proposal, critique, adjudication and constructive training execution guidance.
-- `runtime.py`: Trusted launch/session capabilities, job retention, completion and asynchronous returns.
+- `definition.py`: Fixed specialist split/join specification, pure report collection, JSON extension, accepted-state fold and seeds.
+- `prompts.py`: Proposal, three specialist critiques, focused repair verification, adjudication and constructive training guidance.
+- `runtime.py`: Trusted original-request snapshot, scoped session capabilities and accepted reads, job retention, completion and asynchronous returns.
 
 The package depends on shared experiment/program capabilities and runtime ports.
 It imports no other concrete workflow. Parent exposure recording is an injected port.
+
+
+Plan reviews do not verify later implementations. Investigators can return an early
+working prototype through the existing review loop before a large search, with exact
+program/version/job attribution. Focused correctness review checks consequential
+mechanics; full specialist review remains for substantive construction or findings.
+SDK building blocks cover exact partial-fill accounting, entry-notional returns,
+empirical quantiles, OLS log-price slope and the defined Haar random-walk anchor.
+Diagnostics keep diagnostic scope, and execution allocation follows observed cost.

@@ -18,6 +18,10 @@ from tests.thesis_runtime.adapters.cosmos.test_chunks import LimitedContainer, s
 from thesis.agent.skills import SkillRegistry
 from thesis.application.workflows import WorkflowRuntime, build_model_router
 from thesis.extensions.tools.registry import build_session_registry
+from thesis.extensions.workflows.research_investigation.contracts import (
+    CRITIC_PHASES,
+    REVIEW_PHASES,
+)
 from thesis.integrations.mcp import HarnessMcpTransportError, McpToolResult
 from thesis.workspaces.programs import WorkspacePrograms
 from thesis_runtime.adapters.cosmos.ownership import CosmosOwnershipStore
@@ -240,9 +244,15 @@ def kit(tmp_path, request):
             )
         )
 
-    def complete(execution_id, target, payload):
-        record = node(execution_id)
-        field = "adjudication" if record.phase == "adjudicate" else record.phase
+    def complete_one(execution_id, phase, target, payload):
+        record = node(execution_id, phase)
+        field = (
+            "adjudication"
+            if record.phase == "adjudicate"
+            else "critique"
+            if record.phase in CRITIC_PHASES
+            else record.phase
+        )
         outcome = tool(
             record.sub_agent_id,
             "request_phase_completion",
@@ -250,6 +260,16 @@ def kit(tmp_path, request):
         )
         assert outcome.ok, outcome.failure
         return outcome
+
+    def complete(execution_id, target, payload):
+        record = node(execution_id)
+        if record.phase in REVIEW_PHASES.values():
+            assert target == "adjudicate"
+            for phase in REVIEW_PHASES.values():
+                report = payload if phase == "implementation_critique" else CRITIQUE
+                outcome = complete_one(execution_id, phase, "collect_critiques", report)
+            return outcome
+        return complete_one(execution_id, record.phase, target, payload)
 
     windows = {
         "development": {"start": "2024-01-01T00:00:00Z", "end": "2024-02-01T00:00:00Z"},
@@ -309,7 +329,7 @@ def test_durable_research_phases_read_and_complete_without_turning_workflow_node
     )
     stages = [
         ("proposal", "critique", PROPOSAL),
-        ("critique", "adjudicate", CRITIQUE),
+        *((phase, "collect_critiques", CRITIQUE) for phase in REVIEW_PHASES.values()),
         ("adjudicate", "investigation", ADJUDICATION),
         (
             "investigation",
@@ -321,13 +341,19 @@ def test_durable_research_phases_read_and_complete_without_turning_workflow_node
                 "evidence": [],
             },
         ),
-        ("critique", "adjudicate", CRITIQUE),
+        *((phase, "collect_critiques", CRITIQUE) for phase in REVIEW_PHASES.values()),
         ("adjudicate", "completed", ADJUDICATION),
     ]
     for phase, target, payload in stages:
         executor = kit.node(branch, phase)
         assert executor.phase == phase
-        field = "adjudication" if phase == "adjudicate" else phase
+        field = (
+            "adjudication"
+            if phase == "adjudicate"
+            else "critique"
+            if phase in CRITIC_PHASES
+            else phase
+        )
         completion = {"target": target, "intentEpoch": 0, field: payload}
         kit.model.responses = [
             lambda: [
@@ -349,7 +375,25 @@ def test_durable_research_phases_read_and_complete_without_turning_workflow_node
         assert worker.tick((work,)) == 1
         assert kit.queue.get(WORKSPACE, work.key).state == "completed"
         assert not kit.model.responses
-        assert kit.chat.get_execution(WORKSPACE, branch).active_phases == (target,)
+        if kit.chat.get_execution(WORKSPACE, branch).active_phases == (
+            "collect_critiques",
+        ):
+            join_work = next(
+                item
+                for item in kit.queue.ready()
+                if item.payload.get("phase") == "collect_critiques"
+            )
+            assert worker.tick((join_work,)) == 1
+        active = kit.chat.get_execution(WORKSPACE, branch).active_phases
+        if target == "critique":
+            assert set(active) == set(REVIEW_PHASES.values())
+        elif target == "collect_critiques":
+            if phase == "alignment_critique":
+                assert active == ("adjudicate",)
+            else:
+                assert "adjudicate" not in active
+        else:
+            assert active == (target,)
         owner = kit.conversations.store.get_sub_agent(
             WORKSPACE, workflow_node.sub_agent_id
         )
@@ -386,9 +430,10 @@ def test_large_handoffs_are_paged_and_repairs_survive_phase_reentry(kit):
     kit.complete(branch, "critique", proposal)
     critic = kit.node(branch).sub_agent_id
     issue = {
-        "issueId": "missing-wavelet-comparison",
+        "issueId": "implementation:missing-wavelet-comparison",
         "concern": "The wavelet feature was omitted. " * 120,
         "consequence": "The composed construction remains untested. " * 80,
+        "evidence": "The proposal omits the wavelet comparison named in its brief.",
         "repair": "Measure the feature interaction or narrow the conclusion. " * 60,
     }
     kit.complete(branch, "adjudicate", {**CRITIQUE, "issues": [issue]})
@@ -434,12 +479,29 @@ def test_large_handoffs_are_paged_and_repairs_survive_phase_reentry(kit):
     assert history["issues"][issue["issueId"]]["status"] == "repair"
     assert history["issues"][issue["issueId"]]["response"] == repair["response"]
     assert read_all({"handoff": 2})["completion"]["critique"]["issues"] == [issue]
-    assert read_all({"handoff": 0}) == {**kit.brief, "executionBudget": 4}
+    assert read_all({"handoff": 0}) == {
+        **kit.brief,
+        "executionBudget": 4,
+        "operatorRequest": {
+            "messageId": kit.trigger.message_id,
+            "text": kit.trigger.body,
+        },
+    }
     assert not kit.tool(
         critic, "read_research_investigations", {"execution_id": sibling}
     ).ok
     kit.complete(
-        branch, "adjudicate", {**CRITIQUE, "verifiedRepairs": [issue["issueId"]]}
+        branch,
+        "adjudicate",
+        {
+            **CRITIQUE,
+            "verifiedRepairs": [
+                {
+                    "issueId": issue["issueId"],
+                    "evidence": "Re-read the revised design: the requested comparison is now present.",
+                }
+            ],
+        },
     )
     kit.complete(branch, "investigation", ADJUDICATION)
     investigation = {
@@ -470,6 +532,189 @@ def test_large_handoffs_are_paged_and_repairs_survive_phase_reentry(kit):
         assert seed.content.result is not None
         assert seed.content.result["text"] == ""
         assert seed.content.result["summary"] != seed.content.text
+
+
+def test_independent_specialists_preserve_findings_and_narrow_repairs_stay_focused(kit):
+    branch = kit.launch()
+    kit.complete(branch, "critique", PROPOSAL)
+    reviewers = {name: kit.node(branch, phase) for name, phase in REVIEW_PHASES.items()}
+    assert len({node.sub_agent_id for node in reviewers.values()}) == 3
+    issues = {}
+    for name, reviewer in reviewers.items():
+        brief = kit.tool(
+            reviewer.sub_agent_id, "read_research_investigations", {"handoff": 0}
+        )
+        original = json.loads(brief.structured["content"])["operatorRequest"]
+        assert original == {
+            "messageId": kit.trigger.message_id,
+            "text": kit.trigger.body,
+        }
+        assert not kit.tool(
+            reviewer.sub_agent_id, "run_backtest", {"program_id": "x"}
+        ).ok
+        issue = {
+            "issueId": f"{name}:boundary",
+            "concern": "Boundary claim is false.",
+            "evidence": f"{name} traced the equality case against the accepted source.",
+            "consequence": "The proposed conclusion is unsupported.",
+            "repair": "Correct this boundary claim and demonstrate the result.",
+        }
+        issues[name] = issue
+        if name == "implementation":
+            missing_evidence = {
+                key: value for key, value in issue.items() if key != "evidence"
+            }
+            rejected = kit.tool(
+                reviewer.sub_agent_id,
+                "request_phase_completion",
+                {
+                    "completion": {
+                        "target": "collect_critiques",
+                        "intentEpoch": 0,
+                        "critique": {**CRITIQUE, "issues": [missing_evidence]},
+                    }
+                },
+            )
+            assert not rejected.ok
+        kit.complete_one(
+            branch, reviewer.phase, "collect_critiques", {**CRITIQUE, "issues": [issue]}
+        )
+        if name != "alignment":
+            assert (
+                "adjudicate"
+                not in kit.chat.get_execution(WORKSPACE, branch).active_phases
+            )
+            # A completed sibling's contract is not part of this reviewer's inputs.
+            sibling_read = kit.tool(
+                reviewers["alignment"].sub_agent_id,
+                "read_research_investigations",
+                {"handoff": 2},
+            )
+            assert not sibling_read.ok
+
+    judge = kit.node(branch, "adjudicate")
+    read = kit.tool(
+        judge.sub_agent_id, "read_research_investigations", {"max_chars": 8000}
+    )
+    state = json.loads(read.structured["content"])
+    assert set(state["critiques"]) == set(REVIEW_PHASES)
+    assert set(state["issues"]) == {issue["issueId"] for issue in issues.values()}
+    assert all(item["status"] == "open" for item in state["issues"].values())
+    kit.complete(
+        branch,
+        "proposal",
+        {
+            **ADJUDICATION,
+            "reason": "Implementation boundary needs a narrow calculation check via focused_critique.",
+            "resolutions": [
+                {
+                    "issueId": issues["implementation"]["issueId"],
+                    "disposition": "repair",
+                    "reason": "Verify the corrected equality case.",
+                }
+            ],
+        },
+    )
+    kit.complete(
+        branch,
+        "focused_critique",
+        {
+            **PROPOSAL,
+            "repairs": [
+                {
+                    "issueId": issues["implementation"]["issueId"],
+                    "response": "The corrected boundary calculation is provided.",
+                }
+            ],
+        },
+    )
+    assert kit.chat.get_execution(WORKSPACE, branch).active_phases == (
+        "focused_critique",
+    )
+    focused = kit.node(branch)
+    invalid = kit.tool(
+        focused.sub_agent_id,
+        "request_phase_completion",
+        {
+            "completion": {
+                "target": "adjudicate",
+                "intentEpoch": 0,
+                "critique": {
+                    **CRITIQUE,
+                    "verifiedRepairs": [issues["implementation"]["issueId"]],
+                },
+            }
+        },
+    )
+    assert not invalid.ok
+    proof = "Independently recomputed the equality case: the revised predicate now excludes it."
+    kit.complete(
+        branch,
+        "adjudicate",
+        {
+            **CRITIQUE,
+            "verifiedRepairs": [
+                {
+                    "issueId": issues["implementation"]["issueId"],
+                    "evidence": proof,
+                }
+            ],
+        },
+    )
+    result = kit.tool(
+        kit.discovery_id, "read_research_investigations", {"execution_id": branch}
+    ).structured["branches"][0]
+    assert (
+        result["issues"][issues["implementation"]["issueId"]]["verification"] == proof
+    )
+    assert result["issues"][issues["experimental"]["issueId"]]["status"] == "open"
+    assert all(
+        kit.conversations.store.get_sub_agent(WORKSPACE, node.sub_agent_id).status
+        is SubAgentStatus.COMPLETED
+        for node in reviewers.values()
+    )
+    kit.complete(branch, "investigation", ADJUDICATION)
+    kit.complete(
+        branch,
+        "critique",
+        {
+            "interpretation": "A changed construction needs substantive review.",
+            "limitations": "No executions; these are source-level findings.",
+            "attempts": [],
+            "evidence": [],
+        },
+    )
+    kit.complete_one(
+        branch,
+        "implementation_critique",
+        "collect_critiques",
+        {
+            **CRITIQUE,
+            "issues": [issues["implementation"]],
+        },
+    )
+    kit.complete_one(
+        branch,
+        "experimental_critique",
+        "collect_critiques",
+        {
+            **CRITIQUE,
+            "verifiedRepairs": [
+                {
+                    "issueId": issues["implementation"]["issueId"],
+                    "evidence": proof,
+                }
+            ],
+        },
+    )
+    kit.complete_one(branch, "alignment_critique", "collect_critiques", CRITIQUE)
+    conflict = kit.tool(
+        kit.discovery_id, "read_research_investigations", {"execution_id": branch}
+    ).structured["branches"][0]
+    assert conflict["issues"][issues["implementation"]["issueId"]]["status"] == "open"
+    assert (
+        conflict["critiques"]["experimental"]["verifiedRepairs"][0]["evidence"] == proof
+    )
 
 
 @pytest.mark.parametrize("kind", ["study", "strategy"])
@@ -597,7 +842,9 @@ def test_provider_recovery_after_study_submission_retains_one_job_and_completes(
     )
     assert worker.tick((work,)) == 1
     assert not kit.model.responses
-    assert kit.chat.get_execution(WORKSPACE, branch).active_phases == ("critique",)
+    assert set(kit.chat.get_execution(WORKSPACE, branch).active_phases) == set(
+        REVIEW_PHASES.values()
+    )
     assert len([call for call in kit.harness.calls if call[0] == "run_study"]) == 1
     assert kit.harness.results[job_id()]["accepted_input"]["job_id"] == job_id()
     messages = [
@@ -841,6 +1088,9 @@ def test_registered_definition_and_launch_scope_use_production_composition(kit):
         assert result.json()["phases"] == [
             "proposal",
             "critique",
+            *REVIEW_PHASES.values(),
+            "collect_critiques",
+            "focused_critique",
             "adjudicate",
             "investigation",
             "completed",

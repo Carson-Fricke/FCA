@@ -225,14 +225,19 @@ def test_live_tool_transcript_survives_model_ssl_and_replays_on_retry(
     assert result.status == "interrupted"
     assert dispatched == [{"source": "study"}]
     assert faults == []
-    assert wakes == []
+    assert wakes
     assert tuple(kit.woke) == launch_wakes
-    assert [
+    supervisor_messages = [
         message
         for message in kit.chat.list_messages(WORKSPACE, request.chat_id)
         if (message.data or {}).get("subAgentId") != node_id
-    ] == other_messages
-    assert _node_record(kit, node_id).status is SubAgentStatus.NEEDS_INPUT
+    ]
+    assert supervisor_messages[: len(other_messages)] == other_messages
+    assert all(
+        (from_record(m).content.result or {}).get("childRecovery")
+        for m in supervisor_messages[len(other_messages) :]
+    )
+    assert _node_record(kit, node_id).status is SubAgentStatus.RUNNING
     assert _node_record(kit, node_id).accepts_input is True
     assert (
         kit.chat.get_execution(WORKSPACE, request.execution_id).state.value == "running"
@@ -250,14 +255,14 @@ def test_live_tool_transcript_survives_model_ssl_and_replays_on_retry(
     ]
     notice = durable[-1]
     assert notice.data is not None
-    assert notice.data["status"] == "interrupted"
+    assert notice.data["status"] == "continuing"
     assert notice.data["failure"] == result.failure
     assert "model TLS failed" in notice.body
     assert all(
         message.data and message.data["subAgentId"] == node_id for message in durable
     )
     events = kit.workflow.observe(WORKSPACE, request.execution_id).events
-    assert any(
+    assert not any(
         event.event_type is ExecutionEventType.SUB_AGENT_NEEDS_INPUT
         and event.payload["subAgentId"] == node_id
         for event in events
@@ -266,13 +271,6 @@ def test_live_tool_transcript_survives_model_ssl_and_replays_on_retry(
         event.event_type is ExecutionEventType.SUB_AGENT_FAILED for event in events
     )
 
-    kit.conversations.answer(
-        WORKSPACE,
-        request.chat_id,
-        node_id,
-        body="Retry using the compiled study.",
-        actor=AnsweringActor(OWNER, OperatorActorKind.HUMAN_OPERATOR),
-    )
     retry = Provider(completion("The earlier study compiled successfully."))
     resumed = _runner(
         kit, store, _control(kit, store, request), retry, lifecycle=lifecycle
@@ -293,12 +291,7 @@ def test_live_tool_transcript_survives_model_ssl_and_replays_on_retry(
         "tool_name": _CALL.name,
     }
     assert replay[envelope_index + 1] == provider.requests[1][-1]
-    assert json.loads(replay[-1].content) == {
-        "text": "Retry using the compiled study.",
-        "source": "user",
-        "result": None,
-        "correlation": None,
-    }
+    assert "continuation" in json.loads(replay[-1].content)["result"]
     assert dispatched == [{"source": "study"}]
     assert _node_record(kit, node_id).status is SubAgentStatus.RUNNING
     durable = _node_messages(kit.chat, request.chat_id, node_id)
@@ -316,7 +309,7 @@ def test_live_tool_transcript_survives_model_ssl_and_replays_on_retry(
         message
         for message in kit.chat.list_messages(WORKSPACE, request.chat_id)
         if (message.data or {}).get("subAgentId") != node_id
-    ] == other_messages
+    ] == supervisor_messages
 
 
 @pytest.mark.parametrize("tool", ["request_phase_completion", "request_workflow_input"])
@@ -424,6 +417,7 @@ def test_persisted_midtool_steering_replays_after_the_tool_result(
 
     provider = Provider(completion("Checking", _CALL), completion("Using daily bars."))
     runner = Conversations(
+        spawn_thread=lambda _: None,
         chat=kit.chat,
         provider=NativeSessionAdapter(provider),
         registry_factory=lambda context: _registry(handler),
@@ -466,6 +460,7 @@ def test_persisted_midtool_steering_replays_after_the_tool_result(
 
     replay_provider = Provider(completion("Continuing with daily bars."))
     replay_runner = Conversations(
+        spawn_thread=lambda _: None,
         chat=kit.chat,
         provider=NativeSessionAdapter(replay_provider),
         registry_factory=lambda context: _registry(handler),
@@ -520,6 +515,7 @@ def test_multiple_typed_datums_persist_at_node_and_replay_as_one_tool_result(
         completion("Validating", _CALL), completion("Validation ready.")
     )
     runner = Conversations(
+        spawn_thread=lambda _: None,
         chat=kit.chat,
         provider=NativeSessionAdapter(provider),
         registry_factory=lambda context: _registry(handler),
@@ -561,6 +557,7 @@ def test_multiple_typed_datums_persist_at_node_and_replay_as_one_tool_result(
 
     replay_provider = Provider(completion("Using both validation outputs."))
     replay_runner = Conversations(
+        spawn_thread=lambda _: None,
         chat=kit.chat,
         provider=NativeSessionAdapter(replay_provider),
         registry_factory=lambda context: _registry(handler),
@@ -599,6 +596,7 @@ def test_handler_persistence_error_is_terminal_node_fault_not_tool_failure(
 
     provider = Provider(completion("Validating", _CALL), completion("Must not run"))
     runner = Conversations(
+        spawn_thread=lambda _: None,
         chat=kit.chat,
         provider=NativeSessionAdapter(provider),
         registry_factory=lambda context: _registry(handler),
@@ -643,6 +641,7 @@ def test_tool_ssl_is_durable_and_delivered_to_model_without_failing_workflow(
         completion("Checking", _CALL), completion("Inspect before retry.")
     )
     runner = Conversations(
+        spawn_thread=lambda _: None,
         chat=kit.chat,
         provider=NativeSessionAdapter(provider),
         registry_factory=lambda context: _registry(handler),
@@ -744,7 +743,9 @@ def test_cancellation_during_model_fault_does_not_overwrite_terminal_status(
 
 def test_catalog_failure_interrupts_only_its_phase_and_can_be_retried(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("thesis_runtime.sessions.recovery.sleep", lambda _: None)
     kit = _kit(tmp_path, payloads=[], results=[])
     request = _request(kit)
     node_id = kit.workflow.prepare_phase(request)
@@ -779,6 +780,7 @@ def test_catalog_failure_interrupts_only_its_phase_and_can_be_retried(
         kit.workflow.fail_execution(request, reason=str(error))
 
     runner = Conversations(
+        spawn_thread=lambda _: None,
         chat=kit.chat,
         provider=NativeSessionAdapter(provider),
         registry_factory=lambda context: build_session_registry(
@@ -792,7 +794,7 @@ def test_catalog_failure_interrupts_only_its_phase_and_can_be_retried(
         assert result.turns == ()
         assert provider.requests == []
         assert faults == []
-        assert _node_record(kit, node_id).status is SubAgentStatus.NEEDS_INPUT
+        assert _node_record(kit, node_id).status is SubAgentStatus.RUNNING
         assert (
             kit.chat.get_execution(WORKSPACE, request.execution_id).state.value
             == "running"
@@ -811,13 +813,6 @@ def test_catalog_failure_interrupts_only_its_phase_and_can_be_retried(
             for message in kit.chat.list_messages(WORKSPACE, request.chat_id)
         )
         transport.error = None
-        kit.conversations.answer(
-            WORKSPACE,
-            request.chat_id,
-            node_id,
-            body="Retry catalog discovery.",
-            actor=AnsweringActor(OWNER, OperatorActorKind.HUMAN_OPERATOR),
-        )
         assert (
             runner.run_node_turn(WORKSPACE, request.chat_id, node_id).status
             == "completed"
