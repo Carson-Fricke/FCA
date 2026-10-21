@@ -196,7 +196,11 @@ introspection.
 | `src/thesis_runtime/contracts/messages.py` | Immutable neutral `SessionMessage`, identity, provenance and explicit correlation | Native-role policy, storage, scheduling, execution |
 | `src/thesis_runtime/conversations/inbox.py` | `SessionInbox`, durable intake/consumption through injected ports, positions and idempotency | Provider projection, model/tool execution, workflow policy |
 | `src/thesis_runtime/conversations/incoming.py` | `write_incoming`, the singular incoming storage boundary | Scheduling, provider projection, tool execution |
-| `src/thesis_runtime/conversations/conversation.py` | `Conversations.deliver_session_message`, handle delegation, admission composition and anchored routing to the one inbox/writer | Duplicate incoming persistence or provider-history construction |
+| `src/thesis_runtime/conversations/conversation.py` | `Conversations.deliver_session_message`, admission composition and anchored routing to the one inbox/writer | Duplicate incoming persistence or provider-history construction |
+| `src/thesis_runtime/conversations/handle.py` | Public anchored handle delegating incoming delivery to the service | Independent intake or storage |
+| `src/thesis_runtime/conversations/execution.py` | Isolated session attempt, scoped reconciliation and success-bound consumption | Alternate inbox, provider projection or incoming writer |
+| `src/thesis_runtime/conversations/output.py` | Outgoing-only model envelope and runtime activity writes | Incoming persistence outside `write_incoming` |
+| `src/thesis_runtime/conversations/recovery.py` | Continuation policy and supervisor selection | Independent scheduling or persistence |
 | `src/thesis_runtime/sessions/session.py` | `AgentSession`, authorized tool execution, committed-output ACK and outcome delivery through injected ports | Provider-role construction, second inbox, ad-hoc replay |
 | `src/thesis_runtime/sessions/model_invocation.py` | Exact request audit, neutral incremental output, bounded publication, canonical-output commit and model terminal state | Incoming delivery, provider roles, tool dispatch, workflow policy |
 | `src/thesis_runtime/adapters/providers/session_adapter.py` | Pure canonical-history projection and explicit correlation for live/replay | Runtime services, persistence, scheduling, ACKs, tool execution |

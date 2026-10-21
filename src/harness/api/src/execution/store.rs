@@ -22,8 +22,8 @@ pub struct Document {
 
 #[derive(Clone)]
 pub struct ExecutionStore {
-    pub backend: Arc<dyn Backend>,
-    pub owner: Option<(String, String)>,
+    pub(super) backend: Arc<dyn Backend>,
+    owner: Option<(String, String)>,
     claimed_until: Option<DateTime<Utc>>,
 }
 fn path(id: &str) -> Result<String> {

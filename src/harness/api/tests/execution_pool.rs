@@ -526,11 +526,11 @@ async fn sdk_retried_committed_claims_reconcile_their_tokens_without_duplicating
     *objects.committed_conflict.lock().unwrap() = Some("execution/control/fleet.json".into());
     let token = Slot::reserve(&store, 2).unwrap().unwrap();
     let fleet: Value = serde_json::from_slice(
-        &store
-            .backend
-            .read("execution/control/fleet.json")
-            .unwrap()
-            .unwrap(),
+        &lake_storage::AzureBlobContainer::download(
+            objects.as_ref(),
+            "execution/control/fleet.json",
+        )
+        .unwrap(),
     )
     .unwrap();
     assert_eq!(fleet["owners"].as_array().unwrap().len(), 1);
@@ -591,7 +591,7 @@ async fn conditional_claim_conflicts_do_not_grant_a_stale_worker_ownership() {
 #[tokio::test]
 async fn a_slow_progress_writer_cannot_block_renewal_or_overwrite_the_new_owner_deadline() {
     use api::execution::renewal::Ownership;
-    let (_, store) = azure_store();
+    let (objects, store) = azure_store();
     assert_eq!(
         post(
             &app(store.clone(), Arc::new(LostHint::default())),
@@ -606,11 +606,13 @@ async fn a_slow_progress_writer_cannot_block_renewal_or_overwrite_the_new_owner_
     monitor.track(owned, "retained-job".into()).unwrap();
     let (entered_tx, entered_rx) = std::sync::mpsc::channel();
     let (release_tx, release_rx) = std::sync::mpsc::channel();
-    let writer = store.clone();
+    let writer = api::execution::backend::Azure {
+        container: objects,
+        sas: Arc::new(NoSignedObjects),
+    };
     let pending = std::thread::spawn(move || {
         let mut first = true;
         writer
-            .backend
             .update("execution/jobs/retained-job.json", &mut |bytes| {
                 if first {
                     first = false;
@@ -675,14 +677,16 @@ async fn ownership_loss_fences_publication_and_blocked_storage_cannot_extend_dea
         .is_err());
     release_tx.send(()).unwrap();
     blocked.join().unwrap();
-    store
-        .backend
-        .update("execution/jobs/retained-job.json", &mut |bytes| {
-            let mut doc: Document = serde_json::from_slice(&bytes).unwrap();
-            doc.owner.as_mut().unwrap().token = "replacement".into();
-            Ok(serde_json::to_vec(&doc).unwrap())
-        })
-        .unwrap();
+    api::execution::backend::Azure {
+        container: objects,
+        sas: Arc::new(NoSignedObjects),
+    }
+    .update("execution/jobs/retained-job.json", &mut |bytes| {
+        let mut doc: Document = serde_json::from_slice(&bytes).unwrap();
+        doc.owner.as_mut().unwrap().token = "replacement".into();
+        Ok(serde_json::to_vec(&doc).unwrap())
+    })
+    .unwrap();
     monitor.renew();
     assert!(monitor.check(chrono::Utc::now()).is_err());
     let mut stale = owned.get("retained-job").unwrap();

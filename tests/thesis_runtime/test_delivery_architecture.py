@@ -31,6 +31,10 @@ REQUIRED = (
     "src/thesis_runtime/conversations/timeline.py",
     "src/thesis_runtime/conversations/incoming.py",
     "src/thesis_runtime/conversations/conversation.py",
+    "src/thesis_runtime/conversations/handle.py",
+    "src/thesis_runtime/conversations/execution.py",
+    "src/thesis_runtime/conversations/output.py",
+    "src/thesis_runtime/conversations/recovery.py",
     "src/thesis_runtime/conversations/delivery.py",
     "src/thesis_runtime/adapters/providers/session_adapter.py",
     "src/thesis_runtime/adapters/providers/families/__init__.py",
@@ -162,8 +166,8 @@ def _incoming_create_errors(tree: ast.Module, path: str) -> list[str]:
         ):
             continue
         if (
-            path == "src/thesis_runtime/conversations/conversation.py"
-            and owner_name == "_persist_turn"
+            path == "src/thesis_runtime/conversations/output.py"
+            and owner_name == "persist_turn"
         ):
             # Its outgoing-only rejection is checked separately, including telemetry starts.
             continue
@@ -705,6 +709,10 @@ def test_adapter_is_pure_and_completion_uses_the_shared_projector() -> None:
     for path in (
         "src/thesis_runtime/sessions/session.py",
         "src/thesis_runtime/conversations/conversation.py",
+        "src/thesis_runtime/conversations/handle.py",
+        "src/thesis_runtime/conversations/execution.py",
+        "src/thesis_runtime/conversations/output.py",
+        "src/thesis_runtime/conversations/recovery.py",
     ):
         assert not _neutral_errors(_source(path)), (
             f"Runtime must not seed/project native history: {path}"
@@ -732,11 +740,14 @@ def test_one_incoming_writer_and_outgoing_only_turn_persistence() -> None:
         for call in _calls(canonical)
     ), "Conversation composition must reach write_incoming"
     assert _calls(canonical), "An unused/empty canonical method is not routing proof"
-    send = _function(_class(conversation, "Conversation"), "send")
+    handle = _source("src/thesis_runtime/conversations/handle.py")
+    send = _function(_class(handle, "Conversation"), "send")
     assert any(
         _name(call.func).endswith(".deliver_session_message") for call in _calls(send)
     ), "Public operator intake must call canonical incoming delivery"
-    output = _function(conversation, "_persist_turn")
+    output = _function(
+        _source("src/thesis_runtime/conversations/output.py"), "persist_turn"
+    )
     guards = [
         node
         for node in ast.walk(output)
@@ -774,7 +785,6 @@ def test_one_incoming_writer_and_outgoing_only_turn_persistence() -> None:
             call.lineno
             for call in _calls(tree)
             if _name(call.func).endswith(".create_message")
-            and not (path.endswith("conversation.py") and call in output_creates)
         ]
         assert not extra, f"Independent incoming persistence in {path}: {extra}"
 

@@ -14,7 +14,8 @@ Market-data decoding and caching belong to `harness-market-reader`; this crate o
 
 `azure.rs::container_from_account_url` exposes the same conditional Blob adapter
 to durable harness execution; the application layer owns job claims and policy.
-Application metadata supports bounded version reads and ETag-conditional PUTs,
+Application metadata requires bounded version reads and ETag-conditional PUTs
+in every container implementation; these methods have no unsupported defaults,
 so progress and heartbeat writers never wait behind an application metadata blob
 lease. HTTP failures retain status and service code; object and market-publication
 lease behavior remains at its existing boundary.

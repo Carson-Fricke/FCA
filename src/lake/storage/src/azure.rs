@@ -41,17 +41,9 @@ pub fn container_from_account_url(
 /// and lease maintenance for one blob.
 pub trait AzureBlobContainer: Send + Sync {
     /// Read bounded application metadata and its exact version for conditional replacement.
-    fn download_versioned(&self, _path: &str) -> Result<(Vec<u8>, String), DataError> {
-        Err(DataError::Unsupported(
-            "conditional metadata reads are unavailable".into(),
-        ))
-    }
+    fn download_versioned(&self, path: &str) -> Result<(Vec<u8>, String), DataError>;
     /// Replace metadata only if no writer changed the version read by this caller.
-    fn upload_if_match(&self, _path: &str, _payload: &[u8], _etag: &str) -> Result<(), DataError> {
-        Err(DataError::Unsupported(
-            "conditional metadata writes are unavailable".into(),
-        ))
-    }
+    fn upload_if_match(&self, path: &str, payload: &[u8], etag: &str) -> Result<(), DataError>;
     fn upload_file(&self, path: &str, source: &std::path::Path) -> Result<(), DataError>;
     /// Replace a leased blob only if the supplied lease still owns that blob.
     fn upload_leased(&self, path: &str, payload: &[u8], lease_id: &str) -> Result<(), DataError>;

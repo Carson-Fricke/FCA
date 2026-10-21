@@ -87,10 +87,12 @@ and provider-adapter modules are REQUIRED migration targets, not a claim of
 completed implementation. Existing role-based session/projection code MUST NOT
 be extended as an alternative design.
 
-- One conversation abstraction: `thesis_runtime.conversations.conversation` owns the
-  `Conversation` handle and the `Conversations` service; HTTP, tools, and the
-  engine see only the service and the handles. Nothing outside the service
-  references the turn runner, coordinator, or spawner.
+- One conversation abstraction: `thesis_runtime.conversations.conversation` exposes
+  the `Conversations` service and its `Conversation` handle (implemented in
+  `handle.py`). Internal `execution.py`, `output.py` and `recovery.py` separate
+  session attempts, output writes and continuation policy. HTTP, tools and the
+  engine see only the service and handles; upstream code never references the
+  turn runner, coordinator or spawner.
 - A chat is a conversation at the root anchor; a sub-agent is a nested one.
   Phase specs are the sealed union `ConversationPhase` / `OneShotPhase` /
   `DeterministicPhase` / `TerminalPhase` / `SplitPhase`; deterministic and

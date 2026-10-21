@@ -6,7 +6,7 @@ market acquisition in `lake/hosted`. The API never executes authored code.
 
 - `mod.rs`: selects one current local/Azure store, composes API ports and runs recovery notifications.
 - `backend.rs`: implements atomic filesystem metadata and ETag-conditional Azure metadata, plus bounded artifact transfers. Concurrent writers re-evaluate mutations against the latest version; no metadata blob lease blocks a heartbeat.
-- `store.rs`: retains immutable accepted input, conditional claims, renewable ownership, interrupted recovery and artifact inventories under `execution/`.
+- `store.rs`: retains immutable accepted input, conditional claims, renewable ownership, interrupted recovery and artifact inventories under `execution/`. The ownership credential is private to the store; only sibling execution modules can access its backend. Callers obtain owned stores through `claim`, never by mutating owner fields.
 - `dispatch.rs`: adapts admitted submissions to coalesced capacity notifications; notification loss leaves work queued.
 - `launch.rs`: reserves global startup capacity before launching a finite process or a digest-matched ACA Job. Job definitions are projected to Azure's execution-only start schema. Minimal Azure name/ID acknowledgements are scoped and verified through an exact execution GET. Unknown starts retain their reservation and are never retried.
 - `worker.rs`: consumes startup reservations once, claims queued work, renews ownership, publishes results and exits. Dispatch and smoke modes only observe/notify durable work.

@@ -679,11 +679,11 @@ The durable sub-agent runtime is implemented in `thesis_runtime`:
 - `AgentSession` is the single durable model/tool turn loop that the chat path
   and workflow path use through `Conversations.run_node_turn`: it sends the merged catalog, persists each
   model and tool invocation as a first-class record, threads tool results back
-  as neutral incoming messages, stops on a terminal control tool, and enforces a safety
-  iteration cap;
+  as neutral incoming messages, stops on a terminal control tool, and yields bounded execution slices
+  without limiting the agent lifetime;
 - `messages.decode_transcript` is the shared neutral durable-history decoder,
   scoped by anchor: the root uses only root messages and a child only its own.
-  `Conversations._persist_turn` writes outgoing envelopes only; incoming
+  `conversations/output.py::persist_turn` writes outgoing envelopes only; incoming
   observations never repersist results. Runtime tool starts are activity and
   their results use the canonical incoming writer;
 - starting a workflow returns its execution handle immediately and runs the
@@ -933,6 +933,16 @@ The implemented boundaries above do not establish completion of every normative
 repair-budget or restart requirement below. Operator workflow gates remain
 removed; domain contract/evidence validation is distinct from conversational
 operator review.
+
+The public `Conversations` service remains in `conversations/conversation.py`.
+Its implementation separates the anchored `Conversation` handle in `handle.py`,
+one attempt's lifecycle and input state in `execution.py`, outgoing persistence
+and runtime activity in `output.py`, and continuation policy in `recovery.py`.
+`incoming.py` owns the sole incoming write and detached presentation preparation;
+`admission.py` owns shared ordering rules. Composition injects the existing writer
+and callbacks into one concrete attempt object. No new scheduler, inbox, service
+interface, or persisted contract accompanies this internal split. Upstream callers
+continue to use the service and handles rather than turn machinery.
 
 ### Accepted v1.0.1 decisions
 

@@ -1,50 +1,26 @@
-"""One conversation: an anchored transcript and its serialized turns.
+"""Public conversation service: anchored intake, child lifecycle and wake routing.
 
-A conversation is the only thing that owns a transcript and turns.  Its
-identity is one conversation id — the chat id for a conversation at the root
-anchor, the sub-agent id for a nested one — plus its workspace and kind.  Its
-transcript is anchored: rows in the containing chat's shared message store,
-discriminated by anchor, so every conversation in a chat streams on that
-chat's unified timeline.  The chat is containment and storage scope, never a
-second identity.
-
-Operations: ``send(body, actor)`` and ``deliver(datum)`` each persist then
-wake; ``request_input`` pauses the node for an operator reply; ``status`` and
-``in_flight`` observe; ``subscribe`` tails the chat's live frames; ``run_turn``
-is the turn body the worker calls.  Turn execution is one implementation: the
-durable session loop, turn persistence, the mid-turn input drain, and one
-serialized worker per conversation.  There is no parent, no completion, no
-kind branching, and no ephemeral delta channel here; every visible reply,
-activity, and event is a durable record that the timeline stream reads.
+The service composes handles and one isolated session attempt per turn. Incoming
+producers converge here before write_incoming; output persistence and continuation
+policy have separate modules, without alternate inboxes or schedulers.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import math
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
 
 from thesis_runtime.contracts.activity import (
-    ModelOutput,
-    RuntimeTool,
-    activity_data,
     decode_activity,
     owns_anchor,
 )
 from thesis_runtime.contracts.context import ToolContext
-from thesis_runtime.contracts.datum import Datum, tool_result_payload
-from thesis_runtime.contracts.errors import ToolCatalogError
+from thesis_runtime.contracts.datum import Datum
 from thesis_runtime.contracts.messages import (
-    MessageContent,
     SessionMessage,
-    decode_transcript,
-    from_record,
 )
-from thesis_runtime.contracts.records import WorkflowExecutionState
 from thesis_runtime.contracts.reply import ToolResultChunk, ToolResultObserver
 from thesis_runtime.conversations import (
     RECORD_ANCHOR_ROLES,
@@ -57,7 +33,7 @@ from thesis_runtime.conversations import (
     SubAgentStatus,
     TranscriptItemKind,
 )
-from thesis_runtime.conversations.admission import message_order_key
+from thesis_runtime.conversations.admission import ordered_messages
 from thesis_runtime.conversations.delivery import (
     ROOT_ANCHOR_ID,
     Anchor,
@@ -69,20 +45,29 @@ from thesis_runtime.conversations.delivery import (
     NodeInputReceipt,
     find_delivered,
 )
-from thesis_runtime.conversations.inbox import SessionInbox
-from thesis_runtime.conversations.incoming import write_incoming
+from thesis_runtime.conversations.execution import (
+    ConversationTurn,
+    NodeTurnError,
+    RegistryFactory,
+    ServiceTurnRunner,
+)
+from thesis_runtime.conversations.handle import Conversation
+from thesis_runtime.conversations.incoming import presentation_fields, write_incoming
+from thesis_runtime.conversations.output import execute_runtime_tool, persist_turn
+from thesis_runtime.conversations.recovery import (
+    continuation_message,
+    recovery_notice,
+    supervisor_anchor,
+)
 from thesis_runtime.conversations.service import ChatService
 from thesis_runtime.conversations.turns import NodeTurnCoordinator, is_external_input
 from thesis_runtime.execution.worker import Work, WorkStore
-from thesis_runtime.sessions.recovery import wait_for_recovery
 from thesis_runtime.sessions.session import (
     AGENT_SYSTEM_PROMPT,
-    AgentSession,
     CompletionProvider,
     SessionResult,
     SessionTurn,
 )
-from thesis_runtime.storage.ownership import OwnershipLost
 from thesis_runtime.subagents.child import (
     ChildConversation,
     ConversationalPolicy,
@@ -95,8 +80,6 @@ from thesis_runtime.subagents.spawn import SubAgentSpawner
 from thesis_runtime.subagents.specs import SubAgentSpec
 from thesis_runtime.subagents.store import PersistenceSubAgentStore, SubAgentStore
 from thesis_runtime.tools.registry import (
-    SessionPersistenceError,
-    SessionToolRegistry,
     ToolExecution,
 )
 
@@ -109,326 +92,12 @@ __all__ = [
 ]
 
 #: Builds the merged, policy-scoped tool registry for one child context.
-RegistryFactory = Callable[[ToolContext], SessionToolRegistry]
+
 
 #: Durable statuses a conversation never leaves.
 _TERMINAL = frozenset(
     {SubAgentStatus.COMPLETED, SubAgentStatus.FAILED, SubAgentStatus.CANCELLED}
 )
-
-
-class NodeTurnError(RuntimeError):
-    """Raised when a node turn cannot be run for the requested node."""
-
-
-def _execution_epoch(chat: ChatService, record: SubAgentRecord) -> int:
-    """Return the owning execution's current intent epoch, or zero."""
-    if record.workflow_execution_id is None:
-        return 0
-    try:
-        execution = chat.get_execution(
-            record.workspace_id, record.workflow_execution_id
-        )
-    except RecordNotFound:
-        return 0
-    return execution.intent_epoch
-
-
-def _execution_closed(chat: ChatService, record: SubAgentRecord) -> bool:
-    """Stop every attributed conversation when its execution is terminal."""
-    if record.workflow_execution_id is None:
-        return False
-    try:
-        execution = chat.get_execution(
-            record.workspace_id, record.workflow_execution_id
-        )
-    except RecordNotFound:
-        return True
-    return execution.state not in {
-        WorkflowExecutionState.QUEUED,
-        WorkflowExecutionState.RUNNING,
-    }
-
-
-def _node_context(
-    child: SubAgentRecord,
-    *,
-    trigger_message_id: str | None = None,
-    intent_epoch: int = 0,
-    phase_executor: bool = False,
-) -> ToolContext:
-    return ToolContext(
-        workspace_id=child.workspace_id,
-        chat_id=child.chat_id,
-        conversation_id=child.sub_agent_id,
-        actor_id=child.created_by,
-        sub_agent_id=child.sub_agent_id,
-        parent_sub_agent_id=child.parent_sub_agent_id,
-        workflow_execution_id=child.workflow_execution_id,
-        phase_attempt_id=child.phase_attempt_id,
-        trigger_message_id=trigger_message_id,
-        allowed_tools=child.allowed_tools,
-        intent_epoch=intent_epoch,
-        phase_executor=phase_executor,
-    )
-
-
-def _child_system_prompt(child: SubAgentRecord) -> str:
-    return (
-        f"You are the '{child.role}' sub-agent. Complete the assigned task "
-        "using the tools available to you. When the task is complete, "
-        "respond with a concise final answer."
-    )
-
-
-class Conversation:
-    """The only owner of one anchored transcript and its turns."""
-
-    def __init__(self, service: Conversations, anchor: Anchor) -> None:
-        self._service = service
-        self._anchor = anchor
-
-    @property
-    def conversation_id(self) -> str:
-        """Return the conversation's single identity: its anchor id."""
-        return self._anchor.sub_agent_id or self._anchor.chat_id
-
-    @property
-    def workspace_id(self) -> str:
-        """Return the workspace the conversation lives in."""
-        return self._anchor.workspace_id
-
-    @property
-    def chat_id(self) -> str:
-        """Return the chat that contains and stores the conversation."""
-        return self._anchor.chat_id
-
-    @property
-    def kind(self) -> str:
-        """Return the durable kind of the conversation's record, when present."""
-        record = self._record()
-        return "root" if record is None else record.kind.value
-
-    # -- operations: each persists then wakes --------------------------------
-
-    def deliver_session_message(
-        self,
-        message: SessionMessage,
-        *,
-        actor_id: str = "thesis-runtime",
-        body: str | None = None,
-        role: MessageRole | None = None,
-        kind: TranscriptItemKind | None = None,
-        data: Mapping[str, object] | None = None,
-        tool_result: Mapping[str, object] | None = None,
-        datums: Sequence[Datum] = (),
-        execution_id: str | None = None,
-        attachment_ids: tuple[str, ...] = (),
-        references: Mapping[str, tuple[str, ...]] | None = None,
-        intent_epoch: int = 0,
-        idempotency_key: str | None = None,
-        schedule: bool = True,
-    ) -> ChatMessage:
-        """Deliver at this handle's anchor through the canonical service port."""
-        return self._service.deliver_session_message(
-            self._anchor,
-            message,
-            actor_id=actor_id,
-            body=body,
-            role=role,
-            kind=kind,
-            data=data,
-            tool_result=tool_result,
-            datums=datums,
-            execution_id=execution_id,
-            attachment_ids=attachment_ids,
-            references=references,
-            intent_epoch=intent_epoch,
-            idempotency_key=idempotency_key,
-            schedule=schedule,
-        )
-
-    def send(
-        self,
-        body: str,
-        actor_id: str,
-        *,
-        role: MessageRole = MessageRole.USER,
-        attachment_ids: Sequence[str] = (),
-        references: Mapping[str, tuple[str, ...]] | None = None,
-        execution_id: str | None = None,
-        intent_epoch: int = 0,
-        schedule: bool = True,
-        message_id: str | None = None,
-    ) -> ChatMessage:
-        """Persist one message, optionally deferring a root wake until intake ends."""
-        if self._anchor.sub_agent_id is not None:
-            if not schedule:
-                raise DeliveryError("only root input may defer scheduling")
-            if role is not MessageRole.USER or attachment_ids or references:
-                raise DeliveryError("nested input must be a plain user answer")
-            return self._service.answer(
-                self.workspace_id,
-                self.chat_id,
-                self._anchor.sub_agent_id,
-                body=body,
-                actor=AnsweringActor(actor_id),
-                message_id=message_id,
-            ).message
-        return self.deliver_session_message(
-            SessionMessage(
-                message_id or f"message-{uuid.uuid4().hex}",
-                "incoming",
-                MessageContent(body, "user"),
-            ),
-            actor_id=actor_id,
-            body=body,
-            role=role,
-            attachment_ids=tuple(attachment_ids),
-            references=references,
-            execution_id=execution_id,
-            intent_epoch=intent_epoch,
-            schedule=schedule,
-        )
-
-    def deliver(
-        self,
-        datum: Datum,
-        *,
-        body: str | None = None,
-        kind: TranscriptItemKind = TranscriptItemKind.SUB_AGENT,
-        role: MessageRole = MessageRole.TOOL,
-        data: Mapping[str, object] | None = None,
-        execution_id: str | None = None,
-        actor_id: str = "thesis-runtime",
-        idempotency_key: str | None = None,
-        tool_result: Mapping[str, object] | None = None,
-        schedule: bool = True,
-    ) -> DeliveryReceipt:
-        """Persist one datum at this anchor, then wake this conversation."""
-        return self._service.deliver(
-            self._anchor,
-            datum,
-            body=body,
-            kind=kind,
-            role=role,
-            data=data,
-            execution_id=execution_id,
-            actor_id=actor_id,
-            idempotency_key=idempotency_key,
-            tool_result=tool_result,
-            schedule=schedule,
-        )
-
-    def request_input(self) -> SubAgentRecord:
-        """Open this conversation's input state so an answer may resume it.
-
-        The pause is a lifecycle transition on the node's durable record: the
-        question's state lives on the asking node, and the answer admitted
-        through :meth:`Conversations.answer` consumes the input and returns the
-        node to ``running``.
-        """
-        if self._anchor.sub_agent_id is None:
-            raise NodeTurnError("a pause targets a nested conversation")
-        return self._service.lifecycle.request_input(
-            self._anchor.workspace_id, self._anchor.sub_agent_id
-        )
-
-    # -- observation ----------------------------------------------------------
-
-    def status(self) -> str:
-        """Return the conversation's durable status."""
-        record = self._record()
-        if record is None:
-            thread = self._service.chat.get_chat(
-                self._anchor.workspace_id, self._anchor.chat_id
-            )
-            return thread.state.value
-        return record.status.value
-
-    def in_flight(self) -> bool:
-        """Return whether a turn is currently running for this conversation."""
-        return self._service.in_flight(
-            self._anchor.workspace_id,
-            self._anchor.chat_id,
-            self._anchor.sub_agent_id or ROOT_ANCHOR_ID,
-        )
-
-    def transcript(self) -> tuple[ChatMessage, ...]:
-        """Return this conversation's own anchored messages, in order."""
-        return self._service.transcript(self._anchor)
-
-    # -- turn execution ------------------------------------------------------
-
-    def run_turn(self) -> ChatMessage | SessionResult | None:
-        """Run this conversation's next turn and return its outcome.
-
-        The worker calls this; it may also be called directly to run a turn
-        synchronously.  The root and every nested conversation run the same
-        durable session turn over their own anchored transcript.
-        """
-        anchor = self._anchor.sub_agent_id or "root"
-        _LOGGER.info("turn.start anchor=%s", anchor)
-        started = time.monotonic()
-        try:
-            result = self._service.run_node_turn(
-                self._anchor.workspace_id,
-                self._anchor.chat_id,
-                self._anchor.sub_agent_id or ROOT_ANCHOR_ID,
-            )
-            if not self._anchor.is_root:
-                return result
-            if result.status != "completed":
-                return None
-            if not result.turns or result.turns[-1].message.direction != "outgoing":
-                return None
-            final_invocation_id = result.turns[-1].invocation_id
-            return next(
-                (
-                    message
-                    for message in reversed(self.transcript())
-                    if message.role is MessageRole.ASSISTANT
-                    and isinstance(decode_activity(message), ModelOutput)
-                    and getattr(decode_activity(message), "invocation_id", None)
-                    == final_invocation_id
-                ),
-                None,
-            )
-        finally:
-            _LOGGER.info(
-                "turn.end anchor=%s duration_ms=%d",
-                anchor,
-                int((time.monotonic() - started) * 1000),
-            )
-
-    def _record(self) -> SubAgentRecord | None:
-        if self._anchor.sub_agent_id is None:
-            return None
-        return self._service.store.get_sub_agent(
-            self._anchor.workspace_id, self._anchor.sub_agent_id
-        )
-
-
-class _ServiceTurnRunner:
-    """Adapt the service's turn dispatch to the worker's runner seam."""
-
-    def __init__(self, service: Conversations) -> None:
-        self._service = service
-
-    def run(
-        self,
-        workspace_id: str,
-        chat_id: str,
-        sub_agent_id: str,
-        *,
-        pull_new_input: bool = False,
-    ) -> object:
-        if not sub_agent_id:
-            return self._service.root(workspace_id, chat_id).run_turn()
-        conversation = self._service.get(workspace_id, sub_agent_id)
-        if conversation is None:
-            raise NodeTurnError(f"sub-agent was not found: {sub_agent_id}")
-        return conversation.run_turn()
 
 
 class Conversations:
@@ -507,7 +176,7 @@ class Conversations:
         self._await_monotonic = await_monotonic or time.monotonic
         self._max_tool_iterations = 64
         self._workers = NodeTurnCoordinator(
-            runner=_ServiceTurnRunner(self),
+            runner=ServiceTurnRunner(self),
             chat=chat,
             store=self._store,
             spawn_thread=spawn_thread,
@@ -709,54 +378,15 @@ class Conversations:
                         "idempotency key already has a different message identity"
                     )
                 return existing
-        payload = dict(data or {})
-        if datums:
-            payload["datums"] = [datum.as_dict() for datum in datums]
-        if idempotency_key is not None:
-            payload["deliveryKey"] = idempotency_key
+        payload, tool_result, body = presentation_fields(
+            message,
+            data=data,
+            datums=datums,
+            idempotency_key=idempotency_key,
+            tool_result=tool_result,
+            body=body,
+        )
         content = message.content
-        result = content.result
-        if result is not None:
-            detached = content.as_dict()["result"]
-            if tool_result is None:
-                correlation = content.correlation
-                primary_type = content.source
-                raw_datums = (
-                    detached.get("datums") if isinstance(detached, Mapping) else None
-                )
-                if (
-                    isinstance(raw_datums, Sequence)
-                    and raw_datums
-                    and isinstance(raw_datums[0], Mapping)
-                ):
-                    candidate = raw_datums[0].get("datumType")
-                    if isinstance(candidate, str) and candidate.strip():
-                        primary_type = candidate
-                tool_result = tool_result_payload(
-                    operation=result.get("operation"),
-                    call_id=correlation.request_id if correlation else None,
-                    tool=correlation.tool_name if correlation else None,
-                    datum_type=primary_type,
-                    ok=bool(result.get("ok")),
-                    structured=detached.get("structured", {})
-                    if isinstance(detached, Mapping)
-                    and isinstance(detached.get("structured"), Mapping)
-                    else {},
-                    text=content.text,
-                    summary=content.text
-                    or f"{correlation.tool_name if correlation else content.source} result",
-                    failure=detached.get("failure")
-                    if isinstance(detached, Mapping)
-                    and isinstance(detached.get("failure"), Mapping)
-                    else None,
-                )
-            if body is None and isinstance(tool_result, Mapping):
-                summary = tool_result.get("summary")
-                text = tool_result.get("text")
-                if isinstance(summary, str) and summary.strip():
-                    body = summary
-                elif isinstance(text, str) and text.strip():
-                    body = text
         # Durable admission queues work in the same commit as this message,
         # before schedule() can apply its record-only routing rule.
         runnable = self._provider is not None and (schedule or content.source == "user")
@@ -1000,533 +630,36 @@ class Conversations:
             )
             if owns_anchor(message, anchor.sub_agent_id)
         ]
-        return self._ordered_messages(messages)
-
-    @staticmethod
-    def _ordered_messages(messages: Sequence[ChatMessage]) -> tuple[ChatMessage, ...]:
-        messages = sorted(
-            messages,
-            key=message_order_key,
-        )
-        start = 0
-        while start < len(messages):
-            if not is_external_input(messages[start]):
-                start += 1
-                continue
-            end = start + 1
-            while end < len(messages) and is_external_input(messages[end]):
-                end += 1
-            # Position orders incoming peers, never moves evidence across outputs.
-            messages[start:end] = sorted(
-                messages[start:end], key=lambda message: message.input_position
-            )
-            start = end
-        return tuple(messages)
+        return ordered_messages(messages)
 
     def run_node_turn(
         self, workspace_id: str, chat_id: str, sub_agent_id: str
     ) -> SessionResult:
-        """Run the same durable session and writer for any conversation anchor."""
-        if self._provider is None:
-            raise NodeTurnError("no session provider was bound")
-        root = sub_agent_id == ROOT_ANCHOR_ID
-        record = None if root else self._store.get_sub_agent(workspace_id, sub_agent_id)
-        if not root and (record is None or record.chat_id != chat_id):
-            raise NodeTurnError(f"sub-agent was not found: {sub_agent_id}")
-        if record is not None and (
-            record.status in _TERMINAL or record.role in RECORD_ANCHOR_ROLES
-        ):
-            return SessionResult(status=record.status.value, content="", turns=())
-        if record is not None and record.status is SubAgentStatus.NEEDS_INPUT:
-            # A prior recovery wake cannot override a deliberate approval pause.
-            # Authorized operator intake resumes the lifecycle before scheduling.
-            return SessionResult(status="needs_input", content="", turns=())
-        if record is not None and _execution_closed(self._chat, record):
-            return SessionResult(status="cancelled", content="", turns=())
-        if record is not None and record.status is SubAgentStatus.PENDING:
-            record = self._lifecycle.start(workspace_id, sub_agent_id)
-        anchor = Anchor(workspace_id, chat_id, None if root else sub_agent_id)
-        durable_consumed = self._chat.read_consumed_input(
-            workspace_id, chat_id, sub_agent_id
-        )
-        read_epoch = 0 if record is None else _execution_epoch(self._chat, record)
-        generation, transcript = self._workers.snapshot(
-            workspace_id,
-            chat_id,
-            sub_agent_id,
-            lambda: self._ordered_messages(
-                self._chat.read_message_window(
-                    workspace_id,
-                    chat_id,
-                    anchor.sub_agent_id or chat_id,
-                    consumed_position=durable_consumed,
-                    limit=self._max_history,
-                )
-            ),
-            observe=lambda messages: [
-                message.message_id for message in messages if is_external_input(message)
-            ],
-        )
-        if not transcript:
-            return SessionResult(status="completed", content="", turns=())
-        selected = list(transcript)
-        retained = {message.message_id: message for message in selected}
-        included_inputs = [
-            message for message in selected if is_external_input(message)
-        ]
-        initial_ids = tuple(message.message_id for message in included_inputs)
-        seen_ids = set(initial_ids)
-        initial_position = max(
-            durable_consumed,
-            max((message.input_position for message in included_inputs), default=0),
-        )
-        consumed_position = initial_position
-        boundary_generation = generation
-        trigger_message_id = next(
-            (
-                message.message_id
-                for message in reversed(transcript)
-                if message.role is MessageRole.USER
-            ),
-            None,
-        )
-        context = (
-            ToolContext(
-                workspace_id=workspace_id,
-                chat_id=chat_id,
-                conversation_id=chat_id,
-                actor_id=self._root_actor_id,
-                trigger_message_id=trigger_message_id,
-                allowed_tools=self._root_allowed_tools,
-            )
-            if record is None
-            else _node_context(
-                record,
-                trigger_message_id=trigger_message_id,
-                intent_epoch=read_epoch,
-                phase_executor=self._owns_phase(record),
-            )
-        )
-
-        def interrupted(failure: Mapping[str, object], *, resume: bool = True) -> None:
-            if not cancelled():
-                if not resume:
-                    # Programming/persistence faults are not provider recovery.
-                    # Preserve the diagnostic, then let the owning worker fail
-                    # this attempt without creating an automatic retry loop.
-                    self.deliver_session_message(
-                        anchor,
-                        SessionMessage(
-                            f"message-{uuid.uuid4().hex}",
-                            "incoming",
-                            MessageContent(
-                                f"Reply interrupted: {failure.get('message')}",
-                                "runtime",
-                                result={"failure": dict(failure)},
-                            ),
-                        ),
-                        role=MessageRole.SYSTEM,
-                        data={"status": "interrupted", "failure": dict(failure)},
-                        schedule=False,
-                    )
-                else:
-                    self._continue_turn(anchor, failure)
-
-        def cancelled() -> bool:
-            try:
-                self._chat.get_chat(workspace_id, chat_id)
-            except RecordNotFound:
-                return True
-            if record is None:
-                return False
-            current = self._store.get_sub_agent(workspace_id, sub_agent_id)
-            return (
-                current is None
-                or (
-                    current.status is not SubAgentStatus.COMPLETED
-                    and _execution_closed(self._chat, current)
-                )
-                or current.status
-                in (
-                    SubAgentStatus.CANCELLED,
-                    SubAgentStatus.FAILED,
-                )
-            )
-
-        def admit_dispatch() -> bool:
-            if not self._chat.admit_conversation_dispatch(workspace_id, chat_id):
-                return False
-            if record is None:
-                return True
-            current = self._store.get_sub_agent(workspace_id, sub_agent_id)
-            return (
-                current is not None
-                and current.status not in _TERMINAL
-                and not _execution_closed(self._chat, current)
-            )
-
-        # A retained continuation is executable input, not a consumed wake. Its
-        # delay survives restart and yields cooperatively to steering/cancellation.
-        for message in reversed(selected):
-            continuation = (
-                (from_record(message).content.result or {}).get("continuation")
-                if message.role is MessageRole.SYSTEM
-                and message.created_by == "thesis-runtime"
-                else None
-            )
-            if isinstance(continuation, Mapping):
-                resume_at = continuation.get("resume_at", 0)
-                if isinstance(resume_at, int | float) and math.isfinite(resume_at):
-                    wait_for_recovery(
-                        max(0.0, resume_at - time.time()),
-                        cancelled=cancelled,
-                        steered=lambda: any(
-                            from_record(row).content.source == "user"
-                            for row in self._chat.read_message_window(
-                                workspace_id,
-                                chat_id,
-                                anchor.sub_agent_id or chat_id,
-                                after_position=consumed_position,
-                            )
-                        ),
-                    )
-                break
-            if message.role is MessageRole.USER:
-                break
-        if cancelled():
-            return SessionResult(status="cancelled", content="", turns=())
-        try:
-            registry = (
-                self._registry_factory(context)
-                if self._registry_factory
-                else SessionToolRegistry()
-            )
-        except ToolCatalogError as error:
-            failure = error.outcome
-            interrupted(failure)
-            return SessionResult(
-                status="interrupted", content="", turns=(), failure=failure
-            )
-        session = AgentSession(
-            workspace_id=workspace_id,
-            chat_id=chat_id,
-            conversation_id=context.conversation_id,
-            tool_context=context,
-            provider=self._provider,
-            registry=registry,
+        """Compose one isolated attempt, then apply the child's return policy."""
+        result = ConversationTurn(
+            chat=self._chat,
             store=self._store,
-            sub_agent_id=context.sub_agent_id,
-            workflow_execution_id=context.workflow_execution_id,
-            phase_attempt_id=context.phase_attempt_id,
-            actor_id=context.actor_id,
-            role="primary",
+            lifecycle=self._lifecycle,
+            workers=self._workers,
+            provider=self._provider,
+            registry_factory=self._registry_factory,
+            deliver=self.deliver_session_message,
+            persist=self._persist_turn,
+            continue_turn=self._continue_turn,
+            on_fault=self._on_fault,
+            on_complete=self._child_turn_ended,
+            root_actor_id=self._root_actor_id,
+            root_allowed_tools=self._root_allowed_tools,
+            root_system_prompt=self._root_system_prompt,
+            max_history=self._max_history,
             max_tool_iterations=self._max_tool_iterations,
-            intent_epoch=context.intent_epoch,
-            timeline=self._chat.timeline,
-        )
-
-        def refresh_registry() -> tuple[SessionToolRegistry, int]:
-            nonlocal context
-            if record is not None:
-                context = replace(context, intent_epoch=read_epoch)
-            refreshed = (
-                self._registry_factory(context)
-                if self._registry_factory
-                else SessionToolRegistry()
-            )
-            return refreshed, context.intent_epoch
-
-        def pull() -> list[SessionMessage]:
-            nonlocal boundary_generation, consumed_position, read_epoch
-            boundary_epoch = (
-                0 if record is None else _execution_epoch(self._chat, record)
-            )
-            generation, snapshot = self._workers.snapshot(
-                workspace_id,
-                chat_id,
-                sub_agent_id,
-                lambda: self._ordered_messages(
-                    self._chat.read_message_window(
-                        workspace_id,
-                        chat_id,
-                        anchor.sub_agent_id or chat_id,
-                        after_position=consumed_position,
-                    )
-                ),
-                observe=lambda messages: [
-                    message.message_id
-                    for message in messages
-                    if is_external_input(message)
-                ],
-            )
-            retained.update((message.message_id, message) for message in snapshot)
-            inbound = [
-                message
-                for message in snapshot
-                if is_external_input(message)
-                and message.message_id not in seen_ids
-                and message.input_position > consumed_position
-            ]
-            seen_ids.update(message.message_id for message in inbound)
-            consumed_position = max(
-                consumed_position,
-                max((message.input_position for message in snapshot), default=0),
-            )
-            fresh = list(decode_transcript(inbound))
-            if any(message.content.source == "user" for message in fresh):
-                read_epoch = boundary_epoch
-            boundary_generation = generation
-            return fresh
-
-        def consumed(messages: Sequence[SessionMessage]) -> None:
-            self._workers.mark_consumed(
-                workspace_id,
-                chat_id,
-                sub_agent_id,
-                boundary_generation,
-                [message.message_id for message in messages],
-                input_position=max(
-                    (message.position for message in messages), default=0
-                ),
-            )
-
-        def steered() -> bool:
-            # Read the durable scoped head, including input accepted by another
-            # API replica. Observation never writes, consumes or mutates the
-            # in-flight provider snapshot; pull owns intake at the next boundary.
-            return any(
-                is_external_input(message)
-                and from_record(message).content.source == "user"
-                for message in self._chat.read_message_window(
-                    workspace_id,
-                    chat_id,
-                    anchor.sub_agent_id or chat_id,
-                    after_position=consumed_position,
-                )
-            )
-
-        def reconcile(messages: Sequence[SessionMessage]) -> Sequence[SessionMessage]:
-            """Restore durable arrival order without expanding retained history."""
-            nonlocal read_epoch
-            known = {message.message_id for message in messages}
-            fresh = pull()
-            known.update(message.message_id for message in fresh)
-            durable = decode_transcript(
-                [
-                    row
-                    for row in self._ordered_messages(tuple(retained.values()))
-                    if row.message_id in known
-                ]
-            )
-            return durable
-
-        def incoming(message: SessionMessage) -> SessionMessage:
-            # Reconciliation already read this scoped authoritative record.
-            # Observation is not another persistence attempt or attribution.
-            known = retained.get(message.message_id)
-            if known is not None and from_record(known) == message:
-                return message
-            record = self.deliver_session_message(
-                anchor,
-                message,
-                actor_id=context.actor_id,
-                execution_id=context.workflow_execution_id,
-                schedule=False,
-            )
-            seen_ids.add(record.message_id)
-            retained[record.message_id] = record
-            return from_record(record)
-
-        instruction = SessionMessage(
-            f"instruction-{uuid.uuid4().hex}",
-            "instruction",
-            MessageContent(
-                self._root_system_prompt
-                if record is None
-                else _child_system_prompt(record),
-                "instruction",
-            ),
-        )
-        decoded = decode_transcript(selected)
-        inbox = SessionInbox(
-            history=(instruction, *decoded),
-            persist=incoming,
-            pending_ids=tuple(
-                message.message_id
-                for message in included_inputs
-                if message.input_position > durable_consumed
-            ),
-        )
-
-        def persist(turn: SessionTurn) -> None:
-            retained.update(
-                (row.message_id, row) for row in self._persist_turn(context, turn)
-            )
-
-        try:
-            result = session.run(
-                (),
-                inbox=inbox,
-                before_model_call=pull,
-                on_consumed=consumed,
-                on_turn=persist,
-                is_cancelled=cancelled,
-                is_steered=steered,
-                admit_dispatch=admit_dispatch,
-                refresh_registry=refresh_registry,
-                reconcile=reconcile,
-            )
-        except OwnershipLost:
-            raise
-        except ToolCatalogError as error:
-            interrupted(error.outcome)
-            return SessionResult(
-                status="interrupted", content="", turns=(), failure=error.outcome
-            )
-        except Exception as error:  # noqa: BLE001 - a phase fault fails the node
-            _LOGGER.exception("conversation turn failed: %s", chat_id)
-            message = str(error) or type(error).__name__
-            if cancelled():
-                return SessionResult(status="cancelled", content="", turns=())
-            if record is None:
-                interrupted(
-                    {
-                        "kind": "runtime_fault",
-                        "message": message,
-                        "certainty": "unknown_outcome",
-                        "retry_safe": False,
-                    },
-                    resume=False,
-                )
-                raise
-            current = self._store.get_sub_agent(workspace_id, sub_agent_id)
-            if current is not None and current.status in _TERMINAL:
-                return SessionResult(
-                    status=current.status.value, content=message, turns=()
-                )
-            failed = self._lifecycle.fail(
-                record.workspace_id,
-                record.sub_agent_id,
-                result={"failure": message},
-            )
-            if self._on_fault is not None:
-                self._on_fault(failed or record, error)
-            return SessionResult(status="failed", content=message, turns=())
-        if result.status == "interrupted":
-            interrupted(result.failure or {})
-        if result.status == "interrupted":
-            return result
-        if result.status == "yielded":
-            if not cancelled():
-                self._continue_turn(anchor)
-            return result
-        if result.status == "cancelled":
-            return result
-        if record is not None:
-            self._child_turn_ended(record, result)
+        ).run(workspace_id, chat_id, sub_agent_id)
         return result
 
-    def _owns_phase(self, record: SubAgentRecord) -> bool:
-        parent = (
-            self._store.get_sub_agent(record.workspace_id, record.parent_sub_agent_id)
-            if record.parent_sub_agent_id
-            else None
-        )
-        return bool(
-            record.phase_executor
-            and record.phase
-            and record.phase_attempt_id
-            and record.workflow_execution_id
-            and parent is not None
-            and parent.role in RECORD_ANCHOR_ROLES
-            and parent.chat_id == record.chat_id
-            and parent.workflow_execution_id == record.workflow_execution_id
-        )
-
     def _persist_turn(
-        self,
-        context: ToolContext,
-        turn: SessionTurn,
-        *,
-        activity: str | None = None,
+        self, context: ToolContext, turn: SessionTurn, *, activity: str | None = None
     ) -> tuple[ChatMessage, ...]:
-        """Persist outgoing envelopes and runtime start activity, never inputs."""
-        if turn.message.direction != "outgoing":
-            return ()
-        content = turn.message.content
-        activity_call_id = (content.result or {}).get("toolCallId")
-        reasoning = (content.result or {}).get("reasoning")
-        root = context.sub_agent_id is None
-        metadata = (
-            RuntimeTool(
-                context.sub_agent_id,
-                "started" if activity == "started" else "finished",
-                activity_call_id if isinstance(activity_call_id, str) else None,
-            )
-            if activity is not None
-            else ModelOutput(context.sub_agent_id, turn.invocation_id)
-        )
-        data = {"turn": "assistant", **activity_data(metadata)}
-        if activity is None:
-            data["sessionMessage"] = turn.message.as_dict()
-        if turn.started_at is not None:
-            data["startedAt"] = turn.started_at.isoformat()
-        if activity is not None:
-            data["ownerActorId"] = context.actor_id
-            data["workflowExecutionId"] = context.workflow_execution_id
-            record = (
-                None
-                if root
-                else self._store.get_sub_agent(
-                    context.workspace_id, context.sub_agent_id or ""
-                )
-            )
-            if record is not None and record.chat_id == context.chat_id:
-                data["phase"] = record.phase
-        messages: list[ChatMessage] = []
-
-        def append(message: ChatMessage) -> None:
-            messages.append(message)
-
-        if activity == "started":
-            append(
-                self._chat.create_message(
-                    context.workspace_id,
-                    context.chat_id,
-                    actor_id=context.actor_id,
-                    body=f"Running {content.source}",
-                    role=MessageRole.TOOL,
-                    kind=TranscriptItemKind.TOOL
-                    if root
-                    else TranscriptItemKind.SUB_AGENT,
-                    execution_id=context.workflow_execution_id,
-                    data={
-                        **data,
-                        "tool": content.source,
-                        "arguments": dict(turn.arguments or {}),
-                    },
-                )
-            )
-        elif turn.message.direction == "outgoing" and (
-            content.text.strip() or content.requests
-        ):
-            append(
-                self._chat.create_message(
-                    context.workspace_id,
-                    context.chat_id,
-                    actor_id=context.actor_id,
-                    message_id=turn.message.message_id,
-                    body=content.text.strip() or "Tool calls requested",
-                    reasoning=reasoning if isinstance(reasoning, str) else None,
-                    role=MessageRole.ASSISTANT,
-                    kind=TranscriptItemKind.MESSAGE
-                    if root
-                    else TranscriptItemKind.SUB_AGENT,
-                    execution_id=context.workflow_execution_id,
-                    data=data,
-                )
-            )
-        return tuple(messages)
+        return persist_turn(self._chat, self._store, context, turn, activity=activity)
 
     def execute_runtime_tool(
         self,
@@ -1535,185 +668,41 @@ class Conversations:
         arguments: Mapping[str, object],
         execute: Callable[[], ToolExecution],
     ) -> ToolExecution:
-        """Record an internal subcall without inventing a provider-call envelope."""
-        from datetime import UTC, datetime
-
-        call_id = f"runtime-{uuid.uuid4().hex}"
-        started_at = datetime.now(UTC)
-        started = time.monotonic()
-        try:
-            self._persist_turn(
-                context,
-                SessionTurn(
-                    message=SessionMessage(
-                        f"activity-{uuid.uuid4().hex}",
-                        "outgoing",
-                        MessageContent("", tool, result={"toolCallId": call_id}),
-                    ),
-                    started_at=started_at,
-                    arguments=arguments,
-                ),
-                activity="started",
-            )
-        except Exception as error:  # noqa: BLE001 - writes must escape dispatch recovery
-            raise SessionPersistenceError(
-                "could not persist runtime tool activity"
-            ) from error
-        if not self._chat.admit_conversation_dispatch(
-            context.workspace_id, context.chat_id
-        ):
-            raise RecordNotFound("conversation has been deleted")
-        result = execute()
-        try:
-            payload = json.loads(result.as_content())
-            payload.update(
-                datums=[datum.as_dict() for datum in result.datums],
-                startedAt=started_at.isoformat(),
-                durationMs=int((time.monotonic() - started) * 1000),
-                arguments=dict(arguments),
-                toolCallId=call_id,
-            )
-            self.deliver_session_message(
-                Anchor(context.workspace_id, context.chat_id, context.sub_agent_id),
-                SessionMessage(
-                    f"message-{uuid.uuid4().hex}",
-                    "incoming",
-                    MessageContent(result.text, "runtime", result=payload),
-                ),
-                actor_id=context.actor_id,
-                body=result.text or f"{tool} result",
-                tool_result=tool_result_payload(
-                    call_id=call_id,
-                    tool=tool,
-                    datum_type=tool,
-                    ok=result.ok,
-                    structured=result.structured,
-                    text=result.text,
-                    summary=result.text or f"{tool} result",
-                    failure=result.failure,
-                ),
-                execution_id=context.workflow_execution_id,
-                schedule=False,
-            )
-        except Exception as error:  # noqa: BLE001 - writes must escape dispatch recovery
-            raise SessionPersistenceError(
-                "could not persist runtime tool activity"
-            ) from error
-        return result
+        """Record a runtime subcall through the shared activity and incoming writers."""
+        return execute_runtime_tool(
+            self._chat,
+            self._store,
+            self.deliver_session_message,
+            context,
+            tool,
+            arguments,
+            execute,
+        )
 
     def _continue_turn(
         self, anchor: Anchor, failure: Mapping[str, object] | None = None
     ) -> None:
-        """Yield a bounded attempt through canonical durable delivery, without a lifetime cap."""
         history = self._chat.read_message_window(
             anchor.workspace_id,
             anchor.chat_id,
             anchor.sub_agent_id or anchor.chat_id,
             limit=32,
         )
-        attempt = 1
-        for row in reversed(history):
-            message = from_record(row)
-            result = message.content.result or {}
-            previous = (
-                result.get("continuation")
-                if row.role is MessageRole.SYSTEM and row.created_by == "thesis-runtime"
-                else None
-            )
-            if isinstance(previous, Mapping):
-                value = previous.get("attempt")
-                attempt = value + 1 if isinstance(value, int) and value > 0 else 1
-                break
-            datums = result.get("datums", ())
-            if not isinstance(datums, list | tuple):
-                datums = ()
-            if message.content.source == "user" or any(
-                isinstance(datum, Mapping) and datum.get("ok") is True
-                for datum in datums
-            ):
-                break
-            if (
-                message.direction == "outgoing"
-                and not message.content.requests
-                and not result.get("interrupted")
-            ):
-                break
-        delay = 0.0 if failure is None else min(300.0, 30.0 * 2 ** min(attempt - 1, 4))
-        requested = (failure or {}).get("retry_after")
-        if isinstance(requested, int | float) and math.isfinite(requested):
-            delay = max(delay, requested)
-        detail = (failure or {}).get(
-            "message", "Execution slice finished with work remaining"
-        )
-        body = (
-            f"Automatically continuing this task: {detail}. "
-            "Resume from retained results and pending job IDs; reconcile uncertain mutations before any new submission. "
-            "Repair rejected arguments from their exact violations. If an approach repeatedly fails, change it, "
-            "use smaller executable steps, or return a scoped technical blocker to your supervisor. "
-            "Routine recovery requires no operator response."
-        )
+        message, attempt = continuation_message(history, failure, now=time.time())
         self.deliver_session_message(
             anchor,
-            SessionMessage(
-                f"message-{uuid.uuid4().hex}",
-                "incoming",
-                MessageContent(
-                    body,
-                    "runtime",
-                    result={
-                        "continuation": {
-                            "attempt": attempt,
-                            "resume_at": time.time() + delay,
-                        },
-                        **({"failure": dict(failure)} if failure is not None else {}),
-                    },
-                ),
-            ),
-            actor_id="thesis-runtime",
-            body=body,
+            message,
             role=MessageRole.SYSTEM,
-            kind=TranscriptItemKind.TOOL
-            if anchor.is_root
-            else TranscriptItemKind.SUB_AGENT,
             data={
                 "status": "continuing",
                 **({"failure": dict(failure)} if failure is not None else {}),
             },
         )
-        # Report explicit technical evidence, never the private child transcript.
-        # Record-only workflow containers cannot supervise; walk to their caller.
         if failure is not None and anchor.sub_agent_id and attempt in (1, 4, 16, 64):
-            child = self._store.get_sub_agent(anchor.workspace_id, anchor.sub_agent_id)
-            target = None if child is None else child.returns_to_sub_agent_id
-            visited = {anchor.sub_agent_id}
-            notify = True
-            while target:
-                if target in visited:
-                    notify = False
-                    break
-                visited.add(target)
-                parent = self._store.get_sub_agent(anchor.workspace_id, target)
-                if parent is None or parent.role not in RECORD_ANCHOR_ROLES:
-                    break
-                target = parent.parent_sub_agent_id
-            if notify:
+            supervisor = supervisor_anchor(self._store, anchor)
+            if supervisor is not None:
                 self.deliver_session_message(
-                    Anchor(anchor.workspace_id, anchor.chat_id, target),
-                    SessionMessage(
-                        f"recovery-notice-{uuid.uuid4().hex}",
-                        "incoming",
-                        MessageContent(
-                            f"Child {anchor.sub_agent_id} encountered a technical interruption and is automatically continuing. "
-                            "Inspect retained outcomes and redirect if useful; do not duplicate pending submissions.",
-                            "runtime",
-                            result={
-                                "childRecovery": {
-                                    "sub_agent_id": anchor.sub_agent_id,
-                                    "failure": dict(failure),
-                                }
-                            },
-                        ),
-                    ),
+                    supervisor, recovery_notice(anchor, failure)
                 )
 
     def _child_turn_ended(self, record: SubAgentRecord, result: SessionResult) -> None:

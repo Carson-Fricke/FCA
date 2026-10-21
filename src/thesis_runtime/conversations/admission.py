@@ -123,3 +123,21 @@ def arrival_sequence(message: ChatMessage) -> int:
 def message_order_key(message: ChatMessage) -> tuple[int, datetime]:
     """Order admitted records by storage sequence, independently of host clocks."""
     return arrival_sequence(message), message.created_at
+
+
+def ordered_messages(messages: Sequence[ChatMessage]) -> tuple[ChatMessage, ...]:
+    """Order incoming peers without moving evidence across outputs."""
+    messages = sorted(messages, key=message_order_key)
+    start = 0
+    while start < len(messages):
+        if not is_external_input(messages[start]):
+            start += 1
+            continue
+        end = start + 1
+        while end < len(messages) and is_external_input(messages[end]):
+            end += 1
+        messages[start:end] = sorted(
+            messages[start:end], key=lambda message: message.input_position
+        )
+        start = end
+    return tuple(messages)
