@@ -1,12 +1,16 @@
 //! Public publication contract: strict decoding, causal evidence and open compositions.
-use harness_strategy_sdk::{
-    research::{
-        recipes, validate_publication, Dataset, DatasetSemantics, Field, FieldType, Panel,
-        ResearchView, WaveletHistory,
-    },
-    serde_json::{json, Value},
-    StudyOutput,
-};
+use harness_strategy_sdk::research::recipes;
+use harness_strategy_sdk::research::validate_publication;
+use harness_strategy_sdk::research::Dataset;
+use harness_strategy_sdk::research::DatasetSemantics;
+use harness_strategy_sdk::research::Field;
+use harness_strategy_sdk::research::FieldType;
+use harness_strategy_sdk::research::Panel;
+use harness_strategy_sdk::research::ResearchView;
+use harness_strategy_sdk::research::WaveletHistory;
+use harness_strategy_sdk::serde_json::json;
+use harness_strategy_sdk::serde_json::Value;
+use harness_strategy_sdk::StudyOutput;
 use std::collections::BTreeMap;
 
 fn field(name: &str, field_type: FieldType) -> Field {

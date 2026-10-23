@@ -1,6 +1,9 @@
-use crate::{CompiledArtifact, ManagedWorkspace};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use crate::CompiledArtifact;
+use crate::ManagedWorkspace;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 

@@ -1,6 +1,10 @@
 //! Typed publication helpers; callers choose data budgets and fidelity.
-use crate::{building_blocks::trailing_haar, MetricPublisher, PublishError, StudyOutput};
-use serde_json::{json, Value};
+use crate::building_blocks::trailing_haar;
+use crate::MetricPublisher;
+use crate::PublishError;
+use crate::StudyOutput;
+use serde_json::json;
+use serde_json::Value;
 
 /// A scalar-cell evidence table, suitable for grids, comparisons and aligned paths.
 pub struct EvidenceTable {

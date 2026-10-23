@@ -8,16 +8,22 @@
 //! state, mirroring the MCP study submitter.
 
 use std::collections::BTreeMap;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::catch_unwind;
+use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::Arc;
 
 use backtest::backtest::screen::ScreenConfig;
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::DateTime;
+use chrono::NaiveDate;
+use chrono::Utc;
 
 use super::clock::Clock;
 use super::launcher::LaunchError;
-use super::store::{JobKind, JobRecord, JobState, JobStore};
+use harness_execution::jobs::ExecutionRepository;
+use harness_execution::jobs::JobKind;
+use harness_execution::jobs::JobRecord;
+use harness_execution::jobs::JobState;
 
 /// Work description passed to an injected screening launcher.
 #[derive(Debug, Clone, PartialEq)]
@@ -86,7 +92,7 @@ impl ScreeningRunner for UnavailableScreeningRunner {
 
 /// Launcher that runs one screening job on a detached worker in this process.
 pub struct InProcessScreenLauncher {
-    jobs: Arc<dyn JobStore>,
+    jobs: Arc<dyn ExecutionRepository>,
     runner: Arc<dyn ScreeningRunner>,
     clock: Arc<dyn Clock>,
 }
@@ -95,7 +101,7 @@ impl InProcessScreenLauncher {
     /// Compose an in-process launcher over the injected boundaries.
     #[must_use]
     pub fn new(
-        jobs: Arc<dyn JobStore>,
+        jobs: Arc<dyn ExecutionRepository>,
         runner: Arc<dyn ScreeningRunner>,
         clock: Arc<dyn Clock>,
     ) -> Self {
@@ -144,7 +150,7 @@ impl ScreenLauncher for InProcessScreenLauncher {
 
 /// Record one completed or domain-failed screening run.
 fn finish_run(
-    jobs: &Arc<dyn JobStore>,
+    jobs: &Arc<dyn ExecutionRepository>,
     job_id: &str,
     configuration: &ScreenConfig,
     outcome: ScreenRunOutcome,
@@ -172,7 +178,7 @@ fn finish_run(
 
 /// Record one screening run whose worker could not produce a result set.
 fn fail_run(
-    jobs: &Arc<dyn JobStore>,
+    jobs: &Arc<dyn ExecutionRepository>,
     job_id: &str,
     configuration: &ScreenConfig,
     started: DateTime<Utc>,
@@ -188,14 +194,20 @@ fn fail_run(
 
 /// Build the authoritative job record for one screening terminal state.
 fn result_record(
-    jobs: &Arc<dyn JobStore>,
+    jobs: &Arc<dyn ExecutionRepository>,
     job_id: &str,
     configuration: &ScreenConfig,
     state: JobState,
     rows: u64,
     started: DateTime<Utc>,
 ) -> Option<JobRecord> {
-    let mut record = jobs.get(job_id)?;
+    let mut record = match jobs.try_get(job_id) {
+        Ok(record) => record?,
+        Err(error) => {
+            eprintln!("screen publication cannot inspect retained job {job_id}: {error}");
+            return None;
+        }
+    };
     record.kind = JobKind::Screen;
     record.state = state;
     record.updated_at = Utc::now().max(started);
@@ -228,9 +240,22 @@ fn parse_date(value: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()
 }
 
-fn fail_job(jobs: &Arc<dyn JobStore>, job_id: &str, started: DateTime<Utc>, message: String) {
-    let Some(mut record) = jobs.get(job_id) else {
-        return;
+fn fail_job(
+    jobs: &Arc<dyn ExecutionRepository>,
+    job_id: &str,
+    started: DateTime<Utc>,
+    message: String,
+) {
+    let mut record = match jobs.try_get(job_id) {
+        Ok(Some(record)) => record,
+        Ok(None) => {
+            eprintln!("admitted execution disappeared: {job_id}");
+            return;
+        }
+        Err(error) => {
+            eprintln!("execution metadata unavailable; reconcile retained job {job_id}: {error}");
+            return;
+        }
     };
     record.state = JobState::Failed;
     record.updated_at = Utc::now().max(started);
@@ -241,13 +266,13 @@ fn fail_job(jobs: &Arc<dyn JobStore>, job_id: &str, started: DateTime<Utc>, mess
 /// Mark one background job failed when its worker exits without a terminal
 /// record: an early return that forgot to record a state, or a panic.
 struct ScreenJobGuard {
-    jobs: Arc<dyn JobStore>,
+    jobs: Arc<dyn ExecutionRepository>,
     job_id: String,
     started: DateTime<Utc>,
 }
 
 impl ScreenJobGuard {
-    fn new(jobs: Arc<dyn JobStore>, job_id: &str, started: DateTime<Utc>) -> Self {
+    fn new(jobs: Arc<dyn ExecutionRepository>, job_id: &str, started: DateTime<Utc>) -> Self {
         Self {
             jobs,
             job_id: job_id.to_string(),
@@ -258,10 +283,17 @@ impl ScreenJobGuard {
 
 impl Drop for ScreenJobGuard {
     fn drop(&mut self) {
-        let in_flight = self
-            .jobs
-            .get(&self.job_id)
-            .is_some_and(|record| matches!(record.state, JobState::Queued | JobState::Running));
+        let in_flight = match self.jobs.try_get(&self.job_id) {
+            Ok(record) => record
+                .is_some_and(|record| matches!(record.state, JobState::Queued | JobState::Running)),
+            Err(error) => {
+                eprintln!(
+                    "execution guard cannot inspect {}; outcome remains unknown: {error}",
+                    self.job_id
+                );
+                return;
+            }
+        };
         if in_flight {
             fail_job(
                 &self.jobs,

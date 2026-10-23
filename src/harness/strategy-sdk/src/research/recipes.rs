@@ -1,5 +1,7 @@
 //! Reusable study-family compositions. They never implement an analysis method.
-use super::{Dataset, Panel, ResearchView};
+use super::Dataset;
+use super::Panel;
+use super::ResearchView;
 use std::collections::BTreeMap;
 
 /// A semantic slot and field-role requirement for a registered panel.

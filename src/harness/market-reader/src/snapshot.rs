@@ -1,8 +1,14 @@
 //! Immutable snapshot identities; access URLs never enter the manifest.
 
-use lake_contracts::{partition_path, AssetClass, BarInterval, DataType, Date};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use lake_contracts::partition_path;
+use lake_contracts::AssetClass;
+use lake_contracts::BarInterval;
+use lake_contracts::DataType;
+use lake_contracts::Date;
+use serde::Deserialize;
+use serde::Serialize;
+use sha2::Digest;
+use sha2::Sha256;
 
 use crate::ReaderError;
 

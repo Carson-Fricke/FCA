@@ -4,12 +4,13 @@ pub mod backend;
 pub mod dispatch;
 pub mod launch;
 pub mod renewal;
-pub mod store;
+
 pub mod validation;
 pub mod worker;
-use backend::{error, Result};
+use backend::error;
+use backend::Result;
+pub use harness_execution::store::ExecutionStore;
 use std::sync::Arc;
-pub use store::ExecutionStore;
 
 pub trait Wake: Send + Sync {
     fn wake(&self) -> std::result::Result<(), String>;
@@ -18,7 +19,7 @@ pub trait Wake: Send + Sync {
 pub fn configured_store() -> Result<ExecutionStore> {
     let mode = std::env::var("HARNESS_MARKET_DATA_MODE").unwrap_or_else(|_| "local".into());
     let backend: Arc<dyn backend::Backend> = match mode.as_str() {
-        "local" => Arc::new(backend::Local {
+        "local" => Arc::new(harness_execution_storage::Local {
             root: crate::http::state::results_root_from_env(),
         }),
         "azure" => {
@@ -80,7 +81,7 @@ pub fn start_control_reconciler() -> tokio::task::JoinHandle<()> {
                         .map(|s| s.parse::<usize>().map_err(backend::error))
                         .transpose()?
                         .unwrap_or(2);
-                    if let Some(slot) = worker::Slot::acquire(&store, max)? {
+                    if let Some(slot) = harness_execution::fleet::Slot::acquire(&store, max)? {
                         drop(slot);
                         dispatch::ConfiguredWake.wake().map_err(backend::error)?;
                     }

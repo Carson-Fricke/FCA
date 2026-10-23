@@ -1,16 +1,17 @@
 //! Validate replay market coverage before deterministic execution.
 
 use super::config::BacktestConfig;
-use super::errors::BacktestError;
-use super::fixture::{DataPreflight, ReplayFixture};
+use super::fixture::DataPreflight;
+use super::fixture::ReplayFixture;
+use harness_trading::replay_errors::BacktestError;
 
 /// Require at least one dispatchable completed frame for every requested bar symbol.
 ///
 /// # Errors
 /// Rejects raw bars whose intervals never complete within the run window.
 pub fn validate_completed_bar_coverage(
-    subscriptions: &[super::engine_core::MarketSubscription],
-    frames: &[super::engine_core::EngineBarFrame],
+    subscriptions: &[harness_trading::program::MarketSubscription],
+    frames: &[harness_trading::program::EngineBarFrame],
 ) -> Result<(), BacktestError> {
     for input in subscriptions
         .iter()
@@ -36,7 +37,7 @@ pub fn validate_completed_bar_coverage(
 /// Rejects requested inputs with no rows in the replay window.
 pub fn validate_subscription_coverage(
     fixture: &ReplayFixture,
-    subscriptions: &[super::engine_core::MarketSubscription],
+    subscriptions: &[harness_trading::program::MarketSubscription],
 ) -> Result<(), BacktestError> {
     for input in subscriptions {
         for symbol in &input.symbols {

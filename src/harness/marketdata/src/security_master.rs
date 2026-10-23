@@ -10,11 +10,14 @@ use std::rc::Rc;
 
 use num::Decimal18;
 
-use crate::catalog::{DelistingType, ListingRecord, ListingsCatalogPort};
+use crate::catalog::DelistingType;
+use crate::catalog::ListingRecord;
+use crate::catalog::ListingsCatalogPort;
 use crate::clock::Clock;
 use crate::error::DataError;
 use crate::symbol::canonical_symbol;
-use crate::time::{Date, DateTime};
+use crate::time::Date;
+use crate::time::DateTime;
 
 fn canonical_entity(entity_id: &str) -> Result<String, DataError> {
     let canonical = entity_id.trim().to_uppercase();

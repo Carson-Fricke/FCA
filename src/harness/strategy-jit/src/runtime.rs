@@ -9,21 +9,43 @@
 use std::collections::BTreeMap;
 use std::os::raw::c_void;
 
-use backtest::backtest::engine_core::{
-    EngineBar, EngineBarFrame, EngineFill, EngineMarket, EngineOrder, MarketSubscription,
-    StrategyInstance, StrategyRuntime, StrategyStart,
-};
-use backtest::backtest::errors::BacktestError;
-use harness_strategy_sdk::{
-    canonical_subscriptions, CBarEvent, CBarFrame, CDecimal, CFill, CMarketOrder, CMetricSink,
-    COrderSink, CQuoteEvent, CStart, CStr, CTradeEvent, MetricPublishFn, OrderSubmitFn,
-    Subscription, METRIC_INVALID_NAME, METRIC_NOT_FINITE, METRIC_OK, METRIC_RESERVED_NAME,
-    RESERVED_METRIC_NAMES, SDK_OK,
-};
+use harness_strategy_sdk::canonical_subscriptions;
+use harness_strategy_sdk::CBarEvent;
+use harness_strategy_sdk::CBarFrame;
+use harness_strategy_sdk::CDecimal;
+use harness_strategy_sdk::CFill;
+use harness_strategy_sdk::CMarketOrder;
+use harness_strategy_sdk::CMetricSink;
+use harness_strategy_sdk::COrderSink;
+use harness_strategy_sdk::CQuoteEvent;
+use harness_strategy_sdk::CStart;
+use harness_strategy_sdk::CStr;
+use harness_strategy_sdk::CTradeEvent;
+use harness_strategy_sdk::MetricPublishFn;
+use harness_strategy_sdk::OrderSubmitFn;
+use harness_strategy_sdk::Subscription;
+use harness_strategy_sdk::METRIC_INVALID_NAME;
+use harness_strategy_sdk::METRIC_NOT_FINITE;
+use harness_strategy_sdk::METRIC_OK;
+use harness_strategy_sdk::METRIC_RESERVED_NAME;
+use harness_strategy_sdk::RESERVED_METRIC_NAMES;
+use harness_strategy_sdk::SDK_OK;
+use harness_trading::program::EngineBar;
+use harness_trading::program::EngineBarFrame;
+use harness_trading::program::EngineFill;
+use harness_trading::program::EngineMarket;
+use harness_trading::program::EngineOrder;
+use harness_trading::program::MarketSubscription;
+use harness_trading::program::StrategyInstance;
+use harness_trading::program::StrategyRuntime;
+use harness_trading::program::StrategyStart;
+use harness_trading::replay_errors::BacktestError;
 
-use crate::compile::{compile, ProgramKind};
+use crate::compile::compile;
+use crate::compile::ProgramKind;
 use crate::error::JitError;
-use crate::load::{LoadedStrategy, LoadedStudy};
+use crate::load::LoadedStrategy;
+use crate::load::LoadedStudy;
 use crate::workspace::ManagedWorkspace;
 
 /// The metric sink result code for any other rejection.
@@ -45,7 +67,7 @@ fn read_subscriptions(view: CStr) -> Result<Vec<MarketSubscription>, JitError> {
     Ok(canonical.into_iter().map(engine_subscription).collect())
 }
 
-pub(crate) fn engine_subscription(input: Subscription) -> MarketSubscription {
+pub fn engine_subscription(input: Subscription) -> MarketSubscription {
     match input {
         Subscription::Bars { symbols, interval } => MarketSubscription {
             data_type: "bars".into(),

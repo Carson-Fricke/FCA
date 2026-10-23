@@ -8,18 +8,28 @@
 
 use std::collections::BTreeMap;
 
-use backtest::backtest::errors::BacktestError;
-use backtest::canonical_json::JsonValue;
-use backtest::runtime::paper::{
-    PaperBook, PaperOptions, PaperRuntimeShell, PaperSessionResult, PaperShell, PaperShellRestore,
-};
-use backtest::runtime::reconciler::{
-    reconcile_cash, reconcile_positions, BrokerPosition, ExpectedPosition, ReconciliationTolerances,
-};
-use backtest::runtime::shadow::{build_report, LivePrint, ObserveOnlyBrokerSink, SingleLegOrder};
-use backtest::runtime::state_store::{
-    decimal_text, FillState, RuntimeStateStore, SnapshotTrigger, StateStoreError,
-};
+use harness_contracts::canonical_json::JsonValue;
+use harness_trading::replay_errors::BacktestError;
+use live::runtime::paper::PaperBook;
+use live::runtime::paper::PaperOptions;
+use live::runtime::paper::PaperRuntimeShell;
+use live::runtime::paper::PaperSessionResult;
+use live::runtime::paper::PaperShell;
+use live::runtime::paper::PaperShellRestore;
+use live::runtime::reconciler::reconcile_cash;
+use live::runtime::reconciler::reconcile_positions;
+use live::runtime::reconciler::BrokerPosition;
+use live::runtime::reconciler::ExpectedPosition;
+use live::runtime::reconciler::ReconciliationTolerances;
+use live::runtime::shadow::build_report;
+use live::runtime::shadow::LivePrint;
+use live::runtime::shadow::ObserveOnlyBrokerSink;
+use live::runtime::shadow::SingleLegOrder;
+use live::runtime::state_store::decimal_text;
+use live::runtime::state_store::FillState;
+use live::runtime::state_store::RuntimeStateStore;
+use live::runtime::state_store::SnapshotTrigger;
+use live::runtime::state_store::StateStoreError;
 use num::Decimal18;
 
 /// A fill for one order, in the shape a session records it.

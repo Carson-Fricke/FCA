@@ -7,11 +7,16 @@
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use crate::catalog::{ContractRecord, ContractsCatalogPort, ListingRecord, ListingsCatalogPort};
+use crate::catalog::ContractRecord;
+use crate::catalog::ContractsCatalogPort;
+use crate::catalog::ListingRecord;
+use crate::catalog::ListingsCatalogPort;
 use crate::clock::Clock;
 use crate::error::DataError;
-use crate::symbol::{canonical_osi_symbol, canonical_symbol};
-use crate::time::{Date, DateTime};
+use crate::symbol::canonical_osi_symbol;
+use crate::symbol::canonical_symbol;
+use crate::time::Date;
+use crate::time::DateTime;
 
 /// The asset kind a universe member's record describes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

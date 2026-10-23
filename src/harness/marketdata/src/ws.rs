@@ -6,23 +6,30 @@
 //! clock, sleep, or random access while producing the same market-event records
 //! used by replay.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::fmt;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::SinkExt;
+use futures_util::StreamExt;
 use num::Decimal18;
 use serde_json::Value;
 
 use crate::error::DataError;
-use crate::events::{MarketEvent, QuoteEvent, TradeEvent};
+use crate::events::MarketEvent;
+use crate::events::QuoteEvent;
+use crate::events::TradeEvent;
 use crate::options_universe::OptionUniverseSnapshot;
-use crate::symbol::{canonical_osi_symbol, canonical_symbol};
-use crate::time::{DateTime, Nanos};
+use crate::symbol::canonical_osi_symbol;
+use crate::symbol::canonical_symbol;
+use crate::time::DateTime;
+use crate::time::Nanos;
 
 /// Alpaca sent an invalid frame or rejected a stream operation.
 #[derive(Clone, Debug, PartialEq, Eq)]

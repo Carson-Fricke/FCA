@@ -33,6 +33,7 @@ crate.
 ## Workspace
 
 - Workspace root is `src/harness/Cargo.toml`. Crates are direct children:
+  `execution`, `execution-storage`, `trading`, `research`,
   `num`, `marketdata`, `backtest`, `live`, `api`, `mcp`, `config`,
   `contracts`, `strategy-sdk`, `strategy-jit`, `lakeclient`, `market-reader`. The embedded-Python host was removed: no
   harness build or test needs a Python interpreter, and authored programs run

@@ -7,20 +7,29 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::path::{Path, PathBuf};
+use std::panic::catch_unwind;
+use std::panic::AssertUnwindSafe;
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use chrono::{DateTime, NaiveDate, Utc};
-use serde_json::{json, Value};
+use chrono::DateTime;
+use chrono::NaiveDate;
+use chrono::Utc;
+use serde_json::json;
+use serde_json::Value;
 
 use backtest::backtest::config::BacktestConfig;
 use backtest::backtest::engine_core::EngineOptions;
 use backtest::backtest::screen::ScreenConfig;
 
 use crate::http::screener::ScreeningRunner;
+use harness_execution::jobs::Admission;
+use harness_execution::jobs::JobAdmission;
+use harness_execution::jobs::JobKind;
+use harness_execution::jobs::JobRecord;
+use harness_execution::jobs::JobState;
 use harness_lakeclient::BlockingLakeClient;
-use mcp::store::{Admission, JobKind, JobRecord, JobState, JobStore};
 
 /// One submission receipt shared by every local surface.
 fn receipt(record: &JobRecord) -> Value {
@@ -44,15 +53,15 @@ fn created_receipt(job_id: &str, kind: JobKind) -> Value {
 
 /// Admission adapter; execution belongs to the isolated worker pool.
 pub struct NativeBacktestSubmitter {
-    job_store: Arc<dyn JobStore>,
+    job_store: Arc<dyn JobAdmission>,
     wake: Arc<dyn crate::execution::Wake>,
 }
 impl NativeBacktestSubmitter {
-    pub fn new(job_store: Arc<dyn JobStore>, wake: Arc<dyn crate::execution::Wake>) -> Self {
+    pub fn new(job_store: Arc<dyn JobAdmission>, wake: Arc<dyn crate::execution::Wake>) -> Self {
         Self { job_store, wake }
     }
 }
-impl mcp::tools::BacktestSubmitter for NativeBacktestSubmitter {
+impl mcp::tools::ports::BacktestSubmitter for NativeBacktestSubmitter {
     fn submit(
         &self,
         path: &str,
@@ -70,15 +79,15 @@ impl mcp::tools::BacktestSubmitter for NativeBacktestSubmitter {
     }
 }
 pub struct NativeStudySubmitter {
-    job_store: Arc<dyn JobStore>,
+    job_store: Arc<dyn JobAdmission>,
     wake: Arc<dyn crate::execution::Wake>,
 }
 impl NativeStudySubmitter {
-    pub fn new(job_store: Arc<dyn JobStore>, wake: Arc<dyn crate::execution::Wake>) -> Self {
+    pub fn new(job_store: Arc<dyn JobAdmission>, wake: Arc<dyn crate::execution::Wake>) -> Self {
         Self { job_store, wake }
     }
 }
-impl mcp::tools::StudySubmitter for NativeStudySubmitter {
+impl mcp::tools::ports::StudySubmitter for NativeStudySubmitter {
     fn submit(
         &self,
         path: &str,
@@ -96,7 +105,7 @@ impl mcp::tools::StudySubmitter for NativeStudySubmitter {
     }
 }
 fn admit_replay(
-    store: &Arc<dyn JobStore>,
+    store: &Arc<dyn JobAdmission>,
     wake: &Arc<dyn crate::execution::Wake>,
     path: &str,
     job_id: Option<&str>,
@@ -122,7 +131,7 @@ pub(crate) fn prepare_replay(
     kind: JobKind,
 ) -> Result<JobRecord, String> {
     let (configuration, accepted_input) =
-        backtest::backtest::job::load_replay_submission(path, job_id, shell)
+        harness_research::configuration::load_replay_submission(path, job_id, shell)
             .map_err(|e| e.to_string())?;
     let id = configuration.job_id.clone();
     let mut record = JobRecord::new(&id, kind, configuration.configuration_hash(), Utc::now());
@@ -131,24 +140,26 @@ pub(crate) fn prepare_replay(
     Ok(record)
 }
 pub struct NativeScreeningSubmitter {
-    job_store: Arc<dyn JobStore>,
+    job_store: Arc<dyn JobAdmission>,
     wake: Arc<dyn crate::execution::Wake>,
 }
 impl NativeScreeningSubmitter {
-    pub fn new(job_store: Arc<dyn JobStore>, wake: Arc<dyn crate::execution::Wake>) -> Self {
+    pub fn new(job_store: Arc<dyn JobAdmission>, wake: Arc<dyn crate::execution::Wake>) -> Self {
         Self { job_store, wake }
     }
 }
-impl mcp::tools::ScreeningSubmitter for NativeScreeningSubmitter {
+impl mcp::tools::ports::ScreeningSubmitter for NativeScreeningSubmitter {
     fn submit(
         &self,
         path: &str,
         _workspace: Option<&str>,
         job_id: Option<&str>,
     ) -> Result<Value, String> {
-        let configuration =
-            backtest::backtest::job::load_screen_config_with_job_id(Path::new(path), job_id)
-                .map_err(|e| e.to_string())?;
+        let configuration = harness_research::configuration::load_screen_config_with_job_id(
+            Path::new(path),
+            job_id,
+        )
+        .map_err(|e| e.to_string())?;
         let id = configuration.job_id.clone();
         let mut record = JobRecord::new(
             &id,
@@ -172,7 +183,7 @@ impl mcp::tools::ScreeningSubmitter for NativeScreeningSubmitter {
 /// Execute one already-admitted immutable input inside a finite worker process.
 /// It never admits, allocates a replacement ID, or reopens caller files.
 pub fn execute_admitted(
-    store: Arc<dyn JobStore>,
+    store: Arc<dyn harness_execution::jobs::JobExecution>,
     record: JobRecord,
     access: Arc<dyn harness_lakeclient::MarketAccess>,
 ) {
@@ -419,7 +430,7 @@ fn authored_program_document(model: &Value, shell: &str) -> Result<Value, String
                 .to_string(),
         );
     }
-    let digest = backtest::sha256::digest_hex(source.as_bytes());
+    let digest = harness_contracts::sha256::digest_hex(source.as_bytes());
     let instance_id = format!("validate-{shell}-{}", &digest[..16]);
     data.insert("symbols".to_string(), json!(&symbols));
     if let Some(echo) = subscription_echo {
@@ -455,20 +466,11 @@ fn authored_program_document(model: &Value, shell: &str) -> Result<Value, String
     Ok(Value::Object(document))
 }
 
-impl mcp::tools::StudyValidator for NativeStudyValidator {
-    fn sdk_reference(
-        &self,
-        arguments: &serde_json::Map<String, Value>,
-    ) -> Result<Value, mcp::tools::ToolExecutionError> {
-        harness_strategy_jit::validation_service()
-            .sdk_reference(arguments)
-            .map_err(|error| mcp::tools::ToolExecutionError::new(error.to_string()))
-    }
-
+impl mcp::tools::ports::StudyValidator for NativeStudyValidator {
     fn validate_strategy_result(
         &self,
         model: &Value,
-    ) -> Result<Value, mcp::tools::ToolExecutionError> {
+    ) -> Result<Value, mcp::tools::ports::ToolExecutionError> {
         validate_authored_program(model, "backtest")
     }
 
@@ -483,7 +485,10 @@ impl mcp::tools::StudyValidator for NativeStudyValidator {
             .map_err(|error| error.to_string())
     }
 
-    fn validate_result(&self, model: &Value) -> Result<Value, mcp::tools::ToolExecutionError> {
+    fn validate_result(
+        &self,
+        model: &Value,
+    ) -> Result<Value, mcp::tools::ports::ToolExecutionError> {
         validate_authored_program(model, "study")
     }
 }
@@ -491,7 +496,7 @@ impl mcp::tools::StudyValidator for NativeStudyValidator {
 fn validate_authored_program(
     model: &Value,
     shell: &str,
-) -> Result<Value, mcp::tools::ToolExecutionError> {
+) -> Result<Value, mcp::tools::ports::ToolExecutionError> {
     cached_authored_validation(model, shell, || inspect_authored_program(model, shell))
 }
 
@@ -502,19 +507,19 @@ pub(crate) fn inspect_authored_program(
     use harness_strategy_jit::ValidationFailure;
     let mut document =
         authored_program_document(model, shell).map_err(ValidationFailure::configuration)?;
-    backtest::backtest::job::overlay_job_id_json(
+    harness_research::configuration::overlay_job_id_json(
         &mut document,
-        Some(backtest::backtest::job::VALIDATION_JOB_ID),
+        Some(harness_research::configuration::VALIDATION_JOB_ID),
     )
     .map_err(|error| ValidationFailure::configuration(error.to_string()))?;
     let configuration = if shell == "study" {
-        backtest::backtest::job::parse_study_document(&document)
+        harness_research::configuration::parse_study_document(&document)
             .map_err(|error| ValidationFailure::configuration(error.to_string()))?
     } else {
         BacktestConfig::from_yaml(&document.to_string())
             .map_err(|error| ValidationFailure::configuration(error.to_string()))?
     };
-    let mut result = harness_strategy_jit::inspect_configuration(&configuration)?;
+    let mut result = harness_research::inspect_configuration(&configuration)?;
     let sdk = harness_strategy_jit::validation_service()
         .sdk_reference(&serde_json::Map::new())
         .map_err(ValidationFailure::from)?;
@@ -529,7 +534,7 @@ pub(crate) fn cached_authored_validation(
     model: &Value,
     shell: &str,
     inspect: impl FnOnce() -> Result<Value, harness_strategy_jit::ValidationFailure>,
-) -> Result<Value, mcp::tools::ToolExecutionError> {
+) -> Result<Value, mcp::tools::ports::ToolExecutionError> {
     let kind = if shell == "study" {
         "study"
     } else {
@@ -539,7 +544,7 @@ pub(crate) fn cached_authored_validation(
     harness_strategy_jit::validation_service()
         .validate(&cache_input, inspect)
         .map_err(|error| {
-            mcp::tools::ToolExecutionError::with_payload(
+            mcp::tools::ports::ToolExecutionError::with_payload(
                 &error.message,
                 json!({
                     "boundary": "local",
@@ -559,7 +564,7 @@ pub(crate) fn cached_authored_validation(
 
 /// Run one screening job on a detached worker and persist its result set.
 fn run_background_screen(
-    job_store: Arc<dyn JobStore>,
+    job_store: Arc<dyn harness_execution::jobs::JobExecution>,
     runner: Arc<dyn ScreeningRunner>,
     job_id: String,
     configuration: ScreenConfig,
@@ -595,7 +600,7 @@ fn run_background_screen(
 
 /// The screening body. Every exit path writes a terminal job record.
 fn run_background_screen_inner(
-    job_store: Arc<dyn JobStore>,
+    job_store: Arc<dyn harness_execution::jobs::JobExecution>,
     runner: Arc<dyn ScreeningRunner>,
     job_id: String,
     configuration: ScreenConfig,
@@ -652,7 +657,7 @@ fn date_of_text(value: &str) -> Option<NaiveDate> {
 
 /// Run one study on a detached worker and persist its complete result set.
 fn run_background_study(
-    job_store: Arc<dyn JobStore>,
+    job_store: Arc<dyn harness_execution::jobs::JobExecution>,
     job_id: String,
     configuration: BacktestConfig,
     output_dir: PathBuf,
@@ -687,9 +692,9 @@ fn run_background_study(
 
 /// The study body. Every exit path writes a terminal job record.
 fn run_background_study_inner(
-    job_store: Arc<dyn JobStore>,
+    job_store: Arc<dyn harness_execution::jobs::JobExecution>,
     job_id: String,
-    mut configuration: BacktestConfig,
+    configuration: BacktestConfig,
     output_dir: PathBuf,
     access: Option<Arc<dyn harness_lakeclient::MarketAccess>>,
 ) {
@@ -704,14 +709,14 @@ fn run_background_study_inner(
             return;
         }
     };
-    let client = client.with_progress(mcp::store::progress_reporter(
+    let client = client.with_progress(harness_execution::jobs::progress_reporter(
         job_store.clone(),
         job_id.clone(),
     ));
     let mut actual_data_start = None;
     let mut actual_data_end = None;
     if !configuration.symbols.is_empty() {
-        match clamp_study_window(&client, &mut configuration) {
+        match study_window_dates(&configuration) {
             Ok((start, end)) => {
                 actual_data_start = Some(start);
                 actual_data_end = Some(end);
@@ -722,7 +727,7 @@ fn run_background_study_inner(
             }
         }
     }
-    match harness_strategy_jit::run_study_configuration(
+    match harness_research::run_study_configuration(
         &configuration,
         &EngineOptions::default(),
         Some(output_dir.as_path()),
@@ -763,7 +768,7 @@ fn run_background_study_inner(
 /// `read_artifact` observe `backtest.json`, `metrics.json`, `report.html`, and
 /// the recorded Parquet trail rather than only the canonical manifest.
 fn run_background_backtest(
-    job_store: Arc<dyn JobStore>,
+    job_store: Arc<dyn harness_execution::jobs::JobExecution>,
     job_id: String,
     configuration: BacktestConfig,
     output_dir: PathBuf,
@@ -798,7 +803,7 @@ fn run_background_backtest(
 
 /// The backtest body. Every exit path writes a terminal job record.
 fn run_background_backtest_inner(
-    job_store: Arc<dyn JobStore>,
+    job_store: Arc<dyn harness_execution::jobs::JobExecution>,
     job_id: String,
     configuration: BacktestConfig,
     output_dir: PathBuf,
@@ -815,11 +820,11 @@ fn run_background_backtest_inner(
             return;
         }
     };
-    let client = client.with_progress(mcp::store::progress_reporter(
+    let client = client.with_progress(harness_execution::jobs::progress_reporter(
         job_store.clone(),
         job_id.clone(),
     ));
-    match harness_strategy_jit::run_backtest_configuration(
+    match harness_research::run_backtest_configuration(
         &configuration,
         &EngineOptions::default(),
         Some(output_dir.as_path()),
@@ -855,7 +860,7 @@ fn run_background_backtest_inner(
 
 /// Publish one terminal job result, preserving admitted provenance fields.
 fn publish_result(
-    job_store: &Arc<dyn JobStore>,
+    job_store: &Arc<dyn harness_execution::jobs::JobExecution>,
     job_id: &str,
     completed: bool,
     metrics: BTreeMap<String, String>,
@@ -863,8 +868,16 @@ fn publish_result(
     error_message: Option<String>,
     artifacts: BTreeMap<String, Vec<u8>>,
 ) -> bool {
-    let Some(mut record) = job_store.get(job_id) else {
-        return false;
+    let mut record = match job_store.try_get(job_id) {
+        Ok(Some(record)) => record,
+        Ok(None) => {
+            eprintln!("admitted execution disappeared: {job_id}");
+            return false;
+        }
+        Err(error) => {
+            eprintln!("execution publication cannot read retained job {job_id}: {error}");
+            return false;
+        }
     };
     record.state = if completed {
         JobState::Succeeded
@@ -888,21 +901,24 @@ fn publish_result(
 }
 
 /// Record one pre-run failure and fail the job in one place.
-fn record_failed_run(job_store: &Arc<dyn JobStore>, job_id: &str, message: String) {
+fn record_failed_run(
+    job_store: &Arc<dyn harness_execution::jobs::JobExecution>,
+    job_id: &str,
+    message: String,
+) {
     fail_job(job_store, job_id, Utc::now(), message);
 }
 
 /// Retain the operator's study window without acquiring implicit bar inputs.
 ///
 /// Existing launchers call this seam before compilation. Acquisition belongs
-/// to the engine after it resolves and validates the source subscription union.
+/// to research acquisition after it validates the source subscription union.
 ///
 /// # Errors
 ///
 /// Returns a reason string when a window date is outside the representable range.
-pub(crate) fn clamp_study_window(
-    _client: &BlockingLakeClient,
-    configuration: &mut BacktestConfig,
+pub(crate) fn study_window_dates(
+    configuration: &BacktestConfig,
 ) -> Result<(NaiveDate, NaiveDate), String> {
     let start_date = date_of(configuration.start_ns)
         .ok_or_else(|| "the data window start is outside the representable range".to_string())?;
@@ -912,7 +928,10 @@ pub(crate) fn clamp_study_window(
 }
 
 /// Persist worker start before acquisition, compilation, or execution.
-fn start_background_job(job_store: &Arc<dyn JobStore>, job_id: &str) -> bool {
+fn start_background_job(
+    job_store: &Arc<dyn harness_execution::jobs::JobExecution>,
+    job_id: &str,
+) -> bool {
     match job_store.mark_running(job_id, Utc::now()) {
         Ok(_) => true,
         Err(error) => {
@@ -930,13 +949,17 @@ fn start_background_job(job_store: &Arc<dyn JobStore>, job_id: &str) -> bool {
 /// Mark one background job failed when its worker exits without a terminal
 /// record: an early return that forgot to record a state, or a panic.
 struct BackgroundJobGuard {
-    job_store: Arc<dyn JobStore>,
+    job_store: Arc<dyn harness_execution::jobs::JobExecution>,
     job_id: String,
     started: DateTime<Utc>,
 }
 
 impl BackgroundJobGuard {
-    fn new(job_store: Arc<dyn JobStore>, job_id: &str, started: DateTime<Utc>) -> Self {
+    fn new(
+        job_store: Arc<dyn harness_execution::jobs::JobExecution>,
+        job_id: &str,
+        started: DateTime<Utc>,
+    ) -> Self {
         Self {
             job_store,
             job_id: job_id.to_string(),
@@ -947,10 +970,17 @@ impl BackgroundJobGuard {
 
 impl Drop for BackgroundJobGuard {
     fn drop(&mut self) {
-        let in_flight = self
-            .job_store
-            .get(&self.job_id)
-            .is_some_and(|record| matches!(record.state, JobState::Queued | JobState::Running));
+        let in_flight = match self.job_store.try_get(&self.job_id) {
+            Ok(record) => record
+                .is_some_and(|record| matches!(record.state, JobState::Queued | JobState::Running)),
+            Err(error) => {
+                eprintln!(
+                    "execution guard cannot inspect {}; outcome remains unknown: {error}",
+                    self.job_id
+                );
+                return;
+            }
+        };
         if in_flight {
             fail_job(
                 &self.job_store,
@@ -979,9 +1009,22 @@ fn date_of(nanos: i64) -> Option<NaiveDate> {
     chrono::DateTime::from_timestamp(seconds, 0).map(|value| value.date_naive())
 }
 
-fn fail_job(job_store: &Arc<dyn JobStore>, job_id: &str, started: DateTime<Utc>, message: String) {
-    let Some(mut record) = job_store.get(job_id) else {
-        return;
+fn fail_job(
+    job_store: &Arc<dyn harness_execution::jobs::JobExecution>,
+    job_id: &str,
+    started: DateTime<Utc>,
+    message: String,
+) {
+    let mut record = match job_store.try_get(job_id) {
+        Ok(Some(record)) => record,
+        Ok(None) => {
+            eprintln!("admitted execution disappeared: {job_id}");
+            return;
+        }
+        Err(error) => {
+            eprintln!("execution metadata unavailable; reconcile retained job {job_id}: {error}");
+            return;
+        }
     };
     record.state = JobState::Failed;
     record.updated_at = Utc::now().max(started);
@@ -1016,7 +1059,7 @@ fn headline_file_metrics(
     headline_metrics(&bytes, configuration)
 }
 fn publish_files(
-    store: &Arc<dyn JobStore>,
+    store: &Arc<dyn harness_execution::jobs::JobExecution>,
     id: &str,
     completed: bool,
     metrics: BTreeMap<String, String>,
@@ -1024,8 +1067,16 @@ fn publish_files(
     error: Option<String>,
     files: BTreeMap<String, PathBuf>,
 ) -> bool {
-    let Some(mut record) = store.get(id) else {
-        return false;
+    let mut record = match store.try_get(id) {
+        Ok(Some(record)) => record,
+        Ok(None) => {
+            eprintln!("admitted execution disappeared: {id}");
+            return false;
+        }
+        Err(error) => {
+            eprintln!("execution publication cannot read retained job {id}: {error}");
+            return false;
+        }
     };
     record.state = if completed {
         JobState::Succeeded
@@ -1065,4 +1116,15 @@ fn strategy_id(configuration: &BacktestConfig) -> String {
         .map(|instance| instance.instance_id.clone())
         .collect::<Vec<_>>()
         .join(",")
+}
+
+impl mcp::tools::ports::SdkReference for NativeStudyValidator {
+    fn sdk_reference(
+        &self,
+        arguments: &serde_json::Map<String, Value>,
+    ) -> Result<Value, mcp::tools::ports::ToolExecutionError> {
+        harness_strategy_jit::validation_service()
+            .sdk_reference(arguments)
+            .map_err(|error| mcp::tools::ports::ToolExecutionError::new(error.to_string()))
+    }
 }

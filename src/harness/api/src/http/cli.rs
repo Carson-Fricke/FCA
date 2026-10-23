@@ -4,9 +4,7 @@
 //! declare the `api` shell, exactly one worker is supported per process, and
 //! the bearer-token environment reference is resolved before serving.
 //!
-//! Configuration loading here is deliberately minimal and line-oriented; the
-//! behavior-identical typed loader lands with the configuration port task, at
-//! which point this resolves through that package instead.
+//! The shared configuration capability owns parsing, validation and secret syntax.
 
 use std::fmt;
 use std::net::SocketAddr;
@@ -15,7 +13,8 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
-use crate::http::{create_app, server};
+use crate::http::create_app;
+use crate::http::server;
 
 /// The `api` configuration subsets the process boundary needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,7 +27,7 @@ pub struct ApiSettings {
     pub port: u16,
     /// Worker count (must be `1`).
     pub workers: u32,
-    /// Raw bearer-token value or environment reference.
+    /// Validated bearer-token environment reference.
     pub bearer_reference: Option<String>,
 }
 
@@ -57,85 +56,32 @@ pub struct ApiCli {
     pub args: crate::ApiArgs,
 }
 
-fn scalar(value: &str) -> String {
-    value
-        .trim()
-        .trim_matches(|character| character == '"' || character == '\'')
-        .to_string()
-}
-
-/// Parse the fields this boundary needs from an API configuration document.
-///
-/// # Errors
-///
-/// Returns [`ApiConfigError`] when the file cannot be read.
+/// Load the shared strict API schema before projecting process settings.
 pub fn load_api_settings(path: &std::path::Path) -> Result<ApiSettings, ApiConfigError> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|error| ApiConfigError(format!("configuration could not be loaded: {error}")))?;
-    let mut settings = ApiSettings {
-        shell: String::new(),
-        host: "127.0.0.1".to_string(),
-        port: 8001,
-        workers: 1,
-        bearer_reference: None,
+    let configuration =
+        config::load_configuration(path).map_err(|error| ApiConfigError(error.to_string()))?;
+    let config::HarnessConfig::Api(document) = configuration else {
+        return Err(ApiConfigError(format!(
+            "configuration shell must be 'api', not '{}'",
+            configuration.shell()
+        )));
     };
-    let mut section = String::new();
-    for line in text.lines() {
-        let line = match line.split_once('#') {
-            Some((code, _)) => code,
-            None => line,
-        };
-        if line.trim().is_empty() {
-            continue;
-        }
-        let indent = line.len() - line.trim_start().len();
-        let trimmed = line.trim();
-        let Some((key, raw_value)) = trimmed.split_once(':') else {
-            continue;
-        };
-        let key = key.trim();
-        let value = scalar(raw_value);
-        if indent == 0 {
-            section = key.to_string();
-            if key == "shell" {
-                settings.shell = value;
-            }
-        } else {
-            match (section.as_str(), key) {
-                ("server", "host") => settings.host = value,
-                ("server", "port") => {
-                    settings.port = value.parse().map_err(|_| {
-                        ApiConfigError("server.port must be an integer".to_string())
-                    })?;
-                }
-                ("server", "workers") => {
-                    settings.workers = value.parse().map_err(|_| {
-                        ApiConfigError("server.workers must be an integer".to_string())
-                    })?;
-                }
-                ("auth", "bearer_token") => settings.bearer_reference = Some(value),
-                _ => {}
-            }
-        }
-    }
-    Ok(settings)
+    let server = &document["server"];
+    Ok(ApiSettings {
+        shell: "api".into(),
+        host: server["host"].as_str().expect("validated host").into(),
+        port: server["port"].as_u64().expect("validated port") as u16,
+        workers: server["workers"].as_u64().expect("validated workers") as u32,
+        bearer_reference: document["auth"]["bearer_token"]
+            .as_str()
+            .map(str::to_string),
+    })
 }
 
-/// Resolve a `${VAR}` environment reference to its value.
-///
-/// # Errors
-///
-/// Returns [`ApiConfigError`] naming the unset variable.
+/// Resolve only a strict environment reference; literal credentials are rejected.
 pub fn resolve_environment_reference(reference: &str) -> Result<String, ApiConfigError> {
-    let trimmed = reference.trim();
-    if let Some(inner) = trimmed
-        .strip_prefix("${")
-        .and_then(|value| value.strip_suffix('}'))
-    {
-        return std::env::var(inner)
-            .map_err(|_| ApiConfigError(format!("environment variable '{inner}' is not set")));
-    }
-    Ok(trimmed.to_string())
+    config::resolve_environment_reference(reference, None)
+        .map_err(|error| ApiConfigError(error.to_string()))
 }
 
 /// Resolve the settings, host/port overrides, and bearer token for serving.

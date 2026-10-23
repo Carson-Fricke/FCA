@@ -1,7 +1,8 @@
 //! Numeric and textual callers share one current Arrow schema and exact artifact bytes.
-use backtest::results::recorder::{
-    EquityRecord, PortfolioEquityRecord, RecorderConfig, RunRecorder,
-};
+use backtest::results::recorder::EquityRecord;
+use backtest::results::recorder::PortfolioEquityRecord;
+use backtest::results::recorder::RecorderConfig;
+use backtest::results::recorder::RunRecorder;
 use num::Decimal18;
 
 #[test]

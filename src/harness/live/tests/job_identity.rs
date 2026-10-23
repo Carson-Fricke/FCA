@@ -1,15 +1,26 @@
 use std::rc::Rc;
 
-use backtest::runtime::state_store::RuntimeStateStore;
+use live::runtime::state_store::RuntimeStateStore;
 use num::Decimal18;
 use serde_json::json;
 
-use live::fills::fees::{aggregate_fees, AssetClass, FeeAssessment, FeeComponent, FeeContext};
-use live::risk::kill_switch::KillSwitch;
-use live::supervision::{
-    resolve_job_id, EmptyMarketFeed, ManualClock, MarketFeed, SharedSnapshotStore, SupervisedFeed,
-    SupervisionError, SupervisionJournal, SupervisorSettings, TraderConfig, TraderSupervisor,
-};
+use harness_trading::fills::fees::aggregate_fees;
+use harness_trading::fills::fees::AssetClass;
+use harness_trading::fills::fees::FeeAssessment;
+use harness_trading::fills::fees::FeeComponent;
+use harness_trading::fills::fees::FeeContext;
+use harness_trading::risk::kill_switch::KillSwitch;
+use live::supervision::clock::ManualClock;
+use live::supervision::configuration::SupervisorSettings;
+use live::supervision::configuration::TraderConfig;
+use live::supervision::feed::EmptyMarketFeed;
+use live::supervision::feed::MarketFeed;
+use live::supervision::feed::SupervisedFeed;
+use live::supervision::journal::SupervisionJournal;
+use live::supervision::models::SupervisionError;
+use live::supervision::process::resolve_job_id;
+use live::supervision::snapshots::SharedSnapshotStore;
+use live::supervision::TraderSupervisor;
 
 #[test]
 fn resolve_job_id_fails_on_configured_persisted_mismatch() {

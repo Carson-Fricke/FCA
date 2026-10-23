@@ -1,12 +1,14 @@
 //! Native harness adapter over catalog, acquisition and object ports. No HTTP calls.
-use harness_lakeclient::{EnsureSpec, LakeClientError, MarketAccess, MarketRequest, ReadSpec};
+use harness_lakeclient::{
+    CoverageEntry, CoverageReport, EnsureResponse, EnsureSpec, Facts, JobStatus, LakeClientError,
+    MarketAcquisition, MarketOptions, MarketReference, MarketSnapshots, OptionResolution, ReadSpec,
+};
 use harness_market_reader::{
     MarketDataSnapshot, Partition, PartitionSource, ReaderError, SnapshotRequest,
 };
 use lake_catalog::{CatalogRepository, JobRepository};
 use lake_contracts::{AssetClass, DataType, Date};
 use lake_coverage::{EnsureAdmission, EnsureOutcome};
-use serde_json::{json, Value};
 use std::sync::Arc;
 
 pub struct NativeMarketAccess {
@@ -40,54 +42,169 @@ fn date(value: &str) -> Result<Date, LakeClientError> {
     Date::parse(value).ok_or_else(|| error("invalid date"))
 }
 #[async_trait::async_trait]
-impl MarketAccess for NativeMarketAccess {
-    async fn request(&self, request: MarketRequest) -> Result<Value, LakeClientError> {
-        if let MarketRequest::ResolveOption(selector) = request {
-            let selector = serde_json::from_value(serde_json::to_value(selector).map_err(error)?)
-                .map_err(error)?;
-            return match (self.options)(selector, None).await {
-                Ok(value) => serde_json::to_value(value).map_err(error),
-                Err(lake_contracts::DataError::PendingJob(id)) => Ok(json!({"job_id":id})),
-                Err(e) => Err(error(e)),
-            };
-        }
+impl MarketAcquisition for NativeMarketAccess {
+    async fn ensure(&self, value: &EnsureSpec) -> Result<EnsureResponse, LakeClientError> {
+        let spec = spec(value)?;
         let as_of = (self.now)();
         let catalog = self.catalog.clone();
         let jobs = self.jobs.clone();
         let admission = self.admission.clone();
         let contracts = self.contracts.clone();
-        let objects = self.source.0.clone();
         let runtime = tokio::runtime::Handle::current();
-        tokio::task::spawn_blocking(move || match request {
-            MarketRequest::Ensure(value)=>{
-                let spec=spec(&value)?;
-                let option_id=if spec.asset_class==AssetClass::Option {
-                    let like=option_request(&spec);
-                    let (_, selection)=lake_coverage::option_coverage(catalog.as_ref(),&like,Some(contracts.as_ref()),None,as_of).map_err(error)?;
-                    Some(lake_coverage::option_ensure_job_id(&like,&selection.symbols()))
-                } else { None };
-                let outcome=runtime.block_on(lake_coverage::ensure_coverage(catalog.as_ref(),&jobs,None,admission,&spec,as_of,option_id.as_deref())).map_err(error)?;
-                match outcome {
-                    EnsureOutcome::Covered(report)=>serde_json::to_value(lake_http::models::CatalogCoverageResponse::from_report(&report,spec.data_type,&spec.symbol)).map_err(error),
-                    EnsureOutcome::Accepted(job)=>Ok(json!({"job_id":job.job_id})),
-                }
+        tokio::task::spawn_blocking(move || {
+            let option_id = if spec.asset_class == AssetClass::Option {
+                let like = option_request(&spec);
+                let (_, selection) = lake_coverage::option_coverage(
+                    catalog.as_ref(),
+                    &like,
+                    Some(contracts.as_ref()),
+                    None,
+                    as_of,
+                )
+                .map_err(error)?;
+                Some(lake_coverage::option_ensure_job_id(
+                    &like,
+                    &selection.symbols(),
+                ))
+            } else {
+                None
+            };
+            match runtime
+                .block_on(lake_coverage::ensure_coverage(
+                    catalog.as_ref(),
+                    &jobs,
+                    None,
+                    admission,
+                    &spec,
+                    as_of,
+                    option_id.as_deref(),
+                ))
+                .map_err(error)?
+            {
+                EnsureOutcome::Covered(report) => Ok(EnsureResponse {
+                    entries: Some(coverage_model(&report, spec.data_type, &spec.symbol).entries),
+                    job_id: None,
+                }),
+                EnsureOutcome::Accepted(job) => Ok(EnsureResponse {
+                    entries: None,
+                    job_id: Some(job.job_id),
+                }),
             }
-            MarketRequest::Coverage(value)=>{
-                let spec=spec(&value)?;
-                let report=if spec.asset_class==AssetClass::Option {
-                    lake_coverage::option_coverage(catalog.as_ref(),&option_request(&spec),Some(contracts.as_ref()),None,as_of).map_err(error)?.0
-                } else { lake_coverage::requested_coverage(catalog.as_ref(),None,&spec,as_of,"coverage").map_err(error)? };
-                serde_json::to_value(lake_http::models::CatalogCoverageResponse::from_report(&report,spec.data_type,&spec.symbol)).map_err(error)
-            }
-            MarketRequest::Job(id)=>{
-                let record=jobs.get(&id).map_err(error)?.ok_or_else(||error("job not found"))?;
-                Ok(json!({"job_id":record.job_id,"state":record.state.value(),"error_message":record.error_message}))
-            }
-            MarketRequest::Universe(as_of)=>Ok(json!({"symbols":lake_query::universe_symbols(objects.as_ref(),date(&as_of)?).map_err(error)?})),
-            MarketRequest::Facts{symbols,as_of}=>Ok(json!({"facts":lake_query::symbol_facts(objects.as_ref(),date(&as_of)?,&symbols).map_err(error)?})),
-            MarketRequest::ResolveOption(_)=>unreachable!(),
-        }).await.map_err(error)?
+        })
+        .await
+        .map_err(error)?
     }
+    async fn coverage(&self, value: &EnsureSpec) -> Result<CoverageReport, LakeClientError> {
+        let spec = spec(value)?;
+        let as_of = (self.now)();
+        let catalog = self.catalog.clone();
+        let contracts = self.contracts.clone();
+        tokio::task::spawn_blocking(move || {
+            let report = if spec.asset_class == AssetClass::Option {
+                lake_coverage::option_coverage(
+                    catalog.as_ref(),
+                    &option_request(&spec),
+                    Some(contracts.as_ref()),
+                    None,
+                    as_of,
+                )
+                .map_err(error)?
+                .0
+            } else {
+                lake_coverage::requested_coverage(catalog.as_ref(), None, &spec, as_of, "coverage")
+                    .map_err(error)?
+            };
+            Ok(coverage_model(&report, spec.data_type, &spec.symbol))
+        })
+        .await
+        .map_err(error)?
+    }
+    async fn job(&self, id: &str) -> Result<JobStatus, LakeClientError> {
+        let jobs = self.jobs.clone();
+        let id = id.to_string();
+        tokio::task::spawn_blocking(move || {
+            let record = jobs
+                .get(&id)
+                .map_err(error)?
+                .ok_or_else(|| error("job not found"))?;
+            Ok(JobStatus {
+                job_id: record.job_id,
+                state: record.state.value().into(),
+                error_message: record.error_message,
+            })
+        })
+        .await
+        .map_err(error)?
+    }
+}
+#[async_trait::async_trait]
+impl MarketReference for NativeMarketAccess {
+    async fn universe(&self, as_of: &str) -> Result<Vec<String>, LakeClientError> {
+        let date = date(as_of)?;
+        let objects = self.source.0.clone();
+        tokio::task::spawn_blocking(move || {
+            lake_query::universe_symbols(objects.as_ref(), date).map_err(error)
+        })
+        .await
+        .map_err(error)?
+    }
+    async fn facts(&self, symbols: &[String], as_of: &str) -> Result<Facts, LakeClientError> {
+        let date = date(as_of)?;
+        let symbols = symbols.to_vec();
+        let objects = self.source.0.clone();
+        tokio::task::spawn_blocking(move || {
+            lake_query::symbol_facts(objects.as_ref(), date, &symbols).map_err(error)
+        })
+        .await
+        .map_err(error)?
+    }
+}
+#[async_trait::async_trait]
+impl MarketOptions for NativeMarketAccess {
+    async fn resolve_option(
+        &self,
+        selector: &lake_contracts::OptionSelector,
+    ) -> Result<OptionResolution, LakeClientError> {
+        match (self.options)(selector.clone(), None).await {
+            Ok(value) => Ok(OptionResolution::Resolved(value)),
+            Err(lake_contracts::DataError::PendingJob(job_id)) => {
+                Ok(OptionResolution::Pending { job_id })
+            }
+            Err(cause) => Err(error(cause)),
+        }
+    }
+}
+fn coverage_model(
+    report: &lake_coverage::CoverageReport,
+    data_type: DataType,
+    symbol: &str,
+) -> CoverageReport {
+    CoverageReport {
+        asset_class: report.asset_class.value().into(),
+        data_type: data_type.value().into(),
+        symbol: symbol.trim().to_uppercase(),
+        start_date: report.start_date.isoformat(),
+        end_date: report.end_date.isoformat(),
+        entries: report
+            .entries
+            .iter()
+            .map(|entry| CoverageEntry {
+                session_date: entry.session_date().isoformat(),
+                status: entry.state.value().into(),
+                is_partial: entry.session.is_partial,
+                symbol: None,
+                data_type: None,
+                row_count: entry.record.as_ref().map(|record| record.row_count),
+                error_message: entry
+                    .record
+                    .as_ref()
+                    .and_then(|record| record.error_message.clone()),
+            })
+            .collect(),
+    }
+}
+#[async_trait::async_trait]
+impl MarketSnapshots for NativeMarketAccess {
     async fn snapshot(&self, value: &ReadSpec) -> Result<MarketDataSnapshot, LakeClientError> {
         let as_of = (self.now)();
         let catalog = self.catalog.clone();

@@ -1,6 +1,7 @@
 //! Execution telemetry shared by harness callers, independent of workflow phases.
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

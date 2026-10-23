@@ -3,10 +3,19 @@
 use std::cmp::Ordering;
 
 use harness_strategy_sdk::serde_json::Value;
-use harness_strategy_sdk::{
-    export_strategy_program, Decimal, Fill, MarketConsumer, MetricPublisher, OrderSink,
-    OrderType, QuoteEvent, Side, StrategyProgram, SubmittedOrder, Subscription, TimeInForce,
-};
+use harness_strategy_sdk::export_strategy_program;
+use harness_strategy_sdk::Decimal;
+use harness_strategy_sdk::Fill;
+use harness_strategy_sdk::MarketConsumer;
+use harness_strategy_sdk::MetricPublisher;
+use harness_strategy_sdk::OrderSink;
+use harness_strategy_sdk::OrderType;
+use harness_strategy_sdk::QuoteEvent;
+use harness_strategy_sdk::Side;
+use harness_strategy_sdk::StrategyProgram;
+use harness_strategy_sdk::SubmittedOrder;
+use harness_strategy_sdk::Subscription;
+use harness_strategy_sdk::TimeInForce;
 
 struct Momentum {
     streak: u64,

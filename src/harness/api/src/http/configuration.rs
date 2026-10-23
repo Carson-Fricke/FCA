@@ -1,22 +1,48 @@
 //! Submitted document validation delegates to the engine's authoritative schemas.
 
 use backtest::backtest::config::BacktestConfig;
-use backtest::backtest::engine_core::{normalize_subscriptions, MarketSubscription};
 use backtest::backtest::screen::ScreenConfig;
-use chrono::{DateTime, NaiveDate, Utc};
+use backtest::backtest::subscriptions::normalize_subscriptions;
+use chrono::DateTime;
+use chrono::NaiveDate;
+use chrono::Utc;
+use harness_trading::program::MarketSubscription;
 use serde_json::Value;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValidatedConfiguration {
-    pub job_id: String,
-    pub strategy_ids: Vec<String>,
-    pub data_start: Option<NaiveDate>,
-    pub data_end: Option<NaiveDate>,
+    pub(crate) job_id: String,
+    pub(crate) strategy_ids: Vec<String>,
+    pub(crate) data_start: Option<NaiveDate>,
+    pub(crate) data_end: Option<NaiveDate>,
     /// Submitted-document identity, not the engine's resolved configuration identity.
-    pub configuration_digest: String,
-    pub document: Value,
-    pub screen: Option<ScreenConfig>,
+    pub(crate) configuration_digest: String,
+    pub(crate) document: Value,
+    pub(crate) screen: Option<ScreenConfig>,
+}
+impl ValidatedConfiguration {
+    pub fn job_id(&self) -> &str {
+        &self.job_id
+    }
+    pub fn strategy_ids(&self) -> &[String] {
+        &self.strategy_ids
+    }
+    pub fn data_start(&self) -> &Option<NaiveDate> {
+        &self.data_start
+    }
+    pub fn data_end(&self) -> &Option<NaiveDate> {
+        &self.data_end
+    }
+    pub fn configuration_digest(&self) -> &str {
+        &self.configuration_digest
+    }
+    pub fn document(&self) -> &Value {
+        &self.document
+    }
+    pub fn screen(&self) -> &Option<ScreenConfig> {
+        &self.screen
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

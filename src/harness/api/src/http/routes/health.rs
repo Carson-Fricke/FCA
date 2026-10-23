@@ -2,7 +2,8 @@
 
 use axum::Json;
 
-use crate::http::models::{AuthCheckResponse, HealthResponse};
+use crate::http::models::AuthCheckResponse;
+use crate::http::models::HealthResponse;
 
 /// Probe-safe liveness response; requires no credentials.
 pub async fn health() -> Json<HealthResponse> {

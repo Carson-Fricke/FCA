@@ -12,7 +12,10 @@
 pub use harness_contracts::{canonical_subscriptions, Subscription};
 use std::collections::BTreeSet;
 
-use crate::{BarFrame, Indicator, QuoteEvent, TradeEvent};
+use crate::BarFrame;
+use crate::Indicator;
+use crate::QuoteEvent;
+use crate::TradeEvent;
 
 /// Observation-only callback context, with no order submission capability.
 ///

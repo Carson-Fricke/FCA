@@ -1,0 +1,14 @@
+[package]
+name = "harness-execution-storage"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+harness-execution = { path = "../execution" }
+harness-contracts = { path = "../contracts" }
+chrono = { version = "0.4", features = ["serde"] }
+serde_json = "1"
+sha2 = "0.10"
+hex = "0.4"
+tempfile = "3"

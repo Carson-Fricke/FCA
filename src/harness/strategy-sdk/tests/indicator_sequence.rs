@@ -1,8 +1,18 @@
 //! Indicator sequence behavior at the public market-routing boundary.
-use harness_strategy_sdk::{
-    route_bar, route_quote, route_trade, BarEvent, BarFrame, Decimal, Indicator, IndicatorMissing,
-    IndicatorSequence, MarketConsumer, ObservationContext, QuoteEvent, Subscription, TradeEvent,
-};
+use harness_strategy_sdk::route_bar;
+use harness_strategy_sdk::route_quote;
+use harness_strategy_sdk::route_trade;
+use harness_strategy_sdk::BarEvent;
+use harness_strategy_sdk::BarFrame;
+use harness_strategy_sdk::Decimal;
+use harness_strategy_sdk::Indicator;
+use harness_strategy_sdk::IndicatorMissing;
+use harness_strategy_sdk::IndicatorSequence;
+use harness_strategy_sdk::MarketConsumer;
+use harness_strategy_sdk::ObservationContext;
+use harness_strategy_sdk::QuoteEvent;
+use harness_strategy_sdk::Subscription;
+use harness_strategy_sdk::TradeEvent;
 use std::collections::BTreeMap;
 
 struct Values {

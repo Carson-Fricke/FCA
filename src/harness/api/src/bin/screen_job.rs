@@ -2,7 +2,10 @@
 
 use std::process::ExitCode;
 
-use api::{emit, run_screen_job, NativeScreenJobRunner, ScreenJobCli};
+use api::emit;
+use api::run_screen_job;
+use api::NativeScreenJobRunner;
+use api::ScreenJobCli;
 use clap::Parser;
 
 fn main() -> ExitCode {

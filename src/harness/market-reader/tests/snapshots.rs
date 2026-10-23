@@ -2,13 +2,20 @@
 
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
-use harness_market_reader::{
-    CacheConfig, MarketDataReader, MarketDataSnapshot, Partition, PartitionSource, ReaderError,
-    SnapshotRequest,
-};
-use sha2::{Digest, Sha256};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use harness_market_reader::CacheConfig;
+use harness_market_reader::MarketDataReader;
+use harness_market_reader::MarketDataSnapshot;
+use harness_market_reader::Partition;
+use harness_market_reader::PartitionSource;
+use harness_market_reader::ReaderError;
+use harness_market_reader::SnapshotRequest;
+use sha2::Digest;
+use sha2::Sha256;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 struct Source {

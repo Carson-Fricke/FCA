@@ -12,22 +12,34 @@
 //! serialized Arrow IPC schema is intentionally omitted so the byte layout is a
 //! pure function of the rows and the fixed writer properties.
 
-use std::fs::{File, OpenOptions};
-use std::io::{self, BufWriter};
-use std::path::{Path, PathBuf};
+use std::fs::File;
+use std::fs::OpenOptions;
+use std::io;
+use std::io::BufWriter;
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use arrow_array::RecordBatch;
-use arrow_schema::{DataType as ArrowDataType, Field, Schema, TimeUnit};
+use arrow_schema::DataType as ArrowDataType;
+use arrow_schema::Field;
+use arrow_schema::Schema;
+use arrow_schema::TimeUnit;
 use parquet::arrow::arrow_writer::ArrowWriterOptions;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::metadata::KeyValue;
-use parquet::file::properties::{WriterProperties, WriterVersion};
+use parquet::file::properties::WriterProperties;
+use parquet::file::properties::WriterVersion;
 
-use super::columns::{Cell, Columns};
-use super::schemas::{Artifact, LogicalType};
-use super::writer::{validate, Row, RowSink, WriterError};
+use super::columns::Cell;
+use super::columns::Columns;
+use super::schemas::Artifact;
+use super::schemas::LogicalType;
+use super::writer::validate;
+use super::writer::Row;
+use super::writer::RowSink;
+use super::writer::WriterError;
 
 /// A [`RowSink`] that writes one artifact as a real Parquet object.
 pub struct ParquetArtifactWriter {

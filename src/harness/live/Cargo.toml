@@ -14,7 +14,9 @@ name = "trader"
 path = "src/bin/trader.rs"
 
 [dependencies]
-backtest = { path = "../backtest" }
+uuid = { version = "1", features = ["v4"] }
+harness-contracts = { path = "../contracts" }
+harness-trading = { path = "../trading" }
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 clap = { version = "4.5", features = ["derive"] }
 config = { path = "../config" }

@@ -1,6 +1,9 @@
 //! Native indicator outputs preserve warm-up and final partial windows.
 use backtest::indicators::overlays::EmaKernel;
-use backtest::indicators::{IndicatorMachine, Tick, TickIndicator, TickKind};
+use backtest::indicators::IndicatorMachine;
+use backtest::indicators::Tick;
+use backtest::indicators::TickIndicator;
+use backtest::indicators::TickKind;
 use num::Decimal18;
 fn trade(time: i64, sequence: u64, price: i64) -> Tick {
     Tick {

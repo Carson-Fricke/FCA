@@ -5,7 +5,8 @@
 
 use std::process::ExitCode;
 
-use api::mcp_cli::{serve_mcp_blocking, McpCli};
+use api::mcp_cli::serve_mcp_blocking;
+use api::mcp_cli::McpCli;
 use clap::Parser;
 
 fn main() -> ExitCode {

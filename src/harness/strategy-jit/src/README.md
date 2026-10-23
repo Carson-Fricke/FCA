@@ -5,7 +5,7 @@ are read from constructed program state before lake fetches. Engine-owned
 replay and lake planning remain outside this crate. All market calls use SDK
 subscription filtering, including direct runtime calls in tests.
 
-- `lib.rs` exposes compilation, loading, runtime, and configuration entrypoints.
+- `lib.rs` exposes compilation, loading, and program adaptation entrypoints.
 - `compile.rs` coordinates cache reuse and compilation under per-compiler/source
   OS file locks. Each build attempt uses unique crate and artifact directories;
   returned libraries are never replaced or removed by later builds. Cargo
@@ -29,20 +29,17 @@ subscription filtering, including direct runtime calls in tests.
   Failures point to compact diagnostics or a minimal SDK missing-export template;
   `for_program` tailors study guidance to strategy traits, context, exports, and
   the `validate_strategy` tool. It does not rewrite or retry authored source.
-- `config.rs` constructs configured study or strategy instances.
+
 - `error.rs` defines compilation, loading, and authoring errors.
 - `load.rs` loads libraries, validates ABI handshakes, and owns program states.
-- `run.rs` validates configurations, exposes effective requirements through
-  `configuration_subscriptions`, checks study echoes through
-  `inspect_configuration`, reports compilation through the injected progress
-  port, and hands constructed instances to engine jobs.
+
 - `runtime.rs` adapts subscribed quotes, trades, interval-identified atomic
   frames, metrics, and strategy orders. Frame orders are returned by
   `on_frame_orders` and stamped at frame availability. The observation-only
   strategy `on_bar_frame` entrypoint rejects dispatch rather than dropping orders.
-- `screen.rs` executes and ranks one-shot screening results.
-- `screen_run.rs` runs screening configurations and writes their artifacts.
-- `source.rs` provides lake-backed screening data access.
+
+
+
 - `toolchain.rs` resolves the pinned compilation toolchain.
 - `workspace.rs` resolves workspace roots to canonical absolute paths and
   manages authored workspaces and artifact manifests. Manifest entry updates lock
@@ -63,3 +60,6 @@ hashes; JIT compiler provenance additionally covers its own build and toolchain
 environment. These identities have different owners and are not interchangeable.
 
 Managed workspaces embed the harness `rust-toolchain.toml`; authored builds use the same pinned compiler shipped in the container.
+
+Configuration, acquisition, ranking and job publication are owned by sibling `research`.
+Raw vtable/state access is crate-private and borrows loaded-library ownership.

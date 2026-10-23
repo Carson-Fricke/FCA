@@ -1,13 +1,18 @@
 //! Worker keepalive state, independent of simulation and blocking storage calls.
-use super::{backend::Result, store::ExecutionStore, worker::Slot};
-use chrono::{DateTime, Utc};
-use mcp::store::StoreError;
-use std::sync::{Arc, Condvar, Mutex};
+use super::backend::Result;
+use chrono::DateTime;
+use chrono::Utc;
+use harness_execution::fleet::Slot;
+use harness_execution::jobs::StoreError;
+use harness_execution::store::OwnedExecution;
+use std::sync::Arc;
+use std::sync::Condvar;
+use std::sync::Mutex;
 use std::time::Duration;
 
 #[derive(Clone)]
 struct JobLease {
-    store: ExecutionStore,
+    store: OwnedExecution,
     id: String,
     until: DateTime<Utc>,
 }
@@ -47,7 +52,10 @@ impl Ownership {
             }),
         }
     }
-    pub fn track(&self, store: ExecutionStore, id: String) -> Result<()> {
+    pub fn track(&self, store: OwnedExecution, id: String) -> Result<()> {
+        if store.job_id() != id {
+            return Err(StoreError::OwnershipLost(id));
+        }
         let until = store
             .claimed_until()
             .ok_or_else(|| StoreError::OwnershipLost(format!("unclaimed execution {id}")))?;

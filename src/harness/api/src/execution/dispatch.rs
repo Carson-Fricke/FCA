@@ -1,9 +1,10 @@
 //! Queue notification adapters. Admission remains durable before any hint.
 use super::Wake;
-use crate::http::{
-    launcher::{BacktestLauncher, LaunchError, LaunchJob},
-    screener::{ScreenLaunchJob, ScreenLauncher},
-};
+use crate::http::launcher::BacktestLauncher;
+use crate::http::launcher::LaunchError;
+use crate::http::launcher::LaunchJob;
+use crate::http::screener::ScreenLaunchJob;
+use crate::http::screener::ScreenLauncher;
 use std::sync::Arc;
 
 pub struct QueuedLauncher(pub Arc<dyn Wake>);

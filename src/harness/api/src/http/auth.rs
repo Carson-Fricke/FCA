@@ -8,9 +8,12 @@ use std::fmt;
 
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::{header, Request, StatusCode};
+use axum::http::header;
+use axum::http::Request;
+use axum::http::StatusCode;
 use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
+use axum::response::IntoResponse;
+use axum::response::Response;
 
 use super::models::error_body;
 use super::state::AppState;

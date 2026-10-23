@@ -1,4 +1,5 @@
-use harness_strategy_jit::{JitError, ValidationFailure};
+use harness_strategy_jit::JitError;
+use harness_strategy_jit::ValidationFailure;
 use serde_json::json;
 
 #[test]

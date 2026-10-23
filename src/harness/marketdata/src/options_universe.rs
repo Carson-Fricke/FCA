@@ -10,11 +10,14 @@ use std::rc::Rc;
 
 use num::Decimal18;
 
-use crate::catalog::{ContractRecord, ContractsCatalogPort};
+use crate::catalog::ContractRecord;
+use crate::catalog::ContractsCatalogPort;
 use crate::clock::Clock;
 use crate::error::DataError;
-use crate::symbol::{canonical_osi_symbol, canonical_symbol};
-use crate::time::{Date, DateTime};
+use crate::symbol::canonical_osi_symbol;
+use crate::symbol::canonical_symbol;
+use crate::time::Date;
+use crate::time::DateTime;
 
 /// How daily membership is sourced from the contracts catalog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -11,7 +11,15 @@
 //! ([`crate::wide::U256`]); no heap allocation happens on an arithmetic path.
 
 use core::fmt;
-use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use core::ops::Add;
+use core::ops::AddAssign;
+use core::ops::Div;
+use core::ops::DivAssign;
+use core::ops::Mul;
+use core::ops::MulAssign;
+use core::ops::Neg;
+use core::ops::Sub;
+use core::ops::SubAssign;
 use core::str::FromStr;
 
 use crate::wide::U256;

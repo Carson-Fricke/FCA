@@ -2,9 +2,12 @@
 
 use std::collections::VecDeque;
 
-use crate::accounting::{ExecutionReport, Fill};
-use crate::error::{require_text, LiveError, LiveResult};
-use crate::orders::OrderRequest;
+use harness_trading::accounting::ExecutionReport;
+use harness_trading::accounting::Fill;
+use harness_trading::error::require_text;
+use harness_trading::error::LiveError;
+use harness_trading::error::LiveResult;
+use harness_trading::orders::OrderRequest;
 
 /// A scheduled venue outcome.
 #[derive(Clone, Debug, PartialEq, Eq)]

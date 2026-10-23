@@ -8,9 +8,15 @@
 use std::fmt;
 use std::sync::Arc;
 
-use serde_json::{json, Map, Value};
+use serde_json::json;
+use serde_json::Map;
+use serde_json::Value;
 
-use crate::tools::{build_catalog, ContextError, HarnessToolsContext, StudyValidator, ToolCatalog};
+use crate::tools::catalog::build_catalog;
+use crate::tools::catalog::ToolCatalog;
+use crate::tools::ports::ContextError;
+use crate::tools::ports::HarnessToolsContext;
+use crate::tools::ports::StudyValidator;
 
 /// Fixed MCP protocol version.
 pub const PROTOCOL_VERSION: &str = "2024-11-05";

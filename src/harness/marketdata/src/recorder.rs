@@ -12,28 +12,46 @@
 //! real, readable lake part.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use arrow_array::{
-    ArrayRef, Decimal128Array, Int64Array, ListArray, RecordBatch, StringArray,
-    TimestampNanosecondArray, UInt32Array, UInt64Array,
-};
-use arrow_buffer::{OffsetBuffer, ScalarBuffer};
-use arrow_schema::{DataType as ArrowDataType, Field, Schema, TimeUnit};
+use arrow_array::ArrayRef;
+use arrow_array::Decimal128Array;
+use arrow_array::Int64Array;
+use arrow_array::ListArray;
+use arrow_array::RecordBatch;
+use arrow_array::StringArray;
+use arrow_array::TimestampNanosecondArray;
+use arrow_array::UInt32Array;
+use arrow_array::UInt64Array;
+use arrow_buffer::OffsetBuffer;
+use arrow_buffer::ScalarBuffer;
+use arrow_schema::DataType as ArrowDataType;
+use arrow_schema::Field;
+use arrow_schema::Schema;
+use arrow_schema::TimeUnit;
 use num::Decimal18;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
-use parquet::file::properties::{WriterProperties, WriterVersion};
+use parquet::file::properties::WriterProperties;
+use parquet::file::properties::WriterVersion;
 
 use crate::clock::Clock;
 use crate::error::DataError;
 use crate::events::MarketEvent;
-use crate::lake::{partition_path, xnys_sessions, AssetClass, DataType, ExchangeSession};
+use crate::lake::partition_path;
+use crate::lake::xnys_sessions;
+use crate::lake::AssetClass;
+use crate::lake::DataType;
+use crate::lake::ExchangeSession;
 use crate::symbol::canonical_symbol;
-use crate::time::{Date, DateTime, Nanos};
+use crate::time::Date;
+use crate::time::DateTime;
+use crate::time::Nanos;
 
 const LIVE_ROOT: &str = "live";
 const PART_DIGITS: usize = 6;

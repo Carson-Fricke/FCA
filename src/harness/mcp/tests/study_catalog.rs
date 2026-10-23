@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use mcp::auth::EnvironmentBearerTokenSource;
-use mcp::tools::{build_catalog, Boundary, HarnessToolsContext, TOOL_VALIDATE_STUDY};
+use mcp::tools::catalog::build_catalog;
+use mcp::tools::ports::Boundary;
+use mcp::tools::ports::HarnessToolsContext;
+use mcp::tools::TOOL_VALIDATE_STUDY;
 use serde_json::json;
 
 #[test]

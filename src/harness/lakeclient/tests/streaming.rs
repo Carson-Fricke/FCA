@@ -1,8 +1,15 @@
 //! Execution reads reuse pinned manifests and verified Arrow data through the real HTTP adapter.
-use harness_lakeclient::testing::{bars_parquet, FakeBarRow, FakeLakeConfig, FakeLakeServer};
-use harness_lakeclient::{LakeClient, LakeClientConfig, ReadSpec};
-use harness_market_reader::{CacheConfig, MarketDataReader};
-use std::sync::{Arc, Mutex};
+use harness_lakeclient::testing::bars_parquet;
+use harness_lakeclient::testing::FakeBarRow;
+use harness_lakeclient::testing::FakeLakeConfig;
+use harness_lakeclient::testing::FakeLakeServer;
+use harness_lakeclient::LakeClient;
+use harness_lakeclient::LakeClientConfig;
+use harness_lakeclient::ReadSpec;
+use harness_market_reader::CacheConfig;
+use harness_market_reader::MarketDataReader;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 #[tokio::test]
 async fn repeated_execution_reads_pin_one_manifest_and_reuse_verified_buffers() {

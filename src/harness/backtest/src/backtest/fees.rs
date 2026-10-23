@@ -6,10 +6,15 @@
 
 use std::collections::BTreeMap;
 
-use num::{Context, Decimal, DecimalError, RoundingMode};
+use num::Context;
+use num::Decimal;
+use num::DecimalError;
+use num::RoundingMode;
 
-use crate::backtest::config::{BacktestConfig, FeeBasis, FeeConfig};
-use crate::backtest::errors::BacktestError;
+use crate::backtest::config::BacktestConfig;
+use crate::backtest::config::FeeBasis;
+use crate::backtest::config::FeeConfig;
+use harness_trading::replay_errors::BacktestError;
 
 /// Default scale used to round derived fees.
 pub const DEFAULT_FEE_PRECISION: &str = "0.0001";
@@ -23,19 +28,31 @@ fn basis_points() -> Decimal {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FeeRounding {
     /// Decimal place to round to.
-    pub precision: Decimal,
+    precision: Decimal,
     /// Rounding mode.
-    pub mode: RoundingMode,
+    mode: RoundingMode,
 }
 
 impl FeeRounding {
+    /// Construct a positive power-of-ten rounding increment.
+    pub fn new(precision: Decimal, mode: RoundingMode) -> Result<Self, BacktestError> {
+        let mut coefficient = precision.coefficient();
+        while coefficient > 1 && coefficient.is_multiple_of(10) {
+            coefficient /= 10;
+        }
+        if !precision.is_positive() || coefficient != 1 {
+            return Err(BacktestError::Configuration(
+                "fee precision must be a positive power of ten".into(),
+            ));
+        }
+        Ok(Self { precision, mode })
+    }
     /// Round one exact amount without introducing binary floating point.
-    #[must_use]
-    pub fn apply(self, amount: Decimal) -> Decimal {
+    pub fn apply(self, amount: Decimal) -> Result<Decimal, BacktestError> {
         let context = Context::new(28, self.mode);
         amount
             .quantize_with(self.precision, &context)
-            .unwrap_or(amount)
+            .map_err(|e| BacktestError::Arithmetic(format!("fee rounding failed: {e}")))
     }
 }
 
@@ -64,18 +81,19 @@ pub struct FeeAssessment {
     /// Asset class (`equity`, `option`, `crypto`).
     pub asset_class: String,
     /// Rounded components.
-    pub components: Vec<FeeComponent>,
+    components: Vec<FeeComponent>,
+    total: Decimal,
 }
 
 impl FeeAssessment {
     /// The exact sum of already-rounded components.
     #[must_use]
     pub fn total(&self) -> Decimal {
-        let mut total = Decimal::ZERO;
-        for component in &self.components {
-            total = total.checked_add(component.amount).unwrap_or(total);
-        }
-        total
+        self.total
+    }
+
+    pub fn components(&self) -> &[FeeComponent] {
+        &self.components
     }
 }
 
@@ -162,88 +180,82 @@ impl FeeSchedule {
         strategy_id: &str,
         asset_class: &str,
     ) -> Result<FeeAssessment, BacktestError> {
-        let components = match asset_class {
-            "option" => {
-                let quantity = fill.quantity;
-                let commission = self.option.rounding.apply(
-                    quantity
-                        .checked_mul(self.option.commission_per_contract)
-                        .unwrap_or(quantity),
-                );
-                let fee = self.option.rounding.apply(
-                    quantity
-                        .checked_mul(self.option.fee_per_contract)
-                        .unwrap_or(quantity),
-                );
-                vec![
-                    FeeComponent {
-                        fee_id: "contract-commission".to_string(),
-                        amount: commission,
-                    },
-                    FeeComponent {
-                        fee_id: "contract-fee".to_string(),
-                        amount: fee,
-                    },
-                ]
-            }
+        let (raw, rounding) = match asset_class {
+            "option" => (
+                harness_trading::fee_policy::options(
+                    fill.quantity,
+                    self.option.commission_per_contract,
+                    self.option.fee_per_contract,
+                ),
+                self.option.rounding,
+            ),
             "crypto" => {
-                let rate = if fill.liquidity == Some("maker") {
-                    self.crypto.maker_rate_bps
-                } else {
-                    self.crypto.taker_rate_bps
+                let maker = match fill.liquidity {
+                    Some("maker") => true,
+                    Some("taker") => false,
+                    _ => {
+                        return Err(BacktestError::Configuration(
+                            "crypto fills require maker or taker liquidity".into(),
+                        ))
+                    }
                 };
-                let notional = fill
-                    .quantity
-                    .checked_mul(fill.price)
-                    .and_then(|value| value.checked_div(basis_points()))
-                    .and_then(|value| value.checked_mul(rate))
-                    .map_err(|error| fee_overflow(fill.fill_id, "crypto fee", error))?;
-                let role = if fill.liquidity == Some("maker") {
-                    "maker"
-                } else {
-                    "taker"
-                };
-                vec![FeeComponent {
-                    fee_id: format!("{role}-fee"),
-                    amount: self.crypto.rounding.apply(notional),
-                }]
+                (
+                    harness_trading::fee_policy::crypto(
+                        fill.quantity,
+                        fill.price,
+                        if maker {
+                            self.crypto.maker_rate_bps
+                        } else {
+                            self.crypto.taker_rate_bps
+                        },
+                        maker,
+                        basis_points(),
+                    ),
+                    self.crypto.rounding,
+                )
             }
-            _ => {
-                let equity = &self.equity;
-                let commission = fill
-                    .quantity
-                    .checked_mul(equity.commission_per_share)
-                    .map_err(|error| fee_overflow(fill.fill_id, "commission", error))?;
-                let commission = max_decimal(commission, equity.commission_minimum);
-                let mut components = vec![FeeComponent {
-                    fee_id: "commission".to_string(),
-                    amount: equity.rounding.apply(commission),
-                }];
-                if fill.side == "sell" {
-                    let sec = fill
-                        .quantity
-                        .checked_mul(fill.price)
-                        .and_then(|value| value.checked_mul(equity.sec_rate_bps))
-                        .and_then(|value| value.checked_div(basis_points()))
-                        .map_err(|error| fee_overflow(fill.fill_id, "SEC regulatory fee", error))?;
-                    let taf = min_decimal(
-                        fill.quantity
-                            .checked_mul(equity.taf_per_share)
-                            .map_err(|error| fee_overflow(fill.fill_id, "FINRA TAF", error))?,
-                        equity.taf_maximum,
-                    );
-                    components.push(FeeComponent {
-                        fee_id: "sec-regulatory".to_string(),
-                        amount: equity.rounding.apply(sec),
-                    });
-                    components.push(FeeComponent {
-                        fee_id: "finra-taf".to_string(),
-                        amount: equity.rounding.apply(taf),
-                    });
-                }
-                components
-            }
+            _ => (
+                harness_trading::fee_policy::equity(
+                    fill.quantity,
+                    fill.price,
+                    fill.side == "sell",
+                    harness_trading::fee_policy::EquityRates {
+                        commission_per_share: self.equity.commission_per_share,
+                        commission_minimum: self.equity.commission_minimum,
+                        sec_rate_bps: self.equity.sec_rate_bps,
+                        taf_per_share: self.equity.taf_per_share,
+                        taf_maximum: self.equity.taf_maximum,
+                    },
+                    basis_points(),
+                ),
+                self.equity.rounding,
+            ),
         };
+        let components = raw
+            .map_err(|error| match error {
+                harness_trading::fee_policy::FeeError::Arithmetic(component, source) => {
+                    fee_overflow(fill.fill_id, component, source)
+                }
+                harness_trading::fee_policy::FeeError::FractionalContracts => {
+                    BacktestError::Configuration(error.to_string())
+                }
+            })?
+            .into_iter()
+            .map(|(fee_id, amount)| {
+                Ok(FeeComponent {
+                    fee_id: fee_id.to_string(),
+                    amount: rounding.apply(amount)?,
+                })
+            })
+            .collect::<Result<Vec<_>, BacktestError>>()?;
+        let total = components
+            .iter()
+            .try_fold(Decimal::ZERO, |total, component| {
+                total.checked_add(component.amount)
+            })
+            .map_err(|e| {
+                BacktestError::Arithmetic(format!("fee total cannot be represented: {e}"))
+            })?;
         Ok(FeeAssessment {
             fill_id: fill.fill_id.to_string(),
             schedule_id: self.schedule_id.clone(),
@@ -252,6 +264,7 @@ impl FeeSchedule {
             strategy_id: strategy_id.to_string(),
             asset_class: asset_class.to_string(),
             components,
+            total,
         })
     }
 }
@@ -279,32 +292,31 @@ pub struct FeeAggregation {
 }
 
 /// Aggregate assessments by run, strategy, and asset class and currency.
-#[must_use]
-pub fn aggregate_fees(assessments: &[FeeAssessment]) -> FeeAggregation {
+pub fn aggregate_fees(assessments: &[FeeAssessment]) -> Result<FeeAggregation, BacktestError> {
     let mut by_run: BTreeMap<(String, String), Decimal> = BTreeMap::new();
     let mut by_strategy: BTreeMap<(String, String), Decimal> = BTreeMap::new();
     let mut by_asset_class: BTreeMap<(String, String), Decimal> = BTreeMap::new();
     for assessment in assessments {
         let total = assessment.total();
-        add_total(&mut by_run, &assessment.job_id, &assessment.currency, total);
+        add_total(&mut by_run, &assessment.job_id, &assessment.currency, total)?;
         add_total(
             &mut by_strategy,
             &assessment.strategy_id,
             &assessment.currency,
             total,
-        );
+        )?;
         add_total(
             &mut by_asset_class,
             &assessment.asset_class,
             &assessment.currency,
             total,
-        );
+        )?;
     }
-    FeeAggregation {
+    Ok(FeeAggregation {
         by_run: aggregates(by_run),
         by_strategy: aggregates(by_strategy),
         by_asset_class: aggregates(by_asset_class),
-    }
+    })
 }
 
 fn add_total(
@@ -312,11 +324,14 @@ fn add_total(
     key: &str,
     currency: &str,
     amount: Decimal,
-) {
+) -> Result<(), BacktestError> {
     let entry = totals
         .entry((key.to_string(), currency.to_string()))
         .or_insert(Decimal::ZERO);
-    *entry = entry.checked_add(amount).unwrap_or(*entry);
+    *entry = entry
+        .checked_add(amount)
+        .map_err(|e| BacktestError::Arithmetic(format!("fee aggregate overflow: {e}")))?;
+    Ok(())
 }
 
 fn aggregates(totals: BTreeMap<(String, String), Decimal>) -> Vec<FeeAggregate> {
@@ -347,10 +362,10 @@ pub fn fee_schedule_from_config(
     let mode = RoundingMode::from_name(&fees.rounding).ok_or_else(|| {
         BacktestError::Configuration(format!("unknown rounding mode {:?}", fees.rounding))
     })?;
-    let rounding = FeeRounding { precision, mode };
-    let per_unit = sum_rates(fees, FeeBasis::PerUnit);
-    let flat = sum_rates(fees, FeeBasis::Flat);
-    let notional_bps = sum_rates(fees, FeeBasis::NotionalBps);
+    let rounding = FeeRounding::new(precision, mode)?;
+    let per_unit = sum_rates(fees, FeeBasis::PerUnit)?;
+    let flat = sum_rates(fees, FeeBasis::Flat)?;
+    let notional_bps = sum_rates(fees, FeeBasis::NotionalBps)?;
     Ok(FeeSchedule {
         schedule_id: schedule_id.to_string(),
         currency: fees.currency.clone(),
@@ -385,28 +400,14 @@ pub fn fee_schedule_for_run(config: &BacktestConfig) -> Result<FeeSchedule, Back
     fee_schedule_from_config(&config.fees, DEFAULT_FEE_PRECISION, "harness-config")
 }
 
-fn sum_rates(fees: &FeeConfig, basis: FeeBasis) -> Decimal {
+fn sum_rates(fees: &FeeConfig, basis: FeeBasis) -> Result<Decimal, BacktestError> {
     let mut total = Decimal::ZERO;
     for rule in fees.rules.iter().filter(|rule| rule.basis == basis) {
-        total = total.checked_add(rule.rate).unwrap_or(total);
+        total = total
+            .checked_add(rule.rate)
+            .map_err(|e| BacktestError::Arithmetic(format!("fee rate sum overflow: {e}")))?;
     }
-    total
-}
-
-fn max_decimal(left: Decimal, right: Decimal) -> Decimal {
-    if left.cmp_value(right) == std::cmp::Ordering::Less {
-        right
-    } else {
-        left
-    }
-}
-
-fn min_decimal(left: Decimal, right: Decimal) -> Decimal {
-    if left.cmp_value(right) == std::cmp::Ordering::Greater {
-        right
-    } else {
-        left
-    }
+    Ok(total)
 }
 
 /// The named failure for one fee component whose exact product overflows.

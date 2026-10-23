@@ -6,19 +6,27 @@
 //! the REST routes.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use api::http::configuration::ValidatedConfiguration;
 use api::http::create_app;
-use api::http::launcher::{BacktestRunner, RunOutcome};
+use api::http::launcher::BacktestRunner;
+use api::http::launcher::RunOutcome;
 use api::http::state::AppConfig;
-use api::http::store::{FileSystemJobStore, JobKind, JobRecord, JobState, JobStore};
 use axum::body::Body;
-use axum::http::{header, Request, StatusCode};
+use axum::http::header;
+use axum::http::Request;
+use axum::http::StatusCode;
 use axum::Router;
+use harness_execution::jobs::JobKind;
+use harness_execution::jobs::JobRecord;
+use harness_execution::jobs::JobState;
+use harness_execution::jobs::{ExecutionRepository, JobAdmission, ResultPublisher};
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
+use serde_json::json;
+use serde_json::Value;
 use tower::ServiceExt;
 
 const BEARER: &str = "test-secret";
@@ -64,7 +72,7 @@ fn durable_app(root: &Path) -> Router {
     create_app(config).expect("app")
 }
 
-fn seed_run(store: &dyn JobStore, job_id: &str) {
+fn seed_run(store: &dyn ExecutionRepository, job_id: &str) {
     let now = chrono::Utc::now();
     store
         .admit(JobRecord::new(job_id, JobKind::Backtest, "seed-input", now))
@@ -77,7 +85,7 @@ fn seed_run(store: &dyn JobStore, job_id: &str) {
     store.put_result(record, artifacts).expect("seed run");
 }
 
-fn seed_job(jobs: &dyn JobStore, job_id: &str) {
+fn seed_job(jobs: &dyn ExecutionRepository, job_id: &str) {
     let now = chrono::Utc::now();
     jobs.admit(JobRecord::new(job_id, JobKind::Backtest, "seed-input", now))
         .and_then(|admission| {
@@ -154,7 +162,7 @@ async fn mcp_health_publishes_the_tool_catalog() {
 async fn mcp_tool_call_list_artifacts_reads_the_durable_store() {
     let root = temp_root("artifacts");
     let router = durable_app(&root);
-    let store = FileSystemJobStore::new(&root);
+    let store = harness_execution_storage::filesystem_store(&root);
     seed_run(&store, "run-mcp");
 
     let (status, body) = send(
@@ -174,14 +182,20 @@ async fn mcp_tool_call_list_artifacts_reads_the_durable_store() {
         .expect("artifacts");
     assert_eq!(artifacts.len(), 1);
     assert_eq!(artifacts[0]["name"], "backtest.json");
-    assert_eq!(artifacts[0]["uri"], "jobs/run-mcp/backtest.json");
+    assert_eq!(
+        artifacts[0]["uri"],
+        format!(
+            "execution/objects/run-mcp/{}/backtest.json",
+            harness_execution::jobs::artifact_digest(br#"{"ok":true}"#)
+        )
+    );
 }
 
 #[tokio::test]
 async fn mcp_tool_call_list_artifacts_returns_empty_for_an_artifact_free_job() {
     let root = temp_root("empty-artifacts");
     let router = durable_app(&root);
-    let store = FileSystemJobStore::new(&root);
+    let store = harness_execution_storage::filesystem_store(&root);
     let now = chrono::Utc::now();
     store
         .admit(JobRecord::new(
@@ -217,7 +231,7 @@ async fn mcp_tool_call_list_artifacts_returns_empty_for_an_artifact_free_job() {
 async fn mcp_tool_call_get_job_status_reads_the_durable_jobs() {
     let root = temp_root("status");
     let router = durable_app(&root);
-    let jobs = FileSystemJobStore::new(&root);
+    let jobs = harness_execution_storage::filesystem_store(&root);
     seed_job(&jobs, "job-mcp");
 
     let (status, body) = send(
@@ -282,3 +296,7 @@ async fn mcp_requires_a_bearer_credential() {
     let (health_status, _) = send(&router, get_with("/mcp/health", None)).await;
     assert_eq!(health_status, StatusCode::UNAUTHORIZED);
 }
+
+#[path = "support/jobs.rs"]
+pub mod job_inspection;
+use job_inspection::JobInspection;

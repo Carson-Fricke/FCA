@@ -6,9 +6,9 @@
 //! this crate's deterministic engine sources with the same length-framed,
 //! newline-normalized scheme as the Python module fingerprint.
 
-use crate::canonical_json::JsonValue;
 use crate::results::recorder::manifest::digest_bytes;
-use crate::sha256::Sha256;
+use harness_contracts::canonical_json::JsonValue;
+use harness_contracts::sha256::Sha256;
 
 use super::fixture::DataPreflight;
 
@@ -86,40 +86,162 @@ pub fn run_digest(job_id: &str, digests: &std::collections::BTreeMap<String, Str
 /// module name and an 8-byte big-endian length.
 #[must_use]
 pub fn code_fingerprint() -> String {
-    const MODULES: [(&str, &str); 12] = [
+    const MODULES: &[(&str, &str)] = &[
+        ("backtest.config", include_str!("config.rs")),
+        ("backtest.engine_core", include_str!("engine_core.rs")),
+        ("backtest.event_bus", include_str!("event_bus.rs")),
+        ("backtest.fees", include_str!("fees.rs")),
+        ("backtest.fixture", include_str!("fixture.rs")),
+        ("backtest.history", include_str!("history.rs")),
+        ("backtest.identity", include_str!("identity.rs")),
+        ("backtest.manifest", include_str!("manifest.rs")),
+        ("backtest.mod", include_str!("mod.rs")),
+        ("backtest.null", include_str!("null.rs")),
+        ("backtest.outcome", include_str!("outcome.rs")),
+        ("backtest.portfolio", include_str!("portfolio.rs")),
+        ("backtest.preflight", include_str!("preflight.rs")),
+        ("backtest.projection", include_str!("projection.rs")),
+        ("backtest.risk", include_str!("risk.rs")),
+        ("backtest.rng", include_str!("rng.rs")),
+        ("backtest.screen", include_str!("screen.rs")),
+        ("backtest.stream", include_str!("stream.rs")),
+        ("backtest.subscriptions", include_str!("subscriptions.rs")),
+        ("backtest.valuation", include_str!("valuation.rs")),
+        ("backtest.venue", include_str!("venue.rs")),
+        ("backtest.yaml", include_str!("yaml.rs")),
         (
-            "harness-backtest.backtest.config",
-            include_str!("config.rs"),
+            "trading.accounting",
+            include_str!("../../../trading/src/accounting.rs"),
         ),
         (
-            "harness-backtest.backtest.engine_core",
-            include_str!("engine_core.rs"),
+            "trading.error",
+            include_str!("../../../trading/src/error.rs"),
         ),
         (
-            "harness-backtest.backtest.errors",
-            include_str!("errors.rs"),
-        ),
-        ("harness-backtest.backtest.fees", include_str!("fees.rs")),
-        ("harness-backtest.backtest.fills", include_str!("fills.rs")),
-        (
-            "harness-backtest.backtest.fixture",
-            include_str!("fixture.rs"),
+            "trading.events",
+            include_str!("../../../trading/src/events.rs"),
         ),
         (
-            "harness-backtest.backtest.manifest",
-            include_str!("manifest.rs"),
+            "trading.ledger",
+            include_str!("../../../trading/src/ledger.rs"),
         ),
-        ("harness-backtest.backtest.null", include_str!("null.rs")),
+        ("trading.lib", include_str!("../../../trading/src/lib.rs")),
         (
-            "harness-backtest.backtest.portfolio",
-            include_str!("portfolio.rs"),
+            "trading.matching",
+            include_str!("../../../trading/src/matching.rs"),
         ),
         (
-            "harness-backtest.backtest.preflight",
-            include_str!("preflight.rs"),
+            "trading.orders",
+            include_str!("../../../trading/src/orders.rs"),
         ),
-        ("harness-backtest.backtest.rng", include_str!("rng.rs")),
-        ("harness-backtest.backtest.yaml", include_str!("yaml.rs")),
+        (
+            "trading.program",
+            include_str!("../../../trading/src/program.rs"),
+        ),
+        (
+            "trading.replay_errors",
+            include_str!("../../../trading/src/replay_errors.rs"),
+        ),
+        (
+            "trading.replay_fills",
+            include_str!("../../../trading/src/replay_fills.rs"),
+        ),
+        (
+            "trading.symbol",
+            include_str!("../../../trading/src/symbol.rs"),
+        ),
+        (
+            "trading.fee_policy",
+            include_str!("../../../trading/src/fee_policy.rs"),
+        ),
+        (
+            "trading.fills.decision",
+            include_str!("../../../trading/src/fills/decision.rs"),
+        ),
+        (
+            "trading.fills.fees",
+            include_str!("../../../trading/src/fills/fees.rs"),
+        ),
+        (
+            "trading.fills.latency_size",
+            include_str!("../../../trading/src/fills/latency_size.rs"),
+        ),
+        (
+            "trading.fills.mid_touch",
+            include_str!("../../../trading/src/fills/mid_touch.rs"),
+        ),
+        (
+            "trading.fills.mod",
+            include_str!("../../../trading/src/fills/mod.rs"),
+        ),
+        (
+            "trading.fills.simple_touch",
+            include_str!("../../../trading/src/fills/simple_touch.rs"),
+        ),
+        (
+            "trading.fills.trade_through",
+            include_str!("../../../trading/src/fills/trade_through.rs"),
+        ),
+        (
+            "trading.notional_policy",
+            include_str!("../../../trading/src/notional_policy.rs"),
+        ),
+        (
+            "trading.oms.groups",
+            include_str!("../../../trading/src/oms/groups.rs"),
+        ),
+        (
+            "trading.oms.manager",
+            include_str!("../../../trading/src/oms/manager.rs"),
+        ),
+        (
+            "trading.oms.mod",
+            include_str!("../../../trading/src/oms/mod.rs"),
+        ),
+        (
+            "trading.oms.state",
+            include_str!("../../../trading/src/oms/state.rs"),
+        ),
+        (
+            "trading.portfolio.book",
+            include_str!("../../../trading/src/portfolio/book.rs"),
+        ),
+        (
+            "trading.portfolio.hub",
+            include_str!("../../../trading/src/portfolio/hub.rs"),
+        ),
+        (
+            "trading.portfolio.mod",
+            include_str!("../../../trading/src/portfolio/mod.rs"),
+        ),
+        (
+            "trading.portfolio.options_lifecycle",
+            include_str!("../../../trading/src/portfolio/options_lifecycle.rs"),
+        ),
+        (
+            "trading.risk.collateral",
+            include_str!("../../../trading/src/risk/collateral.rs"),
+        ),
+        (
+            "trading.risk.kill_switch",
+            include_str!("../../../trading/src/risk/kill_switch.rs"),
+        ),
+        (
+            "trading.risk.limits",
+            include_str!("../../../trading/src/risk/limits.rs"),
+        ),
+        (
+            "trading.risk.mod",
+            include_str!("../../../trading/src/risk/mod.rs"),
+        ),
+        (
+            "trading.risk.models",
+            include_str!("../../../trading/src/risk/models.rs"),
+        ),
+        (
+            "trading.risk.pipeline",
+            include_str!("../../../trading/src/risk/pipeline.rs"),
+        ),
     ];
     let mut hasher = Sha256::new();
     hasher.update(b"fca-backtest-code-v1\0");
@@ -235,11 +357,11 @@ pub struct BacktestManifest {
     /// Strategy identities.
     pub strategies: Vec<StrategyIdentity>,
     /// Effective consumer plan.
-    pub effective_subscriptions: Vec<super::engine_core::MarketSubscription>,
+    pub effective_subscriptions: Vec<harness_trading::program::MarketSubscription>,
     /// Consumer union plus execution inputs planned for acquisition.
-    pub acquired_subscriptions: Vec<super::engine_core::MarketSubscription>,
+    pub acquired_subscriptions: Vec<harness_trading::program::MarketSubscription>,
     /// Separate quote/trade execution plan; empty for studies.
-    pub execution_subscriptions: Vec<super::engine_core::MarketSubscription>,
+    pub execution_subscriptions: Vec<harness_trading::program::MarketSubscription>,
 }
 
 impl BacktestManifest {
@@ -357,7 +479,7 @@ fn string_array(values: &[String]) -> JsonValue {
 ///
 /// # Errors
 ///
-/// Returns [`super::errors::BacktestError`] if the fixture cannot be
+/// Returns [`harness_trading::replay_errors::BacktestError`] if the fixture cannot be
 /// preflighted.
 #[allow(clippy::too_many_arguments)]
 pub fn build_manifest(
@@ -370,7 +492,7 @@ pub fn build_manifest(
     fee_identity: &JsonValue,
     risk_pipeline_identity: &JsonValue,
     strategy_identities: Vec<StrategyIdentity>,
-) -> Result<BacktestManifest, super::errors::BacktestError> {
+) -> Result<BacktestManifest, harness_trading::replay_errors::BacktestError> {
     Ok(BacktestManifest {
         manifest_version: MANIFEST_VERSION.to_string(),
         engine_id: ENGINE_ID.to_string(),

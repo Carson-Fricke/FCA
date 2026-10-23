@@ -5,7 +5,8 @@
 
 use std::collections::BTreeMap;
 
-use mcp::store::{artifact_digest, run_digest};
+use harness_execution::jobs::artifact_digest;
+use harness_execution::jobs::run_digest;
 
 #[test]
 fn store_and_manifest_run_digests_agree_on_the_job_vector() {
@@ -37,3 +38,6 @@ fn run_digest_binds_the_job_identity_and_artifact_digests() {
     different.insert("fills.parquet".to_string(), artifact_digest(b"fills-bytes"));
     assert_ne!(first, run_digest("job-1", &different));
 }
+
+#[path = "support/jobs.rs"]
+pub mod job_inspection;

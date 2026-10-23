@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use backtest::sha256::digest_hex;
+use harness_contracts::sha256::digest_hex;
 
 use crate::error::JitError;
 

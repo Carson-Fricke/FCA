@@ -1,5 +1,7 @@
 //! Strict option selectors survive the public submission configuration boundary.
-use config::{models::build_backtest, parse_yaml_mapping, YamlValue};
+use config::models::build_backtest;
+use config::parse_yaml_mapping;
+use config::YamlValue;
 use std::path::Path;
 
 #[test]

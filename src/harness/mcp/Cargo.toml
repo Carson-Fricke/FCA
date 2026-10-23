@@ -10,6 +10,10 @@ publish = false
 crate-type = ["rlib"]
 
 [dependencies]
+config = { path = "../config" }
+harness-research = { path = "../research" }
+harness-execution-storage = { path = "../execution-storage" }
+harness-execution = { path = "../execution" }
 harness-contracts = { path = "../contracts" }
 backtest = { path = "../backtest" }
 chrono = { version = "0.4", features = ["serde"] }

@@ -1,6 +1,7 @@
 //! Request specifications for the frozen lake routes.
 
-use serde_json::{json, Value};
+use serde_json::json;
+use serde_json::Value;
 
 /// One symbol/data-type window ensure request.
 ///

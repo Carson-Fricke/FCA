@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use num::Decimal;
 
-use crate::canonical_json::JsonValue;
+use harness_contracts::canonical_json::JsonValue;
 
 /// One applied fill input for accounting.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -228,7 +228,10 @@ impl VirtualBook {
     }
 
     /// Account one fill exactly.
-    pub fn apply_fill(&mut self, fill: &BookFill) {
+    pub fn apply_fill(
+        &mut self,
+        fill: &BookFill,
+    ) -> Result<(), harness_trading::replay_errors::BacktestError> {
         let buy = fill.side == "buy";
         let signed_quantity = if buy {
             fill.quantity
@@ -236,7 +239,7 @@ impl VirtualBook {
             fill.quantity.negated()
         };
         let current = self.positions.get(&fill.symbol).cloned();
-        let (quantity, mut cost_basis, mut cash_flow, mut realized_pnl) = match &current {
+        let (quantity, cost_basis, cash_flow, realized_pnl) = match &current {
             Some(ledger) => (
                 ledger.quantity,
                 ledger.cost_basis,
@@ -245,65 +248,27 @@ impl VirtualBook {
             ),
             None => (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO),
         };
-        let next_quantity = quantity.checked_add(signed_quantity).unwrap_or(quantity);
-
-        if quantity.is_zero()
-            || quantity
-                .checked_mul(signed_quantity)
-                .is_ok_and(|v| v.is_positive())
-        {
-            let addition = signed_quantity
-                .checked_mul(fill.price)
-                .unwrap_or(Decimal::ZERO);
-            cost_basis = cost_basis.checked_add(addition).unwrap_or(cost_basis);
-        } else if abs_le(signed_quantity, quantity) {
-            let released_basis = if abs_eq(signed_quantity, quantity) {
-                cost_basis
-            } else {
-                cost_basis
-                    .checked_mul(signed_quantity.abs())
-                    .and_then(|value| value.checked_div(quantity.abs()))
-                    .unwrap_or(Decimal::ZERO)
-            };
-            let term = signed_quantity
-                .negated()
-                .checked_mul(fill.price)
-                .unwrap_or(Decimal::ZERO)
-                .checked_sub(released_basis)
-                .unwrap_or(Decimal::ZERO);
-            realized_pnl = realized_pnl.checked_add(term).unwrap_or(realized_pnl);
-            cost_basis = cost_basis.checked_sub(released_basis).unwrap_or(cost_basis);
-        } else {
-            let closing_quantity = quantity.negated();
-            let term = closing_quantity
-                .negated()
-                .checked_mul(fill.price)
-                .unwrap_or(Decimal::ZERO)
-                .checked_sub(cost_basis)
-                .unwrap_or(Decimal::ZERO);
-            realized_pnl = realized_pnl.checked_add(term).unwrap_or(realized_pnl);
-            cost_basis = next_quantity
-                .checked_mul(fill.price)
-                .unwrap_or(Decimal::ZERO);
-        }
-
-        realized_pnl = realized_pnl.checked_sub(fill.fee).unwrap_or(realized_pnl);
-        let notional = signed_quantity
-            .checked_mul(fill.price)
-            .unwrap_or(Decimal::ZERO);
-        cash_flow = cash_flow
-            .checked_sub(notional)
-            .and_then(|value| value.checked_sub(fill.fee))
-            .unwrap_or(cash_flow);
-        if next_quantity.is_zero() {
-            cost_basis = Decimal::ZERO;
-            realized_pnl = cash_flow;
-        }
-        let next_cash = self
-            .cash
-            .checked_sub(notional)
-            .and_then(|value| value.checked_sub(fill.fee))
-            .unwrap_or(self.cash);
+        let (next_cash, next) = harness_trading::ledger::apply(
+            self.cash,
+            harness_trading::ledger::Position {
+                quantity,
+                cost_basis,
+                cash_flow,
+                realized_pnl,
+            },
+            signed_quantity,
+            fill.price,
+            fill.fee,
+        )
+        .map_err(|error| {
+            harness_trading::replay_errors::BacktestError::Arithmetic(error.to_string())
+        })?;
+        let harness_trading::ledger::Position {
+            quantity: next_quantity,
+            cost_basis,
+            cash_flow,
+            realized_pnl,
+        } = next;
         self.positions.insert(
             fill.symbol.clone(),
             PositionLedger {
@@ -315,6 +280,7 @@ impl VirtualBook {
         );
         self.cash = next_cash;
         self.fill_ids.push(fill.fill_id.clone());
+        Ok(())
     }
 
     /// Apply one explicit mark.
@@ -460,10 +426,18 @@ impl PortfolioHub {
     }
 
     /// Route one fill to exactly one strategy book.
-    pub fn apply_fill(&mut self, book_id: &str, fill: &BookFill) {
-        if let Some(book) = self.book_mut(book_id) {
-            book.apply_fill(fill);
-        }
+    pub fn apply_fill(
+        &mut self,
+        book_id: &str,
+        fill: &BookFill,
+    ) -> Result<(), harness_trading::replay_errors::BacktestError> {
+        self.book_mut(book_id)
+            .ok_or_else(|| {
+                harness_trading::replay_errors::BacktestError::Configuration(format!(
+                    "unknown book {book_id}"
+                ))
+            })?
+            .apply_fill(fill)
     }
 
     /// Broadcast one explicit mark to every book.
@@ -597,14 +571,6 @@ fn aggregate_position(symbol: &str, positions: &[PositionSnapshot]) -> Aggregate
         market_value,
         unrealized_pnl,
     }
-}
-
-fn abs_eq(left: Decimal, right: Decimal) -> bool {
-    left.abs().cmp_value(right.abs()) == std::cmp::Ordering::Equal
-}
-
-fn abs_le(left: Decimal, right: Decimal) -> bool {
-    left.abs().cmp_value(right.abs()) != std::cmp::Ordering::Greater
 }
 
 /// Render an optional decimal as a JSON string or null (Python `_decimal_or_none`).

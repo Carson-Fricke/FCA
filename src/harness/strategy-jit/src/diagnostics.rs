@@ -1,6 +1,7 @@
 //! Classify structured Cargo diagnostics, never rendered error text.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
 use serde::Deserialize;
 

@@ -33,10 +33,14 @@
 
 use std::fmt;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap::Args;
+use clap::CommandFactory;
+use clap::Parser;
+use clap::Subcommand;
 
 pub mod execution;
 pub mod http;
@@ -308,8 +312,6 @@ impl BacktestRunSummary {
 /// Failures a [`BacktestJobRunner`] can report to the CLI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BacktestJobError {
-    /// The Rust backtest engine has not been ported yet.
-    EngineNotPorted,
     /// The engine rejected the run for a domain reason.
     Engine(String),
 }
@@ -317,10 +319,6 @@ pub enum BacktestJobError {
 impl fmt::Display for BacktestJobError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::EngineNotPorted => formatter.write_str(
-                "the Rust backtest engine is not yet ported; the Python harness \
-                 remains authoritative",
-            ),
             Self::Engine(reason) => formatter.write_str(reason),
         }
     }
@@ -330,9 +328,7 @@ impl std::error::Error for BacktestJobError {}
 
 /// Execution seam between the parsed `backtest-job` surface and the engine.
 ///
-/// The ported Rust backtest pipeline implements this trait; until then the
-/// CLI is fully exercised through [`UnportedBacktestJobRunner`] and test
-/// doubles, so the command surface is stable while the engine lands.
+/// The native research application supplies the current implementation.
 pub trait BacktestJobRunner {
     /// Run one backtest for the already-validated command arguments.
     ///
@@ -340,16 +336,6 @@ pub trait BacktestJobRunner {
     ///
     /// Returns [`BacktestJobError`] when the engine cannot complete the run.
     fn run(&self, args: &BacktestJobArgs) -> Result<BacktestRunSummary, BacktestJobError>;
-}
-
-/// Always-failing runner double used to test CLI error handling.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct UnportedBacktestJobRunner;
-
-impl BacktestJobRunner for UnportedBacktestJobRunner {
-    fn run(&self, _args: &BacktestJobArgs) -> Result<BacktestRunSummary, BacktestJobError> {
-        Err(BacktestJobError::EngineNotPorted)
-    }
 }
 
 /// Execution seam between the parsed `study-job` surface and the study engine.
@@ -363,16 +349,6 @@ pub trait StudyJobRunner {
     ///
     /// Returns [`BacktestJobError`] when the study cannot complete the run.
     fn run(&self, args: &StudyJobArgs) -> Result<BacktestRunSummary, BacktestJobError>;
-}
-
-/// Always-failing study runner double used to test CLI error handling.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct UnportedStudyJobRunner;
-
-impl StudyJobRunner for UnportedStudyJobRunner {
-    fn run(&self, _args: &StudyJobArgs) -> Result<BacktestRunSummary, BacktestJobError> {
-        Err(BacktestJobError::EngineNotPorted)
-    }
 }
 
 /// The canonical summary the `screen-job` surface prints after a run.
@@ -716,7 +692,7 @@ pub fn emit(result: CommandResult) -> ExitCode {
 pub fn run_trader(args: &TraderArgs) -> ExitCode {
     match &args.command {
         Some(TraderCommand::Status(status)) => {
-            match live::supervision::read_supervision_status(status.config.as_path()) {
+            match live::supervision::process::read_supervision_status(status.config.as_path()) {
                 Some(payload) => {
                     println!("{payload}");
                     ExitCode::SUCCESS
@@ -727,7 +703,7 @@ pub fn run_trader(args: &TraderArgs) -> ExitCode {
                 }
             }
         }
-        None => ExitCode::from(live::supervision::run_trader_process(&args.config).code()),
+        None => ExitCode::from(live::supervision::process::run_trader_process(&args.config).code()),
     }
 }
 

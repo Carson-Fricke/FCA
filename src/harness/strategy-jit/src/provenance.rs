@@ -1,11 +1,13 @@
 //! Host, dependency, toolchain, and Cargo configuration identities.
 
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
+use std::sync::OnceLock;
 
-use backtest::sha256::digest_hex;
+use harness_contracts::sha256::digest_hex;
 
 use crate::error::JitError;
 

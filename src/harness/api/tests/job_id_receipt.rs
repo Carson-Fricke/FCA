@@ -1,10 +1,14 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use api::local::{NativeBacktestSubmitter, NativeScreeningSubmitter, NativeStudySubmitter};
-use mcp::store::{InMemoryJobStore, JobStore};
-use mcp::tools::{BacktestSubmitter, ScreeningSubmitter, StudySubmitter};
-use serde_json::{json, Value};
+use api::local::NativeBacktestSubmitter;
+use api::local::NativeScreeningSubmitter;
+use api::local::NativeStudySubmitter;
+use mcp::tools::ports::BacktestSubmitter;
+use mcp::tools::ports::ScreeningSubmitter;
+use mcp::tools::ports::StudySubmitter;
+use serde_json::json;
+use serde_json::Value;
 
 fn write_temp(name: &str, document: &Value) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
@@ -32,7 +36,7 @@ fn replay_document(shell: &str) -> Value {
 
 fn screen_document() -> Value {
     let source = "// screening source\n";
-    let digest = backtest::sha256::digest_hex(source.as_bytes());
+    let digest = harness_contracts::sha256::digest_hex(source.as_bytes());
     json!({
         "schema_version": 1,
         "shell": "screen",
@@ -50,7 +54,7 @@ fn screen_document() -> Value {
 
 #[test]
 fn backtest_receipt_echoes_the_submitted_job_id() {
-    let store = Arc::new(InMemoryJobStore::new());
+    let store = Arc::new(harness_execution_storage::memory_store());
     let submitter = NativeBacktestSubmitter::new(store.clone(), Arc::new(Wake));
     let path = write_temp("backtest", &replay_document("backtest"));
     let receipt = submitter
@@ -68,7 +72,7 @@ fn backtest_receipt_echoes_the_submitted_job_id() {
 
 #[test]
 fn study_receipt_echoes_the_submitted_job_id() {
-    let store = Arc::new(InMemoryJobStore::new());
+    let store = Arc::new(harness_execution_storage::memory_store());
     let submitter = NativeStudySubmitter::new(store.clone(), Arc::new(Wake));
     let path = write_temp("study", &replay_document("study"));
     let receipt = submitter
@@ -85,7 +89,7 @@ fn study_receipt_echoes_the_submitted_job_id() {
 
 #[test]
 fn screen_receipt_echoes_the_submitted_job_id() {
-    let store = Arc::new(InMemoryJobStore::new());
+    let store = Arc::new(harness_execution_storage::memory_store());
     let submitter = NativeScreeningSubmitter::new(store.clone(), Arc::new(Wake));
     let path = write_temp("screen", &screen_document());
     let receipt = submitter
@@ -102,7 +106,7 @@ fn screen_receipt_echoes_the_submitted_job_id() {
 
 #[test]
 fn submitted_job_id_overrides_a_document_job_id() {
-    let store = Arc::new(InMemoryJobStore::new());
+    let store = Arc::new(harness_execution_storage::memory_store());
     let submitter = NativeBacktestSubmitter::new(store.clone(), Arc::new(Wake));
     let mut document = replay_document("backtest");
     document["job_id"] = json!("job-document");
@@ -122,3 +126,7 @@ impl api::execution::Wake for Wake {
         Ok(())
     }
 }
+
+#[path = "support/jobs.rs"]
+pub mod job_inspection;
+use job_inspection::JobInspection;

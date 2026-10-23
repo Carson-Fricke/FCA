@@ -1,7 +1,7 @@
 use super::*;
 use crate::auth::EnvironmentBearerTokenSource;
-use crate::store::InMemoryJobStore;
-use crate::tools::{Boundary, ToolExecutionError};
+use crate::tools::ports::Boundary;
+use crate::tools::ports::ToolExecutionError;
 
 struct Validator(Option<String>);
 
@@ -26,7 +26,7 @@ impl StudyValidator for Validator {
 fn server(validator: Option<Arc<dyn StudyValidator>>) -> McpServer {
     let mut context =
         HarnessToolsContext::new(Boundary::Local, Arc::new(EnvironmentBearerTokenSource));
-    context.job_store = Some(Arc::new(InMemoryJobStore::new()));
+    context.job_store = Some(Arc::new(harness_execution_storage::memory_store()));
     context.study_validator = validator;
     create_server(context).unwrap()
 }

@@ -5,8 +5,8 @@
 //! command return values never carry venue outcomes, which keeps simulated and
 //! live adapters on the same boundary.
 
-use crate::error::LiveResult;
-use crate::orders::OrderRequest;
+use harness_trading::error::LiveResult;
+use harness_trading::orders::OrderRequest;
 
 /// The synchronous venue command boundary.
 pub trait ExecutionVenue {

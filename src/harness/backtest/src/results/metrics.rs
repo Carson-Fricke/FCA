@@ -507,6 +507,21 @@ impl Default for EquityAccumulator {
     }
 }
 impl EquityAccumulator {
+    /// Account for consecutive unchanged equity samples without redoing decimal
+    /// arithmetic. Their count and final observed time retain return weighting
+    /// and peak/recovery timing exactly; this never changes the metric cadence.
+    pub fn extend_flat(&mut self, timestamp_ns: i64, additional: usize) {
+        if additional == 0 {
+            return;
+        }
+        let previous = self.last.expect("flat extension follows an equity sample");
+        self.push(EquityPoint {
+            timestamp_ns,
+            equity: previous.equity,
+        });
+        self.count += additional - 1;
+    }
+
     pub fn push(&mut self, point: EquityPoint) {
         self.negative |= point.equity.is_negative();
         if self.first.is_none() {
@@ -639,8 +654,8 @@ impl EquityAccumulator {
     }
 }
 
-/// Second pass shares the ledger reader with artifact encoding, preserving
-/// the exact ordered floating-point deviation sum and decimal mean.
+/// Second metric pass over causal history, preserving the exact ordered
+/// floating-point deviation sum and decimal mean independently of report sampling.
 pub struct EquityVariance {
     mean: Outcome<Decimal18>,
     previous: Option<EquityPoint>,
@@ -648,6 +663,32 @@ pub struct EquityVariance {
     count: usize,
 }
 impl EquityVariance {
+    /// Repeat the identical zero-return deviation in its original addition
+    /// order. Multiplying by the count would change floating-point rounding.
+    pub fn extend_flat(&mut self, timestamp_ns: i64, additional: usize) {
+        if additional == 0 {
+            return;
+        }
+        if let (Ok(mean), Some(previous)) = (self.mean, self.previous) {
+            self.squares = self.squares.and_then(|mut squares| {
+                let deviation = sample_return(previous.equity, previous.equity)
+                    .and_then(|r| sub(r, mean, "sharpe_per_sample"))?
+                    .to_f64();
+                let contribution = deviation * deviation;
+                if contribution != 0.0 {
+                    for _ in 0..additional {
+                        squares += contribution;
+                    }
+                }
+                Ok(squares)
+            });
+            self.previous = Some(EquityPoint {
+                timestamp_ns,
+                equity: previous.equity,
+            });
+        }
+    }
+
     pub fn push(&mut self, point: EquityPoint) {
         if let (Ok(mean), Some(previous)) = (self.mean, self.previous) {
             self.squares = self.squares.and_then(|s| {

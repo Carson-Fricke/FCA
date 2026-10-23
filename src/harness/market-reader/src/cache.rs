@@ -1,10 +1,12 @@
 //! Bounded retained Arrow data and checksum-addressed Parquet cache files.
 
-use crate::{CacheConfig, ReaderError};
+use crate::CacheConfig;
+use crate::ReaderError;
 use arrow_array::RecordBatch;
 use bytes::Bytes;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::SystemTime;
 
 pub(crate) struct CachedPartition {

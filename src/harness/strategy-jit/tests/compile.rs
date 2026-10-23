@@ -2,9 +2,15 @@
 
 use std::path::PathBuf;
 
-use backtest::backtest::engine_core::{EngineBar, EngineBarFrame, EngineMarket, StrategyRuntime};
-use harness_strategy_jit::{compile, JitStudyRuntime, ManagedWorkspace, ProgramKind};
+use harness_strategy_jit::compile;
+use harness_strategy_jit::JitStudyRuntime;
+use harness_strategy_jit::ManagedWorkspace;
+use harness_strategy_jit::ProgramKind;
 use harness_strategy_sdk::Decimal;
+use harness_trading::program::EngineBar;
+use harness_trading::program::EngineBarFrame;
+use harness_trading::program::EngineMarket;
+use harness_trading::program::StrategyRuntime;
 
 const STUDY_SOURCE: &str = include_str!("fixtures/study_program.rs");
 

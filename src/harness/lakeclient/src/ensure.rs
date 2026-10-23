@@ -10,7 +10,8 @@
 
 use std::time::Duration;
 
-use crate::models::{CoverageEntry, JobStatus};
+use crate::models::CoverageEntry;
+use crate::models::JobStatus;
 
 /// First coverage-poll interval.
 pub(crate) const POLL_START: Duration = Duration::from_millis(100);

@@ -12,15 +12,23 @@
 //! run without a configured lake fails loudly and never falls back to local
 //! files or a synthetic fixture.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
-use backtest::backtest::engine_core::{BacktestOutcome, EngineOptions};
+use backtest::backtest::engine_core::EngineOptions;
+use backtest::backtest::outcome::BacktestOutcome;
 use harness_lakeclient::BlockingLakeClient;
 
-use crate::{
-    BacktestJobArgs, BacktestJobError, BacktestJobRunner, BacktestRunSummary, ScreenJobArgs,
-    ScreenJobError, ScreenJobRunner, ScreenRunSummary, StudyJobArgs, StudyJobRunner,
-};
+use crate::BacktestJobArgs;
+use crate::BacktestJobError;
+use crate::BacktestJobRunner;
+use crate::BacktestRunSummary;
+use crate::ScreenJobArgs;
+use crate::ScreenJobError;
+use crate::ScreenJobRunner;
+use crate::ScreenRunSummary;
+use crate::StudyJobArgs;
+use crate::StudyJobRunner;
 
 /// Build the market-lake client from the process environment.
 ///
@@ -43,9 +51,10 @@ impl BacktestJobRunner for NativeBacktestJobRunner {
             ));
         };
         let client = require_lake_client()?;
-        let configuration = backtest::backtest::job::load_backtest_config(Path::new(config))
-            .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
-        let (outcome, artifact_path) = harness_strategy_jit::run_backtest_configuration(
+        let configuration =
+            harness_research::configuration::load_backtest_config(Path::new(config))
+                .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
+        let (outcome, artifact_path) = harness_research::run_backtest_configuration(
             &configuration,
             &EngineOptions::default(),
             args.output_dir.as_deref(),
@@ -68,13 +77,12 @@ impl StudyJobRunner for NativeStudyJobRunner {
             ));
         };
         let client = require_lake_client()?;
-        let mut configuration = backtest::backtest::job::load_study_config(config)
+        let configuration = harness_research::configuration::load_study_config(config)
             .map_err(|error| BacktestJobError::Engine(error.to_string()))?;
         if !configuration.symbols.is_empty() {
-            crate::local::clamp_study_window(&client, &mut configuration)
-                .map_err(BacktestJobError::Engine)?;
+            crate::local::study_window_dates(&configuration).map_err(BacktestJobError::Engine)?;
         }
-        let (outcome, artifact_path) = harness_strategy_jit::run_study_configuration(
+        let (outcome, artifact_path) = harness_research::run_study_configuration(
             &configuration,
             &EngineOptions::default(),
             args.output_dir.as_deref(),
@@ -105,7 +113,7 @@ fn summary_from_outcome(outcome: &BacktestOutcome, artifact_path: PathBuf) -> Ba
 /// Run `screen-job` through the JIT screening seam.
 ///
 /// The data source is the real
-/// [`LakeScreeningSource`](harness_strategy_jit::LakeScreeningSource), reading
+/// [`LakeScreeningSource`](harness_research::LakeScreeningSource), reading
 /// the market-lake HTTP routes. A missing or rejected lake configuration fails
 /// the command loudly before any run; no synthetic data is ever substituted.
 #[derive(Debug, Clone, Copy, Default)]
@@ -118,14 +126,14 @@ impl ScreenJobRunner for NativeScreenJobRunner {
                 "A screening configuration is required: screen-job --config <path>".to_string(),
             ));
         };
-        let configuration = backtest::backtest::job::load_screen_config(Path::new(config))
+        let configuration = harness_research::configuration::load_screen_config(Path::new(config))
             .map_err(|error| ScreenJobError::Engine(error.to_string()))?;
-        let source = harness_strategy_jit::LakeScreeningSource::from_env()
+        let source = harness_research::LakeScreeningSource::from_env()
             .map_err(|error| ScreenJobError::Engine(error.to_string()))?;
-        let (outcome, artifact_path) = harness_strategy_jit::run_screening_configuration(
+        let (outcome, artifact_path) = harness_research::run_screening_configuration(
             &configuration,
             &source,
-            &harness_strategy_jit::ScreenRunOptions::default(),
+            &harness_research::ScreenRunOptions::default(),
             args.output_dir.as_deref(),
         )
         .map_err(|error| ScreenJobError::Engine(error.to_string()))?;

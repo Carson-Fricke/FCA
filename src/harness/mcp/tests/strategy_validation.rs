@@ -1,6 +1,13 @@
-use mcp::auth::{bearer_headers, BearerTokenSource, MissingBearerCredentialError};
-use mcp::tools::{build_catalog, Boundary, HarnessToolsContext, RemoteResponse, RemoteTransport};
-use serde_json::{json, Value};
+use mcp::auth::bearer_headers;
+use mcp::auth::BearerTokenSource;
+use mcp::auth::MissingBearerCredentialError;
+use mcp::tools::catalog::build_catalog;
+use mcp::tools::ports::Boundary;
+use mcp::tools::ports::HarnessToolsContext;
+use mcp::tools::ports::RemoteResponse;
+use mcp::tools::ports::RemoteTransport;
+use serde_json::json;
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -49,7 +56,10 @@ impl RemoteTransport for Transport {
 #[test]
 fn validation_catalog_shape_and_capabilities_match_in_both_modes() {
     for mode in [Boundary::Local, Boundary::Remote] {
-        let catalog = build_catalog(HarnessToolsContext::new(mode, Arc::new(Token))).unwrap();
+        let mut context = HarnessToolsContext::new(mode, Arc::new(Token));
+        context.api_base_url = Some("https://harness.example".into());
+        context.remote_transport = Some(Arc::new(Transport { failure: false }));
+        let catalog = build_catalog(context).unwrap();
         let strategy = catalog.resolve("validate_strategy").unwrap();
         assert_eq!(strategy.capability, "backtest");
         assert_eq!(
@@ -58,6 +68,8 @@ fn validation_catalog_shape_and_capabilities_match_in_both_modes() {
         );
         assert!(strategy.description.contains("export_strategy_program!"));
         let mut context = HarnessToolsContext::new(mode, Arc::new(Token));
+        context.api_base_url = Some("https://harness.example".into());
+        context.remote_transport = Some(Arc::new(Transport { failure: false }));
         context.capabilities.backtest = false;
         let disabled = build_catalog(context).unwrap();
         assert!(disabled.resolve("validate_strategy").is_none());

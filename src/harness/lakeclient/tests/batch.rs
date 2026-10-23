@@ -5,8 +5,14 @@
 //! not timing-asserted here; the ordering contract is what callers rely on for
 //! deterministic failure reporting.
 
-use harness_lakeclient::testing::{bars_parquet, FakeBarRow, FakeLakeConfig, FakeLakeServer};
-use harness_lakeclient::{BlockingLakeClient, EnsureSpec, LakeClientConfig, ReadSpec};
+use harness_lakeclient::testing::bars_parquet;
+use harness_lakeclient::testing::FakeBarRow;
+use harness_lakeclient::testing::FakeLakeConfig;
+use harness_lakeclient::testing::FakeLakeServer;
+use harness_lakeclient::BlockingLakeClient;
+use harness_lakeclient::EnsureSpec;
+use harness_lakeclient::LakeClientConfig;
+use harness_lakeclient::ReadSpec;
 
 const TOKEN: &str = "batch-token";
 

@@ -1,8 +1,16 @@
 //! Mixed study with a nested indicator dependency and observation-only context.
-use harness_strategy_sdk::{
-    export_study_program, BarFrame, Decimal, Indicator, IndicatorSequence, MarketConsumer,
-    MetricPublisher, ObservationContext, QuoteEvent, StudyProgram, Subscription, TradeEvent,
-};
+use harness_strategy_sdk::export_study_program;
+use harness_strategy_sdk::BarFrame;
+use harness_strategy_sdk::Decimal;
+use harness_strategy_sdk::Indicator;
+use harness_strategy_sdk::IndicatorSequence;
+use harness_strategy_sdk::MarketConsumer;
+use harness_strategy_sdk::MetricPublisher;
+use harness_strategy_sdk::ObservationContext;
+use harness_strategy_sdk::QuoteEvent;
+use harness_strategy_sdk::StudyProgram;
+use harness_strategy_sdk::Subscription;
+use harness_strategy_sdk::TradeEvent;
 
 struct QuoteCount {
     sequence: IndicatorSequence,

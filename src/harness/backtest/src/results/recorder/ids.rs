@@ -4,7 +4,7 @@
 //! from the seed, the kind, and a monotonic ordinal; the first 16 digest bytes
 //! are tagged as a UUID v5-shaped value. No clock or random source participates.
 
-use crate::sha256::Sha256;
+use harness_contracts::sha256::Sha256;
 
 use super::config::Seed;
 
@@ -92,7 +92,7 @@ impl std::error::Error for IdError {}
 #[must_use]
 pub fn format_uuid(bytes: &[u8]) -> String {
     debug_assert_eq!(bytes.len(), 16);
-    let hex = crate::sha256::hex(bytes);
+    let hex = harness_contracts::sha256::hex(bytes);
     format!(
         "{}-{}-{}-{}-{}",
         &hex[0..8],

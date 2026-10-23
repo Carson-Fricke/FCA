@@ -9,21 +9,29 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::process::{Command, ExitCode};
+use std::process::Command;
+use std::process::ExitCode;
 use std::sync::Arc;
 
 use clap::Parser;
-use mcp::auth::{EnvironmentBearerTokenSource, BEARER_TOKEN_VARIABLE};
+use harness_execution::jobs::ExecutionRepository;
+use mcp::auth::EnvironmentBearerTokenSource;
+use mcp::auth::BEARER_TOKEN_VARIABLE;
 use mcp::server::McpServer;
-use mcp::store::JobStore;
-use mcp::tools::{
-    Boundary, ConfigurationLoader, HarnessToolsContext, ProcessOutcome, ProcessRunner,
-    RemoteResponse, RemoteTransport,
-};
+use mcp::tools::ports::Boundary;
+use mcp::tools::ports::ConfigurationLoader;
+use mcp::tools::ports::HarnessToolsContext;
+use mcp::tools::ports::ProcessOutcome;
+use mcp::tools::ports::ProcessRunner;
+use mcp::tools::ports::RemoteResponse;
+use mcp::tools::ports::RemoteTransport;
 use mcp::transport::serve_stdio;
-use serde_json::{Map, Value};
+use serde_json::Map;
+use serde_json::Value;
 
-use crate::local::{NativeBacktestSubmitter, NativeScreeningSubmitter, NativeStudySubmitter};
+use crate::local::NativeBacktestSubmitter;
+use crate::local::NativeScreeningSubmitter;
+use crate::local::NativeStudySubmitter;
 
 /// Environment variable consulted for the remote API base URL.
 pub const API_BASE_URL_VARIABLE: &str = "HARNESS_API_BASE_URL";
@@ -164,7 +172,7 @@ pub fn build_mcp_server(args: &crate::McpArgs) -> Result<McpServer, McpServeErro
     context.runner = Some(Arc::new(SubprocessRunner));
     context.configuration_loader = default_loader();
     if boundary == Boundary::Local {
-        let job_store: Arc<dyn JobStore> = Arc::new(
+        let job_store: Arc<dyn ExecutionRepository> = Arc::new(
             crate::execution::configured_store().map_err(|e| McpServeError(e.to_string()))?,
         );
         let wake = Arc::new(crate::execution::dispatch::ConfiguredWake);
@@ -179,6 +187,7 @@ pub fn build_mcp_server(args: &crate::McpArgs) -> Result<McpServer, McpServeErro
         )));
         context.screening_submitter =
             Some(Arc::new(NativeScreeningSubmitter::new(job_store, wake)));
+        context.sdk_reference = Some(Arc::new(crate::local::NativeStudyValidator));
         context.study_validator = Some(Arc::new(
             crate::execution::validation::ProcessValidator::configured().map_err(McpServeError)?,
         ));
@@ -190,7 +199,7 @@ pub fn build_mcp_server(args: &crate::McpArgs) -> Result<McpServer, McpServeErro
 }
 
 fn default_loader() -> Arc<dyn ConfigurationLoader> {
-    Arc::new(mcp::tools::JsonFileConfigurationLoader)
+    Arc::new(mcp::tools::arguments::SharedFileConfigurationLoader)
 }
 
 /// Serve the MCP server over stdio until EOF.

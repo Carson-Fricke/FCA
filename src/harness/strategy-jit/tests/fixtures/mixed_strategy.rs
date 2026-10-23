@@ -1,9 +1,22 @@
 //! Strategy fixture with a program-owned trade indicator and atomic bar orders.
-use harness_strategy_sdk::{
-    export_strategy_program, BarFrame, Decimal, Indicator, IndicatorSequence, MarketConsumer,
-    MetricPublisher, ObservationContext, OrderSink, OrderType, ProgramStart, QuoteEvent, Side,
-    StrategyProgram, SubmittedOrder, Subscription, TimeInForce, TradeEvent,
-};
+use harness_strategy_sdk::export_strategy_program;
+use harness_strategy_sdk::BarFrame;
+use harness_strategy_sdk::Decimal;
+use harness_strategy_sdk::Indicator;
+use harness_strategy_sdk::IndicatorSequence;
+use harness_strategy_sdk::MarketConsumer;
+use harness_strategy_sdk::MetricPublisher;
+use harness_strategy_sdk::ObservationContext;
+use harness_strategy_sdk::OrderSink;
+use harness_strategy_sdk::OrderType;
+use harness_strategy_sdk::ProgramStart;
+use harness_strategy_sdk::QuoteEvent;
+use harness_strategy_sdk::Side;
+use harness_strategy_sdk::StrategyProgram;
+use harness_strategy_sdk::SubmittedOrder;
+use harness_strategy_sdk::Subscription;
+use harness_strategy_sdk::TimeInForce;
+use harness_strategy_sdk::TradeEvent;
 
 struct TradeCount {
     sequence: IndicatorSequence,

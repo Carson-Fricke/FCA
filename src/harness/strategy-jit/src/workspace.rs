@@ -1,7 +1,8 @@
 //! The managed cargo workspace that holds authored crates and their builds.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
 use serde_json::Value as Json;
 
@@ -164,7 +165,7 @@ impl ManagedWorkspace {
                     .map_or(0, |time| time.as_nanos()),
                 SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             );
-            let name = backtest::sha256::digest_hex(nonce.as_bytes())[..16].to_string();
+            let name = harness_contracts::sha256::digest_hex(nonce.as_bytes())[..16].to_string();
             match std::fs::create_dir(self.target_dir().join(&name)) {
                 Ok(()) => return Ok(name),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,

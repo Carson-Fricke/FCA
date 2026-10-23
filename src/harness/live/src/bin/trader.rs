@@ -12,11 +12,13 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::Parser;
+use clap::Subcommand;
 
-use live::supervision::{
-    read_supervision_status, run_trader_process, TraderExitCode, DEFAULT_CONFIG_PATH,
-};
+use live::supervision::models::TraderExitCode;
+use live::supervision::process::read_supervision_status;
+use live::supervision::process::run_trader_process;
+use live::supervision::process::DEFAULT_CONFIG_PATH;
 
 #[derive(Debug, Parser)]
 #[command(

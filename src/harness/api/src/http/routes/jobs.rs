@@ -2,18 +2,26 @@
 
 use std::collections::HashMap;
 
-use axum::extract::{Path, Query, State};
-use axum::http::{header, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::extract::Path;
+use axum::extract::Query;
+use axum::extract::State;
+use axum::http::header;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::response::Response;
 use axum::routing::get;
-use axum::{Json, Router};
+use axum::Json;
+use axum::Router;
 use serde_json::json;
 
-use crate::http::models::{
-    ApiError, ArtifactListResponse, ArtifactSummary, JobListResponse, JobStatusResponse,
-};
+use crate::http::models::ApiError;
+use crate::http::models::ArtifactListResponse;
+use crate::http::models::ArtifactSummary;
+use crate::http::models::JobListResponse;
+use crate::http::models::JobStatusResponse;
 use crate::http::state::AppState;
-use crate::http::store::{JobKind, JobState};
+use harness_execution::jobs::JobKind;
+use harness_execution::jobs::JobState;
 
 const IDENTIFIER_MAX: usize = 128;
 const ARTIFACT_NAME_MAX: usize = 512;
@@ -68,7 +76,7 @@ async fn list_jobs(
             }
         }
         let jobs = state
-            .job_store
+            .queries
             .try_list(
                 kind,
                 state_filter,
@@ -87,7 +95,7 @@ async fn get_job(
     super::super::blocking::run(state.control.clone(), move || {
         identifier(&job_id)?;
         state
-            .job_store
+            .queries
             .try_get(&job_id)
             .map_err(|e| ApiError::store_error(&e.to_string()))?
             .map(Json)
@@ -102,7 +110,11 @@ async fn delete_job(
 ) -> Result<StatusCode, ApiError> {
     super::super::blocking::run(state.control.clone(), move || {
         identifier(&job_id)?;
-        if state.job_store.delete(&job_id) {
+        if state
+            .retention
+            .remove(&job_id)
+            .map_err(|error| ApiError::store_error(&error.to_string()))?
+        {
             Ok(StatusCode::NO_CONTENT)
         } else {
             Err(ApiError::job_not_found())
@@ -118,7 +130,7 @@ async fn list_artifacts(
     super::super::blocking::run(state.control.clone(), move || {
         identifier(&job_id)?;
         let inventory = state
-            .job_store
+            .artifacts
             .artifacts(&job_id)
             .map_err(|e| ApiError::store_error(&e.to_string()))?
             .ok_or_else(ApiError::job_not_found)?;
@@ -151,7 +163,7 @@ async fn download_artifact(
             return Err(ApiError::artifact_not_found());
         }
         if state
-            .job_store
+            .queries
             .try_get(&job_id)
             .map_err(|error| ApiError::store_error(&error.to_string()))?
             .is_none()
@@ -163,7 +175,7 @@ async fn download_artifact(
             .is_some_and(|value| value == "json")
         {
             let payload = state
-                .job_store
+                .artifacts
                 .artifact(&job_id, &artifact_name)
                 .map_err(|e| ApiError::store_error(&e.to_string()))?
                 .ok_or_else(ApiError::artifact_not_found)?;
@@ -184,7 +196,7 @@ async fn download_artifact(
             )
         })?;
         let mut reader = state
-            .job_store
+            .artifacts
             .open_artifact(&job_id, &artifact_name)
             .map_err(|e| ApiError::store_error(&e.to_string()))?
             .ok_or_else(ApiError::artifact_not_found)?;

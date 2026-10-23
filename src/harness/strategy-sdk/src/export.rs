@@ -18,23 +18,44 @@
 
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
-use std::ffi::{c_char, CString};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::ffi::c_char;
+use std::ffi::CString;
 use std::panic::AssertUnwindSafe;
 
-use crate::abi::{
-    CBarEvent, CBarFrame, CFill, CMetricSink, COrderSink, CQuoteEvent, CStart, CStr, CTradeEvent,
-    SDK_ERROR, SDK_OK,
-};
-use crate::consumer::{
-    route_bar_with_signature, route_quote_with_signature, route_trade_with_signature,
-    routing_signature, validate_routing, RoutingSignature,
-};
-use crate::events::{BarEvent, BarFrame, Fill, ProgramStart, QuoteEvent, TradeEvent};
-use crate::program::{
-    MetricPublisher, OrderSink, ScreenContext, ScreeningProgram, StrategyProgram, StudyProgram,
-};
-use crate::{effective_subscriptions, MarketConsumer, ObservationContext};
+use crate::abi::CBarEvent;
+use crate::abi::CBarFrame;
+use crate::abi::CFill;
+use crate::abi::CMetricSink;
+use crate::abi::COrderSink;
+use crate::abi::CQuoteEvent;
+use crate::abi::CStart;
+use crate::abi::CStr;
+use crate::abi::CTradeEvent;
+use crate::abi::SDK_ERROR;
+use crate::abi::SDK_OK;
+use crate::consumer::route_bar_with_signature;
+use crate::consumer::route_quote_with_signature;
+use crate::consumer::route_trade_with_signature;
+use crate::consumer::routing_signature;
+use crate::consumer::validate_routing;
+use crate::consumer::RoutingSignature;
+use crate::effective_subscriptions;
+use crate::events::BarEvent;
+use crate::events::BarFrame;
+use crate::events::Fill;
+use crate::events::ProgramStart;
+use crate::events::QuoteEvent;
+use crate::events::TradeEvent;
+use crate::program::MetricPublisher;
+use crate::program::OrderSink;
+use crate::program::ScreenContext;
+use crate::program::ScreeningProgram;
+use crate::program::StrategyProgram;
+use crate::program::StudyProgram;
+use crate::MarketConsumer;
+use crate::ObservationContext;
 
 struct ConsumerState<T> {
     program: T,

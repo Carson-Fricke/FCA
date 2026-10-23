@@ -1,23 +1,38 @@
 //! The market-lake HTTP client.
 
-use harness_contracts::progress::{ExecutionProgress, ExecutionStage, ProgressReporter};
+use harness_contracts::progress::ExecutionProgress;
+use harness_contracts::progress::ExecutionStage;
+use harness_contracts::progress::ProgressReporter;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Duration;
 
 use arrow_array::RecordBatch;
-use futures_util::stream::{self, StreamExt};
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+use futures_util::stream;
+use futures_util::stream::StreamExt;
+use reqwest::header::HeaderMap;
+use reqwest::header::HeaderValue;
+use reqwest::header::AUTHORIZATION;
 use serde_json::Value;
 
-use crate::ensure::{
-    coverage_entries_satisfied, coverage_entry_is_satisfied, coverage_verdict,
-    earliest_complete_date, ensure_job_progress, next_poll_interval, CoverageVerdict,
-    EnsureJobProgress, POLL_START,
-};
-use crate::error::{EnsureFailure, LakeClientError};
-use crate::models::{CoverageReport, EnsureResponse, FactsResponse, JobStatus, UniverseResponse};
-use crate::spec::{EnsureSpec, ReadSpec};
+use crate::ensure::coverage_entries_satisfied;
+use crate::ensure::coverage_entry_is_satisfied;
+use crate::ensure::coverage_verdict;
+use crate::ensure::earliest_complete_date;
+use crate::ensure::ensure_job_progress;
+use crate::ensure::next_poll_interval;
+use crate::ensure::CoverageVerdict;
+use crate::ensure::EnsureJobProgress;
+use crate::ensure::POLL_START;
+use crate::error::EnsureFailure;
+use crate::error::LakeClientError;
+use crate::models::CoverageReport;
+use crate::models::EnsureResponse;
+use crate::models::FactsResponse;
+use crate::models::JobStatus;
+use crate::models::UniverseResponse;
+use crate::spec::EnsureSpec;
+use crate::spec::ReadSpec;
 
 /// Default Azure market-lake endpoint; environment overrides can select a local lake.
 pub const DEFAULT_LAKE_BASE_URL: &str = "http://127.0.0.1:8001/market-data";
@@ -310,22 +325,20 @@ impl LakeClient {
         &self,
         spec: &EnsureSpec,
     ) -> Result<crate::EnsureResponse, LakeClientError> {
-        let value = match &self.access {
-            Some(access) => {
-                access
-                    .request(crate::MarketRequest::Ensure(spec.clone()))
-                    .await?
+        let response: EnsureResponse = match &self.access {
+            Some(access) => access.ensure(spec).await?,
+            None => {
+                let value = self
+                    .post_value("/v1/catalog/ensure", &spec.ensure_body())
+                    .await
+                    .map_err(|error| LakeClientError::EnsureRequest(error.to_string()))?;
+                serde_json::from_value(value).map_err(|error| {
+                    LakeClientError::EnsureRequest(format!(
+                        "market-lake ensure response is not valid: {error}"
+                    ))
+                })?
             }
-            None => self
-                .post_value("/v1/catalog/ensure", &spec.ensure_body())
-                .await
-                .map_err(|error| LakeClientError::EnsureRequest(error.to_string()))?,
         };
-        let response: EnsureResponse = serde_json::from_value(value).map_err(|error| {
-            LakeClientError::EnsureRequest(format!(
-                "market-lake ensure response is not valid: {error}"
-            ))
-        })?;
         if response.entries.is_none() && response.job_id.as_deref().is_none_or(str::is_empty) {
             return Err(LakeClientError::Protocol(
                 "ingestion acknowledgement has no coverage or retained job ID".into(),
@@ -341,11 +354,7 @@ impl LakeClient {
     /// Returns a typed error when the request or decode fails.
     pub async fn coverage(&self, spec: &EnsureSpec) -> Result<CoverageReport, LakeClientError> {
         let value = match &self.access {
-            Some(access) => {
-                access
-                    .request(crate::MarketRequest::Coverage(spec.clone()))
-                    .await?
-            }
+            Some(access) => return access.coverage(spec).await,
             None => {
                 self.get_value("/v1/catalog/coverage", &spec.query_params())
                     .await?
@@ -365,11 +374,7 @@ impl LakeClient {
     /// Returns a typed error when the request or decode fails.
     pub async fn job(&self, job_id: &str) -> Result<JobStatus, LakeClientError> {
         let value = match &self.access {
-            Some(access) => {
-                access
-                    .request(crate::MarketRequest::Job(job_id.into()))
-                    .await?
-            }
+            Some(access) => return access.job(job_id).await,
             None => self.get_value(&format!("/v1/jobs/{job_id}"), &[]).await?,
         };
         serde_json::from_value(value).map_err(|error| {
@@ -547,11 +552,7 @@ impl LakeClient {
     /// Returns a typed error when the request or decode fails.
     pub async fn reference_universe(&self, as_of: &str) -> Result<Vec<String>, LakeClientError> {
         let value = match &self.access {
-            Some(access) => {
-                access
-                    .request(crate::MarketRequest::Universe(as_of.into()))
-                    .await?
-            }
+            Some(access) => return access.universe(as_of).await,
             None => {
                 self.get_value("/v1/reference/universe", &[("as_of", as_of.to_string())])
                     .await?
@@ -577,14 +578,7 @@ impl LakeClient {
     ) -> Result<BTreeMap<String, BTreeMap<String, String>>, LakeClientError> {
         let params = vec![("as_of", as_of.to_string()), ("symbols", symbols.join(","))];
         let value = match &self.access {
-            Some(access) => {
-                access
-                    .request(crate::MarketRequest::Facts {
-                        symbols: symbols.to_vec(),
-                        as_of: as_of.into(),
-                    })
-                    .await?
-            }
+            Some(access) => return access.facts(symbols, as_of).await,
             None => self.get_value("/v1/reference/facts", &params).await?,
         };
         let response: FactsResponse = serde_json::from_value(value).map_err(|error| {
@@ -665,26 +659,13 @@ impl LakeClient {
             .map_err(|e| LakeClientError::Config(e.to_string()))?;
         let body =
             serde_json::to_value(selector).map_err(|e| LakeClientError::Config(e.to_string()))?;
-        let response = self
-            .http
-            .post(self.url("/v1/options/resolve"))
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| LakeClientError::Transport(e.to_string()))?;
-        let accepted = response.status().as_u16() == 202;
-        let mut value = self.value(response).await?;
-        if accepted {
-            let id = value
-                .get("job_id")
-                .and_then(Value::as_str)
-                .filter(|id| !id.is_empty())
-                .ok_or_else(|| {
-                    LakeClientError::Protocol(
-                        "option acquisition acknowledgement omitted its job ID".into(),
-                    )
-                })?
-                .to_string();
+        let resolution = self.option_resolution(selector, &body).await?;
+        let resolved = match resolution {
+            crate::OptionResolution::Resolved(value) => Some(value),
+            crate::OptionResolution::Pending { job_id } => {
+                if job_id.is_empty() { return Err(LakeClientError::Protocol("option acquisition acknowledgement omitted its job ID".into())); }
+                let id = job_id;
+
             loop {
                 let record = self.job(&id).await?;
                 if record.job_id != id {
@@ -707,28 +688,54 @@ impl LakeClient {
                     }
                 }
             }
-            value = self.option_value(selector, &body).await?;
-        }
-        let resolved: harness_contracts::ResolvedOption = serde_json::from_value(value)
-            .map_err(|e| LakeClientError::Protocol(format!("invalid option resolution: {e}")))?;
+                match self.option_resolution(selector, &body).await? {
+                    crate::OptionResolution::Resolved(value) => Some(value),
+                    crate::OptionResolution::Pending { job_id } => return Err(LakeClientError::Protocol(format!("option resolution still pending after completed acquisition {id}; reconcile retained job {job_id}"))),
+                }
+            }
+        }.ok_or_else(|| LakeClientError::Protocol("missing option resolution".into()))?;
         resolved
             .validate_against(selector)
             .map_err(|e| LakeClientError::Protocol(e.to_string()))?;
         Ok(resolved)
     }
 
-    async fn option_value(
+    async fn option_resolution(
         &self,
         selector: &harness_contracts::OptionSelector,
         body: &Value,
-    ) -> Result<Value, LakeClientError> {
-        match &self.access {
-            Some(access) => {
-                access
-                    .request(crate::MarketRequest::ResolveOption(selector.clone()))
-                    .await
-            }
-            None => self.post_value("/v1/options/resolve", body).await,
+    ) -> Result<crate::OptionResolution, LakeClientError> {
+        if let Some(access) = &self.access {
+            return access.resolve_option(selector).await;
+        }
+        let response = self
+            .http
+            .post(self.url("/v1/options/resolve"))
+            .json(body)
+            .send()
+            .await
+            .map_err(|error| LakeClientError::Transport(error.to_string()))?;
+        let accepted = response.status().as_u16() == 202;
+        let value = self.value(response).await?;
+        if accepted {
+            let job_id = value
+                .get("job_id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| {
+                    LakeClientError::Protocol(
+                        "option acquisition acknowledgement omitted its job ID".into(),
+                    )
+                })?;
+            Ok(crate::OptionResolution::Pending {
+                job_id: job_id.into(),
+            })
+        } else {
+            serde_json::from_value(value)
+                .map(crate::OptionResolution::Resolved)
+                .map_err(|error| {
+                    LakeClientError::Protocol(format!("invalid option resolution: {error}"))
+                })
         }
     }
     async fn value(&self, response: reqwest::Response) -> Result<Value, LakeClientError> {

@@ -1,7 +1,7 @@
 //! Full local validation result reuse and structured diagnostic boundary.
 
 use api::local::NativeStudyValidator;
-use mcp::tools::StudyValidator;
+use mcp::tools::ports::StudyValidator;
 use serde_json::json;
 
 #[test]

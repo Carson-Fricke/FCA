@@ -1,8 +1,15 @@
 //! Managed wavelet observations through real dependency-first market routing.
-use harness_strategy_sdk::{
-    route_bar, BarEvent, BarFrame, Decimal, Indicator, IndicatorMissing, MarketConsumer,
-    ObservationContext, Subscription, WaveletIndicator, WaveletSnapshot,
-};
+use harness_strategy_sdk::route_bar;
+use harness_strategy_sdk::BarEvent;
+use harness_strategy_sdk::BarFrame;
+use harness_strategy_sdk::Decimal;
+use harness_strategy_sdk::Indicator;
+use harness_strategy_sdk::IndicatorMissing;
+use harness_strategy_sdk::MarketConsumer;
+use harness_strategy_sdk::ObservationContext;
+use harness_strategy_sdk::Subscription;
+use harness_strategy_sdk::WaveletIndicator;
+use harness_strategy_sdk::WaveletSnapshot;
 use std::collections::BTreeMap;
 
 struct Owner {

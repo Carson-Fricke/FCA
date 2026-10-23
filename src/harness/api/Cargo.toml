@@ -30,6 +30,10 @@ name = "mcp"
 path = "src/bin/mcp.rs"
 
 [dependencies]
+harness-research = { path = "../research" }
+harness-trading = { path = "../trading" }
+harness-execution-storage = { path = "../execution-storage" }
+harness-execution = { path = "../execution" }
 futures-util = "0.3"
 lake-hosted = { path = "../../lake/hosted" }
 lake-contracts = { path = "../../lake/contracts" }

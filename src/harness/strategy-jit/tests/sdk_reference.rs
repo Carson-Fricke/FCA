@@ -1,5 +1,6 @@
 use harness_strategy_jit::validation_service;
-use serde_json::{json, Map};
+use serde_json::json;
+use serde_json::Map;
 use std::collections::BTreeMap;
 
 #[test]
@@ -14,7 +15,7 @@ fn sdk_identity_matches_workspace_programs_relative_source_hash_contract() {
     ] {
         sources.insert(
             format!("{name}/Cargo.toml"),
-            backtest::sha256::digest_hex(&std::fs::read(root.join("Cargo.toml")).unwrap()),
+            harness_contracts::sha256::digest_hex(&std::fs::read(root.join("Cargo.toml")).unwrap()),
         );
         let mut directories = vec![root.join("src")];
         while let Some(directory) = directories.pop() {
@@ -34,13 +35,13 @@ fn sdk_identity_matches_workspace_programs_relative_source_hash_contract() {
                                 .unwrap()
                                 .replace('\\', "/")
                         ),
-                        backtest::sha256::digest_hex(&std::fs::read(&path).unwrap()),
+                        harness_contracts::sha256::digest_hex(&std::fs::read(&path).unwrap()),
                     );
                 }
             }
         }
     }
-    let expected = backtest::sha256::digest_hex(&serde_json::to_vec(&sources).unwrap());
+    let expected = harness_contracts::sha256::digest_hex(&serde_json::to_vec(&sources).unwrap());
     let result = validation_service().sdk_reference(&Map::new()).unwrap();
     assert_eq!(result["sdkIdentity"], expected);
     assert_eq!(result["sourceHashes"], json!(sources));

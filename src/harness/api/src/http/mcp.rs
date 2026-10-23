@@ -12,18 +12,26 @@ use std::sync::Arc;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use axum::response::IntoResponse;
+use axum::response::Response;
 use axum::Json;
 use mcp::auth::EnvironmentBearerTokenSource;
-use mcp::server::{error_response, McpServer, PARSE_ERROR};
-use mcp::tools::{Boundary, ContextError, HarnessToolsContext};
-use serde_json::{json, Value};
+use mcp::server::error_response;
+use mcp::server::McpServer;
+use mcp::server::PARSE_ERROR;
+use mcp::tools::ports::Boundary;
+use mcp::tools::ports::ContextError;
+use mcp::tools::ports::HarnessToolsContext;
+use serde_json::json;
+use serde_json::Value;
 
-use crate::local::{NativeBacktestSubmitter, NativeScreeningSubmitter, NativeStudySubmitter};
+use crate::local::NativeBacktestSubmitter;
+use crate::local::NativeScreeningSubmitter;
+use crate::local::NativeStudySubmitter;
 
 use super::models::error_body;
 use super::state::AppState;
-use super::store::JobStore;
+use harness_execution::jobs::ExecutionRepository;
 
 /// Compose the MCP server the HTTP boundary serves.
 ///
@@ -34,14 +42,16 @@ use super::store::JobStore;
 /// # Errors
 ///
 /// Returns [`ContextError`] when the local tool context cannot be composed.
-pub fn compose_local_server(job_store: Arc<dyn JobStore>) -> Result<Arc<McpServer>, ContextError> {
+pub fn compose_local_server(
+    job_store: Arc<dyn ExecutionRepository>,
+) -> Result<Arc<McpServer>, ContextError> {
     compose_queued_server(
         job_store,
         Arc::new(crate::execution::dispatch::ConfiguredWake),
     )
 }
 pub fn compose_queued_server(
-    job_store: Arc<dyn JobStore>,
+    job_store: Arc<dyn ExecutionRepository>,
     wake: Arc<dyn crate::execution::Wake>,
 ) -> Result<Arc<McpServer>, ContextError> {
     let validator =
@@ -49,9 +59,9 @@ pub fn compose_queued_server(
     compose_with_validator(job_store, wake, Arc::new(validator))
 }
 pub fn compose_with_validator(
-    job_store: Arc<dyn JobStore>,
+    job_store: Arc<dyn ExecutionRepository>,
     wake: Arc<dyn crate::execution::Wake>,
-    validator: Arc<dyn mcp::tools::StudyValidator>,
+    validator: Arc<dyn mcp::tools::ports::StudyValidator>,
 ) -> Result<Arc<McpServer>, ContextError> {
     let mut context =
         HarnessToolsContext::new(Boundary::Local, Arc::new(EnvironmentBearerTokenSource));
@@ -68,6 +78,7 @@ pub fn compose_with_validator(
         wake,
     )));
     context.study_validator = Some(validator);
+    context.sdk_reference = Some(Arc::new(crate::local::NativeStudyValidator));
     context.job_store = Some(job_store);
     let context = context.validate()?;
     Ok(Arc::new(mcp::create_server(context)?))

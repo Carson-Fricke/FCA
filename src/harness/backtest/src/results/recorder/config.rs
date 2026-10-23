@@ -63,7 +63,7 @@ impl Seed {
         match self {
             Self::Text(value) => value.clone(),
             Self::Int(value) => value.to_string(),
-            Self::Bytes(value) => crate::sha256::hex(value),
+            Self::Bytes(value) => harness_contracts::sha256::hex(value),
         }
     }
 }

@@ -7,10 +7,14 @@
 //! strings, so the host can assert a scale-preserving crossing.
 
 use harness_strategy_sdk::serde_json::Value;
-use harness_strategy_sdk::{
-    export_study_program, BarFrame, Decimal, MarketConsumer, MetricPublisher, ObservationContext,
-    StudyProgram, Subscription,
-};
+use harness_strategy_sdk::export_study_program;
+use harness_strategy_sdk::BarFrame;
+use harness_strategy_sdk::Decimal;
+use harness_strategy_sdk::MarketConsumer;
+use harness_strategy_sdk::MetricPublisher;
+use harness_strategy_sdk::ObservationContext;
+use harness_strategy_sdk::StudyProgram;
+use harness_strategy_sdk::Subscription;
 
 #[derive(Debug, Default)]
 struct BarStudy {

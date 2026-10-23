@@ -7,10 +7,17 @@ use std::collections::VecDeque;
 
 use num::Decimal18;
 
-use super::base::{
-    add, divide, multiply, sqrt, subtract, IndicatorError, IndicatorKernel, IndicatorMachine,
-    TickDriver, DEFAULT_BUCKET_NS, MIDNIGHT_UTC_NS,
-};
+use super::base::add;
+use super::base::divide;
+use super::base::multiply;
+use super::base::sqrt;
+use super::base::subtract;
+use super::base::IndicatorError;
+use super::base::IndicatorKernel;
+use super::base::IndicatorMachine;
+use super::base::TickDriver;
+use super::base::DEFAULT_BUCKET_NS;
+use super::base::MIDNIGHT_UTC_NS;
 
 /// Wilder ATR over per-bucket true ranges derived from trade ticks.
 #[derive(Clone, Debug)]

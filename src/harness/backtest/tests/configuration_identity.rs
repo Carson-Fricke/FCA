@@ -1,6 +1,8 @@
 use backtest::backtest::config::BacktestConfig;
-use backtest::backtest::manifest::{configuration_timestamp, utc_timestamp};
-use backtest::configuration_identity::{configuration_digest, configuration_json};
+use backtest::backtest::manifest::configuration_timestamp;
+use backtest::backtest::manifest::utc_timestamp;
+use backtest::configuration_identity::configuration_digest;
+use backtest::configuration_identity::configuration_json;
 use std::collections::BTreeMap;
 
 #[test]

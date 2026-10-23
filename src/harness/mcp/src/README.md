@@ -37,3 +37,5 @@ Thesis's workspace wrapper exposes different, ID-only agent schemas: it resolves
 harness tools. MCP does not own workspace Git paths, publication, stored completion
 references, or agent repair budgets. Compact diagnostics and minimal missing-export
 templates are validator-owned guidance, not a protocol-side repair executor.
+
+- `tools/`: Source implementation for tools.

@@ -1,7 +1,11 @@
 //! Operator benchmark: one closed symbol-session, durable acquisition and verified cold/warm reads.
 use clap::Parser;
-use harness_lakeclient::{EnsureSpec, LakeClient, LakeClientConfig, ReadSpec};
-use std::{sync::Arc, time::Instant};
+use harness_lakeclient::EnsureSpec;
+use harness_lakeclient::LakeClient;
+use harness_lakeclient::LakeClientConfig;
+use harness_lakeclient::ReadSpec;
+use std::sync::Arc;
+use std::time::Instant;
 
 #[derive(Parser)]
 struct Args {

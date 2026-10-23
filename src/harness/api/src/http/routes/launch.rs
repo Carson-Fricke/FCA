@@ -2,16 +2,25 @@
 
 use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::{header, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::http::header;
+use axum::http::HeaderValue;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::response::Response;
 use axum::routing::post;
-use axum::{Json, Router};
+use axum::Json;
+use axum::Router;
 use serde_json::json;
 
-use crate::http::launcher::{mark_failed, LaunchJob};
-use crate::http::models::{ApiError, LaunchAcceptedResponse};
+use crate::http::launcher::mark_failed;
+use crate::http::launcher::LaunchJob;
+use crate::http::models::ApiError;
+use crate::http::models::LaunchAcceptedResponse;
 use crate::http::state::AppState;
-use crate::http::store::{Admission, JobKind, JobRecord, StoreError};
+use harness_execution::jobs::Admission;
+use harness_execution::jobs::JobKind;
+use harness_execution::jobs::JobRecord;
+use harness_execution::jobs::StoreError;
 
 /// Build the submission routes without binding them to a queue.
 pub fn launch_router() -> Router<AppState> {
@@ -77,7 +86,7 @@ fn launch_with_shell(
     record.data_end = configuration.data_end;
     record.configuration_digest = Some(digest);
     record.accepted_input = configuration.document.clone();
-    match state.job_store.admit(record) {
+    match state.admission.admit(record) {
         Err(StoreError::Conflict(detail)) => return Err(ApiError::job_conflict(&detail)),
         Err(error) => return Err(ApiError::store_error(&error.to_string())),
         Ok(Admission::Joined(existing)) => return accepted(&existing),
@@ -91,7 +100,7 @@ fn launch_with_shell(
     };
     if let Err(error) = state.launcher.launch(&job) {
         mark_failed(
-            state.job_store.as_ref(),
+            state.execution.as_ref(),
             &job_id,
             state.clock.as_ref(),
             &error,
@@ -100,7 +109,7 @@ fn launch_with_shell(
     }
 
     let record = state
-        .job_store
+        .queries
         .try_get(&job_id)
         .map_err(|error| ApiError::store_error(&error.to_string()))?
         .ok_or_else(ApiError::job_not_found)?;

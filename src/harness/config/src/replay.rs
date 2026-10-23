@@ -1,6 +1,7 @@
 //! Authoritative replay document validation. Compact shipped documents use explicit defaults.
 
-use crate::{ConfigError, YamlValue};
+use crate::ConfigError;
+use crate::YamlValue;
 use serde_json::Value;
 
 /// Decode the submitted document without resolving defaults or changing its identity.

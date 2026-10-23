@@ -4,24 +4,43 @@
 //! the configured bearer token, records every request (method, path, decoded
 //! query, authorization header, body), and serves programmable JSON and canonical Parquet bodies. No production services are contacted.
 
-use std::collections::{BTreeMap, HashMap};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::sync::Mutex;
 
-use arrow_array::builder::{ListBuilder, StringBuilder};
-use arrow_array::{
-    ArrayRef, Decimal128Array, RecordBatch, StringArray, TimestampNanosecondArray, UInt32Array,
-    UInt64Array,
-};
-use arrow_schema::{DataType as ArrowType, Field, Schema, TimeUnit};
-use axum::body::{Body, Bytes};
-use axum::extract::{Path, Query, State};
-use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
-use axum::{Json, Router};
-use serde_json::{json, Value};
+use arrow_array::builder::ListBuilder;
+use arrow_array::builder::StringBuilder;
+use arrow_array::ArrayRef;
+use arrow_array::Decimal128Array;
+use arrow_array::RecordBatch;
+use arrow_array::StringArray;
+use arrow_array::TimestampNanosecondArray;
+use arrow_array::UInt32Array;
+use arrow_array::UInt64Array;
+use arrow_schema::DataType as ArrowType;
+use arrow_schema::Field;
+use arrow_schema::Schema;
+use arrow_schema::TimeUnit;
+use axum::body::Body;
+use axum::body::Bytes;
+use axum::extract::Path;
+use axum::extract::Query;
+use axum::extract::State;
+use axum::http::header::AUTHORIZATION;
+use axum::http::header::CONTENT_TYPE;
+use axum::http::HeaderMap;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::response::Response;
+use axum::routing::get;
+use axum::routing::post;
+use axum::Json;
+use axum::Router;
+use serde_json::json;
+use serde_json::Value;
 
 /// One request the fake lake observed.
 #[derive(Clone, Debug, PartialEq)]

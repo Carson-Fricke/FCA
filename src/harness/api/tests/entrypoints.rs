@@ -52,10 +52,10 @@ fn rust_api_and_mcp_entrypoints_run() {
 /// lake route.
 #[test]
 fn backtest_job_binary_runs_the_native_engine() {
-    use backtest::backtest::errors::ONE_DAY_NS;
     use harness_lakeclient::testing::{
         quote_parquet, trade_parquet, FakeLakeConfig, FakeLakeServer, FakeQuoteRow, FakeTradeRow,
     };
+    use harness_trading::replay_errors::ONE_DAY_NS;
     use marketdata::Date;
     use std::collections::BTreeMap;
 

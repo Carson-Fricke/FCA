@@ -20,10 +20,11 @@ pub mod routes;
 pub mod screener;
 pub mod server;
 pub mod state;
-pub mod store;
 
-use axum::routing::{get, post};
-use axum::{middleware, Router};
+use axum::middleware;
+use axum::routing::get;
+use axum::routing::post;
+use axum::Router;
 
 use auth::AuthError;
 use state::AppConfig;

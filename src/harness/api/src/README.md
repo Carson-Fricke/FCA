@@ -9,3 +9,5 @@ This folder composes native execution, configuration, persistence and protocol a
 
 `execution/` owns durable queued admission, isolated finite workers and local/Azure
 execution adapters. `http/` only accepts and observes work through injected ports.
+
+- `bin/`: Local bin capability.

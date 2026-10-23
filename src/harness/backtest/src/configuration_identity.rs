@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use crate::backtest::config::BacktestConfig;
-use crate::canonical_json::JsonValue;
+use harness_contracts::canonical_json::JsonValue;
 
 fn merge_parameters(
     base: &BacktestConfig,

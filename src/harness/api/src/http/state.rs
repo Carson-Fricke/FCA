@@ -5,14 +5,21 @@ use std::sync::Arc;
 
 use mcp::server::McpServer;
 
-use super::clock::{Clock, SystemClock};
-use super::configuration::{ConfigurationParser, StrictJsonConfigurationParser};
-use super::launcher::{
-    BacktestLauncher, BacktestRunner, InProcessLauncher, UnportedBacktestRunner,
-};
+use super::clock::Clock;
+use super::clock::SystemClock;
+use super::configuration::ConfigurationParser;
+use super::configuration::StrictJsonConfigurationParser;
+use super::launcher::BacktestLauncher;
+use super::launcher::BacktestRunner;
+use super::launcher::InProcessLauncher;
+use super::native::NativeBacktestRunner;
 use super::native::NativeScreenRunner;
-use super::screener::{InProcessScreenLauncher, ScreenLauncher};
-use super::store::{FileSystemJobStore, InMemoryJobStore, JobStore, SasIssuer};
+use super::screener::InProcessScreenLauncher;
+use super::screener::ScreenLauncher;
+use harness_execution::jobs::SasIssuer;
+use harness_execution::jobs::{
+    ArtifactReader, ExecutionRepository, JobAdmission, JobQueries, JobRetention,
+};
 
 /// Environment variable overriding the durable results root.
 pub const RESULTS_ROOT_VARIABLE: &str = "HARNESS_RESULTS_ROOT";
@@ -38,7 +45,11 @@ pub struct AppState {
     /// Static bearer token, or `None` to fail closed.
     pub bearer_token: Option<String>,
     /// Authoritative job store.
-    pub job_store: Arc<dyn JobStore>,
+    pub admission: Arc<dyn JobAdmission>,
+    pub queries: Arc<dyn JobQueries>,
+    pub artifacts: Arc<dyn ArtifactReader>,
+    pub retention: Arc<dyn JobRetention>,
+    pub execution: Arc<dyn harness_execution::jobs::JobExecution>,
     /// Backtest launcher.
     pub launcher: Arc<dyn BacktestLauncher>,
     /// Screening launcher.
@@ -58,7 +69,7 @@ pub struct AppConfig {
     /// Explicit bearer token; when `None` the runtime environment is read.
     pub bearer_token: Option<String>,
     /// Authoritative job store.
-    pub job_store: Arc<dyn JobStore>,
+    pub job_store: Arc<dyn ExecutionRepository>,
     /// Backtest launcher.
     pub launcher: Arc<dyn BacktestLauncher>,
     /// Screening launcher.
@@ -76,16 +87,14 @@ pub struct AppConfig {
 impl AppConfig {
     /// Build an all-in-memory app config with the default parser and clock.
     ///
-    /// The default launcher runs the unported-engine stub, so a launch records
-    /// a failed job until a real [`super::launcher::BacktestRunner`] is
-    /// composed.
+    /// Explicit in-process composition uses the current native runner.
     #[must_use]
     pub fn in_memory() -> Self {
-        let job_store = Arc::new(InMemoryJobStore::new());
+        let job_store = Arc::new(harness_execution_storage::memory_store());
         let clock = Arc::new(SystemClock);
         let launcher = Arc::new(InProcessLauncher::new(
             job_store.clone(),
-            Arc::new(UnportedBacktestRunner),
+            Arc::new(NativeBacktestRunner::default()),
             clock.clone(),
         ));
         let screener_launcher = Arc::new(InProcessScreenLauncher::new(
@@ -109,7 +118,8 @@ impl AppConfig {
     #[must_use]
     pub fn durable_with_runner(root: impl Into<PathBuf>, runner: Arc<dyn BacktestRunner>) -> Self {
         let root = root.into();
-        let job_store: Arc<dyn JobStore> = Arc::new(FileSystemJobStore::new(&root));
+        let job_store: Arc<dyn ExecutionRepository> =
+            Arc::new(harness_execution_storage::filesystem_store(&root));
         let clock = Arc::new(SystemClock);
         let launcher = Arc::new(InProcessLauncher::new(
             job_store.clone(),
@@ -136,7 +146,11 @@ impl AppConfig {
     pub(crate) fn into_state(self, bearer_token: Option<String>) -> AppState {
         AppState {
             bearer_token,
-            job_store: self.job_store,
+            admission: self.job_store.clone(),
+            queries: self.job_store.clone(),
+            artifacts: self.job_store.clone(),
+            retention: self.job_store.clone(),
+            execution: self.job_store,
             launcher: self.launcher,
             screener_launcher: self.screener_launcher,
             sas_issuer: self.sas_issuer,

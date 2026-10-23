@@ -9,11 +9,14 @@ use std::fmt;
 use std::future::Future;
 
 use arrow_array::RecordBatch;
-use tokio::runtime::{Builder, Runtime};
+use tokio::runtime::Builder;
+use tokio::runtime::Runtime;
 
-use crate::client::{LakeClient, LakeClientConfig};
+use crate::client::LakeClient;
+use crate::client::LakeClientConfig;
 use crate::error::LakeClientError;
-use crate::spec::{EnsureSpec, ReadSpec};
+use crate::spec::EnsureSpec;
+use crate::spec::ReadSpec;
 
 /// A blocking client over the frozen market-lake routes.
 pub struct BlockingLakeClient {

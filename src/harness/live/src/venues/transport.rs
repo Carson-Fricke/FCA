@@ -12,8 +12,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::error::{require_text, LiveError, LiveResult};
-use crate::venues::alpaca::{AsyncBrokerTransport, TransportResponse};
+use crate::venues::alpaca::AsyncBrokerTransport;
+use crate::venues::alpaca::TransportResponse;
+use harness_trading::error::require_text;
+use harness_trading::error::LiveError;
+use harness_trading::error::LiveResult;
 
 /// Default Alpaca paper-trading REST base URL.
 pub const ALPACA_PAPER_BASE_URL: &str = "https://paper-api.alpaca.markets";

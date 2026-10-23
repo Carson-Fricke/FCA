@@ -6,12 +6,16 @@
 //! the two engines.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
-use crate::sha256::{digest_hex, Sha256};
+use harness_contracts::sha256::digest_hex;
+use harness_contracts::sha256::Sha256;
 
 use super::artifacts::artifact_path;
-use super::schemas::{Artifact, SCHEMA_VERSION, STREAM_ARTIFACTS};
+use super::schemas::Artifact;
+use super::schemas::SCHEMA_VERSION;
+use super::schemas::STREAM_ARTIFACTS;
 
 /// Immutable summary of one closed recorded run.
 #[derive(Clone, Debug, PartialEq, Eq)]

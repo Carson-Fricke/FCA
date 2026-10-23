@@ -11,9 +11,14 @@ use std::rc::Rc;
 
 use crate::error::DataError;
 use crate::events::MarketEvent;
-use crate::lake::{sessions_for, AssetClass, DataType, ExchangeSession};
+use crate::lake::sessions_for;
+use crate::lake::AssetClass;
+use crate::lake::DataType;
+use crate::lake::ExchangeSession;
 use crate::symbol::canonical_symbol;
-use crate::time::{Date, DateTime, Nanos};
+use crate::time::Date;
+use crate::time::DateTime;
+use crate::time::Nanos;
 
 /// One hole in a live feed's expected coverage, half-open in time.
 #[derive(Clone, Debug, PartialEq, Eq)]

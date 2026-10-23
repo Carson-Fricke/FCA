@@ -6,31 +6,55 @@
 //! network access is required.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::sync::Mutex;
 
-use api::http::clock::{Clock, SystemClock};
-use api::http::configuration::{StrictJsonConfigurationParser, ValidatedConfiguration};
+use api::http::clock::Clock;
+use api::http::clock::SystemClock;
+use api::http::configuration::StrictJsonConfigurationParser;
+use api::http::configuration::ValidatedConfiguration;
 use api::http::create_app;
-use api::http::launcher::{
-    BacktestLauncher, BacktestRunner, InProcessLauncher, LaunchError, RunOutcome,
-};
+use api::http::launcher::BacktestLauncher;
+use api::http::launcher::BacktestRunner;
+use api::http::launcher::InProcessLauncher;
+use api::http::launcher::LaunchError;
+use api::http::launcher::RunOutcome;
 use api::http::state::AppConfig;
-use api::http::store::{
-    artifact_digest, Admission, FileSystemJobStore, InMemoryJobStore, JobKind, JobRecord, JobState,
-    JobStore, SasIssuer, StoreError, StoredJob,
-};
 use axum::body::Body;
-use axum::http::{header, HeaderMap, Request, StatusCode};
+use axum::http::header;
+use axum::http::HeaderMap;
+use axum::http::Request;
+use axum::http::StatusCode;
 use axum::Router;
-use chrono::{TimeZone, Utc};
-use harness_lakeclient::testing::{
-    bars_parquet, quote_parquet, trade_parquet, FakeBarRow, FakeLakeConfig, FakeLakeServer,
-    FakeQuoteRow, FakeTradeRow,
+use chrono::TimeZone;
+use chrono::Utc;
+use harness_execution::jobs::artifact_digest;
+use harness_execution::jobs::Admission;
+use harness_execution::jobs::JobKind;
+use harness_execution::jobs::JobRecord;
+use harness_execution::jobs::JobState;
+use harness_execution::jobs::SasIssuer;
+use harness_execution::jobs::StoreError;
+use harness_execution::jobs::{
+    ArtifactReader, ExecutionRepository, JobAdmission, JobQueries, JobRetention, ResultPublisher,
 };
-use harness_lakeclient::{BlockingLakeClient, LakeClientConfig};
+
+use harness_execution::store::ExecutionStore;
+use harness_lakeclient::testing::bars_parquet;
+use harness_lakeclient::testing::quote_parquet;
+use harness_lakeclient::testing::trade_parquet;
+use harness_lakeclient::testing::FakeBarRow;
+use harness_lakeclient::testing::FakeLakeConfig;
+use harness_lakeclient::testing::FakeLakeServer;
+use harness_lakeclient::testing::FakeQuoteRow;
+use harness_lakeclient::testing::FakeTradeRow;
+use harness_lakeclient::BlockingLakeClient;
+use harness_lakeclient::LakeClientConfig;
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
+use serde_json::json;
+use serde_json::Value;
 use tower::ServiceExt;
 
 const BEARER: &str = "test-secret";
@@ -138,7 +162,7 @@ impl BacktestRunner for StubRunner {
         }
         let body = format!(
             "{{\"manifest\":{{\"job_id\":\"{}\"}},\"status\":\"completed\"}}",
-            configuration.job_id
+            configuration.job_id()
         );
         let mut artifacts = BTreeMap::new();
         artifacts.insert("backtest.json".to_string(), body.into_bytes());
@@ -181,7 +205,7 @@ impl SasIssuer for RecordingSasIssuer {
 
 struct TestApp {
     router: Router,
-    store: Arc<InMemoryJobStore>,
+    store: Arc<ExecutionStore>,
 }
 
 fn build(
@@ -189,7 +213,7 @@ fn build(
     sas: Option<Arc<dyn SasIssuer>>,
     runner: Arc<dyn BacktestRunner>,
 ) -> TestApp {
-    let store = Arc::new(InMemoryJobStore::new());
+    let store = Arc::new(harness_execution_storage::memory_store());
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let launcher = Arc::new(InProcessLauncher::new(store.clone(), runner, clock.clone()));
     let config = AppConfig {
@@ -217,7 +241,7 @@ fn app_with(token: Option<&str>, runner: Arc<dyn BacktestRunner>) -> TestApp {
 }
 
 fn seed(
-    store: &dyn JobStore,
+    store: &dyn ExecutionRepository,
     job_id: &str,
     state: JobState,
     strategy_id: &str,
@@ -500,8 +524,14 @@ async fn list_artifacts_reports_the_reproducibility_manifest_shape() {
     assert_eq!(artifacts[1]["name"], "fills.parquet");
     assert_eq!(artifacts[0]["sizeBytes"], b"actions-bytes".len() as u64);
     let uri = artifacts[0]["uri"].as_str().expect("artifact uri");
-    assert_eq!(uri, "jobs/run-1/actions.parquet");
-    let derived_name = uri.strip_prefix("jobs/run-1/").expect("job prefix");
+    assert_eq!(
+        uri,
+        format!(
+            "execution/objects/run-1/{}/actions.parquet",
+            artifact_digest(b"actions-bytes")
+        )
+    );
+    let derived_name = uri.rsplit('/').next().expect("artifact name");
     assert_eq!(derived_name, "actions.parquet");
     assert_eq!(artifacts[0]["sha256"], artifact_digest(b"actions-bytes"));
     assert_eq!(artifacts[0]["sas_url"], Value::Null);
@@ -541,13 +571,22 @@ async fn list_artifacts_issues_scoped_sas_urls_when_configured() {
     let artifacts = &json_body(&body)["artifacts"];
     assert_eq!(
         artifacts[1]["sas_url"],
-        "https://storage.example/jobs/run-1/fills.parquet?sig=abc"
+        format!(
+            "https://storage.example/execution/objects/run-1/{}/fills.parquet?sig=abc",
+            artifact_digest(b"fills-bytes")
+        )
     );
     assert_eq!(
         *issuer.paths.lock().expect("paths"),
         vec![
-            "jobs/run-1/actions.parquet".to_string(),
-            "jobs/run-1/fills.parquet".to_string()
+            format!(
+                "execution/objects/run-1/{}/actions.parquet",
+                artifact_digest(b"actions-bytes")
+            ),
+            format!(
+                "execution/objects/run-1/{}/fills.parquet",
+                artifact_digest(b"fills-bytes")
+            )
         ]
     );
 }
@@ -787,7 +826,7 @@ impl BacktestLauncher for FailingLauncher {
 
 #[tokio::test]
 async fn launch_failure_publishes_failed_metadata_without_artifacts() {
-    let store = Arc::new(InMemoryJobStore::new());
+    let store = Arc::new(harness_execution_storage::memory_store());
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let config = AppConfig {
         bearer_token: Some(BEARER.to_string()),
@@ -887,10 +926,46 @@ async fn successful_outcome_without_artifacts_is_not_published_as_succeeded() {
 }
 
 struct FaultingPutResultStore {
-    inner: InMemoryJobStore,
+    inner: ExecutionStore,
 }
 
-impl JobStore for FaultingPutResultStore {
+impl JobAdmission for FaultingPutResultStore {
+    fn admit(&self, record: JobRecord) -> Result<Admission, StoreError> {
+        self.inner.admit(record)
+    }
+}
+impl JobQueries for FaultingPutResultStore {
+    fn try_get(&self, id: &str) -> Result<Option<JobRecord>, StoreError> {
+        self.inner.try_get(id)
+    }
+    fn try_list(
+        &self,
+        kind: Option<JobKind>,
+        state: Option<JobState>,
+        strategy: Option<&str>,
+    ) -> Result<Vec<JobRecord>, StoreError> {
+        self.inner.try_list(kind, state, strategy)
+    }
+}
+impl ArtifactReader for FaultingPutResultStore {
+    fn artifacts(
+        &self,
+        id: &str,
+    ) -> Result<Option<Vec<harness_execution::jobs::ArtifactInfo>>, StoreError> {
+        self.inner.artifacts(id)
+    }
+    fn artifact(&self, id: &str, name: &str) -> Result<Option<Vec<u8>>, StoreError> {
+        self.inner.artifact(id, name)
+    }
+    fn open_artifact(
+        &self,
+        id: &str,
+        name: &str,
+    ) -> Result<Option<Box<dyn std::io::Read + Send>>, StoreError> {
+        self.inner.open_artifact(id, name)
+    }
+}
+impl ResultPublisher for FaultingPutResultStore {
     fn update_progress(
         &self,
         job_id: &str,
@@ -899,7 +974,6 @@ impl JobStore for FaultingPutResultStore {
     ) -> Result<JobRecord, StoreError> {
         self.inner.update_progress(job_id, snapshot, now)
     }
-
     fn mark_running(
         &self,
         job_id: &str,
@@ -907,15 +981,6 @@ impl JobStore for FaultingPutResultStore {
     ) -> Result<JobRecord, StoreError> {
         self.inner.mark_running(job_id, started)
     }
-
-    fn get(&self, job_id: &str) -> Option<JobRecord> {
-        self.inner.get(job_id)
-    }
-
-    fn admit(&self, record: JobRecord) -> Result<Admission, StoreError> {
-        self.inner.admit(record)
-    }
-
     fn put_result(
         &self,
         record: JobRecord,
@@ -926,29 +991,24 @@ impl JobStore for FaultingPutResultStore {
         }
         self.inner.put_result(record, artifacts)
     }
-
-    fn list(
+    fn put_files(
         &self,
-        kind: Option<JobKind>,
-        state: Option<JobState>,
-        strategy_id: Option<&str>,
-    ) -> Vec<JobRecord> {
-        self.inner.list(kind, state, strategy_id)
+        record: JobRecord,
+        files: BTreeMap<String, std::path::PathBuf>,
+    ) -> Result<JobRecord, StoreError> {
+        self.inner.put_files(record, files)
     }
-
-    fn fetch(&self, job_id: &str) -> Option<StoredJob> {
-        self.inner.fetch(job_id)
-    }
-
-    fn delete(&self, job_id: &str) -> bool {
-        self.inner.delete(job_id)
+}
+impl JobRetention for FaultingPutResultStore {
+    fn remove(&self, id: &str) -> Result<bool, StoreError> {
+        self.inner.remove(id)
     }
 }
 
 #[tokio::test]
 async fn memory_artifact_publication_fault_cannot_publish_success() {
     let store = Arc::new(FaultingPutResultStore {
-        inner: InMemoryJobStore::new(),
+        inner: harness_execution_storage::memory_store(),
     });
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let config = AppConfig {
@@ -1018,9 +1078,10 @@ impl BacktestRunner for PartialArtifactRunner {
 async fn filesystem_artifact_publication_fault_preserves_partial_evidence() {
     let root = temp_root("publication-fault");
     let blocked = root
+        .join("execution")
         .join("objects")
-        .join("jobs")
         .join("job-publication-fault")
+        .join(artifact_digest(b"blocked"))
         .join("z-blocked.bin");
     std::fs::create_dir_all(&blocked).expect("blocked artifact path");
     let router = durable_router(&root, Arc::new(PartialArtifactRunner));
@@ -1040,7 +1101,7 @@ async fn filesystem_artifact_publication_fault_preserves_partial_evidence() {
         json!({"job_id": "job-publication-fault", "state": "failed"})
     );
 
-    let store = FileSystemJobStore::new(&root);
+    let store = harness_execution_storage::filesystem_store(&root);
     let stored = store.fetch("job-publication-fault").expect("record");
     assert_eq!(stored.record.state, JobState::Failed);
     assert!(stored
@@ -1144,7 +1205,7 @@ async fn launch_rejects_a_wrong_shell_document() {
 #[tokio::test]
 async fn injected_launcher_keeps_asynchronous_job_semantics() {
     let launcher = Arc::new(RecordingLauncher::default());
-    let store = Arc::new(InMemoryJobStore::new());
+    let store = Arc::new(harness_execution_storage::memory_store());
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let config = AppConfig {
         bearer_token: Some(BEARER.to_string()),
@@ -1202,7 +1263,7 @@ async fn auth_check_requires_credentials() {
 
 #[test]
 fn in_memory_store_helpers_are_deterministic() {
-    let store = InMemoryJobStore::new();
+    let store = harness_execution_storage::memory_store();
     let mut artifacts = BTreeMap::new();
     artifacts.insert("a".to_string(), vec![1, 2]);
     store
@@ -1304,7 +1365,7 @@ async fn native_engine_launch_reaches_a_terminal_state() {
         "strategy_instances": [{
             "instance_id": "spy-momentum",
             "implementation": "jit",
-            "bundle_hash": backtest::sha256::digest_hex(momentum_source.replace("\r\n", "\n").as_bytes()),
+            "bundle_hash": harness_contracts::sha256::digest_hex(momentum_source.replace("\r\n", "\n").as_bytes()),
             "capital_fraction": 1.0,
             "symbols": ["SPY"],
             "parameters": {"source": momentum_source}
@@ -1373,7 +1434,7 @@ async fn native_research_metrics_are_queryable_over_http() {
         "strategy_instances": [{
             "instance_id": "research-model",
             "implementation": "jit",
-            "bundle_hash": backtest::sha256::digest_hex(study_source.replace("\r\n", "\n").as_bytes()),
+            "bundle_hash": harness_contracts::sha256::digest_hex(study_source.replace("\r\n", "\n").as_bytes()),
             "capital_fraction": "1.0",
             "symbols": ["SPY"],
             "parameters": {"source": study_source}
@@ -1417,8 +1478,14 @@ async fn native_research_metrics_are_queryable_over_http() {
 
 const SUBSCRIPTION_STUDY: &str = r#"
 use harness_strategy_sdk::serde_json::Value;
-use harness_strategy_sdk::{export_study_program, BarFrame, MarketConsumer, MetricPublisher,
-    ObservationContext, QuoteEvent, StudyProgram, Subscription};
+use harness_strategy_sdk::export_study_program;
+use harness_strategy_sdk::BarFrame;
+use harness_strategy_sdk::MarketConsumer;
+use harness_strategy_sdk::MetricPublisher;
+use harness_strategy_sdk::ObservationContext;
+use harness_strategy_sdk::QuoteEvent;
+use harness_strategy_sdk::StudyProgram;
+use harness_strategy_sdk::Subscription;
 struct Observer { quotes: u64, bars: u64 }
 impl StudyProgram for Observer {
     fn new(_: Value) -> Self { Self { quotes: 0, bars: 0 } }
@@ -1442,7 +1509,7 @@ export_study_program!(Observer);
 
 #[test]
 fn authored_subscription_studies_validate_then_launch_exact_lake_inputs() {
-    use mcp::tools::StudyValidator;
+    use mcp::tools::ports::StudyValidator;
 
     let runtime = tokio::runtime::Runtime::new().expect("runtime");
     for mixed in [false, true] {
@@ -1576,7 +1643,7 @@ fn authored_subscription_studies_validate_then_launch_exact_lake_inputs() {
 
 #[test]
 fn authored_tick_echo_uses_only_explicit_symbols_and_rejects_mismatch() {
-    use mcp::tools::StudyValidator;
+    use mcp::tools::ports::StudyValidator;
     let model = json!({
         "source": SUBSCRIPTION_STUDY.replace("SPY", "QQQ"),
         "harnessConfiguration": {
@@ -1602,11 +1669,17 @@ fn authored_tick_echo_uses_only_explicit_symbols_and_rejects_mismatch() {
 
 #[test]
 fn validator_returns_recursive_indicator_requirements_without_extras() {
-    use mcp::tools::StudyValidator;
+    use mcp::tools::ports::StudyValidator;
     let source = r#"
 use harness_strategy_sdk::serde_json::Value;
-use harness_strategy_sdk::{export_study_program, Decimal, Indicator, IndicatorSequence, MarketConsumer,
-    ObservationContext, StudyProgram, Subscription};
+use harness_strategy_sdk::export_study_program;
+use harness_strategy_sdk::Decimal;
+use harness_strategy_sdk::Indicator;
+use harness_strategy_sdk::IndicatorSequence;
+use harness_strategy_sdk::MarketConsumer;
+use harness_strategy_sdk::ObservationContext;
+use harness_strategy_sdk::StudyProgram;
+use harness_strategy_sdk::Subscription;
 struct Leaf { last: Option<Decimal>, sequence: IndicatorSequence }
 impl Indicator for Leaf { fn value(&self, _: &str) -> Option<Decimal> { self.last }
 fn sequence(&self) -> &IndicatorSequence { &self.sequence }
@@ -1667,7 +1740,7 @@ fn strict_http_subscription_contract_rejects_invalid_shapes() {
 
 #[test]
 fn authored_contract_rejects_symbol_and_interval_conflicts_before_lake() {
-    use mcp::tools::StudyValidator;
+    use mcp::tools::ports::StudyValidator;
 
     let server = spy_lake();
     let base = json!({"source": SUBSCRIPTION_STUDY, "harnessConfiguration": {
@@ -1708,7 +1781,7 @@ fn authored_contract_rejects_symbol_and_interval_conflicts_before_lake() {
 
 #[test]
 fn authored_subscriptions_must_match_compiled_bar_requirements() {
-    use mcp::tools::StudyValidator;
+    use mcp::tools::ports::StudyValidator;
 
     let server = spy_lake();
     let model = json!({"source": include_str!("fixtures/parity_study.rs"), "harnessConfiguration": {
@@ -1740,7 +1813,7 @@ fn authored_subscriptions_must_match_compiled_bar_requirements() {
 
 #[test]
 fn nested_authored_configuration_preserves_runtime_fields_and_normalized_source() {
-    use mcp::tools::StudyValidator;
+    use mcp::tools::ports::StudyValidator;
 
     let source = include_str!("fixtures/parity_study.rs")
         .replace("\r\n", "\n")
@@ -1777,7 +1850,7 @@ fn nested_authored_configuration_preserves_runtime_fields_and_normalized_source(
     );
     assert_eq!(
         document["strategy_instances"][0]["bundle_hash"],
-        backtest::sha256::digest_hex(source.as_bytes())
+        harness_contracts::sha256::digest_hex(source.as_bytes())
     );
     let response = api::local::NativeStudyValidator.validate(&model).unwrap();
     assert_eq!(
@@ -1809,7 +1882,7 @@ fn nested_authored_configuration_preserves_runtime_fields_and_normalized_source(
 
 #[test]
 fn nested_and_shorthand_contracts_reject_contradictions_before_lake() {
-    use mcp::tools::StudyValidator;
+    use mcp::tools::ports::StudyValidator;
 
     let server = spy_lake();
     let echo = json!([
@@ -1963,7 +2036,7 @@ async fn duplicate_submission_joins_and_conflicting_input_fails_closed() {
 
 #[test]
 fn admission_and_result_publication_rules_are_atomic() {
-    let store = InMemoryJobStore::new();
+    let store = harness_execution_storage::memory_store();
     let now = Utc::now();
     let created = store
         .admit(JobRecord::new("job-rules", JobKind::Study, "digest", now))
@@ -1998,7 +2071,43 @@ fn admission_and_result_publication_rules_are_atomic() {
 
 struct FailingAdmitStore;
 
-impl JobStore for FailingAdmitStore {
+impl JobAdmission for FailingAdmitStore {
+    fn admit(&self, _record: JobRecord) -> Result<Admission, StoreError> {
+        Err(StoreError::Io("disk offline".to_string()))
+    }
+}
+impl JobQueries for FailingAdmitStore {
+    fn try_get(&self, _id: &str) -> Result<Option<JobRecord>, StoreError> {
+        Ok(None)
+    }
+    fn try_list(
+        &self,
+        _kind: Option<JobKind>,
+        _state: Option<JobState>,
+        _strategy: Option<&str>,
+    ) -> Result<Vec<JobRecord>, StoreError> {
+        Ok(Vec::new())
+    }
+}
+impl ArtifactReader for FailingAdmitStore {
+    fn artifacts(
+        &self,
+        _id: &str,
+    ) -> Result<Option<Vec<harness_execution::jobs::ArtifactInfo>>, StoreError> {
+        Ok(None)
+    }
+    fn artifact(&self, _id: &str, _name: &str) -> Result<Option<Vec<u8>>, StoreError> {
+        Ok(None)
+    }
+    fn open_artifact(
+        &self,
+        _id: &str,
+        _name: &str,
+    ) -> Result<Option<Box<dyn std::io::Read + Send>>, StoreError> {
+        Ok(None)
+    }
+}
+impl ResultPublisher for FailingAdmitStore {
     fn update_progress(
         &self,
         job_id: &str,
@@ -2008,7 +2117,6 @@ impl JobStore for FailingAdmitStore {
         let _ = (job_id, snapshot, now);
         Err(StoreError::Io("disk offline".to_string()))
     }
-
     fn mark_running(
         &self,
         _job_id: &str,
@@ -2016,15 +2124,6 @@ impl JobStore for FailingAdmitStore {
     ) -> Result<JobRecord, StoreError> {
         Err(StoreError::Io("disk offline".to_string()))
     }
-
-    fn get(&self, _job_id: &str) -> Option<JobRecord> {
-        None
-    }
-
-    fn admit(&self, _record: JobRecord) -> Result<Admission, StoreError> {
-        Err(StoreError::Io("disk offline".to_string()))
-    }
-
     fn put_result(
         &self,
         _record: JobRecord,
@@ -2032,22 +2131,17 @@ impl JobStore for FailingAdmitStore {
     ) -> Result<JobRecord, StoreError> {
         Err(StoreError::Io("disk offline".to_string()))
     }
-
-    fn list(
+    fn put_files(
         &self,
-        _kind: Option<JobKind>,
-        _state: Option<JobState>,
-        _strategy_id: Option<&str>,
-    ) -> Vec<JobRecord> {
-        Vec::new()
+        _record: JobRecord,
+        _files: BTreeMap<String, std::path::PathBuf>,
+    ) -> Result<JobRecord, StoreError> {
+        Err(StoreError::Io("fixture has no publisher".into()))
     }
-
-    fn fetch(&self, _job_id: &str) -> Option<StoredJob> {
-        None
-    }
-
-    fn delete(&self, _job_id: &str) -> bool {
-        false
+}
+impl JobRetention for FailingAdmitStore {
+    fn remove(&self, _id: &str) -> Result<bool, StoreError> {
+        Ok(false)
     }
 }
 
@@ -2148,3 +2242,7 @@ async fn direct_launch_status_retains_progress_and_error_without_a_workflow() {
         .unwrap();
     assert_eq!(app.store.get("job-progress").unwrap(), before);
 }
+
+#[path = "support/jobs.rs"]
+pub mod job_inspection;
+use job_inspection::JobInspection;

@@ -7,14 +7,18 @@
 
 use std::collections::BTreeSet;
 
-use num::{Decimal18, RoundingMode, SCALE};
+use num::Decimal18;
+use num::RoundingMode;
+use num::SCALE;
 
-use crate::canonical_json::JsonValue;
-use crate::sha256::{digest_hex, Sha256};
+use harness_contracts::canonical_json::JsonValue;
+use harness_contracts::sha256::digest_hex;
+use harness_contracts::sha256::Sha256;
 
 use super::config::BacktestConfig;
-use super::errors::{BacktestError, ONE_DAY_NS};
 use super::rng::PythonRandom;
+use harness_trading::replay_errors::BacktestError;
+use harness_trading::replay_errors::ONE_DAY_NS;
 
 /// Exact knobs for the deterministic local benchmark data fixture.
 #[derive(Clone, Debug, PartialEq, Eq)]

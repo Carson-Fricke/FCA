@@ -5,11 +5,15 @@
 //! response with a `null` id; EOF closes the loop.
 
 use std::fmt;
-use std::io::{BufRead, Write};
+use std::io::BufRead;
+use std::io::Write;
 
-use serde_json::{json, Value};
+use serde_json::json;
+use serde_json::Value;
 
-use crate::server::{error_response, McpServer, PARSE_ERROR};
+use crate::server::error_response;
+use crate::server::McpServer;
+use crate::server::PARSE_ERROR;
 
 /// Raised when one stdin line is not decodable JSON.
 #[derive(Debug, Clone, PartialEq, Eq)]

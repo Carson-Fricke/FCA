@@ -1,5 +1,6 @@
 //! Finite compute adapters and startup reservations. No engine or provider work.
-use super::{worker::Slot, ExecutionStore};
+use super::ExecutionStore;
+use harness_execution::fleet::Slot;
 
 /// One coalesced notification fills available slots. Unknown starts retain
 /// their reservations; a hint is never retried as execution authority.

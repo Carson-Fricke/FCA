@@ -5,12 +5,21 @@
 //! Call snapshot_at(symbol, frame.available_at_ns) at the decision and retain the
 //! result. Historical lookup never substitutes a later value. Warm-up and missing
 //! input return None rather than carrying a stale feature across missing bars.
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
+use std::collections::VecDeque;
 
-use crate::{
-    canonical_subscriptions, indicator_add, indicator_div, indicator_mul, indicator_sub, BarFrame,
-    Decimal, Indicator, IndicatorSequence, MarketConsumer, ObservationContext, Subscription,
-};
+use crate::canonical_subscriptions;
+use crate::indicator_add;
+use crate::indicator_div;
+use crate::indicator_mul;
+use crate::indicator_sub;
+use crate::BarFrame;
+use crate::Decimal;
+use crate::Indicator;
+use crate::IndicatorSequence;
+use crate::MarketConsumer;
+use crate::ObservationContext;
+use crate::Subscription;
 
 /// One scale's detail energy, with support measured in source bars.
 #[derive(Clone, Debug, PartialEq, Eq)]

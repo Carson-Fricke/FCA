@@ -5,9 +5,12 @@
 
 use std::collections::BTreeMap;
 
-use crate::models::{build_api, build_backtest, build_trader};
+use crate::models::build_api;
+use crate::models::build_backtest;
+use crate::models::build_trader;
 use crate::yaml::YamlValue;
-use crate::{ConfigError, HarnessConfig};
+use crate::ConfigError;
+use crate::HarnessConfig;
 
 fn is_environment_reference(value: &str) -> bool {
     let inner = value

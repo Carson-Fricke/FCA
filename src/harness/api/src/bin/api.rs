@@ -5,7 +5,8 @@
 
 use std::process::ExitCode;
 
-use api::http::cli::{serve_api_blocking, ApiCli};
+use api::http::cli::serve_api_blocking;
+use api::http::cli::ApiCli;
 use clap::Parser;
 
 fn main() -> ExitCode {

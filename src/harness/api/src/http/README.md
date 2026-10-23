@@ -15,4 +15,3 @@ This folder owns authenticated HTTP composition and injected execution ports. Th
 - `screener.rs`: Defines screening launch and result adapters.
 - `server.rs`: Builds and serves the HTTP router.
 - `state.rs`: Holds injected HTTP dependencies and settings.
-- `store.rs`: Re-exports the shared MCP-owned durable job contract.

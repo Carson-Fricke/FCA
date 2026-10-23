@@ -1,7 +1,10 @@
-use harness_contracts::{
-    canonical_json, canonical_subscriptions, configuration_hash, BarInterval, DataType,
-    HashEncoding, Subscription,
-};
+use harness_contracts::canonical_json;
+use harness_contracts::canonical_subscriptions;
+use harness_contracts::configuration_hash;
+use harness_contracts::BarInterval;
+use harness_contracts::DataType;
+use harness_contracts::HashEncoding;
+use harness_contracts::Subscription;
 use serde_json::json;
 
 #[test]

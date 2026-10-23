@@ -6,7 +6,8 @@
 //! is circular, so phase and envelope near the edges inherit the same boundary
 //! caveat as the underlying wavelet coefficients.
 
-use crate::signal::fft::{dft, idft};
+use crate::signal::fft::dft;
+use crate::signal::fft::idft;
 use crate::signal::wavelets::SignalError;
 
 /// Return the (envelope, phase) of a real one-dimensional series.

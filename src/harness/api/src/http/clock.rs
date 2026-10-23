@@ -1,6 +1,7 @@
 //! Injectable clock for job-record timestamps.
 
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
+use chrono::Utc;
 
 /// Clock boundary; deterministic tests supply a fixed implementation.
 pub trait Clock: Send + Sync {

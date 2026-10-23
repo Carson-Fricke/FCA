@@ -9,10 +9,13 @@ use std::collections::HashSet;
 
 use num::Decimal18;
 
-use crate::catalog::{DelistingType, ListingType, ListingsCatalogPort};
+use crate::catalog::DelistingType;
+use crate::catalog::ListingType;
+use crate::catalog::ListingsCatalogPort;
 use crate::error::DataError;
 use crate::symbol::canonical_symbol;
-use crate::time::{Date, DateTime};
+use crate::time::Date;
+use crate::time::DateTime;
 
 /// The listing lifecycle fact carried by one corporate-action event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

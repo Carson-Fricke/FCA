@@ -1,4 +1,6 @@
-use config::{parse_yaml_mapping, replay::parse_document, YamlValue};
+use config::parse_yaml_mapping;
+use config::replay::parse_document;
+use config::YamlValue;
 
 #[test]
 fn sequence_mapping_forms_share_one_parser_and_reject_duplicate_keys() {

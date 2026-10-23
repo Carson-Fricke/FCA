@@ -4,12 +4,14 @@
 //! so existing clients decode responses unchanged.
 
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use axum::response::IntoResponse;
+use axum::response::Response;
 use axum::Json;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::json;
+use serde_json::Value;
 
-use super::store::JobRecord;
+use harness_execution::jobs::JobRecord;
 
 /// Probe-safe liveness response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -67,7 +69,7 @@ pub struct LaunchAcceptedResponse {
     /// Job identifier.
     pub job_id: String,
     /// Current job state.
-    pub state: super::store::JobState,
+    pub state: harness_execution::jobs::JobState,
 }
 
 /// The persisted state of one launch job.

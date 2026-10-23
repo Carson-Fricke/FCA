@@ -13,13 +13,19 @@
 //! writer without touching the recorder.
 
 use std::collections::BTreeMap;
-use std::fs::{File, OpenOptions};
-use std::io::{self, BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::fs::File;
+use std::fs::OpenOptions;
+use std::io;
+use std::io::BufWriter;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
 
-use crate::canonical_json::JsonValue;
+use harness_contracts::canonical_json::JsonValue;
 
-use super::schemas::{Artifact, FieldDef, LogicalType};
+use super::schemas::Artifact;
+use super::schemas::FieldDef;
+use super::schemas::LogicalType;
 
 /// One recorded cell value.
 #[derive(Clone, Debug, PartialEq, Eq)]

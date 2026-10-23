@@ -1,9 +1,12 @@
 //! Generated crate construction and Cargo invocation.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 
-use crate::diagnostics::{build_artifact, build_diagnostics, output_tail};
+use crate::diagnostics::build_artifact;
+use crate::diagnostics::build_diagnostics;
+use crate::diagnostics::output_tail;
 use crate::error::JitError;
 
 pub(super) fn sdk_dependency_path() -> String {

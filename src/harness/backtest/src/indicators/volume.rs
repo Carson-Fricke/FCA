@@ -9,9 +9,14 @@ use std::collections::VecDeque;
 
 use num::Decimal18;
 
-use super::base::{
-    add, divide, multiply, subtract, IndicatorError, IndicatorKernel, IndicatorMachine, TickDriver,
-};
+use super::base::add;
+use super::base::divide;
+use super::base::multiply;
+use super::base::subtract;
+use super::base::IndicatorError;
+use super::base::IndicatorKernel;
+use super::base::IndicatorMachine;
+use super::base::TickDriver;
 
 /// Session-cumulative volume-weighted average price of trades.
 #[derive(Clone, Debug, Default)]

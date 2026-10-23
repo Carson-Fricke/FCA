@@ -1,15 +1,25 @@
 //! Verified Parquet decoding; sources supply bytes, never provider execution.
 
-use crate::cache::{CachedPartition, PartitionCache};
-use crate::{CacheConfig, MarketDataSnapshot, Partition, ReaderError};
+use crate::cache::CachedPartition;
+use crate::cache::PartitionCache;
+use crate::CacheConfig;
+use crate::MarketDataSnapshot;
+use crate::Partition;
+use crate::ReaderError;
 use arrow_array::RecordBatch;
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
-use futures_util::{stream, StreamExt};
-use lake_contracts::{schema_for, AssetClass, DataType};
-use parquet::arrow::arrow_reader::{ParquetRecordBatchReader, ParquetRecordBatchReaderBuilder};
-use sha2::{Digest, Sha256};
-use std::sync::{Arc, OnceLock};
+use futures_util::stream;
+use futures_util::StreamExt;
+use lake_contracts::schema_for;
+use lake_contracts::AssetClass;
+use lake_contracts::DataType;
+use parquet::arrow::arrow_reader::ParquetRecordBatchReader;
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+use sha2::Digest;
+use sha2::Sha256;
+use std::sync::Arc;
+use std::sync::OnceLock;
 
 pub trait PartitionSource: Send + Sync {
     fn read<'a>(&'a self, partition: &'a Partition) -> BoxFuture<'a, Result<Bytes, ReaderError>>;

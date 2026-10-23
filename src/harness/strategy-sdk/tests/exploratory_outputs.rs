@@ -1,8 +1,14 @@
-use harness_strategy_sdk::building_blocks::{
-    perceptually_important_points, Atr, CrossoverAge, DirectionalChange, Ema, FittedNormalization,
-    RollingMoments, Rsi, Vwap,
-};
-use harness_strategy_sdk::{OutputPoint, StudyOutput};
+use harness_strategy_sdk::building_blocks::perceptually_important_points;
+use harness_strategy_sdk::building_blocks::Atr;
+use harness_strategy_sdk::building_blocks::CrossoverAge;
+use harness_strategy_sdk::building_blocks::DirectionalChange;
+use harness_strategy_sdk::building_blocks::Ema;
+use harness_strategy_sdk::building_blocks::FittedNormalization;
+use harness_strategy_sdk::building_blocks::RollingMoments;
+use harness_strategy_sdk::building_blocks::Rsi;
+use harness_strategy_sdk::building_blocks::Vwap;
+use harness_strategy_sdk::OutputPoint;
+use harness_strategy_sdk::StudyOutput;
 
 #[test]
 fn segmentation_and_shape_preserve_confirmation_and_trailing_support() {

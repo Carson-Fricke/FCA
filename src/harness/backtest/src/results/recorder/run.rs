@@ -11,18 +11,30 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use crate::canonical_json::JsonValue;
+use harness_contracts::canonical_json::JsonValue;
 
 use super::artifacts::artifact_path;
 use super::columns::Cell;
-use super::config::{text, ActionKind, MarkerScope, RecorderConfig, TransitionReason};
-use super::ids::{EngineIdSource, IdError};
-use super::manifest::{
-    file_digest, manifest_rows, run_fingerprint, ManifestRowsInput, RunManifest,
-};
+use super::config::text;
+use super::config::ActionKind;
+use super::config::MarkerScope;
+use super::config::RecorderConfig;
+use super::config::TransitionReason;
+use super::ids::EngineIdSource;
+use super::ids::IdError;
+use super::manifest::file_digest;
+use super::manifest::manifest_rows;
+use super::manifest::run_fingerprint;
+use super::manifest::ManifestRowsInput;
+use super::manifest::RunManifest;
 use super::parquet::ParquetArtifactWriter;
-use super::schemas::{Artifact, STREAM_ARTIFACTS};
-use super::writer::{build_row, Row, RowSink, Value, WriterError};
+use super::schemas::Artifact;
+use super::schemas::STREAM_ARTIFACTS;
+use super::writer::build_row;
+use super::writer::Row;
+use super::writer::RowSink;
+use super::writer::Value;
+use super::writer::WriterError;
 
 /// Exact numeric portfolio sample. Decimal text is encoded once at the sink;
 /// equal consecutive values reuse their canonical formatting.

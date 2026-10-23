@@ -29,11 +29,21 @@
 
 use core::cmp::Ordering;
 use core::fmt;
-use core::hash::{Hash, Hasher};
-use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use core::hash::Hash;
+use core::hash::Hasher;
+use core::ops::Add;
+use core::ops::AddAssign;
+use core::ops::Div;
+use core::ops::DivAssign;
+use core::ops::Mul;
+use core::ops::MulAssign;
+use core::ops::Neg;
+use core::ops::Sub;
+use core::ops::SubAssign;
 use core::str::FromStr;
 
-use crate::decimal18::{DecimalError, RoundingMode};
+use crate::decimal18::DecimalError;
+use crate::decimal18::RoundingMode;
 use crate::wide::U256;
 
 /// The default context precision (28 significant digits).

@@ -1,0 +1,10 @@
+[package]
+name = "harness-trading"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+num = { path = "../num" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

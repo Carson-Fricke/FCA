@@ -14,7 +14,10 @@ use serde_json::Value;
 
 use super::clock::Clock;
 use super::configuration::ValidatedConfiguration;
-use super::store::{JobKind, JobRecord, JobState, JobStore, StoreError};
+use harness_execution::jobs::ExecutionRepository;
+use harness_execution::jobs::JobKind;
+use harness_execution::jobs::JobState;
+use harness_execution::jobs::StoreError;
 
 /// Work description passed to an injected backtest launcher.
 #[derive(Debug, Clone, PartialEq)]
@@ -48,23 +51,6 @@ pub trait BacktestRunner: Send + Sync {
         configuration: &ValidatedConfiguration,
         progress: harness_contracts::progress::ProgressReporter,
     ) -> Result<RunOutcome, String>;
-}
-
-/// Default runner used until the Rust backtest engine is ported.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct UnportedBacktestRunner;
-
-impl BacktestRunner for UnportedBacktestRunner {
-    fn run(
-        &self,
-        _configuration: &ValidatedConfiguration,
-        _progress: harness_contracts::progress::ProgressReporter,
-    ) -> Result<RunOutcome, String> {
-        Err(
-            "the Rust backtest engine is not yet ported; the Python harness remains authoritative"
-                .to_string(),
-        )
-    }
 }
 
 /// A launcher failure surfaced back to the route as a failed job.
@@ -183,39 +169,24 @@ fn scalar_string(value: &Value) -> Option<String> {
 ///
 /// Returns the store failure when the failed record cannot be published.
 pub fn mark_failed(
-    jobs: &dyn JobStore,
+    jobs: &dyn harness_execution::jobs::JobExecution,
     job_id: &str,
     clock: &dyn Clock,
     error: &LaunchError,
 ) -> Result<(), StoreError> {
-    let existing = jobs.get(job_id);
-    let created_at = existing
-        .as_ref()
-        .map_or_else(|| clock.now(), |record| record.created_at);
-    let kind = existing
-        .as_ref()
-        .map_or(JobKind::Backtest, |record| record.kind);
-    let input_digest = existing
-        .as_ref()
-        .map_or_else(String::new, |record| record.input_digest.clone());
-    let mut record = JobRecord::new(job_id, kind, input_digest, created_at);
+    let mut record = jobs
+        .try_get(job_id)?
+        .ok_or_else(|| StoreError::JobNotFound(job_id.into()))?;
     record.state = JobState::Failed;
     record.updated_at = clock.now();
     record.error_message = Some(error.to_string());
-    if let Some(existing) = existing {
-        record.strategy_id = existing.strategy_id;
-        record.data_start = existing.data_start;
-        record.data_end = existing.data_end;
-        record.configuration_digest = existing.configuration_digest;
-        record.accepted_input = existing.accepted_input;
-    }
     jobs.put_result(record, BTreeMap::new())?;
     Ok(())
 }
 
 /// Launcher that runs one deterministic backtest inside this process.
 pub struct InProcessLauncher {
-    jobs: Arc<dyn JobStore>,
+    jobs: Arc<dyn ExecutionRepository>,
     runner: Arc<dyn BacktestRunner>,
     clock: Arc<dyn Clock>,
 }
@@ -224,7 +195,7 @@ impl InProcessLauncher {
     /// Compose an in-process launcher over the injected boundaries.
     #[must_use]
     pub fn new(
-        jobs: Arc<dyn JobStore>,
+        jobs: Arc<dyn ExecutionRepository>,
         runner: Arc<dyn BacktestRunner>,
         clock: Arc<dyn Clock>,
     ) -> Self {
@@ -243,13 +214,13 @@ impl BacktestLauncher for InProcessLauncher {
             .runner
             .run(
                 &job.configuration,
-                super::store::progress_reporter(self.jobs.clone(), job.job_id.clone()),
+                harness_execution::jobs::progress_reporter(self.jobs.clone(), job.job_id.clone()),
             )
             .map_err(LaunchError::Engine)?;
         let artifacts = outcome.artifacts;
         let mut record = self
             .jobs
-            .get(&job.job_id)
+            .try_get(&job.job_id)?
             .ok_or_else(|| LaunchError::Store(format!("job not found: {}", job.job_id)))?;
         record.state = if outcome.completed {
             JobState::Succeeded

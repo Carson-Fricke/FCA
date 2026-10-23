@@ -14,10 +14,12 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::backtest::errors::BacktestError;
-use crate::backtest::fixture::{date_string, days_from_civil};
-use crate::backtest::yaml::{load_yaml, YamlValue};
-use crate::sha256::digest_hex;
+use crate::backtest::fixture::date_string;
+use crate::backtest::fixture::days_from_civil;
+use crate::backtest::yaml::load_yaml;
+use crate::backtest::yaml::YamlValue;
+use harness_contracts::sha256::digest_hex;
+use harness_trading::replay_errors::BacktestError;
 
 /// The configuration shell every screening document declares.
 pub const SCREEN_SHELL: &str = "screen";
@@ -92,7 +94,7 @@ impl ScreenConfig {
     ///
     /// Returns [`BacktestError::Configuration`] on any malformed document,
     /// unknown key, or bundle-hash mismatch. `source_path` cannot be resolved
-    /// from text alone; use [`load_screen_config`](crate::backtest::job::load_screen_config)
+    /// from text alone; use [`load_screen_config`](harness_research::configuration::load_screen_config)
     /// for documents that reference the source by path.
     pub fn from_yaml(text: &str) -> Result<Self, BacktestError> {
         let value = load_yaml(text).map_err(|error| BacktestError::Configuration(error.0))?;
@@ -325,7 +327,7 @@ fn assemble(fields: RawFields, base_dir: Option<&Path>) -> Result<ScreenConfig, 
         return Err(configuration_error("bar_intervals must be nonempty"));
     }
     for interval in &fields.bar_intervals {
-        super::engine_core::replay_interval_ns(interval)?;
+        crate::backtest::subscriptions::replay_interval_ns(interval)?;
     }
     let mut intervals = fields.bar_intervals.clone();
     intervals.sort();

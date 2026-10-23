@@ -1,12 +1,15 @@
 //! Synchronous validator port over one bounded compiler child. A faulty authored
 //! constructor, timeout or allocation failure cannot terminate the API process.
-use mcp::tools::{StudyValidator, ToolExecutionError};
-use serde_json::{json, Map, Value};
-use std::{
-    io::{Read, Write},
-    process::{Command, Stdio},
-    sync::Mutex,
-};
+use mcp::tools::ports::StudyValidator;
+use mcp::tools::ports::ToolExecutionError;
+use serde_json::json;
+use serde_json::Map;
+use serde_json::Value;
+use std::io::Read;
+use std::io::Write;
+use std::process::Command;
+use std::process::Stdio;
+use std::sync::Mutex;
 
 pub struct ProcessValidator {
     pub binary: std::path::PathBuf,
@@ -32,9 +35,6 @@ impl ProcessValidator {
 }
 
 impl StudyValidator for ProcessValidator {
-    fn sdk_reference(&self, args: &Map<String, Value>) -> Result<Value, ToolExecutionError> {
-        crate::local::NativeStudyValidator.sdk_reference(args)
-    }
     fn validation_identity(&self) -> Option<String> {
         crate::local::NativeStudyValidator.validation_identity()
     }
@@ -244,5 +244,11 @@ impl Drop for ChildGuard {
             let _ = self.0.kill();
             let _ = self.0.wait();
         }
+    }
+}
+
+impl mcp::tools::ports::SdkReference for ProcessValidator {
+    fn sdk_reference(&self, args: &Map<String, Value>) -> Result<Value, ToolExecutionError> {
+        crate::local::NativeStudyValidator.sdk_reference(args)
     }
 }

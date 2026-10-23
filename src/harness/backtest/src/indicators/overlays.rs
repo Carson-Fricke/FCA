@@ -2,10 +2,17 @@
 
 use num::Decimal18;
 
-use super::base::{
-    add, divide, multiply, subtract, IndicatorError, IndicatorKernel, IndicatorMachine,
-    RollingWindow, TickDriver, DEFAULT_BUCKET_NS, MIDNIGHT_UTC_NS,
-};
+use super::base::add;
+use super::base::divide;
+use super::base::multiply;
+use super::base::subtract;
+use super::base::IndicatorError;
+use super::base::IndicatorKernel;
+use super::base::IndicatorMachine;
+use super::base::RollingWindow;
+use super::base::TickDriver;
+use super::base::DEFAULT_BUCKET_NS;
+use super::base::MIDNIGHT_UTC_NS;
 
 /// Rolling mean of the last `period` trade prices.
 #[derive(Clone, Debug)]

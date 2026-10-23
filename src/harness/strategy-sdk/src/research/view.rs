@@ -1,7 +1,9 @@
 //! Versioned presentation contracts. They carry no execution capabilities.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::StudyOutput;
 

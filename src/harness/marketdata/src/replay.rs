@@ -11,17 +11,27 @@
 //! run. Frames are `u64` big-endian length prefixes of UTF-8 field text, exactly
 //! matching `harness.data.replay._canonical_fields` and `_update_frame`.
 
-use arrow_array::{
-    Array, Decimal128Array, Int64Array, RecordBatch, StringArray, TimestampMicrosecondArray,
-    TimestampNanosecondArray, UInt64Array,
-};
+use arrow_array::Array;
+use arrow_array::Decimal128Array;
+use arrow_array::Int64Array;
+use arrow_array::RecordBatch;
+use arrow_array::StringArray;
+use arrow_array::TimestampMicrosecondArray;
+use arrow_array::TimestampNanosecondArray;
+use arrow_array::UInt64Array;
 use num::Decimal18;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-use sha2::{Digest, Sha256};
+use sha2::Digest;
+use sha2::Sha256;
 
 use crate::error::DataError;
-use crate::events::{BarEvent, EventType, MarketEvent, QuoteEvent, TradeEvent};
-use crate::lake::{DataType, ExchangeSession};
+use crate::events::BarEvent;
+use crate::events::EventType;
+use crate::events::MarketEvent;
+use crate::events::QuoteEvent;
+use crate::events::TradeEvent;
+use crate::lake::DataType;
+use crate::lake::ExchangeSession;
 use crate::symbol::canonical_symbol;
 use crate::time::DateTime;
 

@@ -1,14 +1,19 @@
 //! Compile/cache coordination for managed authored artifacts.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
-use backtest::sha256::digest_hex;
+use harness_contracts::sha256::digest_hex;
 
-use crate::compiler::{run_build, sdk_dependency_path, write_authored_crate};
-use crate::error::{artifact_missing, JitError};
+use crate::compiler::run_build;
+use crate::compiler::sdk_dependency_path;
+use crate::compiler::write_authored_crate;
+use crate::error::artifact_missing;
+use crate::error::JitError;
 use crate::provenance::compiler_fingerprint;
 use crate::toolchain::resolve_toolchain;
-use crate::workspace::{ManagedWorkspace, WorkspaceManifest};
+use crate::workspace::ManagedWorkspace;
+use crate::workspace::WorkspaceManifest;
 
 pub use crate::validation::{validation_service, ValidationFailure, ValidationService};
 

@@ -5,11 +5,21 @@
 //! broken naive fixed-point ports: preserved trailing zeros, negative zero,
 //! positive exponents, and full-width coefficients.
 
-use harness_strategy_sdk::{
-    export, BarFrame, CBarEvent, CBarFrame, CDecimal, CStr, Decimal, MarketConsumer,
-    MetricPublisher, ObservationContext, StudyProgram, Subscription, SDK_ABI_VERSION, SDK_ERROR,
-    SDK_OK,
-};
+use harness_strategy_sdk::export;
+use harness_strategy_sdk::BarFrame;
+use harness_strategy_sdk::CBarEvent;
+use harness_strategy_sdk::CBarFrame;
+use harness_strategy_sdk::CDecimal;
+use harness_strategy_sdk::CStr;
+use harness_strategy_sdk::Decimal;
+use harness_strategy_sdk::MarketConsumer;
+use harness_strategy_sdk::MetricPublisher;
+use harness_strategy_sdk::ObservationContext;
+use harness_strategy_sdk::StudyProgram;
+use harness_strategy_sdk::Subscription;
+use harness_strategy_sdk::SDK_ABI_VERSION;
+use harness_strategy_sdk::SDK_ERROR;
+use harness_strategy_sdk::SDK_OK;
 
 fn roundtrip(text: &str) {
     let value: Decimal = text.parse().expect("decimal parses");

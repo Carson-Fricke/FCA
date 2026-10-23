@@ -10,11 +10,11 @@ publish = false
 crate-type = ["rlib"]
 
 [dependencies]
+harness-trading = { path = "../trading" }
 config = { path = "../config" }
 harness-contracts = { path = "../contracts" }
 num = { path = "../num" }
 marketdata = { path = "../marketdata" }
-harness-lakeclient = { path = "../lakeclient" }
 arrow-array = "59"
 arrow-schema = "59"
 parquet = { version = "59", features = ["arrow"] }
@@ -25,4 +25,5 @@ zstd = "0.13"
 sha2 = "0.10"
 
 [dev-dependencies]
+live = { path = "../live" }
 harness-lakeclient = { path = "../lakeclient", features = ["test-support"] }

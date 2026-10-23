@@ -1,9 +1,11 @@
 //! Author-facing mechanics: partial fills, return units and explicit definitions.
-use harness_strategy_sdk::building_blocks::{
-    cash_return_bps, empirical_quantile, haar_random_walk_energy_share, log_price_slope_bps,
-    FillLedger,
-};
-use harness_strategy_sdk::{Decimal, Fill};
+use harness_strategy_sdk::building_blocks::cash_return_bps;
+use harness_strategy_sdk::building_blocks::empirical_quantile;
+use harness_strategy_sdk::building_blocks::haar_random_walk_energy_share;
+use harness_strategy_sdk::building_blocks::log_price_slope_bps;
+use harness_strategy_sdk::building_blocks::FillLedger;
+use harness_strategy_sdk::Decimal;
+use harness_strategy_sdk::Fill;
 
 fn d(value: &str) -> Decimal {
     value.parse().unwrap()

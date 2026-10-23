@@ -3,16 +3,48 @@
 //! This is execution scratch, not a persisted application format. All rows are
 //! retained; statistics and Parquet output never require a full in-memory copy.
 
-use std::{
-    fs::{File, OpenOptions},
-    io::{self, Read, Write},
-    marker::PhantomData,
-    sync::Arc,
-};
+use std::fs::File;
+use std::fs::OpenOptions;
+use std::io;
+use std::io::Read;
+use std::io::Write;
+use std::marker::PhantomData;
+use std::sync::Arc;
 use tempfile::NamedTempFile;
 
 const CHUNK: usize = 8192;
 const MAX_FRAME: usize = 64 * 1024 * 1024;
+
+/// Caller-owned scratch allocation and capacity. The engine never reads environment settings.
+#[derive(Clone, Default)]
+pub struct HistoryResources {
+    allocator: Option<Arc<dyn Fn() -> io::Result<NamedTempFile> + Send + Sync>>,
+    max_bytes: u64,
+}
+impl std::fmt::Debug for HistoryResources {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HistoryResources")
+            .field("max_bytes", &self.max_bytes)
+            .finish()
+    }
+}
+impl HistoryResources {
+    pub fn new(
+        max_bytes: u64,
+        allocator: Arc<dyn Fn() -> io::Result<NamedTempFile> + Send + Sync>,
+    ) -> Self {
+        Self {
+            max_bytes,
+            allocator: Some(allocator),
+        }
+    }
+    fn allocate(&self) -> io::Result<NamedTempFile> {
+        self.allocator
+            .as_ref()
+            .ok_or_else(|| io::Error::other("replay history requires caller-supplied scratch"))?(
+        )
+    }
+}
 
 pub trait Record: Clone {
     fn encode(&self, output: &mut Vec<u8>);
@@ -26,6 +58,7 @@ pub struct History<T: Record> {
     count: usize,
     bytes: u64,
     last: Option<T>,
+    resources: HistoryResources,
 }
 impl<T: Record> Default for History<T> {
     fn default() -> Self {
@@ -35,10 +68,20 @@ impl<T: Record> Default for History<T> {
             count: 0,
             bytes: 0,
             last: None,
+            resources: HistoryResources::default(),
         }
     }
 }
 impl<T: Record> History<T> {
+    pub fn new(resources: HistoryResources) -> Self {
+        Self {
+            resources,
+            ..Self::default()
+        }
+    }
+    pub fn resources(&self) -> HistoryResources {
+        self.resources.clone()
+    }
     pub fn push(&mut self, value: T) -> io::Result<()> {
         self.last = Some(value.clone());
         self.tail.push(value);
@@ -54,24 +97,19 @@ impl<T: Record> History<T> {
             let mut compressor = zstd::bulk::Compressor::new(1)?;
             compressor.set_parameter(zstd::zstd_safe::CParameter::ChecksumFlag(true))?;
             let compressed = compressor.compress(&raw)?;
-            let cap = std::env::var("HARNESS_HISTORY_SCRATCH_BYTES")
-                .ok()
-                .map(|v| v.parse::<u64>().map_err(io::Error::other))
-                .transpose()?
-                .unwrap_or(2 * 1024 * 1024 * 1024);
             let bytes = self.bytes + compressed.len() as u64 + 16;
-            if bytes > cap {
+            if bytes > self.resources.max_bytes {
                 return Err(io::Error::other(
                     "replay history scratch capacity exhausted",
                 ));
             }
             if self.file.is_none() {
-                self.file = Some(Arc::new(NamedTempFile::new()?));
+                self.file = Some(Arc::new(self.resources.allocate()?));
             }
             // A completed history may be cloned by result consumers. Fork its
             // scratch before appending so each snapshot keeps its exact rows.
             if Arc::strong_count(self.file.as_ref().unwrap()) > 1 {
-                let mut replacement = NamedTempFile::new()?;
+                let mut replacement = self.resources.allocate()?;
                 let mut original = File::open(self.file.as_ref().unwrap().path())?.take(self.bytes);
                 if io::copy(&mut original, &mut replacement)? != self.bytes {
                     return Err(io::Error::other("truncated replay history"));

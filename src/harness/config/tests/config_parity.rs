@@ -5,9 +5,11 @@
 //! strict models, decimal normalization, datetime formatting, and canonical
 //! JSON stay stable across edits to the loader itself.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
-use config::{canonical_json, load_configuration};
+use config::canonical_json;
+use config::load_configuration;
 
 fn config_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

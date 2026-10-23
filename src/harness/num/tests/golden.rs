@@ -7,14 +7,27 @@
 
 use core::str::FromStr;
 
-use num::{Decimal18, DecimalError, RoundingMode, MAX_UNSCALED, MIN_UNSCALED, ONE_UNSCALED};
+use num::Decimal18;
+use num::DecimalError;
+use num::RoundingMode;
+use num::MAX_UNSCALED;
+use num::MIN_UNSCALED;
+use num::ONE_UNSCALED;
 
 mod golden_data;
 
-use golden_data::{
-    BinaryCase, IntCase, MulDivCase, ParseCase, RoundCase, TextCase, BINARY_CASES, INT_CASES,
-    MUL_DIV_CASES, PARSE_CASES, ROUND_CASES, TEXT_CASES,
-};
+use golden_data::BinaryCase;
+use golden_data::IntCase;
+use golden_data::MulDivCase;
+use golden_data::ParseCase;
+use golden_data::RoundCase;
+use golden_data::TextCase;
+use golden_data::BINARY_CASES;
+use golden_data::INT_CASES;
+use golden_data::MUL_DIV_CASES;
+use golden_data::PARSE_CASES;
+use golden_data::ROUND_CASES;
+use golden_data::TEXT_CASES;
 
 fn mode(name: &str) -> RoundingMode {
     RoundingMode::from_name(name).unwrap_or_else(|| panic!("unknown rounding mode {name}"))

@@ -1,14 +1,19 @@
-use mcp::auth::{bearer_headers, BearerTokenSource, MissingBearerCredentialError};
-use mcp::tools::{
-    Boundary, HarnessToolsContext, RemoteResponse, RemoteTransport, StudyValidator,
-    ToolExecutionError,
-};
-use serde_json::{json, Map, Value};
+use mcp::auth::bearer_headers;
+use mcp::auth::BearerTokenSource;
+use mcp::auth::MissingBearerCredentialError;
+use mcp::tools::ports::Boundary;
+use mcp::tools::ports::HarnessToolsContext;
+use mcp::tools::ports::RemoteResponse;
+use mcp::tools::ports::RemoteTransport;
+use mcp::tools::ports::StudyValidator;
+use mcp::tools::ports::ToolExecutionError;
+use serde_json::json;
+use serde_json::Map;
+use serde_json::Value;
 use std::collections::BTreeMap;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 struct Token;
 impl BearerTokenSource for Token {
@@ -80,6 +85,24 @@ fn remote_mutation_loss_is_unknown_and_server_rejections_keep_detail_and_certain
             "unknown_outcome",
             "job_id",
         ),
+        (
+            Ok(RemoteResponse {
+                status_code: 202,
+                headers: BTreeMap::new(),
+                body: json!({"job_id":"another-execution","state":"queued"}),
+            }),
+            "unknown_outcome",
+            "mismatch",
+        ),
+        (
+            Ok(RemoteResponse {
+                status_code: 202,
+                headers: BTreeMap::new(),
+                body: json!({"job_id":"certainty","state":"invented"}),
+            }),
+            "unknown_outcome",
+            "state",
+        ),
     ] {
         let mut context = HarnessToolsContext::new(Boundary::Remote, Arc::new(Token));
         context.api_base_url = Some("https://harness.example".into());
@@ -110,9 +133,7 @@ impl StudyValidator for Validator {
             self.0.fetch_add(1, Ordering::SeqCst)
         ))
     }
-    fn sdk_reference(&self, _: &Map<String, Value>) -> Result<Value, ToolExecutionError> {
-        Ok(json!({"sdkIdentity": "sdk-content-hash", "sdkVersion": "0.1.0", "sdkAbiVersion": 3}))
-    }
+
     fn validate(&self, _: &Value) -> Result<Value, String> {
         unreachable!()
     }
@@ -121,6 +142,7 @@ impl StudyValidator for Validator {
 #[test]
 fn initialize_metadata_is_fresh_and_sdk_catalog_reads_serving_validator() {
     let mut context = HarnessToolsContext::new(Boundary::Local, Arc::new(Token));
+    context.sdk_reference = Some(Arc::new(Validator(AtomicUsize::new(0))));
     context.study_validator = Some(Arc::new(Validator(AtomicUsize::new(0))));
     let server = mcp::create_server(context).unwrap();
     let catalog = server
@@ -203,4 +225,10 @@ fn remote_sdk_guidance_and_initialize_use_remote_reference_identity() {
         response["result"]["structuredContent"]["content"],
         "remote source guidance"
     );
+}
+
+impl mcp::tools::ports::SdkReference for Validator {
+    fn sdk_reference(&self, _: &Map<String, Value>) -> Result<Value, ToolExecutionError> {
+        Ok(json!({"sdkIdentity": "sdk-content-hash", "sdkVersion": "0.1.0", "sdkAbiVersion": 3}))
+    }
 }

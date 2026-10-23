@@ -1,26 +1,25 @@
 //! Admission, interruption, fencing and HTTP availability at the execution boundary.
 //! Replaces the former thread-specific active worker test in job_id_receipt.
-use api::{
-    execution::{
-        backend::{Backend, Local},
-        dispatch::QueuedLauncher,
-        store::{Document, ExecutionStore},
-        worker::Slot,
-        Wake,
-    },
-    http::{create_app, state::AppConfig},
-};
-use axum::{
-    body::Body,
-    http::{Request, StatusCode},
-};
+use api::execution::backend::Backend;
+use api::execution::dispatch::QueuedLauncher;
+use api::execution::Wake;
+use api::http::create_app;
+use api::http::state::AppConfig;
+use axum::body::Body;
+use axum::http::Request;
+use axum::http::StatusCode;
+use harness_execution::fleet::Slot;
+use harness_execution::jobs::JobState;
+use harness_execution::jobs::{JobQueries, ResultPublisher};
+use harness_execution::store::Document;
+use harness_execution::store::ExecutionStore;
+use harness_execution_storage::Local;
 use http_body_util::BodyExt;
-use mcp::store::{JobState, JobStore};
-use serde_json::{json, Value};
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use serde_json::json;
+use serde_json::Value;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use tower::ServiceExt;
 
 /// External Azure service fake: version conflicts and failures cross the real
@@ -212,7 +211,7 @@ async fn lost_capacity_hint_keeps_one_queryable_execution_and_interruption_never
     let submitted = directory.path().join("submission.json");
     std::fs::write(&submitted, input.to_string()).unwrap();
     let local = api::local::NativeBacktestSubmitter::new(Arc::new(store.clone()), wake.clone());
-    let joined = mcp::tools::BacktestSubmitter::submit(
+    let joined = mcp::tools::ports::BacktestSubmitter::submit(
         &local,
         submitted.to_str().unwrap(),
         None,
@@ -321,7 +320,7 @@ async fn artifact_inventory_is_metadata_and_binary_download_preserves_the_publis
     let api = app(store.clone(), Arc::new(LostHint::default()));
     assert_eq!(post(&api, &document()).await.0, StatusCode::ACCEPTED);
     let owner = store.claim("retained-job").unwrap().unwrap();
-    let mut record = owner.get("retained-job").unwrap();
+    let mut record = owner.try_get("retained-job").unwrap().unwrap();
     record.state = JobState::Succeeded;
     let payload = vec![42u8; 200_000];
     owner
@@ -436,9 +435,9 @@ async fn synchronous_control_work_cannot_block_health_or_job_observation() {
 #[tokio::test]
 async fn renewal_failures_recover_without_replaying_and_publish_the_retained_execution() {
     use api::execution::renewal::Ownership;
+    use harness_execution::jobs::{StorageFailureKind, StoreError};
     use lake_contracts::DataError;
     use lake_storage::AzureBlobContainer;
-    use mcp::store::{StorageFailureKind, StoreError};
     let (objects, store) = azure_store();
     let api = app(store.clone(), Arc::new(LostHint::default()));
     assert_eq!(post(&api, &document()).await.0, StatusCode::ACCEPTED);
@@ -484,7 +483,7 @@ async fn renewal_failures_recover_without_replaying_and_publish_the_retained_exe
     let temp = tempfile::tempdir().unwrap();
     let file = temp.path().join("result.json");
     std::fs::write(&file, b"verified").unwrap();
-    let mut record = owned.get("retained-job").unwrap();
+    let mut record = owned.try_get("retained-job").unwrap().unwrap();
     record.state = JobState::Succeeded;
     owned
         .put_files(
@@ -546,7 +545,7 @@ async fn sdk_retried_committed_claims_reconcile_their_tokens_without_duplicating
         .unwrap();
     ownership.renew();
     assert!(ownership.check(chrono::Utc::now()).is_ok());
-    let mut record = owned.get("retained-job").unwrap();
+    let mut record = owned.try_get("retained-job").unwrap().unwrap();
     record.state = JobState::Succeeded;
     owned
         .put_result(
@@ -689,8 +688,12 @@ async fn ownership_loss_fences_publication_and_blocked_storage_cannot_extend_dea
     .unwrap();
     monitor.renew();
     assert!(monitor.check(chrono::Utc::now()).is_err());
-    let mut stale = owned.get("retained-job").unwrap();
+    let mut stale = owned.try_get("retained-job").unwrap().unwrap();
     stale.state = JobState::Failed;
     assert!(owned.put_result(stale, Default::default()).is_err());
     assert_eq!(store.get("retained-job").unwrap().state, JobState::Running);
 }
+
+#[path = "support/jobs.rs"]
+pub mod job_inspection;
+use job_inspection::JobInspection;

@@ -2,14 +2,14 @@
 
 use num::Decimal18;
 
-use crate::error::LiveResult;
-use crate::events::MarketEvent;
-use crate::fills::decision::FillDecision;
-use crate::fills::latency_size::LatencySize;
-use crate::fills::mid_touch::MidTouch;
-use crate::fills::simple_touch::SimpleTouch;
-use crate::fills::trade_through::TradeThrough;
-use crate::orders::SingleLegOrder;
+use harness_trading::error::LiveResult;
+use harness_trading::events::MarketEvent;
+use harness_trading::fills::decision::FillDecision;
+use harness_trading::fills::latency_size::LatencySize;
+use harness_trading::fills::mid_touch::MidTouch;
+use harness_trading::fills::simple_touch::SimpleTouch;
+use harness_trading::fills::trade_through::TradeThrough;
+use harness_trading::orders::SingleLegOrder;
 
 /// A deterministic fill plugin used by the simulated venue.
 pub trait FillPlugin {

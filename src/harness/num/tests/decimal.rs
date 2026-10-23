@@ -2,7 +2,8 @@
 
 use core::str::FromStr;
 
-use num::{Decimal, DecimalError};
+use num::Decimal;
+use num::DecimalError;
 
 fn decimal(text: &str) -> Decimal {
     Decimal::from_str(text).expect("valid decimal literal")

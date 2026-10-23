@@ -7,7 +7,8 @@
 
 use num::Decimal18;
 
-use crate::time::{DateTime, Nanos};
+use crate::time::DateTime;
+use crate::time::Nanos;
 
 /// Event classes recognized by the deterministic bus, in priority order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

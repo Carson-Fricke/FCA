@@ -4,6 +4,10 @@
 [workspace]
 resolver = "2"
 members = [
+    "research",
+    "trading",
+    "execution-storage",
+    "execution",
     "num",
     "api",
     "marketdata",

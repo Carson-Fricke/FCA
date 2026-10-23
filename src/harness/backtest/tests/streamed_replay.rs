@@ -1,18 +1,23 @@
 //! Full-resolution replay and result statistics survive bounded memory execution.
-use backtest::{
-    backtest::{
-        config::BacktestConfig,
-        engine_core::*,
-        errors::{BacktestError, ONE_DAY_NS},
-        fixture::{synthetic_fixture, ReplayFixture, SyntheticDataOptions},
-        history::History,
-        preflight::preflight_data,
-        stream::StreamedReplay,
-    },
-    results::metrics::{equity_curve_metrics, equity_curve_metrics_stream, EquityPoint},
-};
+use backtest::backtest::config::BacktestConfig;
+use backtest::backtest::engine_core::*;
+use backtest::backtest::fixture::synthetic_fixture;
+use backtest::backtest::fixture::ReplayFixture;
+use backtest::backtest::fixture::SyntheticDataOptions;
+use backtest::backtest::history::History;
+use backtest::backtest::identity::build_default_manifest;
+use backtest::backtest::outcome::BacktestOutcome;
+use backtest::backtest::preflight::preflight_data;
+use backtest::backtest::stream::StreamedReplay;
+use backtest::results::metrics::equity_curve_metrics;
+use backtest::results::metrics::equity_curve_metrics_stream;
+use backtest::results::metrics::EquityPoint;
+use harness_trading::program::*;
+use harness_trading::replay_errors::BacktestError;
+use harness_trading::replay_errors::ONE_DAY_NS;
 use num::Decimal18;
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 struct Idle;
 impl StrategyRuntime for Idle {
@@ -129,7 +134,10 @@ fn compressed_histories_preserve_every_row_and_exact_full_resolution_metrics() {
             equity: Decimal18::from_i64(100_000 + (i % 97) - (i % 13)),
         })
         .collect();
-    let mut history = History::default();
+    let mut history = History::new(backtest::backtest::history::HistoryResources::new(
+        2 * 1024 * 1024,
+        std::sync::Arc::new(tempfile::NamedTempFile::new),
+    ));
     for point in &points {
         history.push(*point).unwrap();
     }

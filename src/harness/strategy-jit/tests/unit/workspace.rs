@@ -1,6 +1,7 @@
 use super::*;
 #[cfg(windows)]
-use std::path::{Component, Prefix};
+use std::path::Component;
+use std::path::Prefix;
 
 #[test]
 fn compile_locks_are_scoped_and_manifest_updates_retain_all_entries() {

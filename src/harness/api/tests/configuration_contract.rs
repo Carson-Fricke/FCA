@@ -1,9 +1,11 @@
-use api::http::configuration::{
-    configuration_hash, ConfigurationParser, StrictJsonConfigurationParser,
-};
+use api::http::configuration::configuration_hash;
+use api::http::configuration::ConfigurationParser;
+use api::http::configuration::StrictJsonConfigurationParser;
 use backtest::backtest::config::BacktestConfig;
-use serde_json::{json, Value};
-use std::sync::atomic::{AtomicU64, Ordering};
+use serde_json::json;
+use serde_json::Value;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 static CONTRACT_TEMP: AtomicU64 = AtomicU64::new(0);
 
@@ -20,7 +22,7 @@ fn acceptance(document: &Value, expected: bool) {
         "engine: {text}"
     );
     assert_eq!(
-        mcp::tools::validate_configuration(document, None).is_ok(),
+        mcp::tools::arguments::validate_configuration(document, None).is_ok(),
         expected,
         "MCP: {text}"
     );
@@ -35,9 +37,9 @@ fn acceptance(document: &Value, expected: bool) {
     ));
     std::fs::write(&path, &text).unwrap();
     let loaded = if document["shell"] == "study" {
-        backtest::backtest::job::load_study_config(&path)
+        harness_research::configuration::load_study_config(&path)
     } else {
-        backtest::backtest::job::load_backtest_config(&path)
+        harness_research::configuration::load_backtest_config(&path)
     };
     std::fs::remove_file(path).unwrap();
     assert_eq!(loaded.is_ok(), expected, "CLI loader: {text}");
@@ -140,12 +142,12 @@ fn submitted_and_resolved_identities_are_deliberately_distinct() {
         .parse(document.to_string().as_bytes())
         .unwrap();
     assert_eq!(
-        parsed.configuration_digest,
+        parsed.configuration_digest(),
         config::configuration_hash(&document)
     );
-    assert_eq!(parsed.configuration_digest, configuration_hash(&document));
+    assert_eq!(parsed.configuration_digest(), configuration_hash(&document));
     let resolved = BacktestConfig::from_yaml(&document.to_string()).unwrap();
-    assert_ne!(parsed.configuration_digest, resolved.configuration_hash());
+    assert_ne!(parsed.configuration_digest(), resolved.configuration_hash());
     assert_eq!(
         resolved.configuration_hash(),
         backtest::backtest::manifest::configuration_hash(&resolved.canonical_json())
@@ -175,7 +177,7 @@ fn numeric_parameters_and_normalized_symbols_agree_between_yaml_json_and_engine(
 #[test]
 fn screening_schema_is_shared_by_api_mcp_and_cli() {
     let source = "// screening source\n";
-    let digest = backtest::sha256::digest_hex(source.as_bytes());
+    let digest = harness_contracts::sha256::digest_hex(source.as_bytes());
     let document = json!({"schema_version":1,"shell":"screen","job_id":"parity-screen",
         "name":"parity",
         "as_of":"2024-01-19","bar_intervals":["1d"],"lookback_days":20,"rank_metric":"close",
@@ -192,7 +194,7 @@ fn screening_schema_is_shared_by_api_mcp_and_cli() {
             !invalid
         );
         assert_eq!(
-            mcp::tools::validate_configuration(&document, None).is_ok(),
+            mcp::tools::arguments::validate_configuration(&document, None).is_ok(),
             !invalid
         );
         let path = std::env::temp_dir().join(format!(
@@ -201,7 +203,7 @@ fn screening_schema_is_shared_by_api_mcp_and_cli() {
         ));
         std::fs::write(&path, text).unwrap();
         assert_eq!(
-            backtest::backtest::job::load_screen_config(&path).is_ok(),
+            harness_research::configuration::load_screen_config(&path).is_ok(),
             !invalid
         );
         std::fs::remove_file(path).unwrap();
@@ -222,8 +224,8 @@ fn nanosecond_bounds_match_typed_resolved_identity_after_api_validation() {
         let parsed = StrictJsonConfigurationParser
             .parse(document.to_string().as_bytes())
             .unwrap();
-        let typed = config::replay::validate_document(&parsed.document).unwrap();
-        let resolved = BacktestConfig::from_yaml(&parsed.document.to_string()).unwrap();
+        let typed = config::replay::validate_document(parsed.document()).unwrap();
+        let resolved = BacktestConfig::from_yaml(&parsed.document().to_string()).unwrap();
         assert_eq!(resolved.canonical_json().to_serde_value(), typed);
         // Compare resolved trees in the same persisted encoding, not raw submission identity.
         assert_eq!(

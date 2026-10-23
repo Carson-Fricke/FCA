@@ -2,9 +2,10 @@
 
 use std::collections::VecDeque;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
+use std::sync::OnceLock;
 
-use backtest::sha256::digest_hex;
+use harness_contracts::sha256::digest_hex;
 
 use crate::compiler::sdk_dependency_path;
 use crate::error::JitError;

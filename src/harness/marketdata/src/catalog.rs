@@ -7,7 +7,8 @@
 use num::Decimal18;
 
 use crate::error::DataError;
-use crate::symbol::{canonical_osi_symbol, canonical_symbol};
+use crate::symbol::canonical_osi_symbol;
+use crate::symbol::canonical_symbol;
 use crate::time::Date;
 
 /// How one entity came to be listed under a symbol.

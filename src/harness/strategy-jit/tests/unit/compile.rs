@@ -1,6 +1,8 @@
 use super::*;
 
-use super::fixture::{artifact_value, replace_preserving_mtime, Fixture};
+use super::fixture::artifact_value;
+use super::fixture::replace_preserving_mtime;
+use super::fixture::Fixture;
 
 #[test]
 fn distinct_authored_sources_reuse_dependencies_and_keep_loaded_artifacts_immutable() {

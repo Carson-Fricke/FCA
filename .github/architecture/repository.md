@@ -1,5 +1,41 @@
 # Repository Architecture
 
+## Harness responsibility boundaries
+
+`src/harness/trading` owns deterministic order, matching, fill accounting, risk,
+fee and program contracts. Replay and live consume it; live has no backtest
+production dependency. Both books use the checked ledger transition, and both
+touch matchers use shared stop activation and price policy. Fee formulas and
+single-position notional cap/reduction policy are shared across both numeric
+representations; multi-leg portfolio constraints remain in trading risk.
+
+`backtest` coordinates deterministic replay over supplied program instances and
+re-iterable input factories. Subscription/frame assembly, event ordering, resting
+venue state, configuration-to-risk projection, outcome rendering and identity have
+separate modules. `research` owns configuration-file loading, authored-program
+composition, acquisition/cursors, scratch allocation and capacity, telemetry cadence,
+result-ledger reconstruction and publication. The replay history consumes an injected
+allocator and capacity; it reads no environment variables.
+`strategy-jit` compiles, loads and adapts programs without a backtest dependency;
+raw vtables and program state are crate-private and borrowed from library owners.
+
+`execution` owns neutral job records, lifecycle rules, conditional-persistence
+ports, fenced claims and fleet reservations. HTTP/MCP import those contracts;
+concrete filesystem, memory and Azure implementations stay outside that crate.
+Admission, queries, artifact reading, publication and retention have separate ports.
+A successful fenced claim constructs an opaque single-job publication capability.
+Queries propagate I/O failures; inventory reads never load artifact payloads.
+`execution-storage` supplies conditional memory/file adapters for the one lifecycle; `api/execution`
+composes cloud/local backends, finite workers, keepalive and dispatch.
+
+Trader supervision separates lifecycle decisions from configuration, clocks,
+feeds, snapshot adapters, journal and process startup. API startup projects the
+shared strict configuration loader; it has no line-oriented alternate parser.
+MCP catalog/schema composition, launches, queries, validation, templates, argument
+materialization and remote transport have separate modules. Runtime handlers receive
+only their capability sets, not the mutable composition context. SDK-reference
+reading is a separate read-only port from authored-program validation.
+
 ## Runtime and FCA extension boundary
 
 `src/thesis_runtime/` owns the generic host for conversations, tool dispatch,
@@ -105,7 +141,7 @@ multi-timeframe aggregation belongs to harness execution and serves screening.
 
 Local harness MCP study, backtest, and screening workers durably transition
 their admitted job from `queued` to `running` before acquisition, compilation,
-or execution. The shared `JobStore.mark_running` operation retains accepted
+or execution. The shared `ResultPublisher.mark_running` operation retains accepted
 input and identity, preserves the first start timestamp on repeated updates,
 and rejects terminal jobs. Acceptance receipts remain `queued`; subsequent
 status queries distinguish an active worker from work awaiting dispatch.
@@ -244,7 +280,7 @@ look-ahead boundary, venues,
 fees, portfolio, risk, bars/scheduler, bounded lake replay, the deterministic
 backtest runner with reproducibility manifest, the streaming run recorder, the
 backtest results store and its authoritative job store (one `JobRecord` per
-`job_id`, artifact payloads under the `jobs/` object prefix), standard metrics
+`job_id`, artifact payloads under the `execution/objects/` prefix), standard metrics
 and attribution,
 the point-in-time option contract universe, the capability-scoped strategy
 boundary (read-only clock, opaque StrategyHistory data capability, one-way
@@ -256,7 +292,7 @@ planned. The signal kernels (MODWT with circular/reflection boundaries,
 additive MRA, wavelet variance, Hilbert envelope/phase features, and an
 exploratory Morlet CWT scalogram) are implemented natively in the `backtest`
 crate under `backtest::signal`, ported from the retired `harness.signal`
-module. The retired `native` C-ABI crate and its removed Python loader have no product consumers and are deleted. Active replay, accounting, matching, and result computation live in `backtest`; authored programs cross the separate SDK/JIT ABI.
+module. The retired `native` C-ABI crate and its removed Python loader have no product consumers and are deleted. Replay and result computation live in `backtest`; deterministic trading policy and books live in `trading`. Authored programs cross the separate SDK/JIT ABI.
 
 The Rust migration is complete. The engine workspace lives under
 `src/harness/` and provides the authoritative engine core (clock, event

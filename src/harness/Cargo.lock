@@ -145,8 +145,12 @@ dependencies = [
  "config",
  "futures-util",
  "harness-contracts",
+ "harness-execution",
+ "harness-execution-storage",
  "harness-lakeclient",
+ "harness-research",
  "harness-strategy-jit",
+ "harness-trading",
  "hex",
  "http-body-util",
  "lake-contracts",
@@ -819,6 +823,8 @@ dependencies = [
  "config",
  "harness-contracts",
  "harness-lakeclient",
+ "harness-trading",
+ "live",
  "marketdata",
  "num",
  "parquet",
@@ -1869,6 +1875,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "harness-execution"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "harness-contracts",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "uuid",
+]
+
+[[package]]
+name = "harness-execution-storage"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "harness-contracts",
+ "harness-execution",
+ "hex",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "harness-lakeclient"
 version = "0.1.0"
 dependencies = [
@@ -1912,15 +1944,34 @@ dependencies = [
 ]
 
 [[package]]
-name = "harness-strategy-jit"
+name = "harness-research"
 version = "0.1.0"
 dependencies = [
  "arrow-array 59.3.0",
  "backtest",
  "chrono",
+ "config",
+ "harness-contracts",
+ "harness-lakeclient",
+ "harness-strategy-jit",
+ "harness-strategy-sdk",
+ "harness-trading",
+ "marketdata",
+ "num",
+ "parquet",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "harness-strategy-jit"
+version = "0.1.0"
+dependencies = [
  "harness-contracts",
  "harness-lakeclient",
  "harness-strategy-sdk",
+ "harness-trading",
  "libloading",
  "marketdata",
  "num",
@@ -1934,6 +1985,15 @@ name = "harness-strategy-sdk"
 version = "0.1.0"
 dependencies = [
  "harness-contracts",
+ "num",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "harness-trading"
+version = "0.1.0"
+dependencies = [
  "num",
  "serde",
  "serde_json",
@@ -2771,16 +2831,18 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 name = "live"
 version = "0.1.0"
 dependencies = [
- "backtest",
  "chrono",
  "clap",
  "config",
  "futures-util",
+ "harness-contracts",
+ "harness-trading",
  "num",
  "reqwest 0.13.5",
  "serde_json",
  "tokio",
  "tokio-tungstenite",
+ "uuid",
 ]
 
 [[package]]
@@ -2846,7 +2908,11 @@ version = "0.1.0"
 dependencies = [
  "backtest",
  "chrono",
+ "config",
  "harness-contracts",
+ "harness-execution",
+ "harness-execution-storage",
+ "harness-research",
  "hex",
  "percent-encoding",
  "serde",

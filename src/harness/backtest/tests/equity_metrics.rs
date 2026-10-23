@@ -5,10 +5,13 @@
 //! annualization. The job-level publication of the same rules is pinned in
 //! `canonical_trades.rs`.
 
-use backtest::results::metrics::{
-    cagr, longest_drawdown, max_drawdown, sharpe_per_sample, total_return, EquityPoint,
-    NANOS_PER_YEAR_365,
-};
+use backtest::results::metrics::cagr;
+use backtest::results::metrics::longest_drawdown;
+use backtest::results::metrics::max_drawdown;
+use backtest::results::metrics::sharpe_per_sample;
+use backtest::results::metrics::total_return;
+use backtest::results::metrics::EquityPoint;
+use backtest::results::metrics::NANOS_PER_YEAR_365;
 use num::Decimal18;
 
 const DAY: i64 = 86_400_000_000_000;
@@ -162,4 +165,41 @@ fn cagr_reports_its_reason_and_names_a_zero_span() {
         Err("nonpositive_span"),
         "a zero span has no annualization"
     );
+}
+
+#[test]
+fn compact_constant_runs_preserve_exact_metrics_and_flat_sample_weighting() {
+    use backtest::results::metrics::{equity_curve_metrics, EquityAccumulator};
+    for levels in [
+        vec!["100", "100", "101", "99", "99", "102"],
+        vec!["100", "0", "0", "5", "5", "6"],
+        vec!["100", "50", "-1", "-1", "20", "20"],
+        vec!["100", "100", "100", "100", "100", "100"],
+    ] {
+        let mut dense = Vec::new();
+        let mut compact = EquityAccumulator::default();
+        let mut groups = Vec::new();
+        for (index, level) in levels.iter().enumerate() {
+            let first = EquityPoint {
+                timestamp_ns: (index * 200) as i64 * DAY,
+                equity: level.parse().unwrap(),
+            };
+            let last_ns = first.timestamp_ns + 100 * DAY;
+            for repeat in 0..101 {
+                dense.push(EquityPoint {
+                    timestamp_ns: first.timestamp_ns + repeat * DAY,
+                    equity: first.equity,
+                });
+            }
+            compact.push(first);
+            compact.extend_flat(last_ns, 100);
+            groups.push((first, last_ns));
+        }
+        let mut variance = compact.variance();
+        for (first, last_ns) in groups {
+            variance.push(first);
+            variance.extend_flat(last_ns, 100);
+        }
+        assert_eq!(compact.finish(variance), equity_curve_metrics(&dense));
+    }
 }

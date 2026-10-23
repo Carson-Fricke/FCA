@@ -11,12 +11,19 @@ use std::collections::HashMap;
 
 use num::Decimal18;
 
-use crate::bars::{BarAggregator, OhlcvBar};
+use crate::bars::BarAggregator;
+use crate::bars::OhlcvBar;
 use crate::clock::Clock;
 use crate::error::DataError;
-use crate::events::{cutoff_key, end_key, start_key, EventType, MarketEvent, OrderingKey};
+use crate::events::cutoff_key;
+use crate::events::end_key;
+use crate::events::start_key;
+use crate::events::EventType;
+use crate::events::MarketEvent;
+use crate::events::OrderingKey;
 use crate::symbol::canonical_symbol;
-use crate::time::{DateTime, Nanos};
+use crate::time::DateTime;
+use crate::time::Nanos;
 
 /// Default ring-buffer capacity for new subscriptions.
 pub const DEFAULT_HISTORY_CAPACITY: usize = 4096;

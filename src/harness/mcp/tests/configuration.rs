@@ -1,12 +1,17 @@
-use mcp::auth::{
-    bearer_headers, BearerTokenSource, EnvironmentBearerTokenSource, MissingBearerCredentialError,
-};
-use mcp::tools::{
-    BacktestSubmitter, Boundary, HarnessToolsContext, RemoteResponse, RemoteTransport,
-};
-use serde_json::{json, Value};
+use mcp::auth::bearer_headers;
+use mcp::auth::BearerTokenSource;
+use mcp::auth::EnvironmentBearerTokenSource;
+use mcp::auth::MissingBearerCredentialError;
+use mcp::tools::ports::BacktestSubmitter;
+use mcp::tools::ports::Boundary;
+use mcp::tools::ports::HarnessToolsContext;
+use mcp::tools::ports::RemoteResponse;
+use mcp::tools::ports::RemoteTransport;
+use serde_json::json;
+use serde_json::Value;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 
 struct Submitter;
 impl BacktestSubmitter for Submitter {
@@ -69,7 +74,7 @@ impl RemoteTransport for CapturingTransport {
         Ok(RemoteResponse {
             status_code: 202,
             headers: BTreeMap::new(),
-            body: json!({"job_id": "job-remote", "state": "queued"}),
+            body: json!({"job_id": payload["job_id"], "state": "queued"}),
         })
     }
 }
@@ -165,7 +170,10 @@ fn run_backtest_applies_a_submitted_job_id_over_the_document() {
 
 #[test]
 fn submission_tools_advertise_an_optional_job_id() {
-    use mcp::tools::{build_catalog, TOOL_RUN_BACKTEST, TOOL_RUN_SCREENER, TOOL_RUN_STUDY};
+    use mcp::tools::catalog::build_catalog;
+    use mcp::tools::TOOL_RUN_BACKTEST;
+    use mcp::tools::TOOL_RUN_SCREENER;
+    use mcp::tools::TOOL_RUN_STUDY;
     let context = HarnessToolsContext::new(Boundary::Local, Arc::new(EnvironmentBearerTokenSource));
     let catalog = build_catalog(context).unwrap();
     for name in [TOOL_RUN_BACKTEST, TOOL_RUN_STUDY, TOOL_RUN_SCREENER] {

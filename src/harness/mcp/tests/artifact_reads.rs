@@ -1,8 +1,16 @@
 //! Remote artifact inspection uses the authenticated canonical job route.
-use mcp::auth::{bearer_headers, BearerTokenSource, MissingBearerCredentialError};
-use mcp::tools::{Boundary, HarnessTools, HarnessToolsContext, RemoteResponse, RemoteTransport};
-use serde_json::{json, Value};
-use std::{collections::BTreeMap, sync::Arc};
+use mcp::auth::bearer_headers;
+use mcp::auth::BearerTokenSource;
+use mcp::auth::MissingBearerCredentialError;
+use mcp::build_catalog;
+use mcp::tools::ports::Boundary;
+use mcp::tools::ports::HarnessToolsContext;
+use mcp::tools::ports::RemoteResponse;
+use mcp::tools::ports::RemoteTransport;
+use serde_json::json;
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 struct Token;
 impl BearerTokenSource for Token {
     fn bearer_token(&self) -> Option<String> {
@@ -40,9 +48,12 @@ fn remote_artifacts_return_canonical_content_and_reject_other_job_attribution() 
         let mut context = HarnessToolsContext::new(Boundary::Remote, Arc::new(Token));
         context.api_base_url = Some("https://harness.example".into());
         context.remote_transport = Some(Arc::new(Transport { mismatch }));
-        let tools = HarnessTools::new(context);
+        let tools = build_catalog(context).unwrap();
         let args = json!({"job_id":"job-output","name":"exploratory_outputs.json"});
-        let result = tools.read_artifact(args.as_object().unwrap());
+        let result = tools
+            .resolve("read_artifact")
+            .unwrap()
+            .call(args.as_object().unwrap());
         if mismatch {
             assert!(result.unwrap_err().to_string().contains("attribution"));
         } else {

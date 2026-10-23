@@ -1,16 +1,28 @@
 //! Loading compiled authored artifacts through `libloading`.
 
-use std::ffi::{c_char, CStr as FfiCStr};
+use std::ffi::c_char;
+use std::ffi::CStr as FfiCStr;
 use std::path::Path;
 
-use harness_strategy_sdk::{
-    CStr, ScreenContext, ScreenRow, ScreeningProgramVTable, StrategyProgramVTable,
-    StudyProgramVTable, ABI_EXPORT, LAST_ERROR_EXPORT, SCREENING_VTABLE_EXPORT, SDK_ABI_VERSION,
-    SDK_OK, STRATEGY_VTABLE_EXPORT, STUDY_VTABLE_EXPORT,
-};
-use libloading::{Library, Symbol};
+use harness_strategy_sdk::CStr;
+use harness_strategy_sdk::ScreenContext;
+use harness_strategy_sdk::ScreenRow;
+use harness_strategy_sdk::ScreeningProgramVTable;
+use harness_strategy_sdk::StrategyProgramVTable;
+use harness_strategy_sdk::StudyProgramVTable;
+use harness_strategy_sdk::ABI_EXPORT;
+use harness_strategy_sdk::LAST_ERROR_EXPORT;
+use harness_strategy_sdk::SCREENING_VTABLE_EXPORT;
+use harness_strategy_sdk::SDK_ABI_VERSION;
+use harness_strategy_sdk::SDK_OK;
+use harness_strategy_sdk::STRATEGY_VTABLE_EXPORT;
+use harness_strategy_sdk::STUDY_VTABLE_EXPORT;
+use libloading::Library;
+use libloading::Symbol;
 
-use crate::error::{export_missing, load_error, JitError};
+use crate::error::export_missing;
+use crate::error::load_error;
+use crate::error::JitError;
 
 /// A loaded study program: the dylib, its vtable, and the constructed state.
 ///
@@ -18,13 +30,12 @@ use crate::error::{export_missing, load_error, JitError};
 /// then unloads the library.
 pub struct LoadedStudy {
     library: Library,
-    vtable: &'static StudyProgramVTable,
+    vtable: *const StudyProgramVTable,
     state: *mut std::os::raw::c_void,
 }
 
 // The engine constructs, drives, and drops a runtime on one thread; the
 // exports are thread-local-error free pure dispatchers over that state.
-unsafe impl Send for LoadedStudy {}
 
 impl LoadedStudy {
     /// Load one study artifact and construct its program state.
@@ -49,7 +60,7 @@ impl LoadedStudy {
                 found: abi_version,
             });
         }
-        let vtable: &'static StudyProgramVTable = unsafe {
+        let vtable: &StudyProgramVTable = unsafe {
             let symbol: Symbol<unsafe extern "C" fn() -> *const StudyProgramVTable> = library
                 .get(STUDY_VTABLE_EXPORT.as_bytes())
                 .map_err(|error| export_missing(&error, STUDY_VTABLE_EXPORT))?;
@@ -73,20 +84,21 @@ impl LoadedStudy {
         }
         Ok(Self {
             library,
-            vtable,
+            vtable: vtable as *const _,
             state,
         })
     }
 
     /// The program vtable.
     #[must_use]
-    pub const fn vtable(&self) -> &'static StudyProgramVTable {
-        self.vtable
+    pub(crate) fn vtable(&self) -> &StudyProgramVTable {
+        // SAFETY: the library remains owned for this borrow.
+        unsafe { &*self.vtable }
     }
 
     /// The constructed program state.
     #[must_use]
-    pub const fn state(&self) -> *mut std::os::raw::c_void {
+    pub(crate) const fn state(&self) -> *mut std::os::raw::c_void {
         self.state
     }
 
@@ -103,19 +115,18 @@ impl LoadedStudy {
 impl Drop for LoadedStudy {
     fn drop(&mut self) {
         // Safety: state came from create and is destroyed exactly once here.
-        unsafe { (self.vtable.destroy)(self.state) };
+        unsafe { (self.vtable().destroy)(self.state) };
     }
 }
 
 /// A loaded strategy artifact; see [`LoadedStudy`].
 pub struct LoadedStrategy {
     library: Library,
-    vtable: &'static StrategyProgramVTable,
+    vtable: *const StrategyProgramVTable,
     state: *mut std::os::raw::c_void,
 }
 
 // See LoadedStudy.
-unsafe impl Send for LoadedStrategy {}
 
 impl LoadedStrategy {
     /// Load one strategy artifact and construct its program state.
@@ -138,7 +149,7 @@ impl LoadedStrategy {
                 found: abi_version,
             });
         }
-        let vtable: &'static StrategyProgramVTable = unsafe {
+        let vtable: &StrategyProgramVTable = unsafe {
             let symbol: Symbol<unsafe extern "C" fn() -> *const StrategyProgramVTable> = library
                 .get(STRATEGY_VTABLE_EXPORT.as_bytes())
                 .map_err(|error| export_missing(&error, STRATEGY_VTABLE_EXPORT))?;
@@ -162,20 +173,21 @@ impl LoadedStrategy {
         }
         Ok(Self {
             library,
-            vtable,
+            vtable: vtable as *const _,
             state,
         })
     }
 
     /// The program vtable.
     #[must_use]
-    pub const fn vtable(&self) -> &'static StrategyProgramVTable {
-        self.vtable
+    pub(crate) fn vtable(&self) -> &StrategyProgramVTable {
+        // SAFETY: the library remains owned for this borrow.
+        unsafe { &*self.vtable }
     }
 
     /// The constructed program state.
     #[must_use]
-    pub const fn state(&self) -> *mut std::os::raw::c_void {
+    pub(crate) const fn state(&self) -> *mut std::os::raw::c_void {
         self.state
     }
 
@@ -192,7 +204,7 @@ impl LoadedStrategy {
 impl Drop for LoadedStrategy {
     fn drop(&mut self) {
         // Safety: state came from create and is destroyed exactly once here.
-        unsafe { (self.vtable.destroy)(self.state) };
+        unsafe { (self.vtable().destroy)(self.state) };
     }
 }
 
@@ -204,12 +216,11 @@ impl Drop for LoadedStrategy {
 /// construction.
 pub struct LoadedScreening {
     library: Library,
-    vtable: &'static ScreeningProgramVTable,
+    vtable: *const ScreeningProgramVTable,
     state: *mut std::os::raw::c_void,
 }
 
 // See LoadedStudy.
-unsafe impl Send for LoadedScreening {}
 
 impl LoadedScreening {
     /// Load one screening artifact and construct its program state.
@@ -232,7 +243,7 @@ impl LoadedScreening {
                 found: abi_version,
             });
         }
-        let vtable: &'static ScreeningProgramVTable = unsafe {
+        let vtable: &ScreeningProgramVTable = unsafe {
             let symbol: Symbol<unsafe extern "C" fn() -> *const ScreeningProgramVTable> = library
                 .get(SCREENING_VTABLE_EXPORT.as_bytes())
                 .map_err(|error| export_missing(&error, SCREENING_VTABLE_EXPORT))?;
@@ -256,21 +267,16 @@ impl LoadedScreening {
         }
         Ok(Self {
             library,
-            vtable,
+            vtable: vtable as *const _,
             state,
         })
     }
 
     /// The program vtable.
     #[must_use]
-    pub const fn vtable(&self) -> &'static ScreeningProgramVTable {
-        self.vtable
-    }
-
-    /// The constructed program state.
-    #[must_use]
-    pub const fn state(&self) -> *mut std::os::raw::c_void {
-        self.state
+    pub(crate) fn vtable(&self) -> &ScreeningProgramVTable {
+        // SAFETY: the library remains owned for this borrow.
+        unsafe { &*self.vtable }
     }
 
     /// The recorded last error from the artifact, if any.
@@ -298,11 +304,11 @@ impl LoadedScreening {
                 "screening context could not be serialized: {error}"
             ))
         })?;
-        let code = unsafe { (self.vtable.screen)(self.state, CStr::from_slice(&document)) };
+        let code = unsafe { (self.vtable().screen)(self.state, CStr::from_slice(&document)) };
         if code != SDK_OK {
             return Err(JitError::Screen(unsafe { read_last_error(&self.library) }));
         }
-        let view = unsafe { (self.vtable.result)(self.state) };
+        let view = unsafe { (self.vtable().result)(self.state) };
         let Some(text) = (unsafe { view.as_str() }) else {
             return Err(JitError::Screen(Some(
                 "screening result is not valid UTF-8".to_string(),
@@ -317,7 +323,7 @@ impl LoadedScreening {
 impl Drop for LoadedScreening {
     fn drop(&mut self) {
         // Safety: state came from create and is destroyed exactly once here.
-        unsafe { (self.vtable.destroy)(self.state) };
+        unsafe { (self.vtable().destroy)(self.state) };
     }
 }
 

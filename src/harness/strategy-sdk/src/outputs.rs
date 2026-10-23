@@ -1,7 +1,9 @@
 //! Typed exploratory evidence copied and persisted by the job host.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
 
 /// One causal value; undefined observations carry their reason.

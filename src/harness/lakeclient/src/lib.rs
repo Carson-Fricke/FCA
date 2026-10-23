@@ -24,7 +24,10 @@
 
 mod access;
 mod blocking;
-pub use access::{MarketAccess, MarketRequest};
+pub use access::{
+    Facts, MarketAccess, MarketAcquisition, MarketOptions, MarketReference, MarketSnapshots,
+    OptionResolution,
+};
 mod client;
 mod ensure;
 mod error;

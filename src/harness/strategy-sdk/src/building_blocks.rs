@@ -2,7 +2,8 @@
 //! publish timing-bearing outputs; these functions never read market data.
 use std::collections::VecDeque;
 
-use crate::{Decimal, Fill};
+use crate::Decimal;
+use crate::Fill;
 
 /// Exact, single-instrument fill accounting. Every partial fill changes inventory.
 /// This is an observation ledger, not an order manager: submission is not a fill,

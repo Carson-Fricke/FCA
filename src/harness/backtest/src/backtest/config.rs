@@ -8,12 +8,15 @@ use std::collections::BTreeMap;
 
 use num::Decimal;
 
-use crate::backtest::engine_core::{normalize_subscriptions, MarketSubscription};
-use crate::backtest::errors::BacktestError;
-use crate::backtest::yaml::{self, YamlValue};
-use crate::canonical_json::JsonValue;
+use crate::backtest::subscriptions::normalize_subscriptions;
+use crate::backtest::yaml;
+use crate::backtest::yaml::YamlValue;
+use harness_contracts::canonical_json::JsonValue;
+use harness_trading::program::MarketSubscription;
+use harness_trading::replay_errors::BacktestError;
 
-use super::manifest::{configuration_hash, configuration_timestamp};
+use super::manifest::configuration_hash;
+use super::manifest::configuration_timestamp;
 
 /// The fee basis used to derive a fee schedule from configuration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -550,9 +553,8 @@ impl BacktestConfig {
             )));
         }
         let job_id = string_field(root, "job_id")?;
-        let start_ns =
-            datetime_field(root, "start")?.unwrap_or(crate::backtest::job::DEFAULT_START_NS);
-        let end_ns = datetime_field(root, "end")?.unwrap_or(crate::backtest::job::DEFAULT_END_NS);
+        let start_ns = datetime_field(root, "start")?.unwrap_or(DEFAULT_START_NS);
+        let end_ns = datetime_field(root, "end")?.unwrap_or(DEFAULT_END_NS);
         let seed = int_field(root, "seed").unwrap_or(0);
         if seed < 0 {
             return Err(BacktestError::Configuration(
@@ -1149,7 +1151,71 @@ fn datetime_field(
         ))
     };
     let text = value.as_str().ok_or_else(invalid)?;
-    crate::backtest::job::parse_timestamp_ns(text)
-        .map(Some)
-        .ok_or_else(invalid)
+    parse_timestamp_ns(text).map(Some).ok_or_else(invalid)
 }
+
+/// Parse an RFC3339 timestamp with explicit offset at exact nanosecond precision.
+/// Returns `None` for malformed or out-of-range bounds rather than rounding.
+#[must_use]
+pub fn parse_timestamp_ns(value: &str) -> Option<i64> {
+    let text = value.trim();
+    if !text.is_ascii() || text.len() < 20 {
+        return None;
+    }
+    let digits = |part: &str| -> Option<i64> {
+        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        part.parse().ok()
+    };
+    if !matches!(text.as_bytes()[10], b'T' | b't') || &text[4..5] != "-" || &text[7..8] != "-" {
+        return None;
+    }
+    digits(&text[..4])?;
+    digits(&text[5..7])?;
+    digits(&text[8..10])?;
+    let date = marketdata::Date::parse(&text[..10])?;
+    let time = &text[11..];
+    let (clock, offset) = if time.ends_with(['Z', 'z']) {
+        (&time[..time.len() - 1], 0)
+    } else {
+        let index = time.rfind(['+', '-'])?;
+        let zone = &time[index..];
+        if zone.len() != 6 || &zone[3..4] != ":" {
+            return None;
+        }
+        let hours = digits(&zone[1..3])?;
+        let minutes = digits(&zone[4..6])?;
+        if hours > 23 || minutes > 59 {
+            return None;
+        }
+        let sign = if zone.starts_with('+') { 1 } else { -1 };
+        (&time[..index], sign * (hours * 3600 + minutes * 60))
+    };
+    let (clock, fraction) = match clock.split_once('.') {
+        Some((clock, fraction)) => {
+            if fraction.len() > 9 {
+                return None;
+            }
+            let nanos = digits(fraction)? * 10_i64.pow(9 - fraction.len() as u32);
+            (clock, nanos)
+        }
+        None => (clock, 0),
+    };
+    if clock.len() != 8 || &clock[2..3] != ":" || &clock[5..6] != ":" {
+        return None;
+    }
+    let hour = digits(&clock[..2])?;
+    let minute = digits(&clock[3..5])?;
+    let second = digits(&clock[6..8])?;
+    if hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+    let seconds =
+        i128::from(date.days()) * 86_400 + i128::from(hour * 3600 + minute * 60 + second - offset);
+    i64::try_from(seconds * 1_000_000_000 + i128::from(fraction)).ok()
+}
+
+/// The default synthetic run window: 2024-01-01 to 2024-01-03 UTC.
+pub const DEFAULT_START_NS: i64 = 19_723 * harness_trading::replay_errors::ONE_DAY_NS;
+pub const DEFAULT_END_NS: i64 = 19_725 * harness_trading::replay_errors::ONE_DAY_NS;

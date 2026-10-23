@@ -9,13 +9,20 @@
 
 use std::collections::BTreeMap;
 
-use super::base::{
-    IndicatorError, IndicatorMachine, TickIndicator, DEFAULT_BUCKET_NS, MIDNIGHT_UTC_NS,
-};
+use super::base::IndicatorError;
+use super::base::IndicatorMachine;
+use super::base::TickIndicator;
+use super::base::DEFAULT_BUCKET_NS;
+use super::base::MIDNIGHT_UTC_NS;
 use super::momentum::RsiKernel;
-use super::overlays::{EmaKernel, MidSmaKernel, SmaKernel};
-use super::volatility::{AtrKernel, RealizedVolKernel};
-use super::volume::{DollarVolumeKernel, ObvKernel, VwapKernel};
+use super::overlays::EmaKernel;
+use super::overlays::MidSmaKernel;
+use super::overlays::SmaKernel;
+use super::volatility::AtrKernel;
+use super::volatility::RealizedVolKernel;
+use super::volume::DollarVolumeKernel;
+use super::volume::ObvKernel;
+use super::volume::VwapKernel;
 
 /// Typed parameter vocabulary supported by indicator specs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

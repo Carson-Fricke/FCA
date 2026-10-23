@@ -1,14 +1,14 @@
 //! Bounded typed Arrow builders; borrowed cells are copied directly into columns.
-use super::{
-    schemas::{Artifact, LogicalType},
-    writer::{Value, WriterError},
-};
-use arrow_array::{
-    builder::{
-        BooleanBuilder, StringBuilder, TimestampNanosecondBuilder, UInt32Builder, UInt64Builder,
-    },
-    ArrayRef,
-};
+use super::schemas::Artifact;
+use super::schemas::LogicalType;
+use super::writer::Value;
+use super::writer::WriterError;
+use arrow_array::builder::BooleanBuilder;
+use arrow_array::builder::StringBuilder;
+use arrow_array::builder::TimestampNanosecondBuilder;
+use arrow_array::builder::UInt32Builder;
+use arrow_array::builder::UInt64Builder;
+use arrow_array::ArrayRef;
 use num::Decimal18;
 use std::fmt::Write;
 use std::sync::Arc;

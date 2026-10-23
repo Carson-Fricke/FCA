@@ -1,12 +1,16 @@
 //! Execution-scoped manifest pinning and an unauthenticated signed-object transport.
 
-use crate::{client::LakeClient, error::LakeClientError, spec::ReadSpec};
-use harness_market_reader::{MarketDataSnapshot, Partition, PartitionSource, ReaderError};
+use crate::client::LakeClient;
+use crate::error::LakeClientError;
+use crate::spec::ReadSpec;
+use harness_market_reader::MarketDataSnapshot;
+use harness_market_reader::Partition;
+use harness_market_reader::PartitionSource;
+use harness_market_reader::ReaderError;
 use serde::Deserialize;
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, Mutex},
-};
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

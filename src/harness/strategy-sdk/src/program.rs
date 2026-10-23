@@ -13,14 +13,23 @@
 use std::collections::BTreeMap;
 
 use num::Decimal;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
-use crate::abi::{
-    CDecimal, CMarketOrder, CMetricSink, COrderSink, CStr, METRIC_INVALID_NAME, METRIC_NOT_FINITE,
-    METRIC_OK, METRIC_RESERVED_NAME, SDK_OK,
-};
-use crate::events::{Fill, ProgramStart};
-use crate::{MarketConsumer, ObservationContext};
+use crate::abi::CDecimal;
+use crate::abi::CMarketOrder;
+use crate::abi::CMetricSink;
+use crate::abi::COrderSink;
+use crate::abi::CStr;
+use crate::abi::METRIC_INVALID_NAME;
+use crate::abi::METRIC_NOT_FINITE;
+use crate::abi::METRIC_OK;
+use crate::abi::METRIC_RESERVED_NAME;
+use crate::abi::SDK_OK;
+use crate::events::Fill;
+use crate::events::ProgramStart;
+use crate::MarketConsumer;
+use crate::ObservationContext;
 
 /// The metric names reserved by the harness; publishing them fails.
 pub const RESERVED_METRIC_NAMES: &[&str] = &[

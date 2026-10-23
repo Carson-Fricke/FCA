@@ -1,8 +1,10 @@
 //! Exact arithmetic of the deterministic synthetic market fixture.
 
 use backtest::backtest::config::BacktestConfig;
-use backtest::backtest::errors::ONE_DAY_NS;
-use backtest::backtest::fixture::{synthetic_fixture, MarketEvent, SyntheticDataOptions};
+use backtest::backtest::fixture::synthetic_fixture;
+use backtest::backtest::fixture::MarketEvent;
+use backtest::backtest::fixture::SyntheticDataOptions;
+use harness_trading::replay_errors::ONE_DAY_NS;
 
 fn config() -> BacktestConfig {
     // 2024-01-01T00:00:00Z for two days (Mon/Tue sessions).

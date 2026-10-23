@@ -30,3 +30,20 @@ local slice and must not contradict or duplicate the architecture documents.
   exist.
 - Update a stale README in the owning task rather than deferring the
   documentation to a later cleanup pass.
+
+## Local Responsibility Contracts
+
+- When adding or structurally changing a substantive module, maintain a concise
+  module docstring (Python) or module documentation (Rust) stating its owned
+  behavior/invariants, nearby responsibilities excluded, and required dependency
+  capabilities. Describe the implementation truthfully; investigate existing
+  responsibility mixtures rather than hiding them behind a narrow comment.
+- Document meaningful interfaces from their consumer's need: behavioral
+  promises, failure/ownership semantics, and authority excluded. Passive records,
+  trivial helpers and re-export files do not need boilerplate contracts.
+- Establish ownership after tracing current behavior and blast radius, before
+  implementation, following the Implementation Phases in the organization
+  instructions. Changing a comment does not justify unrelated responsibility.
+- Keep global boundaries in architecture documents and the local file inventory
+  in folder READMEs. Source contracts explain local ownership without duplicating
+  those inventories. Presence checks cannot establish semantic compliance.

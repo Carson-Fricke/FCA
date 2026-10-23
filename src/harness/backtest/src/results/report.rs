@@ -12,7 +12,10 @@
 
 use std::fmt::Write as _;
 
-use crate::results::metrics::{EquityMetrics, EquityPoint, Outcome, TradeStats};
+use crate::results::metrics::EquityMetrics;
+use crate::results::metrics::EquityPoint;
+use crate::results::metrics::Outcome;
+use crate::results::metrics::TradeStats;
 
 const CSS: &str = ":root{color-scheme:light}body{margin:0;padding:2rem;background:#f8fafc;\
 color:#1f2937;font-family:system-ui,\"Segoe UI\",sans-serif}main{max-width:1080px;margin:0 auto}\

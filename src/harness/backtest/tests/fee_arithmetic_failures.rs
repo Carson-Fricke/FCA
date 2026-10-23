@@ -5,12 +5,15 @@
 //! cannot be represented, and asserts a named error rather than a zero fee. A
 //! valid zero quantity still yields zero components.
 
-use backtest::backtest::errors::BacktestError;
-use backtest::backtest::fees::{
-    CryptoMakerTakerFeeModel, EquityRegulatoryFeeModel, FeeFill, FeeRounding, FeeSchedule,
-    OptionsPerContractFeeModel,
-};
-use num::{Decimal, RoundingMode};
+use backtest::backtest::fees::CryptoMakerTakerFeeModel;
+use backtest::backtest::fees::EquityRegulatoryFeeModel;
+use backtest::backtest::fees::FeeFill;
+use backtest::backtest::fees::FeeRounding;
+use backtest::backtest::fees::FeeSchedule;
+use backtest::backtest::fees::OptionsPerContractFeeModel;
+use harness_trading::replay_errors::BacktestError;
+use num::Decimal;
+use num::RoundingMode;
 
 fn dec(text: &str) -> Decimal {
     text.parse().expect("decimal literal")
@@ -21,10 +24,7 @@ fn dec(text: &str) -> Decimal {
 /// The scales of the literals are chosen so a product of two of them stays
 /// representable, except where a test deliberately pairs very small scales.
 fn schedule(commission_per_share: &str) -> FeeSchedule {
-    let rounding = FeeRounding {
-        precision: dec("0.0001"),
-        mode: RoundingMode::HalfEven,
-    };
+    let rounding = FeeRounding::new(dec("0.0001"), RoundingMode::HalfEven).unwrap();
     FeeSchedule {
         schedule_id: "test-schedule".to_string(),
         currency: "USD".to_string(),
@@ -116,9 +116,37 @@ fn zero_quantity_fill_is_a_valid_zero_fee_not_an_error() {
     let assessment = schedule("0.005")
         .calculate(&flat, "job-1", "strategy-a", "equity")
         .expect("a zero quantity is a valid fill");
-    assert_eq!(assessment.components.len(), 3);
-    for component in &assessment.components {
+    assert_eq!(assessment.components().len(), 3);
+    for component in assessment.components() {
         assert!(component.amount.cmp_value(Decimal::ZERO).is_eq());
     }
     assert!(assessment.total().cmp_value(Decimal::ZERO).is_eq());
+}
+
+#[test]
+fn option_fee_overflow_is_reported_instead_of_substituting_the_quantity() {
+    let mut fees = schedule("0");
+    fees.option.commission_per_contract = dec("1E+1000000000");
+    let contracts = fill(
+        "option-overflow",
+        "buy",
+        dec("1E+1500000000"),
+        dec("100"),
+        None,
+    );
+    assert!(matches!(
+        fees.calculate(&contracts, "job", "strategy", "option"),
+        Err(BacktestError::Arithmetic(_))
+    ));
+}
+#[test]
+fn fractional_option_contracts_are_rejected_by_the_shared_fee_policy() {
+    let contracts = fill("fractional", "buy", dec("1.5"), dec("100"), None);
+    assert!(fees_error(&contracts).contains("whole number"));
+}
+fn fees_error(contracts: &FeeFill<'_>) -> String {
+    schedule("0")
+        .calculate(contracts, "job", "strategy", "option")
+        .unwrap_err()
+        .to_string()
 }

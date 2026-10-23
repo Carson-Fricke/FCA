@@ -3,10 +3,13 @@
 pub mod progress;
 pub use lake_contracts::{OptionRight, OptionSelector, ResolvedOption};
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use sha2::Digest;
+use sha2::Sha256;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt::Write;
 
 pub const CONFIGURATION_HASH_DOMAIN: &[u8] = b"fca:harness-configuration:v1\0";
@@ -209,3 +212,6 @@ pub fn canonical_subscriptions(inputs: Vec<Subscription>) -> Result<Vec<Subscrip
         })
         .collect())
 }
+
+pub mod canonical_json;
+pub mod sha256;

@@ -8,19 +8,26 @@
 
 use num::Decimal18;
 
-use crate::accounting::{ExecutionReport, Fill};
-use crate::error::{require_text, LiveError, LiveResult};
-use crate::events::MarketEvent;
-use crate::fills::simple_touch::SimpleTouch;
-use crate::oms::manager::SingleLegOms;
-use crate::oms::state::OrderSnapshot;
-use crate::orders::{OrderRequest, SingleLegOrder};
-use crate::portfolio::book::PositionSnapshot;
-use crate::portfolio::hub::{PortfolioHub, PortfolioSnapshot};
-use crate::risk::models::{RiskContext, RiskDecision, RiskRule};
-use crate::risk::pipeline::RiskPipeline;
 use crate::venues::scripted::VenueOutcome;
 use crate::venues::sim::SimulatedVenue;
+use harness_trading::accounting::ExecutionReport;
+use harness_trading::accounting::Fill;
+use harness_trading::error::require_text;
+use harness_trading::error::LiveError;
+use harness_trading::error::LiveResult;
+use harness_trading::events::MarketEvent;
+use harness_trading::fills::simple_touch::SimpleTouch;
+use harness_trading::oms::manager::SingleLegOms;
+use harness_trading::oms::state::OrderSnapshot;
+use harness_trading::orders::OrderRequest;
+use harness_trading::orders::SingleLegOrder;
+use harness_trading::portfolio::book::PositionSnapshot;
+use harness_trading::portfolio::hub::PortfolioHub;
+use harness_trading::portfolio::hub::PortfolioSnapshot;
+use harness_trading::risk::models::RiskContext;
+use harness_trading::risk::models::RiskDecision;
+use harness_trading::risk::models::RiskRule;
+use harness_trading::risk::pipeline::RiskPipeline;
 
 /// Static composition settings for one trader session.
 #[derive(Clone, Debug)]
@@ -54,7 +61,7 @@ pub struct TraderCore {
     risk_decisions: Vec<RiskDecision>,
     applied_fills: Vec<Fill>,
     reports: Vec<ExecutionReport>,
-    prices: std::collections::HashMap<crate::symbol::Symbol, Decimal18>,
+    prices: std::collections::HashMap<harness_trading::symbol::Symbol, Decimal18>,
     order_count: usize,
 }
 
@@ -63,7 +70,7 @@ impl TraderCore {
     pub fn new(
         config: TraderConfig,
         rules: Vec<Box<dyn RiskRule>>,
-        on_reject: crate::risk::pipeline::OnReject,
+        on_reject: harness_trading::risk::pipeline::OnReject,
     ) -> LiveResult<Self> {
         let mut hub = PortfolioHub::new(&config.account_id, vec![])?;
         hub.create_book(&config.book_id, config.initial_cash)?;

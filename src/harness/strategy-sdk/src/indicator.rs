@@ -1,5 +1,7 @@
 //! Composable, symbol-aware indicators with causal output sequences.
-use crate::{BarFrame, MarketConsumer, ObservationContext};
+use crate::BarFrame;
+use crate::MarketConsumer;
+use crate::ObservationContext;
 use num::Decimal;
 use std::collections::BTreeMap;
 

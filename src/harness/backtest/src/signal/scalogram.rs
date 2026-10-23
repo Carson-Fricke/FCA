@@ -7,7 +7,8 @@
 
 use std::f64::consts::PI;
 
-use crate::signal::fft::{fft_in_place, ifft_in_place};
+use crate::signal::fft::fft_in_place;
+use crate::signal::fft::ifft_in_place;
 use crate::signal::wavelets::SignalError;
 
 /// Default Morlet center frequency.

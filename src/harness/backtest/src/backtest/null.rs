@@ -11,16 +11,20 @@
 //! fewer than two movable blocks, no returns, or a constant return sequence
 //! fail preflight rather than masquerading as signal destruction.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use num::Decimal18;
 
-use crate::sha256::Sha256;
+use harness_contracts::sha256::Sha256;
 
-use super::config::{BacktestConfig, NullTransformConfig};
-use super::errors::BacktestError;
-use super::fixture::{MarketEvent, ReplayFingerprints, ReplayFixture};
+use super::config::BacktestConfig;
+use super::config::NullTransformConfig;
+use super::fixture::MarketEvent;
+use super::fixture::ReplayFingerprints;
+use super::fixture::ReplayFixture;
 use super::rng::PythonRandom;
+use harness_trading::replay_errors::BacktestError;
 
 /// Apply the configured null transform to one replay fixture.
 ///
@@ -128,7 +132,7 @@ pub fn apply_null_transform(
             .collect::<Result<Vec<_>, _>>()?;
         let mut evidence = source.evidence.clone();
         evidence.fingerprints.row = None;
-        evidence.fingerprints.data = crate::sha256::digest_hex(
+        evidence.fingerprints.data = harness_contracts::sha256::digest_hex(
             format!(
                 "fca:null-replay\0{}\0{}\0{}\0{}",
                 source.evidence.fingerprints.data, null.mode, null.block_size, null.seed

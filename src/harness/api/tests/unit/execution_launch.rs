@@ -1,5 +1,6 @@
 //! Pure Azure protocol identity validation; execution ownership is covered at HTTP.
-use super::{acknowledged_execution, start_template};
+use super::acknowledged_execution;
+use super::start_template;
 use serde_json::json;
 
 #[test]

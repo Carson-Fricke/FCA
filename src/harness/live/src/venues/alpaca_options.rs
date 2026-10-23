@@ -6,22 +6,34 @@
 //! `src/harness/venues/CAPABILITY_MATRIX.md` and must carry the same version
 //! as [`CAPABILITY_MATRIX_VERSION`].
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
+use std::collections::VecDeque;
 
-use num::{Decimal18, RoundingMode};
+use num::Decimal18;
+use num::RoundingMode;
 
-use crate::accounting::{ExecutionReport, Fill};
-use crate::error::{require_text, LiveError, LiveResult};
-use crate::orders::{
-    ExecutionType, MultiLegOrder, OrderLeg, OrderRequest, OrderStatus, OrderType, Side,
-    SingleLegOrder, TimeInForce,
-};
-use crate::symbol::{is_osi_symbol, OsiSymbol, Symbol};
-use crate::venues::alpaca::{
-    AlpacaClientOrderIdSource, AlpacaCommandReceipt, AsyncBrokerTransport,
-};
+use crate::venues::alpaca::AlpacaClientOrderIdSource;
+use crate::venues::alpaca::AlpacaCommandReceipt;
+use crate::venues::alpaca::AsyncBrokerTransport;
 use crate::venues::alpaca_crypto::is_crypto_pair;
 use crate::venues::scripted::VenueOutcome;
+use harness_trading::accounting::ExecutionReport;
+use harness_trading::accounting::Fill;
+use harness_trading::error::require_text;
+use harness_trading::error::LiveError;
+use harness_trading::error::LiveResult;
+use harness_trading::orders::ExecutionType;
+use harness_trading::orders::MultiLegOrder;
+use harness_trading::orders::OrderLeg;
+use harness_trading::orders::OrderRequest;
+use harness_trading::orders::OrderStatus;
+use harness_trading::orders::OrderType;
+use harness_trading::orders::Side;
+use harness_trading::orders::SingleLegOrder;
+use harness_trading::orders::TimeInForce;
+use harness_trading::symbol::is_osi_symbol;
+use harness_trading::symbol::OsiSymbol;
+use harness_trading::symbol::Symbol;
 
 /// Version shared by the in-code matrix and the rendered capability document.
 pub const CAPABILITY_MATRIX_VERSION: &str = "2026-09.1";
@@ -1304,6 +1316,6 @@ pub fn require_option_symbol(symbol: &Symbol) -> LiveResult<()> {
 }
 
 /// The signed spread direction: the first leg's side classifies the group.
-pub fn spread_side(legs: &[crate::orders::OrderLeg]) -> Side {
+pub fn spread_side(legs: &[harness_trading::orders::OrderLeg]) -> Side {
     legs.first().map(|leg| leg.side).unwrap_or(Side::Buy)
 }
