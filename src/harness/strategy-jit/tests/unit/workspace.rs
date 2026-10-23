@@ -1,6 +1,7 @@
 use super::*;
 #[cfg(windows)]
 use std::path::Component;
+#[cfg(windows)]
 use std::path::Prefix;
 
 #[test]
