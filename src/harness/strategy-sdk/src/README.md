@@ -21,7 +21,11 @@ have observation-only contexts, while strategies receive an order sink.
 - `building_blocks.rs` provides trailing moments, EMA, simple-average RSI/ATR,
   rolling VWAP, crossover age, directional-change confirmation, trailing-window
   vertical-distance PIP and frozen normalization. The Haar kernel is internal to
-  evidence publication; trading wavelet features use the managed indicator.
+    evidence publication; trading wavelet features use the managed indicator.
+    Its `FillLedger` accounts for every deduplicated actual fill and per-order
+    weighted price. `PendingOrder` tracks requested versus cumulatively filled
+    quantity; a partial fill does not complete an order. Cancellation/rejection
+    requires explicit lifecycle evidence from the caller.
   It also provides FillLedger for exact partial-fill inventory/cash/fee accounting,
   cash_return_bps with entry quantity and price, nearest-rank empirical_quantile,
   OLS log_price_slope_bps and a ratio-of-expected-energies Haar random-walk anchor.

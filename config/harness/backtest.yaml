@@ -23,7 +23,7 @@ strategy_instances:
     instance_id: msft-momentum
     implementation: jit
     # SHA-256 of the authored source file; the JIT seam rejects a mismatch.
-    bundle_hash: dca3e6dda63c83d8a9d7cc0688e180a42e3d3e0dd502c3d4d731db505c2d8998
+    bundle_hash: c65afc914778a9657c36e61e1d4e70d621f189752828849e0243dc164ab27984
     capital_fraction: 1.0
     symbols: [MSFT]
     parameters:

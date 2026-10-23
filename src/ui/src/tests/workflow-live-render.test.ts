@@ -58,6 +58,7 @@ vi.mock('$lib/api', () => ({
 	deleteChat: vi.fn(),
 	getExecution: vi.fn(async () => null),
 	getWorkflowDefinition: vi.fn(async () => { throw new Error('Unavailable'); }),
+	listWorkflowMetadata: vi.fn(async () => ({ items: [], after: 0 })),
 	listTimelinePage: vi.fn(async () => ({ items: [], nextBefore: null, after: 0 })),
 	listChats: vi.fn(async () => [chatThread('chat-1'), chatThread('chat-2')]),
 	listChatSubAgents: vi.fn(async () => []),

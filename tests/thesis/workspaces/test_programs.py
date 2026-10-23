@@ -30,6 +30,7 @@ from thesis.workspaces.programs import (
     ProgramPublicationError,
     WorkspacePrograms,
 )
+from thesis.workspaces.sdk import source_hashes
 
 CONFIG: dict[str, object] = {
     "start": "2024-01-01T00:00:00Z",
@@ -122,6 +123,11 @@ class Harness:
     def read_sdk_reference(self, **arguments: object) -> McpToolResult:
         metadata = dict(
             cast(Mapping[str, object], self.current_server_info()["serverInfo"])
+        )
+        metadata["sourceHashes"] = source_hashes(
+            WorkspacePrograms(
+                cast(LocalWorkspaceProvider, None), submissions=MemorySubmissions()
+            ).sdk_root
         )
         if "topic" in arguments:
             local = WorkspacePrograms(
@@ -662,6 +668,17 @@ def test_sdk_root_deployment_and_version_mismatch(
         matched.read_sdk_reference("consumer")["sdkIdentity"]
         == service.read_sdk_reference("consumer")["sdkIdentity"]
     )
+    consumer = deployed / "src" / "consumer.rs"
+    original = consumer.read_bytes()
+    consumer.write_bytes(
+        original.replace(b"trait MarketConsumer", b"trait ChangedConsumer")
+    )
+    with pytest.raises(
+        ProgramArtifactError, match="differing sources: strategy-sdk/src/consumer.rs"
+    ):
+        matched.template_source("study", CONFIG)
+    assert not harness.calls
+    consumer.write_bytes(original)
     cargo = deployed / "Cargo.toml"
     cargo.write_text(
         cargo.read_text(encoding="utf-8").replace(

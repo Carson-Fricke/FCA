@@ -1,10 +1,11 @@
 import { render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import HarnessExecutionCard from '$lib/components/chat/HarnessExecutionCard.svelte';
-import type { HarnessJobProgress, HarnessJobStatus } from '$lib/types';
-import { getHarnessJob } from '$lib/api';
+import BacktestToolCard from '$lib/components/chat/tool-results/BacktestToolCard.svelte';
+import type { HarnessJobProgress, HarnessJobStatus, ToolResult } from '$lib/types';
+import { getBacktest, getHarnessJob } from '$lib/api';
 
-vi.mock('$lib/api', () => ({ getHarnessJob: vi.fn(), backendKind: 'local', apiBaseUrl: '/api' }));
+vi.mock('$lib/api', () => ({ getHarnessJob: vi.fn(), getBacktest: vi.fn(), backendKind: 'local', apiBaseUrl: '/api' }));
 
 const reading: HarnessJobProgress = {
     stage: 'reading_data', symbol: 'MSFT', data_type: 'quote',
@@ -76,6 +77,40 @@ describe('shared harness execution status', () => {
         await screen.findByText('Execution status unavailable');
         expect(screen.getByText(/Status unavailable: harness unavailable/)).toBeInTheDocument();
         expect(screen.queryByText('Preparing market data')).toBeNull();
+    });
+
+    it('keeps a backtest card observing beyond two minutes, recovers read failures and stops on navigation', async () => {
+        vi.useFakeTimers();
+        const id = 'long-backtest';
+        vi.mocked(getHarnessJob).mockReset().mockResolvedValue({job_id:id,state:'running'});
+        const result: ToolResult = {callId:'submit',datumType:'tool_result',failure:null,summary:'Accepted',text:'',tool:'run_backtest',ok:true,structured:{job_id:id,state:'queued'}};
+        const view = render(BacktestToolCard,{props:{result,workspaceId:'research'}});
+        try {
+            await vi.advanceTimersByTimeAsync(125_000);
+            expect(getHarnessJob).toHaveBeenCalledTimes(63);
+            expect(screen.getByTestId('backtest-tool-card')).toHaveTextContent('running');
+            expect(screen.queryByText(/Reopen the conversation/)).toBeNull();
+            vi.mocked(getHarnessJob).mockRejectedValueOnce(new Error('temporary read failure'));
+            await vi.advanceTimersByTimeAsync(2000);
+            expect(screen.getByTestId('backtest-tool-card')).toHaveTextContent('temporary read failure');
+            expect(screen.getByTestId('backtest-tool-card')).toHaveTextContent('running');
+            await vi.advanceTimersByTimeAsync(2000);
+            expect(screen.queryByText(/temporary read failure/)).toBeNull();
+            expect(getBacktest).not.toHaveBeenCalled();
+            view.unmount();
+            const calls = vi.mocked(getHarnessJob).mock.calls.length;
+            await vi.advanceTimersByTimeAsync(10_000);
+            expect(getHarnessJob).toHaveBeenCalledTimes(calls);
+        } finally { view.unmount(); vi.useRealTimers(); }
+    });
+
+    it('updates a queued backtest receipt to the observed terminal failure', async () => {
+        const id='failed-backtest';
+        vi.mocked(getHarnessJob).mockResolvedValue({job_id:id,state:'failed',error_message:'worker interrupted'});
+        render(BacktestToolCard,{props:{workspaceId:'research',result:{callId:'submit',datumType:'tool_result',failure:null,summary:'Accepted',text:'',tool:'run_backtest',ok:true,structured:{job_id:id,state:'queued'}}}});
+        await screen.findByText('worker interrupted');
+        expect(screen.getByTestId('backtest-tool-card')).toHaveTextContent('failed');
+        expect(screen.getByRole('link',{name:'Inspect execution →'})).toHaveAttribute('href',`/w/research/backtests/${id}`);
     });
 
 });

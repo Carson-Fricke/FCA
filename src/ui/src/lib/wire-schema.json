@@ -2738,6 +2738,13 @@
               "type": "null"
             }
           ]
+        },
+        "outputPrefixes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TimelineOutputWire"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -3157,6 +3164,26 @@
         "steering_message_ids",
         "updated_at",
         "finished_at"
+      ],
+      "type": "object"
+    },
+    "WorkflowMetadataWire": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/WorkflowExecutionWire"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items",
+        "after"
       ],
       "type": "object"
     },

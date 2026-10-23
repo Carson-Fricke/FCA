@@ -312,8 +312,8 @@ def test_notification_dispatch_survives_api_restart_and_busy_conversation() -> N
             assert container.feed_reads > 0
             assert (
                 len([query for query in container.queries if "RuntimeWork" in query])
-                == 1
-            )  # Startup snapshot only.
+                <= 2
+            )  # Bounded startup snapshot, repeated if it raced feed initialization.
             # One input transaction owns each runnable create. Scheduling must
             # not try a duplicate create after admission.
             creates = [
@@ -325,6 +325,42 @@ def test_notification_dispatch_survives_api_restart_and_busy_conversation() -> N
             assert len(creates) == 2
         finally:
             provider.release.set()
+            worker.stop()
+            running.result(timeout=5)
+
+
+def test_slow_retained_work_scan_does_not_block_live_dispatch() -> None:
+    class SlowReconciliation(LimitedContainer):
+        entered = Event()
+        release = Event()
+
+        def query_items(self, *, query: str, **kwargs: Any):
+            if "c.recordType = 'RuntimeWork'" in query:
+                self.entered.set()
+                assert self.release.wait(5)
+            return super().query_items(query=query, **kwargs)
+
+    container, provider = SlowReconciliation(), Provider()
+    client, chat, worker, work, _ = replica(container, provider)
+    thread = chat.create_chat(
+        "workspace", title="Independent dispatch", owner_actor_id="operator"
+    )
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        running = pool.submit(worker.run)
+        try:
+            assert container.entered.wait(2)
+            response = client.post(
+                f"/v1/workspaces/workspace/chats/{thread.chat_id}/messages",
+                headers={"Authorization": "Bearer token"},
+                json={"actor_id": "operator", "body": "Continue during recovery"},
+            )
+            assert response.status_code == 200, response.json()
+            assert provider.entered.wait(2), "recovery scan blocked new input"
+            wait_completed(work, ("input:" + response.json()["message_id"],))
+            assert not container.release.is_set()
+            assert provider.calls == 1
+        finally:
+            container.release.set()
             worker.stop()
             running.result(timeout=5)
 

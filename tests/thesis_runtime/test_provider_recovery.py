@@ -490,7 +490,7 @@ def test_provider_outage_leaves_runnable_continuation_for_a_replacement_worker(b
     )
     assert response.status_code == 200
     assert worker.tick() == 1 and len(exchange.requests) == 4
-    pending = work.ready()
+    pending = tuple(work.get(ref.workspace_id, ref.key) for ref in work.ready())
     assert len(pending) == 1 and pending[0].state == "pending"
     exchange.responses = [SUCCESS]
     _, restarted, next_worker, next_work, _ = replica(container, openrouter(exchange))

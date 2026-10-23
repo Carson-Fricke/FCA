@@ -995,11 +995,14 @@ class ChatService:
         return self._persistence.list_conversation(Attachment, workspace_id, chat_id)
 
     def list_chat_executions(
-        self, workspace_id: str, chat_id: str
+        self, workspace_id: str, chat_id: str, *, include_nested: bool = False
     ) -> tuple[WorkflowExecution, ...]:
         self.get_chat(workspace_id, chat_id)
         return self._persistence.list_conversation(
-            WorkflowExecution, workspace_id, chat_id, conversation_id=chat_id
+            WorkflowExecution,
+            workspace_id,
+            chat_id,
+            conversation_id=None if include_nested else chat_id,
         )
 
     def list_chat_sub_agents(
@@ -1771,6 +1774,14 @@ class ChatService:
 
     def get_tool_job(self, workspace_id: str, job_id: str) -> ToolJob:
         return self._require(ToolJob, workspace_id, job_id)
+
+    def list_tool_jobs(self, workspace_id: str) -> tuple[ToolJob, ...]:
+        """List retained operation references without interpreting their tools.
+
+        Product catalogs classify operations outside the runtime. This read never
+        scans transcripts, dispatches tools, or treats tracking as execution state.
+        """
+        return self._list(ToolJob, workspace_id)
 
     def find_tool_job(self, workspace_id: str, job_id: str) -> ToolJob | None:
         """Return the tracking record for one job id, or ``None`` when untracked.

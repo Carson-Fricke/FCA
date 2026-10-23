@@ -5,6 +5,7 @@ import type { TimelineStreamOptions } from '$lib/sse';
 import { timelineFixture } from './timeline-fixture';
 vi.mock('$lib/api', async (importOriginal) => ({
 	...await importOriginal<typeof import('$lib/api')>(), fixtureMode: false,
+	listWorkflowMetadata: vi.fn(async () => ({ items: [], after: 0 })),
 	listTimelinePage: vi.fn(async () => ({ items: [], nextBefore: null, after: 0 }))
 }));
 const streams = vi.hoisted(() => [] as Array<(item: TimelineItem) => void>);
@@ -29,7 +30,7 @@ const item = (seq: number, threadId = 'root'): TimelineMessageWire => ({ id: `it
 beforeEach(() => { vi.clearAllMocks(); streams.length = 0; streamOptions.length = 0; });
 
 describe('one timeline authority', () => {
-	it('starts streaming only after the first all-thread page, before older pagination completes', async () => {
+	it('loads the root recent page and streams without fetching older or child history', async () => {
 		let finish!: (page: TimelinePage) => void;
 		let finishOlder!: (page: TimelinePage) => void;
 		vi.mocked(listTimelinePage).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
@@ -37,17 +38,21 @@ describe('one timeline authority', () => {
 		const timeline = new TimelineController(); timeline.start('ws', 'chat');
 		expect(streams).toHaveLength(0);
 		expect(timeline.connected).toBe(false);
-		expect(vi.mocked(listTimelinePage).mock.calls[0].slice(0, 4)).toEqual(['ws', 'chat', null, null]);
+		expect(vi.mocked(listTimelinePage).mock.calls[0].slice(0, 4)).toEqual(['ws', 'chat', 'root', null]);
 		expect(timeline.initialLoading).toBe(true);
 		expect(timeline.items).toEqual([]);
-		finish({ items: [item(2), item(3, 'node')], nextBefore: 2, after: 10 });
+		finish({ items: [item(2), item(3)], nextBefore: 2, after: 10 });
 		await vi.waitFor(() => expect(timeline.initialLoading).toBe(false));
 		expect(streamOptions[0].after).toBe(10);
-		expect(timeline.history.root.loading).toBe(true);
+		expect(timeline.history.root.loading).toBe(false);
+		expect(listTimelinePage).toHaveBeenCalledTimes(1);
+		expect(timeline.history.root.complete).toBe(false);
 		expect(timeline.connected).toBe(true);
 		streams[0](item(11));
+		const older = timeline.loadHistory('root', true);
 		finishOlder({ items: [item(1), item(2)], nextBefore: null, after: 11 });
-		await vi.waitFor(() => expect(timeline.history.root.complete).toBe(true));
+		await older;
+		expect(timeline.history.root.complete).toBe(true);
 		expect(timeline.items.map((entry) => entry.seq)).toEqual([1, 2, 3, 11]);
 		expect(streamOptions).toHaveLength(1);
 		expect(streamOptions[0].after).toBe(10);
@@ -67,7 +72,7 @@ describe('one timeline authority', () => {
 		expect(streamOptions[0].after).toBe(17);
 		timeline.stop();
 	});
-	it('loads more than 2,000 items through the final page, sharing identity and seq with live items', async () => {
+	it('loads older pages only on demand while preserving live identities and seq', async () => {
 		vi.mocked(listTimelinePage).mockResolvedValueOnce({ items: Array.from({ length: 1000 }, (_, i) => item(i + 1201)), nextBefore: 1201, after: 2200 })
 			.mockResolvedValueOnce({ items: Array.from({ length: 1000 }, (_, i) => item(i + 201)), nextBefore: 201, after: 2200 })
 			.mockResolvedValueOnce({ items: Array.from({ length: 200 }, (_, i) => item(i + 1)), nextBefore: 1, after: 2200 })
@@ -75,7 +80,11 @@ describe('one timeline authority', () => {
 		const timeline = new TimelineController(); timeline.start('ws', 'chat');
 		await vi.waitFor(() => expect(streams).toHaveLength(1));
 		streams[0](item(2200));
-		await vi.waitFor(() => expect(timeline.history['root']?.complete).toBe(true));
+		expect(listTimelinePage).toHaveBeenCalledTimes(1);
+		await timeline.loadHistory('root', true);
+		await timeline.loadHistory('root', true);
+		await timeline.loadHistory('root', true);
+		expect(timeline.history.root.complete).toBe(true);
 		expect(timeline.items).toHaveLength(2200);
 		expect(timeline.messages.map((message) => message.seq)).toEqual(Array.from({ length: 2200 }, (_, i) => i + 1));
 		expect(vi.mocked(listTimelinePage).mock.calls.map((call) => call[3])).toEqual([null, 1201, 201, 1]);
@@ -85,7 +94,9 @@ describe('one timeline authority', () => {
 		vi.mocked(listTimelinePage).mockResolvedValueOnce({ items: [item(2)], nextBefore: 2, after: 2 })
 			.mockResolvedValueOnce({ items: [item(2)], nextBefore: 2, after: 3 });
 		const timeline = new TimelineController(); timeline.start('ws', 'chat');
-		await vi.waitFor(() => expect(timeline.history['root']?.error).toContain('cursor did not advance'));
+		await vi.waitFor(() => expect(timeline.history.root?.loaded).toBe(true));
+		await timeline.loadHistory('root', true);
+		expect(timeline.history.root.error).toContain('cursor did not advance');
 		expect(timeline.items).toHaveLength(1);
 		await timeline.loadHistory();
 		expect(timeline.history['root'].complete).toBe(true);

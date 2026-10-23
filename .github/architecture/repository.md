@@ -780,7 +780,11 @@ with a remote harness. Wheels and source distributions package canonical
 `harness/strategy-sdk`, `harness/contracts`, `harness/num`, and `lake/contracts` Cargo manifests and
 Rust sources with portable relative path dependencies. SDK version/ABI metadata
 comes from the packaged SDK; SDK identity hashes all four crates' manifests
-and source files. Shared minimal templates in `workspaces/programs.py` back both
+and source files after CRLF-to-LF normalization. `workspaces/sdk.py` owns the
+local source inventory, and JIT `sdk_reference.rs` owns serving inventory and
+bounded reads; compiler provenance remains host-specific. Every other source
+byte and filename remains significant, and genuine SDK drift still fails closed.
+Shared minimal templates in `workspaces/programs.py` back both
 reference reads and basic authoring, not completed research implementations.
 Shared workflow prompt guidance owns targeted repair and
 asking after three unsuccessful compiler repairs, not a runtime repair cap.

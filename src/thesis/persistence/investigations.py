@@ -42,11 +42,11 @@ class CosmosInvestigationStore:
             )
         except CosmosResourceNotFoundError:
             return None
-        return self._decode(document["record"])
+        return decode_investigation(document["record"])
 
     def list(self, workspace_id: str) -> tuple[Investigation, ...]:
         return tuple(
-            self._decode(item["record"])
+            decode_investigation(item["record"])
             for item in self._container.query_items(
                 "SELECT * FROM c WHERE c.workspaceId = @workspace",
                 parameters=[{"name": "@workspace", "value": workspace_id}],
@@ -58,34 +58,38 @@ class CosmosInvestigationStore:
     def _key(investigation_id: str) -> str:
         return hashlib.sha256(investigation_id.encode()).hexdigest()
 
-    @staticmethod
-    def _decode(data: dict[str, Any]) -> Investigation:
-        links = data["links"]
-        return Investigation(
-            workspace_id=data["workspace_id"],
-            created_at=datetime.fromisoformat(data["created_at"]),
-            created_by=data["created_by"],
-            investigation_id=data["investigation_id"],
-            title=data["title"],
-            objective=data["objective"],
-            owner_actor_id=data["owner_actor_id"],
-            state=InvestigationState(data["state"]),
-            links=RecordLinks(
-                chat_ids=tuple(links["chat_ids"]),
-                workflow_execution_ids=tuple(links["workflow_execution_ids"]),
-                job_ids=tuple(links["job_ids"]),
-                references={
-                    key: tuple(ids) for key, ids in links["references"].items()
-                },
-            ),
-            updated_at=datetime.fromisoformat(data["updated_at"])
-            if data["updated_at"]
-            else None,
-        )
+
+def decode_investigation(data: dict[str, Any]) -> Investigation:
+    links = data["links"]
+    return Investigation(
+        workspace_id=data["workspace_id"],
+        created_at=datetime.fromisoformat(data["created_at"]),
+        created_by=data["created_by"],
+        investigation_id=data["investigation_id"],
+        title=data["title"],
+        objective=data["objective"],
+        owner_actor_id=data["owner_actor_id"],
+        state=InvestigationState(data["state"]),
+        links=RecordLinks(
+            chat_ids=tuple(links["chat_ids"]),
+            workflow_execution_ids=tuple(links["workflow_execution_ids"]),
+            job_ids=tuple(links["job_ids"]),
+            references={key: tuple(ids) for key, ids in links["references"].items()},
+        ),
+        updated_at=datetime.fromisoformat(data["updated_at"])
+        if data["updated_at"]
+        else None,
+    )
 
 
 def open_investigations(chat: ChatService) -> Investigations:
     """Compose application research storage separately from runtime persistence."""
+    from thesis_runtime.adapters.persistence import persistence_backend, postgres_store
+
+    if persistence_backend() == "postgres":
+        from thesis.persistence.postgres import PostgresInvestigationStore
+
+        return Investigations(chat, PostgresInvestigationStore(postgres_store()))
     database = ensure_database(open_cosmos_client())
     container = database.create_container_if_not_exists(
         id="investigations", partition_key=PartitionKey(path="/workspaceId")

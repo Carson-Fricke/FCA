@@ -1,7 +1,7 @@
 """Backtest data HTTP surface delegating launch to the harness adapter.
 
-Listing and detail read the workspace backtest records persisted locally and
-keyed by the harness ``job_id``; the launch route delegates to the harness
+Listing discovers retained execution references, while report detail reads
+published evidence keyed by the harness ``job_id``. The launch route delegates to the harness
 activation adapter interface (:class:`HarnessBoundary`) exactly like every
 other Thesis activation call.  The router resolves its services from app state.
 """
@@ -9,11 +9,10 @@ other Thesis activation call.  The router resolves its services from app state.
 from __future__ import annotations
 
 import pathlib
-import threading
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from datetime import UTC, datetime
-from typing import Annotated, Protocol
+from typing import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
@@ -24,6 +23,12 @@ from thesis.artifacts.importer import (
     ArtifactImportError,
     ArtifactImportReceipt,
     HarnessManifest,
+)
+from thesis.backtests.catalog import BacktestCatalog
+from thesis.backtests.records import (
+    BacktestRecord,
+    BacktestStore,
+    InMemoryBacktestStore,
 )
 from thesis.integrations.harness_activation import (
     ActivationEnvironment,
@@ -44,158 +49,6 @@ def _utc_now() -> datetime:
 
 def _iso_z(moment: datetime) -> str:
     return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-@dataclass(frozen=True, slots=True)
-class BacktestRecord:
-    """One workspace backtest row keyed by its harness job.
-
-    ``job_id`` is the single execution identity allocated at submission and
-    reused unchanged by tracking, artifacts, and reports.  A statistic the
-    harness did not publish is ``None``; the record never carries a zero in its
-    place.
-    """
-
-    job_id: str
-    workspace_id: str
-    strategy_id: str
-    name: str
-    period_start: str
-    period_end: str
-    created_at: str
-    initial_capital: float | None
-    final_capital: float | None
-    total_return: float | None
-    sharpe_per_sample: float | None
-    max_drawdown: float | None
-    win_rate: float | None
-    trades: int | None
-    split: Mapping[str, object] | None = None
-    manifest: Mapping[str, object] = field(default_factory=dict)
-    equity: tuple[Mapping[str, float | int], ...] = ()
-    trade_log: tuple[Mapping[str, object], ...] = ()
-    stats: Mapping[str, object] = field(default_factory=dict)
-    status: str = "succeeded"
-    bundle_ref: str | None = None
-    config_path: str | None = None
-    chat_id: str | None = None
-    execution_id: str | None = None
-
-    @property
-    def split_declared(self) -> bool:
-        return self.split is not None
-
-    @property
-    def capital_change(self) -> float | None:
-        """Final minus initial capital, or ``None`` until both ends are published."""
-        if self.initial_capital is None or self.final_capital is None:
-            return None
-        return round(self.final_capital - self.initial_capital, 2)
-
-    def summary_row(self) -> dict[str, object]:
-        """Return the BacktestSummaryRow projection."""
-        return {
-            "job_id": self.job_id,
-            "workspace_id": self.workspace_id,
-            "strategy_id": self.strategy_id,
-            "name": self.name,
-            "period_start": self.period_start,
-            "period_end": self.period_end,
-            "capital": self.initial_capital,
-            "total_return": self.total_return,
-            "sharpe_per_sample": self.sharpe_per_sample,
-            "max_drawdown": self.max_drawdown,
-            "win_rate": self.win_rate,
-            "trades": self.trades,
-            "split_declared": self.split is not None,
-            "created_at": self.created_at,
-            "chat_id": self.chat_id,
-            "execution_id": self.execution_id,
-        }
-
-    def _stats_document(self) -> dict[str, object]:
-        raw = self.manifest.get("stats")
-        if isinstance(raw, Mapping):
-            return dict(raw)
-        return dict(self._default_stats())
-
-    def detail(self) -> dict[str, object]:
-        """Return the BacktestDetail projection."""
-        return {
-            "job_id": self.job_id,
-            "workspace_id": self.workspace_id,
-            "strategy_id": self.strategy_id,
-            "name": self.name,
-            "period_start": self.period_start,
-            "period_end": self.period_end,
-            "initial_capital": self.initial_capital,
-            "final_capital": self.final_capital,
-            "capital_change": self.capital_change,
-            "equity": [dict(point) for point in self.equity],
-            "trades": [dict(trade) for trade in self.trade_log],
-            "stats": self._stats_document(),
-            "split": dict(self.split) if self.split is not None else None,
-            "manifest": dict(self.manifest),
-            "status": self.status,
-            "bundle_ref": self.bundle_ref,
-            "config_path": self.config_path,
-            "chat_id": self.chat_id,
-            "execution_id": self.execution_id,
-        }
-
-    def _default_stats(self) -> dict[str, object]:
-        return {
-            "sharpe_per_sample": self.sharpe_per_sample,
-            "sharpePerSample": self.sharpe_per_sample,
-            "max_drawdown": self.max_drawdown,
-            "win_rate": self.win_rate,
-        }
-
-
-class BacktestStore(Protocol):
-    """Read boundary over the locally persisted backtest records."""
-
-    def list(self, workspace_id: str) -> tuple[BacktestRecord, ...]:
-        """Return every record for the workspace, newest first."""
-        ...
-
-    def get(self, workspace_id: str, job_id: str) -> BacktestRecord | None:
-        """Return one record by its direct ``(workspace_id, job_id)`` key."""
-        ...
-
-    def add(self, record: BacktestRecord) -> BacktestRecord:
-        """Atomically persist and return one record.
-
-        Materialization is add-if-absent: a repeated or concurrent import for
-        the same ``(workspace_id, job_id)`` returns the existing projection
-        instead of creating another one.
-        """
-        ...
-
-
-class InMemoryBacktestStore:
-    """Local in-memory backtest store with atomic add-if-absent semantics."""
-
-    def __init__(self) -> None:
-        self._records: dict[str, dict[str, BacktestRecord]] = {}
-        self._lock = threading.Lock()
-
-    def list(self, workspace_id: str) -> tuple[BacktestRecord, ...]:
-        with self._lock:
-            return tuple(reversed(tuple(self._records.get(workspace_id, {}).values())))
-
-    def get(self, workspace_id: str, job_id: str) -> BacktestRecord | None:
-        with self._lock:
-            return self._records.get(workspace_id, {}).get(job_id)
-
-    def add(self, record: BacktestRecord) -> BacktestRecord:
-        with self._lock:
-            bucket = self._records.setdefault(record.workspace_id, {})
-            existing = bucket.get(record.job_id)
-            if existing is not None:
-                return existing
-            bucket[record.job_id] = record
-            return record
 
 
 class LaunchBacktestRequest(BaseModel):
@@ -519,6 +372,12 @@ def get_backtest_service(request: Request) -> BacktestDataService:
     return require_service(request, "backtest_service", BacktestDataService)
 
 
+def get_backtest_catalog(request: Request) -> BacktestCatalog:
+    from thesis.http.errors import require_service
+
+    return require_service(request, "backtest_catalog", BacktestCatalog)
+
+
 def _service_error(error: Exception) -> HTTPException:
     from thesis.http.errors import service_error
 
@@ -532,9 +391,26 @@ def create_backtest_router() -> APIRouter:
     @router.get("/backtests")
     def list_backtests(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
-        service: Annotated[BacktestDataService, Depends(get_backtest_service)],
+        catalog: Annotated[BacktestCatalog, Depends(get_backtest_catalog)],
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=100)] = 50,
+        strategy_id: Annotated[str | None, Query(max_length=128)] = None,
     ) -> dict[str, object]:
-        return {"items": list(service.list_backtests(workspace_id))}
+        return catalog.page(
+            workspace_id, offset=offset, limit=limit, strategy_id=strategy_id
+        )
+
+    @router.get("/backtests/jobs/{job_id}/inspection")
+    def inspect_backtest_job(
+        workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
+        job_id: Annotated[str, Path(min_length=1, max_length=128)],
+        catalog: Annotated[BacktestCatalog, Depends(get_backtest_catalog)],
+    ) -> dict[str, object]:
+        """Inspect retained identity, actual execution and frozen inputs without import."""
+        try:
+            return catalog.get(workspace_id, job_id)
+        except (KeyError, ValueError) as error:
+            raise _service_error(error) from error
 
     @router.get("/backtests/jobs/{job_id}")
     def materialize_backtest_job(
@@ -571,9 +447,33 @@ def create_backtest_router() -> APIRouter:
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
         job_id: Annotated[str, Path(min_length=1, max_length=128)],
         service: Annotated[BacktestDataService, Depends(get_backtest_service)],
+        request: Request,
     ) -> dict[str, object]:
         try:
             return service.get_backtest(workspace_id, job_id)
+        except KeyError:
+            # Report caching is optional. A terminal job can be opened directly
+            # from its retained reference without first visiting its chat card.
+            catalog = get_backtest_catalog(request)
+            try:
+                observation = catalog.get(workspace_id, job_id)
+            except KeyError as error:
+                raise _service_error(error) from error
+            coordinator = getattr(request.app.state, "backtest_run_coordinator", None)
+            if observation["state"] != "succeeded" or coordinator is None:
+                raise _service_error(KeyError(job_id)) from None
+            card = coordinator.materialize(workspace_id, job_id, state="succeeded")
+            backtest = card.get("backtest")
+            if not isinstance(backtest, dict):
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "code": "backtest_report_unavailable",
+                        "message": card.get("error")
+                        or "Published report is temporarily unavailable; the execution remains visible.",
+                    },
+                ) from None
+            return backtest
         except Exception as error:
             raise _service_error(error) from error
 
@@ -593,9 +493,6 @@ def create_backtest_router() -> APIRouter:
 
 __all__ = [
     "BacktestDataService",
-    "BacktestRecord",
-    "BacktestStore",
-    "InMemoryBacktestStore",
     "LaunchBacktestRequest",
     "create_backtest_router",
     "get_backtest_service",

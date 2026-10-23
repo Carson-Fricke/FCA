@@ -14,7 +14,8 @@ from thesis.agent.harness_tools import (
 )
 from thesis.application.job_classification import HARNESS_RESEARCH_MODEL_TOOL
 from thesis.backtests.coordinator import BacktestRunCoordinator
-from thesis.http.backtests import BacktestDataService, InMemoryBacktestStore
+from thesis.backtests.records import InMemoryBacktestStore
+from thesis.http.backtests import BacktestDataService
 from thesis.integrations.mcp import (
     TOOL_GET_JOB_RESULT,
     TOOL_GET_JOB_STATUS,
@@ -120,7 +121,7 @@ def _coordinator(
     store = InMemoryBacktestStore()
     service = BacktestDataService(store=store, clock=lambda: NOW)
     coordinator = BacktestRunCoordinator(
-        service,
+        service.store,
         tools,
         tracking=None if job is None else _lookup(job),
         clock=lambda: NOW,

@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 
 from thesis.agent.harness_tools import HarnessToolProvider, HarnessToolResult
 from thesis.backtests.artifacts import ArtifactReader, HarnessArtifactReader
-from thesis.http.backtests import BacktestRecord
+from thesis.backtests.records import BacktestRecord
 from thesis.integrations.mcp import TOOL_GET_JOB_RESULT, TOOL_GET_JOB_STATUS
 from thesis.research.evidence import numeric_metric
 

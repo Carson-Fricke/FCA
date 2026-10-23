@@ -8,6 +8,7 @@ const streams = vi.hoisted(() => [] as Array<(item: TimelineItem) => void>);
 vi.mock('$lib/api', async (original) => ({
 	...await original<typeof import('$lib/api')>(), fixtureMode: false,
 	listChats: vi.fn(async () => [{ chat_id: 'chat-1', title: 'Research' }]),
+	listWorkflowMetadata: vi.fn(async () => ({ items: [], after: 0 })),
 	listTimelinePage: vi.fn(async () => ({ items: [], nextBefore: null, after: 0 })),
 	listChatSubAgents: vi.fn(async () => []),
 	getExecution: vi.fn(async () => { throw new Error('Forbidden latest-execution fetch'); }),
@@ -324,7 +325,7 @@ describe('multiple workflows on one timeline', () => {
 		expect(parseScope(controller.scope.toQuery()).at(-1)).toMatchObject({ executionId: 'two', phase });
 		expect(phaseScopeId('a:b', 'c')).not.toBe(phaseScopeId('a', 'b:c'));
 		const partial = timelineFixture([launch('one', 1)]);
-		partial.history.root = { complete: false, loading: true, error: '' };
+		partial.history.root = { complete: false, loading: true, loaded: false, nextBefore: null, error: '' };
 		const partialController = new WorkflowScopeController('ws-1', 'partial-links', partial);
 		partialController.attachChat('chat-1', { scope: 'conversation:chat-1/phase:discovery' });
 		expect(partialController.activeSegment?.executionId).toBeUndefined();

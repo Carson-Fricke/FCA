@@ -1,5 +1,5 @@
 /** One chat data owner: live stream, history, identity and ordered thread selectors. */
-import { apiBaseUrl, fixtureMode, listTimelinePage } from './api';
+import { apiBaseUrl, fixtureMode, listTimelinePage, listWorkflowMetadata } from './api';
 import { untrack } from 'svelte';
 import { TimelineStream } from './sse';
 import { fixtureTimeline } from './fixture-timeline';
@@ -18,7 +18,10 @@ export class TimelineController {
 	connected = $state(false);
 	initialLoading = $state(false);
 	streamError = $state('');
-	history = $state<Record<string, { loading: boolean; complete: boolean; error: string }>>({});
+	history = $state<Record<string, { loading: boolean; loaded: boolean; complete: boolean; error: string; nextBefore: number | null }>>({});
+	#metadata = $state.raw<Map<string, { execution: WorkflowExecutionRecord; seq: number }>>(new Map());
+	metadataError = $state('');
+	#metadataRequest: AbortController | null = null;
 	#stream: TimelineStream | null = null;
 	#unsubscribe: (() => void) | null = null;
 	#workspaceId = '';
@@ -59,7 +62,7 @@ export class TimelineController {
 		}
 		return { messages, events, messagesByThread, eventsByThread, eventsByExecution, snapshots, nodeRevision };
 	});
-	workflows = $derived(deriveWorkflowLive(this.#index.messages, this.#index.eventsByExecution, this.#index.snapshots));
+	workflows = $derived(deriveWorkflowLive(this.#index.messages, this.#index.eventsByExecution, this.#index.snapshots, this.#metadata));
 	get anyActiveWorkflow(): boolean { return hasActiveWorkflow(this.workflows); }
 	get nodeRevision(): string { return this.#index.nodeRevision; }
 	eventsForExecution(id: string): ExecutionEvent[] { return this.#index.eventsByExecution.get(id) ?? []; }
@@ -124,28 +127,26 @@ export class TimelineController {
 		this.#localMessages = this.#localMessages.filter((message) => !messageIds.has(message.message_id));
 	}
 
-	/** Partial pages remain visible on failure; aborted and previous-chat replies cannot merge. */
-	async loadHistory(threadId = 'root'): Promise<void> {
-		if (!this.#chatId || untrack(() => this.history[threadId]?.complete) || this.#loads.has(threadId)) return;
+	/** One selected-thread page per request; older pages are explicit operator navigation. */
+	async loadHistory(threadId = 'root', older = false): Promise<void> {
+		const previous = untrack(() => this.history[threadId]);
+		if (!this.#chatId || previous?.complete || (previous?.loaded && !older && !previous.error) || this.#loads.has(threadId)) return;
 		const request = new AbortController();
 		this.#loads.set(threadId, request);
-		this.history[threadId] = { loading: true, complete: false, error: '' };
-		let before: number | null = null;
+		this.history[threadId] = { loaded: previous?.loaded ?? false, loading: true, complete: false, error: '', nextBefore: previous?.nextBefore ?? null };
+		const before = previous?.nextBefore ?? null;
 		try {
-			do {
-				const page = await listTimelinePage(this.#workspaceId, this.#chatId, threadId === 'root' ? null : threadId, before, request.signal);
-				if (request.signal.aborted || this.#loads.get(threadId) !== request) return;
-				this.merge(page.items);
-				if (threadId === 'root' && before === null) {
-					this.initialLoading = false;
-					this.#startStream(page.after);
-				}
-				if (page.nextBefore !== null && before !== null && page.nextBefore >= before) {
-					throw new Error('Timeline history cursor did not advance');
-				}
-				before = page.nextBefore;
-			} while (before !== null);
-			this.history[threadId].complete = true;
+			const page = await listTimelinePage(this.#workspaceId, this.#chatId, threadId, before, request.signal);
+			if (request.signal.aborted || this.#loads.get(threadId) !== request) return;
+			if (page.nextBefore !== null && before !== null && page.nextBefore >= before) throw new Error('Timeline history cursor did not advance');
+			this.merge([...(page.outputPrefixes ?? []), ...page.items]);
+			if (threadId === 'root' && before === null) {
+				this.initialLoading = false;
+				this.#startStream(page.after);
+			}
+			this.history[threadId].loaded = true;
+			this.history[threadId].nextBefore = page.nextBefore;
+			this.history[threadId].complete = page.nextBefore === null;
 		} catch (error) {
 			if (!request.signal.aborted && this.#loads.get(threadId) === request) this.history[threadId].error = error instanceof Error ? error.message : 'Conversation history could not be loaded.';
 		} finally {
@@ -155,6 +156,20 @@ export class TimelineController {
 				this.history[threadId].loading = false;
 			}
 		}
+	}
+
+	async refreshMetadata(): Promise<void> {
+		if (!this.#chatId || this.#metadataRequest) return;
+		const request = new AbortController();
+		this.#metadataRequest = request;
+		try {
+			const metadata = await listWorkflowMetadata(this.#workspaceId, this.#chatId, request.signal);
+			if (request.signal.aborted || this.#metadataRequest !== request) return;
+			this.#metadata = new Map(metadata.items.map((execution) => [execution.execution_id, { execution, seq: metadata.after }]));
+			this.metadataError = '';
+		} catch (error) {
+			if (!request.signal.aborted) this.metadataError = error instanceof Error ? error.message : 'Workflow metadata could not be loaded.';
+		} finally { if (this.#metadataRequest === request) this.#metadataRequest = null; }
 	}
 
 	cancelHistory(threadId: string): void {
@@ -170,6 +185,7 @@ export class TimelineController {
 		this.#chatId = chatId;
 		this.initialLoading = true;
 		void this.loadHistory();
+		void this.refreshMetadata();
 	}
 
 	#startStream(after: number): void {
@@ -196,6 +212,8 @@ export class TimelineController {
 
 	stop(): void {
 		this.#generation += 1;
+		this.#metadataRequest?.abort();
+		this.#metadataRequest = null;
 		this.#unsubscribe?.();
 		this.#unsubscribe = null;
 		this.#stream?.stop();
@@ -215,6 +233,8 @@ export class TimelineController {
 		this.#localMessages = [];
 		this.initialLoading = false;
 		this.history = {};
+		this.#metadata = new Map();
+		this.metadataError = '';
 		this.streamError = '';
 	}
 }

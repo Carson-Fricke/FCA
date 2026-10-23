@@ -17,14 +17,10 @@ terminal transcript, log, issue, or task evidence.
 - `uv` (Python 3.12 project environment): `uv sync --extra dev`.
 - Node.js LTS with npm for the UI: `npm --version`; install once per checkout
   with `npm install` inside `src/ui`.
-- Docker Desktop for the Cosmos DB emulator that backs durable conversation
-  state. The launcher starts Docker when needed and runs the emulator from the
-  pinned `vnext-EN20260907` image over loopback HTTP with a named data volume
-  mounted at `/data`, so conversations survive restarts. HTTP bypasses this
-  release's TLS buffering defect. Microsoft fixed the HTTPS request-size hangs
-  in `vnext-EN20261008`, but that image fails to query our retained catalog with
-  `unknown type of jsonb container`; do not switch this data volume to it.
-  The legacy emulator image does not persist data.
+- Docker Desktop for native PostgreSQL 17 on loopback port 5433. The launcher
+  starts Docker when needed, retains `thesis-postgres-data`, and stores its
+  generated password only in ignored `.env`. The stopped Cosmos emulator and its
+  volume are retained as the source backup of the completed local cutover.
 - Bearer tokens for market-lake (`LAKE_API__BEARER_TOKEN`), harness
   (`HARNESS_API_BEARER_TOKEN`), and Thesis (`THESIS_API__BEARER_TOKEN`) are
   managed in the ignored repository `.env` by `scripts/local/dev_tokens.py`.
@@ -75,7 +71,7 @@ provider into streamed conversation replies: when `OPENROUTER_API_KEY` is
 present, a new user message streams an assistant reply over
 `GET /v1/workspaces/{ws}/chats/{chat}/events/stream`; without it, chat stays a
 durable message surface with no reply. `THESIS_MODEL` overrides the model
-(default `deepseek/deepseek-v4.1-flash`). Local and deployed backends use the same
+(default `deepseek/deepseek-v4.1-flash-1017`). Local and deployed backends use the same
 control service; local logging must not override phase-completion methods.
 Completion attempt identity is supplied by trusted runtime context.
 
@@ -102,8 +98,8 @@ provider with a missing deployment reports `model_unavailable`.
 ### One command (recommended)
 
 `scripts/local/start-stack.ps1` runs the token helper, loads `.env`, ensures
-the Cosmos DB emulator is running (creating it on first use, with a persistent
-data volume), and launches the market-lake API (port 8002), harness API,
+native PostgreSQL 17 is running on loopback port 5433 (creating a private local
+password and the persistent `thesis-postgres-data` volume on first use), and launches the harness API,
 Thesis API, and UI detached with logs under `.local/logs`. It stops an existing
 instance on the target port first, and it keeps the tokens stable across
 restarts so the UI's baked credential keeps matching the Thesis API:
@@ -125,32 +121,45 @@ powershell -File scripts/local/start-stack.ps1 -Foreground
 The launcher adds the base CPython directory to `PATH` for the harness facade
 (see troubleshooting) and reports each server's PID and health.
 
-The local harness uses the Azure development market lake by default:
-`https://fca-ml-dev-api.lemonhill-3b437822.westus2.azurecontainerapps.io`.
-Sign in with `az login`; the launcher reads `api-bearer-token` from the existing
-Key Vault into the harness child's environment only. The Azure token is never
-written to `.env`, and the local lake keeps its generated loopback token.
-`HARNESS_LAKE_BEARER_SECRET_URI` can select a different Key Vault secret.
-
-To use the local lake, put `LAKE_API_URL=http://127.0.0.1:8002` in the ignored
-`.env` and include `lake` when starting the stack. `LAKE_API_BASE_URL` is also
-supported after `LAKE_API_URL`; unset both URL overrides to use Azure again.
-Other explicit endpoints use their configured `LAKE_API__BEARER_TOKEN` unless
-a Key Vault secret URI is supplied. A missing or rejected remote credential
-fails; the harness does not fall back to the local lake.
-
-For a manual harness launch against Azure, resolve its token into the process
-environment rather than loading the loopback lake token from `.env`:
+To connect local Thesis to the entire Azure harness, set `HARNESS_MCP_URL` to
+`https://fca-ml-dev-quant-api.lemonhill-3b437822.westus2.azurecontainerapps.io`
+and supply that deployment's `HARNESS_API_BEARER_TOKEN` in the ignored `.env`.
+Then restart only Thesis; the local UI and PostgreSQL remain local:
 
 ```powershell
-$env:LAKE_API__BEARER_TOKEN = (az keyvault secret show `
-    --vault-name fca-ml-dev-kv-obj3kww --name api-bearer-token --query value -o tsv)
+powershell -File scripts/local/start-stack.ps1 -Servers thesis -Foreground
 ```
 
-The local Cosmos client defaults to `http://127.0.0.1:8081`, matching the launcher.
-Remove an old local `THESIS_COSMOS_ENDPOINT=https://localhost:8081` override or
-set it to the HTTP endpoint. Gateway, health, and explorer ports bind only to
-`127.0.0.1`; deployed Cosmos endpoints continue using HTTPS.
+The launcher reads `.env`; it does not automatically load
+`.local/thesis-azure-harness.env`. Startup logs name the selected harness
+endpoint. MCP tools and the workspace status client use that same configured
+endpoint. A remote authentication or transport failure never selects local
+execution. Previously accepted local jobs remain in the local harness; changing
+the connection does not transfer or replay them.
+
+When `HARNESS_MCP_URL` is unset, Thesis selects `http://127.0.0.1:8001`.
+Starting the local `harness` server composes its complete filesystem market lake
+and finite local workers. Run `-Servers postgres,thesis,ui` when using Azure so
+the launcher does not also start a local harness. Do not use `-Rotate` with a
+remote harness credential: local token generation does not rotate Azure secrets.
+
+`THESIS_PERSISTENCE=postgres` and `THESIS_POSTGRES_DSN` select the native local
+store. The launcher writes them to ignored `.env`; never commit or print the DSN.
+The database is independent of the harness endpoint. Restarting Thesis or the
+container retains conversations, job IDs, audits and consumption positions.
+Existing Cosmos catalogs require an explicit bounded offline copy and content
+verification before switching; startup never converts or silently reads them.
+The completed local cutover retains its compressed source snapshot and stopped
+emulator volume for recovery. Do not start the old emulator for ordinary use.
+
+Azure Thesis retains its Cosmos backend. `-Servers cosmos` remains available for
+explicit adapter testing with `THESIS_PERSISTENCE=cosmos`; its HTTP endpoint is
+`http://127.0.0.1:8081`. It is not required by native PostgreSQL.
+
+The real PostgreSQL HTTP behavior suite uses one disposable database. CI supplies
+`THESIS_TEST_POSTGRES_DSN` for its dedicated PostgreSQL service; local pytest can
+create one disposable Docker server automatically. Tests never use the application
+DSN. Focused command: `uv run --extra dev pytest -p no:cacheprovider tests/thesis/http/test_postgres_persistence.py`.
 
 ### Manual (three terminals)
 
@@ -201,9 +210,9 @@ Notes on the composition:
 - `THESIS_WORKSPACE_ROOT` overrides the persisted workspace root; omit it for
   the default local app-data location. Workspaces themselves are created through
   the API (see section 4).
-- Conversations are durable in the Cosmos DB `catalog` container, partitioned by
-  workspace, in local and workspace runs alike. Local runs use the Cosmos DB
-  emulator described above, and chats survive a restart of the Thesis API process.
+- Local conversations are durable in native PostgreSQL; Azure Thesis retains its
+  configured Cosmos `catalog`. Both adapters share the neutral inbox, timeline,
+  revision checks and ownership fences, and survive a Thesis API restart.
 - The workspace catalog is selected separately from chat. With `THESIS_STORAGE_ACCOUNT_NAME`
   set, the catalog lists the blob containers under
   `THESIS_WORKSPACE_CONTAINER_PREFIX` (`thesis-ws-` by default) and each

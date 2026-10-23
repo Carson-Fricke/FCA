@@ -9,3 +9,32 @@ src/harness/strategy-sdk/** text=auto eol=lf
 src/harness/contracts/** text=auto eol=lf
 src/harness/num/** text=auto eol=lf
 src/lake/contracts/** text=auto eol=lf
+# All repository text uses the LF bytes used by Linux builds. Explicit binary
+# attributes below prevent newline conversion of binary assets.
+* text=auto eol=lf
+*.png -text
+*.jpg -text
+*.jpeg -text
+*.gif -text
+*.webp -text
+*.ico -text
+*.pdf -text
+*.zip -text
+*.gz -text
+*.parquet -text
+*.arrow -text
+*.feather -text
+*.woff -text
+*.woff2 -text
+*.ttf -text
+*.wasm -text
+*.exe -text
+*.dll -text
+*.so -text
+*.dylib -text
+*.pyd -text
+*.db -text
+*.sqlite -text
+*.sqlite3 -text
+*.npy -text
+*.npz -text

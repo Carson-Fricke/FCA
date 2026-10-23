@@ -100,6 +100,13 @@ class WorkflowExecutionWire(
     """Complete serialized workflow execution record."""
 
 
+class WorkflowMetadataWire(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: tuple[WorkflowExecutionWire, ...]
+    after: int = Field(ge=0)
+
+
 class ExecutionEventWire(
     _record_model("ExecutionEventFields", ExecutionEvent, camel=True)
 ):
@@ -246,6 +253,9 @@ class TimelinePageWire(BaseModel):
     items: tuple[TimelineItemWire, ...]
     next_before: int | None
     after: int = Field(ge=0)
+    output_prefixes: tuple[TimelineOutputWire, ...] = Field(
+        default=(), alias="outputPrefixes"
+    )
 
 
 class WorkflowSplitWire(BaseModel):

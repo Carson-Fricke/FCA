@@ -47,6 +47,9 @@ subscription filtering, including direct runtime calls in tests.
   and UNC prefixes are converted to conventional paths accepted by MSVC.
 
 Focused tests and authored fixture sources live in the sibling `tests/` folder.
+- `sdk_reference.rs` owns read-only SDK inventory, metadata and bounded source
+  reads. It normalizes CRLF to LF for source hashes and detects changes during
+  reads; compiler provenance and validation caching remain in their own modules.
 `tests/validation_guidance.rs` covers compact failures and the minimal study
 contract; `tests/unit/diagnostic_compactness.rs` covers retained locations and
 suggestions without duplicate rendered payloads. Test fixtures are not runtime
@@ -56,7 +59,7 @@ Workspace program IDs and Git publication belong to Thesis, not this crate.
 The JIT compiles the assembled source/configuration it receives. Thesis's packaged
 SDK reference identity includes the canonical SDK, harness contracts, num, and
 lake contracts Cargo/source
-hashes; JIT compiler provenance additionally covers its own build and toolchain
+hashes with CRLF normalized to LF; JIT compiler provenance additionally covers its own build and toolchain
 environment. These identities have different owners and are not interchangeable.
 
 Managed workspaces embed the harness `rust-toolchain.toml`; authored builds use the same pinned compiler shipped in the container.

@@ -1,7 +1,8 @@
 <script lang="ts">
 	import BacktestReport from '$lib/components/backtest-view/BacktestReport.svelte';
-	import { getBacktest, materializeBacktestRun } from '$lib/api';
-	import type { BacktestDetail, ToolResult } from '$lib/types';
+	import { getBacktest } from '$lib/api';
+	import { observeJob } from '$lib/research/jobs';
+	import type { BacktestDetail, HarnessJobStatus, ToolResult } from '$lib/types';
 	import { formatValue, isRecord, readNumber, readRecord, readString } from './safe';
 
 	let { result, workspaceId }: { result: ToolResult; workspaceId: string } = $props();
@@ -14,15 +15,14 @@
 	const exitCode = $derived(readNumber(data, 'exit_code'));
 	const metrics = $derived(readRecord(data, 'metrics'));
 	const metricRows = $derived(Object.entries(metrics));
-	const chatId = $derived(readString(data, 'chat_id'));
-	const executionId = $derived(readString(data, 'execution_id'));
 
 	const identifier = $derived(jobId ?? runState);
-	const statusText = $derived(runState);
-	const normalizedState = $derived((runState ?? '').toLowerCase());
+	let observed = $state<HarnessJobStatus | null>(null);
+	const statusText = $derived(observed?.state ?? runState);
+	const normalizedState = $derived((statusText ?? '').toLowerCase());
 	const isActive = $derived(normalizedState === 'running' || normalizedState === 'queued');
 	const isFailed = $derived(
-		!result.ok ||
+		(!observed && !result.ok) ||
 			normalizedState === 'failed' ||
 			normalizedState === 'cancelled'
 	);
@@ -31,15 +31,11 @@
 	let loading = $state(false);
 	let loadError = $state('');
 
-	const MATERIALIZE_MAX_ATTEMPTS = 40;
-	const MATERIALIZE_INTERVAL_MS = 3000;
-
 	$effect(() => {
 		const ws = workspaceId;
 		const id = jobId ?? '';
-		const chat = chatId;
-		const execution = executionId;
 		if (!ws || !id) {
+			observed = null;
 			detail = null;
 			loading = false;
 			loadError = '';
@@ -47,62 +43,42 @@
 		}
 		let cancelled = false;
 		let timer: ReturnType<typeof setTimeout> | null = null;
-		let attempts = 0;
+		let resolving = false;
 		loading = true;
 		loadError = '';
 		detail = null;
-
-		async function loadById(jobIdValue: string): Promise<void> {
-			const next = await getBacktest(ws, jobIdValue);
-			if (cancelled) return;
-			detail = next;
-			loading = false;
-		}
+		observed = null;
 
 		async function resolve(): Promise<void> {
 			try {
-				const card = await materializeBacktestRun(ws, id, {
-					chatId: chat,
-					executionId: execution
-				});
+				const next = await getBacktest(ws, id);
 				if (cancelled) return;
-				if (card.backtest) {
-					detail = card.backtest;
-					loading = false;
-					return;
-				}
-				const cardState = (card.state ?? '').toLowerCase();
-				if (card.error) {
-					loadError = card.error;
-					loading = false;
-					return;
-				}
-				if (cardState === 'failed' || cardState === 'cancelled') {
-					loadError = failureMessage;
-					loading = false;
-					return;
-				}
-				if (cardState === 'succeeded') {
-					await loadById(id);
-					return;
-				}
-				attempts += 1;
-				if (attempts >= MATERIALIZE_MAX_ATTEMPTS) {
-					loadError = 'Backtest is still running. Reopen the conversation to refresh.';
-					loading = false;
-					return;
-				}
-				timer = setTimeout(() => void resolve(), MATERIALIZE_INTERVAL_MS);
+				detail = next;
+				loading = false;
+				loadError = '';
 			} catch (error: unknown) {
 				if (cancelled) return;
 				loadError = error instanceof Error ? error.message : 'Failed to load backtest';
 				loading = false;
+				timer = setTimeout(() => void resolve(), 5000);
 			}
 		}
 
-		void resolve();
+		const stop = observeJob(id, ({ job, error }) => {
+			if (cancelled) return;
+			observed = job;
+			loadError = error;
+			if (job?.state === 'succeeded' && !resolving) {
+				resolving = true;
+				void resolve();
+			} else if (job?.state === 'failed' || job?.state === 'cancelled') {
+				loading = false;
+				loadError = job.error_message || 'Execution ended without a report.';
+			}
+		});
 		return () => {
 			cancelled = true;
+			stop();
 			if (timer) clearTimeout(timer);
 		};
 	});
@@ -152,6 +128,8 @@
 	{/if}
 
 	{#if jobId}
+		<a href="/w/{workspaceId}/backtests/{jobId}" class="text-xs text-accent hover:underline">Inspect execution →</a>
+		{#if loadError && loading}<p class="text-xs text-warn">Status unavailable: {loadError}. Retrying automatically.</p>{/if}
 		{#if loading}
 			<p
 				class="flex items-center gap-2 text-xs text-slate-500"

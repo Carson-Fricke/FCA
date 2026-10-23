@@ -37,7 +37,7 @@ from thesis.agent.harness_tools import (
 from thesis.application.prompts import FCA_REPLY_SYSTEM_PROMPT
 from thesis.auth.session import OperatorSessionService
 from thesis.auth.workspace_access import WorkspaceAuthorizer
-from thesis.http.artifacts import ArtifactCatalogService, create_artifact_router
+from thesis.http.artifacts import create_artifact_router
 from thesis.http.auth import (
     CsrfTokenGuard,
     OidcVerifier,
@@ -65,8 +65,8 @@ from thesis.http.workspaces import (
     require_workspace_access,
 )
 from thesis.identity.ports import AccountStore, SessionStore
-from thesis.persistence.cosmos_submissions import open_submission_store
 from thesis.persistence.investigations import open_investigations
+from thesis.persistence.stack import open_submission_store
 from thesis.research.investigations import Investigations, MemoryInvestigationStore
 from thesis.screening.service import ScreenerService
 from thesis_runtime.adapters.providers.openrouter import OpenRouterProvider
@@ -528,7 +528,7 @@ def create_app(
         from thesis.backtests import BacktestRunCoordinator
 
         backtest_coordinator = BacktestRunCoordinator(
-            workspace_data.backtests,
+            workspace_data.backtests.store,
             harness_tool_provider,
             tracking=None if chat_service is None else chat_service.find_tool_job,
         )
@@ -572,8 +572,25 @@ def create_app(
         application.state.dashboard_service = workspace_data.dashboards
         application.state.workspace_state_service = workspace_data.state
         application.state.strategy_service = workspace_data.strategies
-        application.state.artifact_catalog_service = ArtifactCatalogService(
-            workspace_data.strategy_artifacts, workspace_data.programs
+        application.state.artifact_catalog_service = workspace_data.strategies.catalog
+        from thesis.backtests.catalog import BacktestCatalog
+
+        application.state.backtest_catalog = BacktestCatalog(
+            submissions=workspace_data.backtests.submissions,
+            tracking=None if chat_service is None else chat_service.list_tool_jobs,
+            reports=workspace_data.backtests.list_backtests,
+            read_job=None
+            if harness_data_service is None
+            else harness_data_service.job_status,
+            read_artifact=None
+            if harness_data_service is None
+            else harness_data_service.artifact,
+            list_artifacts=None
+            if harness_data_service is None
+            else harness_data_service.list_artifacts,
+        )
+        workspace_data.workspaces.bind_count_provider(
+            "backtests", application.state.backtest_catalog.count
         )
         screener_service = workspace_data.screeners
         if (
@@ -842,7 +859,7 @@ def serving_app_from_environment() -> FastAPI:
     )
     from thesis.application.workflow_launcher import daemon_thread
     from thesis.http.workspaces import build_local_workspace_data
-    from thesis_runtime.adapters.cosmos.stack import open_runtime_persistence
+    from thesis_runtime.adapters.persistence import open_runtime_persistence
 
     persistence = open_runtime_persistence()
     investigations = open_investigations(persistence.chat)

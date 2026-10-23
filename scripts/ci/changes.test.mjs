@@ -6,6 +6,13 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 import { classify, changedPaths } from './changes.mjs';
 
+test('repository text policy changes verify and rebuild both SDK consumers', () => {
+  for (const path of ['.gitattributes', '.editorconfig']) {
+    const result = classify([path]);
+    for (const key of ['python', 'harness', 'lake', 'ui', 'main_image', 'thesis_image']) assert.equal(result[key], true, `${path}: ${key}`);
+  }
+});
+
 test('UI-only changes select UI without rebuilding either backend', () => {
   const result = classify(['src/ui/src/routes/+page.svelte']);
   assert.equal(result.ui, true);

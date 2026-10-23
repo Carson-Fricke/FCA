@@ -15,7 +15,7 @@ claims don't belong here.
 | `chat-host.svelte.ts` | Shared conversation lifecycle, immediate send projections, stable failed-send retry identities, and percolation used by both hosts. |
 | `chat-navigation.ts` | Conversation URL adapter; clears scope and hash on conversation changes. |
 | `model-output.ts` | Provisional output projection with UTF-8 offsets, gap handling, scoped identities and canonical-completion suppression. |
-| `timeline.svelte.ts` | One ordered timeline owner: history then cursor-only SSE, pagination, indexes, and local pending messages reconciled with POST/SSE by identity without advancing cursors. |
+| `timeline.svelte.ts` | One ordered timeline owner: selected-thread recent history then cursor-only SSE, explicit older-page loading, current workflow metadata, indexes, and local pending messages reconciled with POST/SSE by identity without advancing cursors. |
 | `fixture-timeline.ts` | In-memory offline timeline seeded from messages, events, and execution fixtures; mutations publish to subscribers. |
 | `sse.ts` | Sole `TimelineStream` SSE client, with frame parsing, timeline URL construction, and reconnect cursors. |
 | `workflow-live.ts` | Pure execution-indexed live workflow map; sequence-ordered active frontiers, waiting joins, explicit phase-executor projection, attention, and active/terminal selectors. |
@@ -39,6 +39,12 @@ cards select their own execution ID from the workflow map, not a singleton
 `effectiveExecution`. Execution, chat-message, and sub-agent SSE clients/routes
 are removed. REST execution and
 sub-agent event replay remains available without creating another subscription.
+
+History initially loads one 200-record selected-thread page. Opening a child loads
+its recent page; the older-history action advances only that thread's cursor.
+Current execution metadata and node lists populate workflow cards/tree without
+child transcripts. Canonical completed messages replace historical streaming
+fragments in PostgreSQL history; open output prefixes do not advance page cursors.
 
 Execution snapshots preserve first-save state and may arrive after lifecycle
 events; their timeline sequence does not suppress earlier event replay. Phase

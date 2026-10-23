@@ -6,6 +6,26 @@
 @.github/instructions/agent-session-delivery.instructions.md
 @.github/instructions/testing-strategy.instructions.md
 
+## Delivery and Text Format Defaults
+
+- Use LF for every repository text file. `.gitattributes` and `.editorconfig`
+  define this policy; binary assets and ignored local data are not normalized.
+- Install the tracked hooks in every checkout with
+  `git config --local core.hooksPath .githooks`. Use
+  `node scripts/ci/line-endings.mjs --fix` to normalize existing working files.
+- When delivering a change, commit and push ALL pending non-ignored repository
+  changes, including pre-existing changes and every SDK producer/consumer.
+  Do not silently hold files back because they predate the current task or seem
+  unrelated. Keep changes back only when the human explicitly requests it.
+  This delivery default does not authorize unrelated implementation work.
+- Inspect and verify the complete delivery before pushing. Never force-add
+  ignored credentials, local data, caches or build artifacts.
+- The pre-push hook rejects staged, unstaged and untracked leftovers. Only an
+  explicit human request for partial delivery permits setting
+  `FCA_EXPLICIT_PARTIAL_PUSH_REASON` for that one push; record the requested
+  exclusion and clear the variable afterward. Never invent a reason or use it
+  to bypass a failed check.
+
 ## Agent Session Delivery Contract
 
 Every coding agent changing Thesis agent, provider, chat, workflow, UI, or

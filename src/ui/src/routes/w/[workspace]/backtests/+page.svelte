@@ -1,242 +1,97 @@
 <script lang="ts">
-	import EmptyState from '$lib/components/common/EmptyState.svelte';
-	import MetricCard from '$lib/components/common/MetricCard.svelte';
-	import {
-		getHarnessStatus,
-		launchBacktest,
-		listBacktests,
-		pollHarnessJob
-	} from '$lib/api';
-	import { shortDate } from '$lib/format';
-	import type { BacktestSummaryRow, HarnessStatus } from '$lib/types';
-	import { notify } from '$lib/workspace.svelte';
+	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
+	import { listBacktestPage, listStrategies } from '$lib/api';
+	import type { BacktestCatalogPage, BacktestCatalogRow, Strategy } from '$lib/types';
 	import type { PageData } from './$types';
-
 	let { data }: { data: PageData } = $props();
-
 	const workspaceId = $derived(data.workspaceId);
-
-	let backtests = $state<BacktestSummaryRow[]>([]);
-	let harness = $state<HarnessStatus | null>(null);
-	let strategyFilter = $state('all');
-	let onlySplit = $state(false);
-	let launching = $state(false);
-	let configuration = $state('{}');
-
-	$effect(() => {
-		let cancelled = false;
-		listBacktests(workspaceId).then((items) => {
-			if (!cancelled) backtests = items;
-		});
-		// Connection status is advisory: an unreachable harness still reports
-		// its topology so the badge can explain why launches will fail.
-		getHarnessStatus().then((status) => {
-			if (!cancelled) harness = status;
-		});
-		return () => {
-			cancelled = true;
-		};
-	});
-
-	/** Re-read the workspace's run history from the API. */
-	async function refresh(): Promise<void> {
-		backtests = await listBacktests(workspaceId);
+	const strategyId = $derived(page.url.searchParams.get('strategy_id') ?? '');
+	const offset = $derived(Math.max(0, Number(page.url.searchParams.get('offset')) || 0));
+	let catalog = $state<BacktestCatalogPage>({items:[],total:0,offset:0,limit:50});
+	let strategies = $state<Strategy[]>([]);
+	let statusFilter = $state('all');
+	let loading = $state(true);
+	let loadError = $state('');
+	let refreshKey = $state(0);
+	let loadedScope = '';
+	const terminal = (state:string) => ['succeeded','failed','cancelled'].includes(state);
+	const duration = (seconds:number|null) => seconds===null ? '—' : seconds<60 ? `${Math.round(seconds)}s` : `${(seconds/60).toFixed(1)} min`;
+	const date = (value:string|null) => value?.slice(0,10) ?? '—';
+	const filtered = $derived(catalog.items.filter(row => statusFilter==='all'||(statusFilter==='unavailable' ? Boolean(row.status_error)||row.state==='unknown' : row.state===statusFilter)));
+	function stage(row:BacktestCatalogRow):string {
+		if(row.state==='succeeded')return 'Results published';
+		const current=[...row.progress].sort((a,b)=>Date.parse(b.updated_at)-Date.parse(a.updated_at))[0];
+		return current?.stage.replaceAll('_',' ') ?? (row.state==='queued'?'Waiting for a worker':'');
 	}
-
-	/**
-	 * Launch a backtest with the UI defaults and refresh the run history. The
-	 * canonical jobs route fronts the harness MCP `run_backtest` tool; when it
-	 * returns a job id the UI polls until the job reaches a terminal state. The
-	 * list reflects whatever the API persisted, never a client-fabricated row.
-	 */
-	async function runBacktest(): Promise<void> {
-		if (launching) return;
-		launching = true;
-		try {
-			const outcome = await launchBacktest(workspaceId, {
-				bundleRef: 'ui-run',
-				config: JSON.parse(configuration),
-				environment: 'paper'
-			});
-			const settled = outcome.job_id ? await pollHarnessJob(outcome.job_id) : null;
-			await refresh();
-			const state = settled?.state ?? outcome.state ?? 'accepted';
-			notify(
-				`Backtest launched (${state}${outcome.job_id ? ` · ${outcome.job_id}` : ''})`
-			);
-		} catch (error) {
-			notify(
-				`Backtest launch failed: ${error instanceof Error ? error.message : String(error)}`,
-				true
-			);
-		} finally {
-			launching = false;
+	function navigate(nextOffset:number, strategy:string=strategyId):void {
+		const query=new URLSearchParams();if(strategy)query.set('strategy_id',strategy);if(nextOffset)query.set('offset',String(nextOffset));
+		void goto(`/w/${encodeURIComponent(workspaceId)}/backtests${query.size?'?'+query:''}`);
+	}
+	$effect(()=>{
+		const ws=workspaceId;const start=offset;const strategy=strategyId;void refreshKey;
+		let cancelled=false;let timer:ReturnType<typeof setTimeout>|undefined;
+		loading=true;loadError='';
+		const scope=JSON.stringify([ws,start,strategy]);
+		if(loadedScope!==scope){catalog={items:[],total:0,offset:start,limit:50};loadedScope=scope;}
+		async function refresh(){
+			try {
+				const next=await listBacktestPage(ws,{offset:start,limit:50,strategyId:strategy||undefined});
+				if(cancelled)return;catalog=next;loading=false;loadError='';
+				if(next.items.some(row=>!terminal(row.state)||row.status_error))timer=setTimeout(refresh,4000);
+			}catch(error){if(cancelled)return;loading=false;loadError=error instanceof Error?error.message:'Could not load backtests';timer=setTimeout(refresh,6000);}
 		}
-	}
-
-	const strategyIds = $derived([...new Set(backtests.map((b) => b.strategy_id))]);
-	const filtered = $derived(
-		backtests.filter(
-			(b) =>
-				(strategyFilter === 'all' || b.strategy_id === strategyFilter) &&
-				(!onlySplit || b.split_declared)
-		)
-	);
-
-	const summary = $derived.by(() => {
-		const returns = backtests.map((b) => b.total_return).filter((v): v is number => v != null);
-		const sharpes = backtests.map((b) => b.sharpe_per_sample).filter((v): v is number => v != null);
-		return {
-			count: backtests.length,
-			best: returns.length ? Math.max(...returns) : null,
-			avgSharpePerSample: sharpes.length ? sharpes.reduce((a, b) => a + b, 0) / sharpes.length : null
-		};
+		void refresh();return()=>{cancelled=true;if(timer)clearTimeout(timer);};
 	});
+	$effect(()=>{const ws=workspaceId;let cancelled=false;listStrategies(ws).then(rows=>{if(!cancelled)strategies=rows;}).catch(()=>{if(!cancelled)strategies=[];});return()=>{cancelled=true;};});
 </script>
 
 <svelte:head><title>Backtests — Thesis</title></svelte:head>
-
 <div class="mx-auto max-w-6xl space-y-4">
-	<label class="block text-sm text-slate-600">
-		Backtest configuration (JSON)
-		<textarea class="mt-1 block w-full rounded border p-2 font-mono" rows="5" bind:value={configuration} aria-label="Backtest configuration"></textarea>
-	</label>
-	<header class="flex flex-wrap items-center gap-3">
-		<div>
-			<h1 class="text-xl font-semibold text-slate-800">Backtests</h1>
-			<p class="text-sm text-slate-500">Run history and declared-split results.</p>
-		</div>
-		{#if harness}
-			<div
-				data-testid="harness-status"
-				data-reachable={harness.reachable}
-				class="flex items-center gap-2 rounded-lg border border-surface-600 bg-surface-900 px-2.5 py-1.5 text-xs"
-				title={harness.error ?? undefined}
-			>
-				<span
-					class="h-2 w-2 rounded-full {harness.reachable ? 'bg-profit' : 'bg-loss'}"
-				></span>
-				<span class="font-mono text-slate-600">
-					harness {harness.mode} · {harness.reachable ? 'reachable' : 'unreachable'}
-				</span>
-				<span class="text-slate-500">{harness.tools.length} tools</span>
-			</div>
-		{/if}
-		<button
-			type="button"
-			data-testid="run-backtest"
-			disabled={launching}
-			onclick={runBacktest}
-			class="ml-auto rounded-lg border border-accent/40 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 disabled:cursor-not-allowed disabled:opacity-60"
-		>
-			{launching ? 'Launching…' : '＋ Run backtest'}
-		</button>
+	<header class="flex flex-wrap items-start justify-between gap-3">
+		<div><h1 class="text-xl font-semibold text-slate-800">Backtests</h1><p class="mt-1 text-sm text-slate-500">Every submitted execution, with its actual state and published evidence.</p></div>
+		<button type="button" class="rounded-lg border border-surface-600 px-3 py-1.5 text-xs text-slate-600" onclick={()=>refreshKey+=1}>Refresh</button>
 	</header>
-
-	<div class="grid grid-cols-3 gap-3">
-		<MetricCard label="Runs" value={summary.count} />
-		<MetricCard label="Best return" value={summary.best ?? '—'} format="signedPct" />
-		<MetricCard label="Average Sharpe (per sample)" value={summary.avgSharpePerSample ?? '—'} format="ratio" />
+	<div class="flex flex-wrap items-center gap-4 text-xs text-slate-500">
+		<span><strong class="font-semibold text-slate-700">{catalog.total}</strong> submitted{strategyId?' for this strategy':''}</span>
+		<span>{catalog.items.filter(row=>row.state==='succeeded').length} succeeded on this page</span>
+		<span>{catalog.items.filter(row=>row.state==='failed').length} failed on this page</span>
 	</div>
-
-	<div class="flex flex-wrap items-center gap-2">
-		<select
-			class="rounded-lg border border-surface-600 bg-surface-900 px-2 py-1.5 text-xs text-slate-700 outline-none"
-			bind:value={strategyFilter}
-			aria-label="Filter by strategy"
-		>
-			<option value="all">All strategies</option>
-			{#each strategyIds as id (id)}
-				<option value={id}>{id}</option>
-			{/each}
-		</select>
-		<label class="flex items-center gap-1.5 text-xs text-slate-500">
-			<input type="checkbox" class="accent-cyan-400" bind:checked={onlySplit} />
-			split declared only
+	<div class="flex flex-wrap items-center gap-4 border-y border-surface-700 py-3">
+		<label class="flex items-center gap-2 text-xs text-slate-500">Execution
+			<select aria-label="Execution state" class="rounded border border-surface-600 bg-surface-900 px-2 py-1.5 text-slate-700" bind:value={statusFilter}>
+				<option value="all">All states</option><option value="queued">Queued</option><option value="running">Running</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option><option value="unavailable">Status unavailable</option>
+			</select>
 		</label>
+		<label class="flex items-center gap-2 text-xs text-slate-500">Strategy
+			<select aria-label="Strategy" class="rounded border border-surface-600 bg-surface-900 px-2 py-1.5 text-slate-700" value={strategyId} onchange={event=>navigate(0,event.currentTarget.value)}>
+				<option value="">All strategies</option>{#each strategies as strategy}<option value={strategy.id}>{strategy.name}</option>{/each}
+				{#if strategyId&&!strategies.some(strategy=>strategy.id===strategyId)}<option value={strategyId}>{strategyId} · artifact unavailable</option>{/if}
+			</select>
+		</label>
+		{#if catalog.total>catalog.limit}<span class="text-xs text-slate-500">Execution filter applies to this page.</span>{/if}
 	</div>
-
-	{#if filtered.length === 0}
-		<EmptyState title="No backtests" hint="Runs submitted from chats will appear here." />
+	{#if loadError}<p role="alert" class="rounded-lg border border-warn/30 bg-warn/5 px-3 py-2 text-sm text-warn">{loadError} Retained rows remain visible; refreshing will retry.</p>{/if}
+	{#if loading&&catalog.items.length===0}<p class="py-8 text-sm text-slate-500" role="status">Loading retained executions…</p>
+	{:else if filtered.length===0}<p class="py-8 text-center text-sm text-slate-500">{catalog.total?'No executions on this page match the filter.':'No backtests have been submitted in this workspace.'}</p>
 	{:else}
-		<div class="overflow-hidden rounded-xl border border-surface-700 bg-surface-900" data-testid="backtest-history">
-			<table class="w-full border-collapse font-mono text-xs">
-				<thead>
-					<tr class="bg-surface-900 text-left text-[10px] tracking-wider text-slate-500 uppercase">
-						<th class="px-4 py-2">Run</th>
-						<th class="px-4 py-2">Strategy</th>
-						<th class="px-4 py-2">Period</th>
-						<th class="px-4 py-2 text-right">Return</th>
-						<th class="px-4 py-2 text-right">Sharpe (per sample)</th>
-						<th class="px-4 py-2 text-right">Max DD</th>
-						<th class="px-4 py-2 text-center">Split</th>
-						<th class="px-4 py-2">Origin</th>
+		<div class="overflow-x-auto rounded-xl border border-surface-700">
+			<table class="w-full min-w-[670px] border-collapse text-left text-xs" data-testid="backtest-history">
+				<thead class="bg-surface-900 text-slate-500"><tr><th class="px-4 py-3 font-medium">Strategy / job</th><th class="px-4 py-3 font-medium">Execution</th><th class="px-4 py-3 font-medium">Evidence</th><th class="px-4 py-3 text-right font-medium">Queue + execution</th><th class="px-4 py-3 font-medium">Data window</th></tr></thead>
+				<tbody>{#each filtered as row(row.job_id)}
+					<tr class="border-t border-surface-700 align-top hover:bg-surface-900">
+						<td class="px-4 py-3"><a class="font-medium text-slate-800 hover:text-accent" href="/w/{workspaceId}/backtests/{row.job_id}">{row.strategy_id||row.name}</a><a class="mt-1 block font-mono text-[11px] text-accent" href="/w/{workspaceId}/backtests/{row.job_id}" title={row.job_id}>{row.job_id.slice(0,16)}…</a></td>
+						<td class="px-4 py-3"><span class="rounded px-1.5 py-0.5 {row.state==='failed'?'bg-loss/10 text-loss':row.state==='succeeded'?'bg-profit/10 text-profit':'bg-accent/10 text-accent'}">{row.state==='unknown'?'Unconfirmed':row.state}</span><p class="mt-1 max-w-56 text-[11px] text-slate-500">{row.error_message||stage(row)}</p>{#if row.status_error}<p class="mt-1 text-[11px] text-warn">Status unavailable · last observation {row.observed_at?new Date(row.observed_at).toLocaleString():'none'}</p>{/if}</td>
+						<td class="px-4 py-3 text-slate-600">{row.evidence==='no_trades'?'No trades':row.evidence==='available'?'Published results':'Incomplete'}</td>
+						<td class="px-4 py-3 text-right font-mono text-slate-600">{duration(row.queue_seconds)} + {duration(row.execution_seconds)}</td>
+						<td class="px-4 py-3 text-slate-500">{date(row.period_start)}<p class="mt-1 text-[11px]">to {date(row.period_end)} · end exclusive</p></td>
 					</tr>
-				</thead>
-				<tbody>
-					{#each filtered as backtest (backtest.job_id)}
-						<tr class="border-t border-surface-700 hover:bg-surface-900">
-							<td class="px-4 py-2">
-								<a href="/w/{workspaceId}/backtests/{backtest.job_id}" class="text-accent hover:underline">
-									{backtest.name}
-								</a>
-							</td>
-							<td class="px-4 py-2 text-slate-500">{backtest.strategy_id}</td>
-							<td class="px-4 py-2 text-slate-500">
-								{shortDate(backtest.period_start)} → {shortDate(backtest.period_end)}
-							</td>
-							<td
-								class="px-4 py-2 text-right {backtest.total_return == null
-									? 'text-slate-500'
-									: backtest.total_return >= 0
-										? 'text-profit'
-										: 'text-loss'}"
-							>
-								{backtest.total_return == null ? '—' : `${(backtest.total_return * 100).toFixed(1)}%`}
-							</td>
-							<td class="px-4 py-2 text-right text-slate-700"
-								>{backtest.sharpe_per_sample == null ? '—' : backtest.sharpe_per_sample.toFixed(2)}</td
-							>
-							<td class="px-4 py-2 text-right text-loss"
-								>{backtest.max_drawdown == null
-									? '—'
-									: `${(backtest.max_drawdown * 100).toFixed(1)}%`}</td
-							>
-							<td class="px-4 py-2 text-center">
-								{#if backtest.split_declared}
-									<span class="rounded-full border border-accent/40 px-2 py-0.5 text-[10px] text-accent">declared</span>
-								{:else}
-									<span class="rounded-full border border-surface-600 px-2 py-0.5 text-[10px] text-slate-500">not declared</span>
-								{/if}
-							</td>
-							<td class="px-4 py-2" data-testid="backtest-origin">
-								{#if backtest.chat_id}
-									<a
-										href="/w/{workspaceId}/conversations?chat={backtest.chat_id}"
-										class="text-accent hover:underline"
-										title="Open the chat that started this run{backtest.execution_id
-											? ` · execution ${backtest.execution_id}`
-											: ''}"
-										data-testid="backtest-origin-chat"
-									>
-										chat
-									</a>
-								{/if}
-								{#if backtest.execution_id}
-									<span
-										class="ml-2 text-slate-500"
-										title="execution {backtest.execution_id}"
-									>
-										{backtest.execution_id.slice(0, 8)}…
-									</span>
-								{:else if !backtest.chat_id}
-									<span class="text-slate-600">—</span>
-								{/if}
-							</td>
-						</tr>
-					{/each}
-				</tbody>
+				{/each}</tbody>
 			</table>
 		</div>
 	{/if}
+	<footer class="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+		<span>{catalog.total?`${offset+1}–${Math.min(offset+catalog.items.length,catalog.total)} of ${catalog.total}`:'0 executions'} · reports are not required for discovery</span>
+		<div class="flex gap-3"><button type="button" disabled={offset===0} class="disabled:opacity-40" onclick={()=>navigate(Math.max(0,offset-catalog.limit))}>Previous</button><button type="button" disabled={offset+catalog.limit>=catalog.total} class="disabled:opacity-40" onclick={()=>navigate(offset+catalog.limit)}>Next</button></div>
+	</footer>
 </div>

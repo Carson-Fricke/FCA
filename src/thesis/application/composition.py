@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -80,7 +80,7 @@ from thesis_runtime.workflows.execution_store import ExecutionIdentity, Executio
 from thesis_runtime.workflows.registry import WorkflowRegistry
 from thesis_runtime.workflows.state import TERMINAL_EXECUTION_STATES
 
-DEFAULT_SERVING_MODEL = "deepseek/deepseek-v4.1-flash"
+DEFAULT_SERVING_MODEL = "deepseek/deepseek-v4.1-flash-1017"
 _SERVING_PROFILE_ID = "serving-openrouter"
 
 
@@ -431,7 +431,7 @@ def build_serving_worker(
     work_store: WorkStore,
     ownership,
     executions: ExecutionStore,
-    recovery_records: Callable[[], tuple[ExecutionIdentity, ...]] | None = None,
+    recovery_records: Callable[[], Iterable[ExecutionIdentity]] | None = None,
 ):
     """Bind FCA registrations into the generic durable worker."""
     from thesis_runtime.hosting.worker import RuntimeHost, build_worker

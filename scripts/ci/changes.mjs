@@ -12,6 +12,9 @@ export function classify(paths, force = false) {
   const selected = Object.fromEntries(names.map(name => [name, force]));
   const choose = (...keys) => keys.forEach(key => { selected[key] = true; });
   for (const path of paths) {
+    if (['.gitattributes', '.editorconfig'].includes(path)) {
+      choose('python', 'harness', 'lake', 'ui', 'main_image', 'thesis_image');
+    }
     if (path === '.github/workflows/python-bicep-ci.yml' || path.startsWith('scripts/ci/changes')) {
       choose(...names);
     }

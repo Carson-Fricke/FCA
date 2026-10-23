@@ -336,12 +336,20 @@ def test_interrupted_pure_join_resumes_under_the_same_attempt(kit):
             {"target": "join", "report": phase},
             attempt_id=record.phase_attempt_id,
         )
-    original = next(work for work in queue.ready() if work.payload["phase"] == "join")
+    original = next(
+        work
+        for work in (queue.get(ref.workspace_id, ref.key) for ref in queue.ready())
+        if work.payload["phase"] == "join"
+    )
     queue.transition(original, "interrupted")
     rebuilt = build(ports, kit.extension)
     rebuilt.prepare_phase(kit.request)
     rebuilt.prepare_phase(kit.request)
-    recovered = [work for work in queue.ready() if work.payload["phase"] == "join"]
+    recovered = [
+        work
+        for work in (queue.get(ref.workspace_id, ref.key) for ref in queue.ready())
+        if work.payload["phase"] == "join"
+    ]
     assert len(recovered) == 1
     assert recovered[0].payload["attempt_id"] == original.payload["attempt_id"]
     rebuilt.enter_scheduled_phase(kit.request, recovered[0].payload)

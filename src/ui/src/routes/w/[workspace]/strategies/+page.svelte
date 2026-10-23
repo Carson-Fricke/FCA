@@ -1,173 +1,37 @@
 <script lang="ts">
-	import EmptyState from '$lib/components/common/EmptyState.svelte';
-	import CreateStrategyDialog from '$lib/components/strategies/CreateStrategyDialog.svelte';
-	import { money, pct, signedPct } from '$lib/format';
-	import { createStrategy, listStrategies } from '$lib/api';
-	import { notify } from '$lib/workspace.svelte';
-	import type { Strategy, StrategyStatus } from '$lib/types';
+	import { listStrategies } from '$lib/api';
+	import type { Strategy } from '$lib/types';
 	import type { PageData } from './$types';
-
 	let { data }: { data: PageData } = $props();
-
-	const workspaceId = $derived(data.workspaceId);
-
-	let strategies = $state<Strategy[]>([]);
-	let view = $state<'grid' | 'list'>('grid');
-	let statusFilter = $state<'all' | StrategyStatus>('all');
-	let createOpen = $state(false);
-
-	$effect(() => {
-		let cancelled = false;
-		listStrategies(workspaceId).then((items) => {
-			if (!cancelled) strategies = items;
-		});
-		return () => {
-			cancelled = true;
-		};
+	const workspaceId=$derived(data.workspaceId);
+	let strategies=$state<Strategy[]>([]);
+	let loaded=$state(false);
+	let loadError=$state('');
+	let refreshKey=$state(0);
+	$effect(()=>{
+		const ws=workspaceId;void refreshKey;let cancelled=false;
+		loaded=false;loadError='';
+		listStrategies(ws).then(items=>{if(!cancelled){strategies=items;loaded=true;}}).catch(error=>{if(!cancelled){loadError=error instanceof Error?error.message:'Could not load strategies';loaded=true;}});
+		return()=>{cancelled=true;};
 	});
-
-	const filtered = $derived(
-		statusFilter === 'all' ? strategies : strategies.filter((s) => s.status === statusFilter)
-	);
-
-	const STATUS_TONE: Record<StrategyStatus, string> = {
-		live: 'border-profit/40 text-profit',
-		paper: 'border-accent/40 text-accent',
-		paused: 'border-warn/40 text-warn',
-		draft: 'border-surface-600 text-slate-500'
-	};
 </script>
-
 <svelte:head><title>Strategies — Thesis</title></svelte:head>
-
 <div class="mx-auto max-w-6xl space-y-4">
-	<header class="flex flex-wrap items-center gap-3">
-		<div>
-			<h1 class="text-xl font-semibold text-slate-800">Strategies</h1>
-			<p class="text-sm text-slate-500">Registry with status filters and version lineage.</p>
-		</div>
-		<div class="ml-auto flex items-center gap-2">
-			<div class="flex overflow-hidden rounded-lg border border-surface-600">
-				<button
-					type="button"
-					class="px-3 py-1.5 text-xs {view === 'grid' ? 'bg-accent/15 text-accent' : 'text-slate-500'}"
-					onclick={() => (view = 'grid')}
-				>
-					Grid
-				</button>
-				<button
-					type="button"
-					class="px-3 py-1.5 text-xs {view === 'list' ? 'bg-accent/15 text-accent' : 'text-slate-500'}"
-					onclick={() => (view = 'list')}
-				>
-					List
-				</button>
-			</div>
-			<select
-				class="rounded-lg border border-surface-600 bg-surface-900 px-2 py-1.5 text-xs text-slate-700 outline-none"
-				bind:value={statusFilter}
-				aria-label="Filter by status"
-			>
-				<option value="all">All statuses</option>
-				<option value="live">Live</option>
-				<option value="paper">Paper</option>
-				<option value="paused">Paused</option>
-				<option value="draft">Draft</option>
-			</select>
-			<button
-				type="button"
-				class="rounded-lg border border-accent/40 bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25"
-				onclick={() => (createOpen = true)}
-				data-testid="new-strategy"
-			>
-				＋ New strategy
-			</button>
-		</div>
-	</header>
-
-	{#if filtered.length === 0}
-		<EmptyState title="No strategies match" hint="Adjust the status filter or start a chat to draft one." />
-	{:else if view === 'grid'}
-		<ul class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-			{#each filtered as strategy (strategy.id)}
-				<li>
-					<a
-						href="/w/{workspaceId}/strategies/{strategy.id}"
-						class="block rounded-xl border border-surface-700 bg-surface-900 p-4 transition hover:border-accent/40"
-						data-testid="strategy-card"
-					>
-						<div class="flex items-center gap-2">
-							<h2 class="truncate text-sm font-semibold text-slate-800">{strategy.name}</h2>
-							<span class="rounded-full border px-2 py-0.5 font-mono text-[10px] {STATUS_TONE[strategy.status]}">
-								{strategy.status}
-							</span>
-						</div>
-						<p class="mt-0.5 font-mono text-[11px] text-slate-500">{strategy.symbol} · {strategy.versions.at(-1)?.version ?? '—'}</p>
-						<p class="mt-2 truncate text-xs text-slate-500">{strategy.description}</p>
-						<div class="mt-3 flex items-baseline gap-4 font-mono text-xs">
-							<span class={strategy.return_pct == null ? 'text-slate-500' : strategy.return_pct >= 0 ? 'text-profit' : 'text-loss'}>{signedPct(strategy.return_pct)}</span>
-							<span class="text-slate-500">win {pct(strategy.win_rate, 0)}</span>
-							<span class="ml-auto text-slate-500">{money(strategy.capital)}</span>
-						</div>
-					</a>
-				</li>
-			{/each}
-		</ul>
+	<header class="flex flex-wrap items-start justify-between gap-3"><div><h1 class="text-xl font-semibold text-slate-800">Strategies</h1><p class="mt-1 text-sm text-slate-500">Authored strategy programs and published bundles, with their exact source and history.</p></div><button type="button" class="rounded-lg border border-surface-600 px-3 py-1.5 text-xs text-slate-600" onclick={()=>refreshKey+=1}>Refresh</button></header>
+	<p class="text-xs text-slate-500">{strategies.length} strategies · drafts appear before their first backtest</p>
+	{#if loadError}<p role="alert" class="rounded-lg border border-loss/30 bg-loss/5 p-3 text-sm text-loss">{loadError}</p>
+	{:else if !loaded}<p role="status" class="py-8 text-sm text-slate-500">Loading authored strategies…</p>
+	{:else if strategies.length===0}<p class="py-8 text-center text-sm text-slate-500">No committed strategies in this workspace. Strategies authored during research appear here automatically.</p>
 	{:else}
-		<div class="overflow-hidden rounded-xl border border-surface-700">
-			<table class="w-full border-collapse text-sm">
-				<thead>
-					<tr class="bg-surface-900 text-left text-[10px] tracking-wider text-slate-500 uppercase">
-						<th class="px-4 py-2">Strategy</th>
-						<th class="px-4 py-2">Symbol</th>
-						<th class="px-4 py-2">Status</th>
-						<th class="px-4 py-2 text-right">Return</th>
-						<th class="px-4 py-2 text-right">Win rate</th>
-						<th class="px-4 py-2 text-right">Capital</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each filtered as strategy (strategy.id)}
-						<tr class="border-t border-surface-700 hover:bg-surface-900">
-							<td class="px-4 py-2">
-								<a href="/w/{workspaceId}/strategies/{strategy.id}" class="text-slate-800 hover:text-accent">
-									{strategy.name}
-								</a>
-							</td>
-							<td class="px-4 py-2 font-mono text-xs text-slate-500">{strategy.symbol}</td>
-							<td class="px-4 py-2">
-								<span class="rounded-full border px-2 py-0.5 font-mono text-[10px] {STATUS_TONE[strategy.status]}">
-									{strategy.status}
-								</span>
-							</td>
-							<td class="px-4 py-2 text-right font-mono text-xs {strategy.return_pct == null ? 'text-slate-500' : strategy.return_pct >= 0 ? 'text-profit' : 'text-loss'}">
-								{signedPct(strategy.return_pct)}
-							</td>
-							<td class="px-4 py-2 text-right font-mono text-xs text-slate-500">{pct(strategy.win_rate, 0)}</td>
-							<td class="px-4 py-2 text-right font-mono text-xs text-slate-500">{money(strategy.capital)}</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
+		<div class="overflow-x-auto rounded-xl border border-surface-700"><table class="w-full min-w-[600px] border-collapse text-left text-sm" data-testid="strategy-list">
+			<thead class="bg-surface-900 text-xs text-slate-500"><tr><th class="px-4 py-3 font-medium">Strategy</th><th class="px-4 py-3 font-medium">Current revision</th><th class="px-4 py-3 font-medium">Inputs</th><th class="px-4 py-3 font-medium">Status</th><th class="px-4 py-3 font-medium">Backtests</th></tr></thead>
+			<tbody>{#each strategies as strategy(strategy.id)}<tr class="border-t border-surface-700 align-top hover:bg-surface-900">
+				<td class="px-4 py-4"><a href="/w/{workspaceId}/strategies/{strategy.id}" class="font-medium text-slate-800 hover:text-accent">{strategy.name}</a><p class="mt-1 text-xs text-slate-500">{strategy.description||strategy.id}</p></td>
+				<td class="px-4 py-4 font-mono text-xs text-slate-600"><span title={strategy.version}>{strategy.version?.slice(0,12)||strategy.versions.at(-1)?.version||'—'}</span><p class="mt-1 font-sans text-slate-500">{strategy.history?.length??strategy.versions.length} history entries</p></td>
+				<td class="px-4 py-4 text-xs text-slate-500">{#if strategy.inputs?.length}{#each strategy.inputs as input}<p>{input.symbols.join(', ')} · {input.interval||input.data_type}</p>{/each}{:else}{strategy.symbol||'See manifest'}{/if}</td>
+				<td class="px-4 py-4"><span class="rounded bg-accent/10 px-2 py-1 text-xs text-accent">{strategy.status}</span></td>
+				<td class="px-4 py-4"><a class="text-xs text-accent hover:underline" href="/w/{workspaceId}/backtests?strategy_id={encodeURIComponent(strategy.id)}">{strategy.backtest_count??0} executions →</a><p class="mt-1 text-xs text-slate-500">Results belong to individual runs.</p></td>
+			</tr>{/each}</tbody>
+		</table></div>
 	{/if}
 </div>
-
-{#if createOpen}
-	<CreateStrategyDialog
-		onClose={() => (createOpen = false)}
-		onCreate={async (input) => {
-			createOpen = false;
-			try {
-				const created = await createStrategy(workspaceId, input);
-				strategies = [created, ...strategies];
-				notify(`Strategy “${created.name}” created`);
-			} catch (error) {
-				notify(
-					`Strategy creation failed: ${error instanceof Error ? error.message : error}`,
-					true
-				);
-			}
-		}}
-	/>
-{/if}

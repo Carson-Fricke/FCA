@@ -31,6 +31,7 @@ from thesis.research.models import (
 from thesis.workspaces.exploration import output_page
 from thesis.workspaces.local import WorkspaceRepositoryError
 from thesis.workspaces.repository import WorkspaceGit, WorkspaceRepositoryProvider
+from thesis.workspaces.sdk import source_hashes as sdk_source_hashes
 from thesis.workspaces.sketches import WorkspaceSketches
 from thesis_runtime.storage.ownership import assert_owned
 from thesis_runtime.tools.schema import render_violations, validate_arguments
@@ -1803,7 +1804,39 @@ class WorkspacePrograms:
             serving["sdkVersion"],
             serving["sdkAbiVersion"],
         ) != (identity, version, abi):
-            raise ProgramArtifactError("local and serving SDK identities do not match")
+            detail = (
+                f"local {identity[:12]}, serving {str(serving['sdkIdentity'])[:12]}"
+            )
+            try:
+                reference = self.harness.read_sdk_reference()
+                hashes = reference.structured.get("sourceHashes")
+                if (
+                    not reference.is_error
+                    and reference.structured.get("sdkIdentity")
+                    == serving["sdkIdentity"]
+                    and isinstance(hashes, Mapping)
+                    and all(isinstance(name, str) for name in hashes)
+                ):
+                    local_hashes = sdk_source_hashes(self.sdk_root)
+                    changed = sorted(
+                        name
+                        for name in set(local_hashes) | set(hashes)
+                        if local_hashes.get(name) != hashes.get(name)
+                    )
+                    if changed:
+                        names = ", ".join(name[:200] for name in changed[:5])
+                        suffix = (
+                            f" (+{len(changed) - 5} more)" if len(changed) > 5 else ""
+                        )
+                        detail += f"; differing sources: {names}{suffix}"
+            except (HarnessMcpError, OSError, ValueError):
+                # Diagnostics must not hide the original mismatch or permit execution.
+                pass
+            raise ProgramArtifactError(
+                f"local and serving SDK identities do not match ({detail}). "
+                "SDK line endings are normalized; align the local SDK sources and "
+                "serving harness deployment before retrying."
+            )
         return serving
 
     def read_sdk_reference(
@@ -1937,20 +1970,7 @@ impl Default for AuthoredIndicator {
                 raise ProgramArtifactError(
                     "SDK reference/templates do not match the packaged SDK"
                 )
-            sources = {}
-            for name, crate in (
-                ("strategy-sdk", self.sdk_root),
-                ("contracts", self.sdk_root.parent / "contracts"),
-                ("num", self.sdk_root.parent / "num"),
-                ("lake-contracts", self.sdk_root.parent.parent / "lake" / "contracts"),
-            ):
-                sources[f"{name}/Cargo.toml"] = _hash(
-                    (crate / "Cargo.toml").read_bytes()
-                )
-                for path in sorted((crate / "src").rglob("*.rs")):
-                    sources[f"{name}/{path.relative_to(crate).as_posix()}"] = _hash(
-                        path.read_bytes()
-                    )
+            sources = sdk_source_hashes(self.sdk_root)
         except ProgramArtifactError:
             raise
         except (OSError, ValueError, KeyError, TypeError) as error:

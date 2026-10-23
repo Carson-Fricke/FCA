@@ -118,6 +118,7 @@ export interface WireTypes {
 	WorkflowDefinitionWire: WorkflowDefinitionWire;
 	WorkflowExecutionState: WorkflowExecutionState;
 	WorkflowExecutionWire: WorkflowExecutionWire;
+	WorkflowMetadataWire: WorkflowMetadataWire;
 	WorkflowSplitWire: WorkflowSplitWire;
 }
 export interface ActorRequest {
@@ -739,6 +740,7 @@ export interface TimelinePageWire {
 	after: number;
 	items: TimelineItemWire[];
 	nextBefore: number | null;
+	outputPrefixes?: TimelineOutputWire[];
 }
 export interface ToolResultRequest {
 	actor_id?: string | null;
@@ -771,4 +773,8 @@ export interface WorkflowSplitWire {
 		[k: string]: string;
 	};
 	join: string;
+}
+export interface WorkflowMetadataWire {
+	after: number;
+	items: WorkflowExecutionWire[];
 }

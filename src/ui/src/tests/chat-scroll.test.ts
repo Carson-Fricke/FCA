@@ -12,6 +12,7 @@ const node: SubAgentNode = {
 vi.mock('$lib/api', () => ({
 	apiBaseUrl: 'http://api.test', fixtureMode: false,
 	listChatSubAgents: vi.fn(async () => [node]),
+	listWorkflowMetadata: vi.fn(async () => ({ items: [], after: 0 })),
 	listTimelinePage: vi.fn(async () => ({ items: [], nextBefore: null, after: 0 })),
 	postNodeMessage: vi.fn()
 }));

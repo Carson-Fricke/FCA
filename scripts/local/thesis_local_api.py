@@ -1,4 +1,4 @@
-"""Local Thesis API composition for the no-Azure development stack.
+"""Local Thesis API composition with a configured local or remote harness.
 
 Binds the real chat surface (T211) and the workspace DATA routes (T231) to a
 single uvicorn process on 127.0.0.1:8000, with the harness-hosted MCP
@@ -17,7 +17,6 @@ Env:
 from __future__ import annotations
 
 import logging
-import os
 import sys
 
 import uvicorn
@@ -55,10 +54,10 @@ from thesis.integrations.mcp import (  # noqa: E402
     HarnessMcpTopology,
     harness_mcp_topology_from_env,
 )
-from thesis.persistence.cosmos_submissions import open_submission_store  # noqa: E402
 from thesis.persistence.investigations import open_investigations  # noqa: E402
+from thesis.persistence.stack import open_submission_store  # noqa: E402
 from thesis.workspaces.local import default_workspace_root  # noqa: E402
-from thesis_runtime.adapters.cosmos.stack import (  # noqa: E402
+from thesis_runtime.adapters.persistence import (  # noqa: E402
     open_runtime_persistence,
 )
 
@@ -68,7 +67,7 @@ logging.basicConfig(
 )
 
 WORKSPACE_ROOT = str(default_workspace_root())
-HARNESS_BASE_URL = "http://127.0.0.1:8001"
+HARNESS_BASE_URL = harness_mcp_topology_from_env().require_harness_url()
 
 
 def _is_local_url(topology: HarnessMcpTopology) -> bool:
@@ -97,7 +96,6 @@ def _harness_composition() -> tuple[HarnessBoundary | None, HarnessToolProvider 
     error is logged only after retries are exhausted. Thesis never spawns a
     harness process.
     """
-    os.environ.setdefault("HARNESS_MCP_URL", HARNESS_BASE_URL)
     topology = harness_mcp_topology_from_env()
     try:
         composition: HarnessMcpComposition = open_harness_mcp_composition(topology)
@@ -111,7 +109,8 @@ def _harness_composition() -> tuple[HarnessBoundary | None, HarnessToolProvider 
     provider = open_harness_tool_provider(client=composition.client)
     print(
         f"harness MCP tool catalog ready; chat tool calling enabled "
-        f"({len(composition.tool_names)} tools via {_mcp_mode(topology)})",
+        f"({len(composition.tool_names)} tools via {_mcp_mode(topology)} "
+        f"at {topology.require_harness_url()})",
         file=sys.stderr,
     )
     return composition.boundary, provider

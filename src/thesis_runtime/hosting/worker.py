@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import cast
@@ -48,7 +48,7 @@ def build_worker(
     work_store: WorkStore,
     ownership: OwnershipStore,
     executions: ExecutionStore,
-    recovery_records: Callable[[], tuple[ExecutionIdentity, ...]] | None = None,
+    recovery_records: Callable[[], Iterable[ExecutionIdentity]] | None = None,
 ) -> DurableWorker:
     def conversation(work: Work) -> None:
         if stack.conversations is None:
@@ -164,10 +164,23 @@ def build_worker(
             schedule=False,
         )
 
-    def repair() -> None:
+    recovery: Iterator[ExecutionIdentity] | None = None
+
+    def repair() -> bool:
+        nonlocal recovery
         if recovery_records is None or stack.workflows is None:
-            return
-        for identity in recovery_records():
+            return False
+        if recovery is None:
+            recovery = iter(recovery_records())
+        for _ in range(8):
+            try:
+                identity = next(recovery)
+            except StopIteration:
+                recovery = None
+                return False
+            except Exception:
+                recovery = None
+                raise
             # Each workflow reconciles missing dispatch and its pure joins; mutations are never replayed.
             try:
                 execution = stack.chat_service.get_execution(
@@ -226,6 +239,8 @@ def build_worker(
                     "could not inspect or persist workflow recovery: %s",
                     identity.execution_id,
                 )
+
+        return True
 
     return DurableWorker(
         work_store,

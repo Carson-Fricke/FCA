@@ -31,7 +31,8 @@ from thesis.auth.workspace_access import (
     identity_account_owner,
     principal_account_id,
 )
-from thesis.http.backtests import BacktestDataService, BacktestStore
+from thesis.backtests.records import BacktestStore
+from thesis.http.backtests import BacktestDataService
 from thesis.http.dashboards import (
     DashboardDataService,
     InMemoryWidgetStore,
@@ -211,7 +212,7 @@ class WorkspaceDataService:
         self._store = store if store is not None else WorkspaceCatalogStore()
         self._clock = clock if clock is not None else _utc_now
         self._id_factory = id_factory
-        self._count_providers = count_providers or {}
+        self._count_providers = dict(count_providers or {})
         self._open_chats_provider = open_chats_provider
         self._health_provider = health_provider
 
@@ -221,6 +222,12 @@ class WorkspaceDataService:
 
     def list_workspaces(self) -> tuple[dict[str, object], ...]:
         return self._store.list()
+
+    def bind_count_provider(self, key: str, provider: Callable[[str], int]) -> None:
+        """Let application composition bind a catalog-backed workspace count."""
+        if key not in _COUNT_KEYS:
+            raise ValueError(f"unknown workspace count: {key}")
+        self._count_providers[key] = provider
 
     def delete_workspace(self, workspace_id: str, chats: ChatService) -> None:
         """Mark the entire storage scope before fencing and purging its chats.
@@ -722,7 +729,10 @@ def build_local_workspace_data(
 
         programs = WorkspacePrograms(repositories, submissions=submissions)
     strategies = StrategyDataService(
-        clock=resolved_clock, id_factory=ids, artifacts=strategy_artifacts
+        clock=resolved_clock,
+        id_factory=ids,
+        artifacts=strategy_artifacts,
+        programs=programs,
     )
     # The screener client is the typed MCP surface for the harness screener
     # tools: an explicit provider wins, else the composed boundary's MCP

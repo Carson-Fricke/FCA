@@ -2,7 +2,7 @@
 	import { shortDate } from '$lib/format';
 	import type { ArtifactHistoryEntry } from '$lib/types';
 
-	/** Version/revision timeline for one artifact, newest last. */
+	/** Retained history in catalog order; the detail header identifies the current revision. */
 	let { history }: { history: ArtifactHistoryEntry[] } = $props();
 </script>
 
@@ -12,11 +12,7 @@
 		<ol class="mt-3 flex flex-wrap items-start gap-x-4 gap-y-3">
 			{#each history as entry, index (entry.label + index)}
 				<li class="flex items-center gap-2">
-					<span
-						class="h-2 w-2 shrink-0 rounded-full {index === history.length - 1
-							? 'bg-accent'
-							: 'bg-surface-600'}"
-					></span>
+					<span class="h-2 w-2 shrink-0 rounded-full bg-surface-600"></span>
 					<div>
 						<p class="font-mono text-[11px] text-slate-700">{entry.label}</p>
 						<p class="font-mono text-[10px] text-slate-500">

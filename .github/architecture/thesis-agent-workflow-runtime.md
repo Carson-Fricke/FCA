@@ -8,11 +8,16 @@ dispatch, subagent lifecycle, workflow execution, durable work, and storage
 ownership. `src/thesis/application/` chooses providers, persistence adapters,
 FCA prompts, policies, extensions, and deployment composition. Dependencies
 point from FCA into the runtime. Runtime inner layers depend on contracts and
-ports; only composition selects Cosmos, filesystem, and native model adapters.
+ports; only composition selects PostgreSQL, Cosmos, filesystem, and native model adapters.
 
 The HTTP factory reuses service-independent router declarations. Authentication,
 services, workflow registrations and stream configuration remain local to each
 application; the declaration cache owns no operator or execution state.
+
+`ChatService.list_tool_jobs(workspace_id)` exposes neutral retained operation
+references to product read models. FCA classifies harness operations outside the
+runtime and reads execution state through its injected harness port. These reads
+do not dispatch tools, scan transcripts, or create another incoming delivery path.
 
 ```text
 src/
@@ -26,7 +31,7 @@ src/
     execution/       Events, durable runnable work and worker claims
     storage/         Ownership ports and local mutation locks
     hosting/         Generic worker handlers and version-pinned recovery
-    adapters/        Cosmos, filesystem and native model providers
+    adapters/        PostgreSQL, Cosmos, filesystem and native model providers
   thesis/
     application/     FCA composition, launcher, prompts and domain projections
     extensions/
@@ -34,6 +39,7 @@ src/
       workflows/     FCA session bindings, hypothesis development and research investigations
     research/        Hypotheses, investigations and research models
     persistence/     FCA investigation and retained submission stores
+    backtests/       Retained execution discovery and published report records
     workspaces/      Git and workspace artifacts
     http/            FCA HTTP transport and generated UI contracts
 ```
@@ -91,7 +97,8 @@ Session policy and completion capabilities live in FCA extension bindings.
 Runtime records carry opaque namespaced `references` rather than fixed strategy,
 experiment, or investigation fields. FCA owns `fca.strategy`, `fca.experiment`,
 and `fca.investigation`, including investigation CRUD and harness submission
-retention. Those domain documents use separate Cosmos containers; the generic
+retention. Domain documents use separate collection scopes in the selected
+backend (separate Cosmos containers or PostgreSQL collection keys); the generic
 conversation catalog does not interpret them. HTTP request models remain FCA
 models, while response schemas and UI decoding use the neutral reference shape.
 
@@ -754,7 +761,7 @@ metadata heuristics. Every activity carries `activityKind`; a record without
 canonical session data is not decoded.
 
 Stream brokers are process-local hints. Production execution ownership and
-mutation fencing use the shared Cosmos catalog and independent durable workers.
+mutation fencing use the selected shared catalog and independent durable workers.
 
 The FCA workflow lives in
 `thesis/extensions/workflows/hypothesis_development/`. Its endpoint owns native
@@ -873,6 +880,29 @@ exports the app's OpenAPI 3.1 plus runtime activity/message/datum/tool schemas;
 envelopes from typed models, including complete input receipts and tree records.
 Schema generation and wire validation are implemented. This does not establish
 complete side-effect recovery or output-publication receipts for every operation.
+
+Local Thesis selects `THESIS_PERSISTENCE=postgres` with a native psycopg pool;
+Azure Thesis retains its configured Cosmos adapter. `adapters/persistence.py`
+selects the backend explicitly. PostgreSQL stores current JSON payloads inline,
+including exact opaque provider request audits, in indexed JSONB documents.
+Generated operational columns index scopes, sequences, inbox positions, queued
+work, ownership resources and execution identities. One short workspace advisory
+transaction validates every enclosing owner and the root deletion fence, then
+commits the counter, canonical message, root bookkeeping, inbox head and runnable
+reference atomically. Workflow updates retain revision CAS. Model/network work
+never runs in that transaction. LISTEN/NOTIFY is a commit hint; durable reads and
+reconciliation remain authoritative after disconnects. FCA investigations and
+submissions use separate collection scopes on the same selected pool.
+
+The worker runs notification discovery, retained-work reconciliation and workflow
+repair independently of its eight execution slots. Each background operation has
+at most one call in flight. Retained-work reads return at most 64 references;
+payloads load only after ownership. Keyset identity pages and eight-execution
+repair passes avoid startup-wide payload hydration. Completed sweeps wait a minute;
+full batches continue promptly. Storage failures back off without blocking live
+notification dispatch. Running attempts whose owners expired are interrupted and
+reconciled, never replayed. Necessary local cutover is a bounded offline operation,
+verifying exact hydrated content/IDs/cursors/audits, with no converter in runtime.
 
 Cosmos commits a message or event by writing the per-chat sequence counter CAS
 and the item create in one transactional batch in the workspace partition.

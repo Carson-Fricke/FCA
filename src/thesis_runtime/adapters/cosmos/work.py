@@ -31,6 +31,7 @@ class CosmosWorkStore:
         self._changed = Event()
         self._continuation: str | None = None
         self._page_has_changes = True
+        self._ready_cursor = ""
 
     def enqueue(self, work: Work) -> None:
         document = {
@@ -109,19 +110,8 @@ class CosmosWorkStore:
         return work
 
     def start(self) -> tuple[WorkReference, ...]:
-        """Capture server feed progress before snapshotting all retained work."""
-        self._changes()
-        documents = self.container.query_items(
-            query="SELECT c.workspaceId, c.key, c.resource, c.createdAt FROM c WHERE c.recordType = 'RuntimeWork' AND c.state IN ('pending', 'running') ORDER BY c.createdAt ASC",
-            parameters=[],
-            enable_cross_partition_query=True,
-        )
-        return tuple(
-            WorkReference(
-                row["workspaceId"], row["key"], row["resource"], row["createdAt"]
-            )
-            for row in documents
-        )
+        """Capture feed progress; retained work is reconciled independently in pages."""
+        return self._changes()
 
     def wait(self, timeout: float) -> tuple[WorkReference, ...]:
         """Consume a bounded change-feed page, independent of API process wakes."""
@@ -150,16 +140,26 @@ class CosmosWorkStore:
         except CosmosResourceNotFoundError as error:
             raise KeyError(key) from error
 
-    def ready(self, limit: int | None = 64) -> tuple[Work, ...]:
-        documents = self.container.query_items(
-            query=("SELECT TOP @limit * " if limit is not None else "SELECT * ")
-            + "FROM c WHERE c.recordType = 'RuntimeWork' AND c.state IN ('pending', 'running') ORDER BY c.createdAt ASC",
-            parameters=[{"name": "@limit", "value": limit}]
-            if limit is not None
-            else [],
-            enable_cross_partition_query=True,
+    def ready(self, limit: int | None = 64) -> tuple[WorkReference, ...]:
+        limit = 64 if limit is None else limit
+        rows = list(
+            self.container.query_items(
+                query="SELECT TOP @limit c.id, c.workspaceId, c.key, c.resource, c.createdAt FROM c WHERE c.recordType = 'RuntimeWork' AND c.state IN ('pending', 'running') AND c.id > @after ORDER BY c.id ASC",
+                parameters=[
+                    {"name": "@limit", "value": limit},
+                    {"name": "@after", "value": self._ready_cursor},
+                ],
+                enable_cross_partition_query=True,
+                max_item_count=limit,
+            )
         )
-        return tuple(self._decode(document) for document in documents)
+        self._ready_cursor = rows[-1]["id"] if len(rows) == limit else ""
+        return tuple(
+            WorkReference(
+                row["workspaceId"], row["key"], row["resource"], row["createdAt"]
+            )
+            for row in rows
+        )
 
     def active(self, workspace_id: str, resource: str) -> bool:
         return bool(

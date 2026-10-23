@@ -34,6 +34,8 @@ import type {
 	BacktestLaunchResult,
 	BacktestRunCard,
 	BacktestSummaryRow,
+	BacktestCatalogRow,
+	BacktestCatalogPage,
 	ChatMessage,
 	ChatThread,
 	ConsentProposal,
@@ -575,7 +577,7 @@ export async function listTimelinePage(
 		return decodeWire('TimelinePageWire', fixtureTimeline.page(workspaceId, chatId, threadId, before), 'fixture/timeline');
 	}
 	signal?.throwIfAborted();
-	const query = new URLSearchParams({ limit: '1000' });
+	const query = new URLSearchParams({ limit: '200' });
 	if (threadId !== null) query.set('thread', threadId);
 	if (before !== null) query.set('before', String(before));
 	const request = new AbortController();
@@ -743,6 +745,16 @@ function messageResult(raw: CreateMessageResponseWire): PostMessageResult {
 	};
 }
 
+/** Current workflow state is independent of transcript pagination. */
+export async function listWorkflowMetadata(workspaceId: string, chatId: string, signal?: AbortSignal) {
+	if (fixtureMode) {
+		const execution = fixtures.executions[chatId];
+		return decodeWire('WorkflowMetadataWire', { items: execution?.execution_id ? [plain(execution)] : [], after: fixtureTimeline.page(workspaceId, chatId, 'root', null).after }, 'fixture/workflow-metadata');
+	}
+	const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}/chats/${encodeURIComponent(chatId)}/executions`;
+	return decodeWire('WorkflowMetadataWire', await apiFetch<unknown>(path, { signal }), path);
+}
+
 function activeExecutionId(chatId: string): string {
 	const doc = fixtures.executions[chatId];
 	return doc?.execution_id ?? '';
@@ -895,7 +907,8 @@ export function listStrategies(workspaceId: string): Promise<Strategy[]> {
 }
 
 export function getStrategy(workspaceId: string, strategyId: string): Promise<Strategy | null> {
-	return listStrategies(workspaceId).then((items) => items.find((s) => s.id === strategyId) ?? null);
+	if (fixtureMode) return listStrategies(workspaceId).then((items) => items.find((s) => s.id === strategyId) ?? null);
+	return apiFetch<Strategy>(`/v1/workspaces/${encodeURIComponent(workspaceId)}/strategies/${encodeURIComponent(strategyId)}`);
 }
 
 export interface CreateStrategyInput {
@@ -949,16 +962,38 @@ export function createStrategy(
 	);
 }
 
-export function listBacktests(workspaceId: string): Promise<BacktestSummaryRow[]> {
+export function listBacktests(workspaceId: string): Promise<BacktestCatalogRow[]> {
+	return listBacktestPage(workspaceId).then(page => page.items);
+}
+
+export function listBacktestPage(workspaceId: string, options: {offset?: number; limit?: number; strategyId?: string} = {}): Promise<BacktestCatalogPage> {
+	const offset = options.offset ?? 0;
+	const limit = options.limit ?? 50;
 	if (fixtureMode) {
 		return wait(5).then(() => {
 			const doc = fixtures.backtests[workspaceId];
-			return doc ? plain(doc.items) : [];
+			const rows = doc ? plain(doc.items) : [];
+			const selected = rows.filter(row => !options.strategyId || row.strategy_id === options.strategyId);
+			return {items: selected.slice(offset, offset + limit).map(fixtureCatalogRow), total: selected.length, offset, limit};
 		});
 	}
-	return apiFetch<{ items: BacktestSummaryRow[] }>(
-		`/v1/workspaces/${encodeURIComponent(workspaceId)}/backtests`
-	).then((r) => r.items);
+	const query = new URLSearchParams({offset:String(offset),limit:String(limit)});
+	if (options.strategyId) query.set('strategy_id',options.strategyId);
+	return apiFetch<BacktestCatalogPage>(`/v1/workspaces/${encodeURIComponent(workspaceId)}/backtests?${query}`);
+}
+
+function fixtureCatalogRow(row: BacktestSummaryRow): BacktestCatalogRow {
+	return {job_id:row.job_id,workspace_id:row.workspace_id,name:row.name,strategy_id:row.strategy_id,
+		programs:[],state:'succeeded',created_at:row.created_at,updated_at:row.created_at,observed_at:row.created_at,
+		status_error:null,error_message:null,period_start:row.period_start,period_end:row.period_end,progress:[],
+		queue_seconds:null,execution_seconds:null,metrics:{},artifact_count:0,total_bytes:0,evidence:row.trades===0?'no_trades':'available',input_origin:'unavailable'};
+}
+
+export function inspectBacktest(workspaceId: string, jobId: string): Promise<BacktestCatalogRow> {
+	if (fixtureMode) return listBacktests(workspaceId).then(rows => {
+		const row=rows.find(row=>row.job_id===jobId);if(!row)throw new Error('Unknown backtest');return row;
+	});
+	return apiFetch<BacktestCatalogRow>(`/v1/workspaces/${encodeURIComponent(workspaceId)}/backtests/jobs/${encodeURIComponent(jobId)}/inspection`);
 }
 
 const FIXTURE_ARTIFACT_NAMES = [

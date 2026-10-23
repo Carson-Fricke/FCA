@@ -15,7 +15,12 @@ fn sdk_identity_matches_workspace_programs_relative_source_hash_contract() {
     ] {
         sources.insert(
             format!("{name}/Cargo.toml"),
-            harness_contracts::sha256::digest_hex(&std::fs::read(root.join("Cargo.toml")).unwrap()),
+            harness_contracts::sha256::digest_hex(
+                std::fs::read_to_string(root.join("Cargo.toml"))
+                    .unwrap()
+                    .replace("\r\n", "\n")
+                    .as_bytes(),
+            ),
         );
         let mut directories = vec![root.join("src")];
         while let Some(directory) = directories.pop() {
@@ -35,7 +40,12 @@ fn sdk_identity_matches_workspace_programs_relative_source_hash_contract() {
                                 .unwrap()
                                 .replace('\\', "/")
                         ),
-                        harness_contracts::sha256::digest_hex(&std::fs::read(&path).unwrap()),
+                        harness_contracts::sha256::digest_hex(
+                            std::fs::read_to_string(&path)
+                                .unwrap()
+                                .replace("\r\n", "\n")
+                                .as_bytes(),
+                        ),
                     );
                 }
             }

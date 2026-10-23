@@ -322,6 +322,65 @@ export interface Strategy {
 	code: string;
 	versions: StrategyVersion[];
 	created_at: string;
+	updated_at?: string | null;
+	version?: string;
+	git_commit?: string;
+	backtest_count?: number;
+	digests?: Record<string, string>;
+	inputs?: { data_type: string; symbols: string[]; interval?: string | null }[];
+	history?: { label: string; created_at: string | null; note: string }[];
+	manifest_text?: string;
+	source_truncated?: boolean;
+}
+
+export interface BacktestProgramReference {
+	strategy_id: string;
+	instance_id?: string;
+	bundle_hash: string | null;
+	source_sha256: string | null;
+	parameters: Record<string, unknown>;
+	source?: string | null;
+}
+
+/** Catalog membership comes from retained submissions, independently of reports. */
+export interface BacktestCatalogRow {
+	job_id: string;
+	workspace_id: string;
+	name: string;
+	strategy_id: string;
+	programs: BacktestProgramReference[];
+	state: string;
+	created_at: string | null;
+	updated_at: string | null;
+	observed_at: string | null;
+	status_error: string | null;
+	error_message: string | null;
+	period_start: string | null;
+	period_end: string | null;
+	progress: HarnessJobProgress[];
+	queue_seconds: number | null;
+	execution_seconds: number | null;
+	metrics: Record<string, string>;
+	artifact_count: number;
+	total_bytes: number;
+	evidence: 'no_trades' | 'available' | 'incomplete';
+	input_origin: 'harness_accepted' | 'retained_submission' | 'unavailable';
+	chat_id?: string | null;
+	execution_id?: string | null;
+	accepted_input?: Record<string, unknown>;
+	submitted_input?: Record<string, unknown>;
+	portfolio?: { positions?: Record<string, unknown>[]; total_pnl?: string; unrealized_pnl?: string };
+	custom_metrics?: Record<string, string>;
+	fills?: Record<string, unknown>[];
+	evidence_error?: string;
+	artifacts?: HarnessArtifact[];
+}
+
+export interface BacktestCatalogPage {
+	items: BacktestCatalogRow[];
+	total: number;
+	offset: number;
+	limit: number;
 }
 
 export interface SegmentMetrics {
@@ -409,6 +468,7 @@ export interface BacktestDetail {
 		data_end: string | null;
 		artifact_count: number;
 		total_bytes: number;
+		metrics?: { equity?: { samples?: number; retained_samples?: number; report_interval_ns?: number } };
 	};
 	/**
 	 * Manifest-imported artifacts when the API publishes them. The UI renders

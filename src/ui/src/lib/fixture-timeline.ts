@@ -52,7 +52,7 @@ class FixtureTimeline {
 		const snapshot = this.#items.get(this.key(workspaceId, chatId)) ?? [];
 		const items = snapshot
 			.filter((item) => (thread === null || item.threadId === thread) && (before === null || item.seq < before));
-		const page = items.slice(-1000);
+		const page = items.slice(-200);
 		return { items: clone(page), nextBefore: items.length > page.length ? page[0].seq : null, after: snapshot.at(-1)?.seq ?? 0 };
 	}
 

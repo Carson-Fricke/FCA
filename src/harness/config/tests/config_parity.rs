@@ -1,9 +1,8 @@
 //! Configuration parity goldens.
 //!
-//! The golden hashes were originally produced by the retired Python
-//! configuration loader and are now self-pinned: they prove the Rust loader,
-//! strict models, decimal normalization, datetime formatting, and canonical
-//! JSON stay stable across edits to the loader itself.
+//! Hashes pin the current committed examples. Intentional source/configuration
+//! changes update these values together; unrelated loader edits must preserve
+//! strict models, decimal normalization, datetime formatting and canonical JSON.
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -25,7 +24,7 @@ fn existing_configuration_hashes_match_the_goldens() {
     let cases = [
         (
             "backtest.yaml",
-            "bd33134861bca6425d1ac3476b9b6a8358551a3f7d78129183f8168da00a4f09",
+            "d6e45d800c793d4fd241e443d26eaf88f2f22bc5e6449b00f345aecfc294a695",
         ),
         (
             "api.yaml",
@@ -76,7 +75,7 @@ fn backtest_canonical_json_is_pinned() {
         r#""parameters":{"limit":{"$decimal":"50000"}},"rule_id":"max-position-notional"}]},"#,
         r#""schema_version":1,"seed":1729,"shell":"backtest","#,
         r#""start":{"$datetime":"2024-01-02T14:30:00.000000Z"},"strategy_instances":[{"#,
-        r#""bundle_hash":"dca3e6dda63c83d8a9d7cc0688e180a42e3d3e0dd502c3d4d731db505c2d8998","#,
+        r#""bundle_hash":"c65afc914778a9657c36e61e1d4e70d621f189752828849e0243dc164ab27984","#,
         r#""capital_fraction":{"$decimal":"1"},"#,
         r#""implementation":"jit","#,
         r#""instance_id":"msft-momentum","parameters":{"lookback":4,"quantity":20,"#,

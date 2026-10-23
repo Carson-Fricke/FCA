@@ -106,7 +106,7 @@ describe('timeline page transport', () => {
 			const query = new URL(String(fetch.mock.calls[0][0]), 'http://test').searchParams;
 			expect(query.get('thread')).toBe('agent/a');
 			expect(query.get('before')).toBe('101');
-			expect(query.get('limit')).toBe('1000');
+			expect(query.get('limit')).toBe('200');
 			expect(query.has('after')).toBe(false);
 			expect(fetch).toHaveBeenCalledTimes(1);
 		} finally { fetch.mockRestore(); }

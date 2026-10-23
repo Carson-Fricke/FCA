@@ -10,7 +10,7 @@
 	 * renders an explicit "not declared" state when the manifest carries no
 	 * split — the split is never fabricated.
 	 */
-	let { backtest }: { backtest: BacktestDetail } = $props();
+	let { backtest, showTrades = true }: { backtest: BacktestDetail; showTrades?: boolean } = $props();
 
 	const boundaryTime = $derived(
 		backtest.split ? Date.parse(`${backtest.split.boundary}T00:00:00Z`) : Number.NaN
@@ -46,12 +46,12 @@
 			const value = stats[key];
 			return typeof value === 'number' ? value : null;
 		};
-		const totalReturn = published('totalReturn');
+		const totalReturn = published('total_return');
 		return {
 			returnPct: totalReturn == null ? null : totalReturn * 100,
-			sharpePerSample: published('sharpePerSample'),
-			maxDrawdown: published('maxDrawdown'),
-			trades: published('tradeCount')
+			sharpePerSample: published('sharpe_per_sample'),
+			maxDrawdown: published('max_drawdown'),
+			trades: published('trade_count')
 		};
 	});
 
@@ -118,13 +118,14 @@
 		</div>
 		<div class="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
 			<MetricCard label="Return" value={overall.returnPct ?? '—'} format="signedPct" />
-			<MetricCard label="Sharpe (per sample)" value={overall.sharpePerSample ?? '—'} format="ratio" />
+			<MetricCard label="Sharpe (per sample)" value={overall.sharpePerSample == null ? '—' : overall.sharpePerSample.toPrecision(6)} />
 			<MetricCard label="Max drawdown" value={overall.maxDrawdown ?? '—'} format="pct" />
 			<MetricCard label="Trades" value={overall.trades ?? '—'} />
 		</div>
 	</div>
 {/if}
 
+{#if backtest.equity.length}
 <TimeSeriesChart
 	title="Equity / cumulative P&L"
 	data={backtest.equity}
@@ -132,8 +133,11 @@
 	markers={splitMarker}
 	height={280}
 />
+{:else}
+	<p class="rounded-xl border border-surface-700 bg-surface-900 p-5 text-sm text-slate-500" data-testid="equity-preview-unavailable">Chart preview is unavailable for this artifact. Published statistics are shown above.</p>
+{/if}
 
-{#if backtest.trades.length}
+{#if showTrades && backtest.trades.length}
 	<div class="mt-3 overflow-hidden rounded-xl border border-surface-700">
 		<table class="w-full border-collapse font-mono text-xs">
 			<thead>

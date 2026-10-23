@@ -11,9 +11,9 @@ from dataclasses import dataclass, field
 import pytest
 from tests.thesis.submissions import MemorySubmissions
 
+from thesis.backtests.records import InMemoryBacktestStore
 from thesis.http.backtests import (
     BacktestDataService,
-    InMemoryBacktestStore,
     LaunchBacktestRequest,
 )
 from thesis.integrations.harness_activation import (

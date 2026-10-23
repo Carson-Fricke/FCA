@@ -17,6 +17,7 @@ pub struct FillLedger {
     cash: Decimal,
     fees: Decimal,
     fills: std::collections::BTreeMap<String, (String, String, Decimal, Decimal, Decimal)>,
+    orders: std::collections::BTreeMap<String, (Decimal, Decimal)>,
 }
 
 impl FillLedger {
@@ -28,6 +29,7 @@ impl FillLedger {
             cash: Decimal::ZERO,
             fees: Decimal::ZERO,
             fills: std::collections::BTreeMap::new(),
+            orders: std::collections::BTreeMap::new(),
         }
     }
 
@@ -60,10 +62,31 @@ impl FillLedger {
                 Err("conflicting fill identity".into())
             };
         }
+        // Prepare every checked change before committing any state. An invalid
+        // fill must not leave partially updated inventory or cash behind.
         let signed = fill.signed_quantity();
-        self.quantity += signed;
-        self.cash -= signed * fill.price;
-        self.fees += fill.fee;
+        let checked = |error: num::DecimalError| format!("fill accounting arithmetic: {error}");
+        let quantity = self.quantity.checked_add(signed).map_err(checked)?;
+        let notional = fill.quantity.checked_mul(fill.price).map_err(checked)?;
+        let cash = if fill.side == "buy" {
+            self.cash.checked_sub(notional)
+        } else {
+            self.cash.checked_add(notional)
+        }
+        .map_err(checked)?;
+        let fees = self.fees.checked_add(fill.fee).map_err(checked)?;
+        let previous = self
+            .orders
+            .get(fill.order_id)
+            .copied()
+            .unwrap_or((Decimal::ZERO, Decimal::ZERO));
+        let order_quantity = previous.0.checked_add(fill.quantity).map_err(checked)?;
+        let order_notional = previous.1.checked_add(notional).map_err(checked)?;
+        self.quantity = quantity;
+        self.cash = cash;
+        self.fees = fees;
+        self.orders
+            .insert(fill.order_id.into(), (order_quantity, order_notional));
         self.fills.insert(fill.fill_id.into(), record);
         Ok(true)
     }
@@ -82,10 +105,15 @@ impl FillLedger {
     }
     /// Total filled quantity for an order, across all its partial fills.
     pub fn filled_quantity(&self, order_id: &str) -> Decimal {
-        self.fills
-            .values()
-            .filter(|record| record.0 == order_id)
-            .fold(Decimal::ZERO, |sum, record| sum + record.2)
+        self.orders
+            .get(order_id)
+            .map_or(Decimal::ZERO, |record| record.0)
+    }
+    /// Quantity-weighted price over every partial fill of this order.
+    pub fn average_fill_price(&self, order_id: &str) -> Option<Decimal> {
+        self.orders
+            .get(order_id)
+            .and_then(|record| record.1.checked_div(record.0).ok())
     }
     /// Marked P&L from fills, inventory and fees; not a return or a closed-trade metric.
     /// # Errors
@@ -95,6 +123,45 @@ impl FillLedger {
             return Err("mark must be positive".into());
         }
         Ok(self.cash + self.quantity * mark - self.fees)
+    }
+}
+
+/// Requested quantity for one accepted order. This does not submit, cancel or
+/// infer an order's terminal state. Keep it while fills remain outstanding;
+/// explicit rejection/cancellation evidence is a separate caller-owned outcome.
+pub struct PendingOrder {
+    order_id: String,
+    quantity: Decimal,
+}
+
+impl PendingOrder {
+    /// Capture an accepted submission, never a guessed first-fill quantity.
+    pub fn new(order_id: &str, quantity: Decimal) -> Result<Self, String> {
+        if order_id.is_empty() || quantity <= Decimal::ZERO {
+            return Err("pending order requires identity and positive requested quantity".into());
+        }
+        Ok(Self {
+            order_id: order_id.into(),
+            quantity,
+        })
+    }
+    pub fn order_id(&self) -> &str {
+        &self.order_id
+    }
+    /// Remaining order quantity, using every acknowledged fill exactly once.
+    pub fn remaining(&self, ledger: &FillLedger) -> Result<Decimal, String> {
+        let remaining = self
+            .quantity
+            .checked_sub(ledger.filled_quantity(&self.order_id))
+            .map_err(|error| error.to_string())?;
+        if remaining < Decimal::ZERO {
+            return Err("filled quantity exceeds requested order quantity".into());
+        }
+        Ok(remaining)
+    }
+    pub fn is_filled(&self, ledger: &FillLedger) -> bool {
+        self.remaining(ledger)
+            .is_ok_and(|quantity| quantity.is_zero())
     }
 }
 

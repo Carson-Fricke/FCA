@@ -18,18 +18,14 @@ every selected listener presents a new process and answers its health
 endpoint, so a calling shell or agent tool returns as soon as the restart
 completes instead of waiting on long-running servers.
 
-The Cosmos DB emulator runs from pinned vNext EN20260907 over loopback HTTP,
-bypassing that release's TLS buffering defect. A named data volume is mounted
-at /data so conversations survive restarts (the legacy emulator image does not
-persist data). It is recreated on every start while the data volume
-is retained, because a stale database socket lock in the container's writable
-layer otherwise survives a plain `docker start`.  Docker Desktop is started
-automatically when the daemon is not running.
+PostgreSQL 17 runs on loopback port 5433 with a persistent named data volume.
+The launcher creates its private password in ignored .env on first use. Cosmos
+is an explicit adapter-testing alternative, not a local Thesis dependency.
 
 .PARAMETER Servers
-Subset of cosmos, harness, thesis, ui to launch. Defaults to all four. The
-Cosmos emulator is a dependency of the Thesis API's conversation store, so it
-is normally left in the default set. The harness includes local market-data storage and finite local ingestion workers.
+Subset of postgres, cosmos, harness, thesis, ui to launch. Defaults to PostgreSQL,
+harness, Thesis and UI. PostgreSQL uses a persistent named volume; cosmos is an
+explicit alternative for testing the Azure adapter. The harness includes local market-data storage and finite local ingestion workers.
 
 .PARAMETER Rotate
 Mint fresh managed tokens instead of reusing the values already in .env.
@@ -52,7 +48,7 @@ powershell -File scripts/local/start-stack.ps1
 #>
 [CmdletBinding()]
 param(
-    [string[]]$Servers = @('cosmos', 'harness', 'thesis', 'ui'),
+    [string[]]$Servers = @('postgres', 'harness', 'thesis', 'ui'),
     [switch]$Rotate,
     [switch]$NoStop,
     [string]$EnvFile,
@@ -80,12 +76,12 @@ $Servers = @(
         Where-Object { $_ }
 )
 foreach ($server in $Servers) {
-    if ($server -notin @('cosmos', 'harness', 'thesis', 'ui')) {
+    if ($server -notin @('postgres', 'cosmos', 'harness', 'thesis', 'ui')) {
         throw "Unknown server '$server'"
     }
 }
 
-$ports = @{ cosmos = 8080; harness = 8001; thesis = 8000; ui = 5173 }
+$ports = @{ postgres = 5433; cosmos = 8080; harness = 8001; thesis = 8000; ui = 5173 }
 $cargoExe = (Get-Command cargo -ErrorAction SilentlyContinue).Source
 
 function Get-PortOwners {
@@ -109,6 +105,7 @@ function Test-ServerReady {
         $PreviousOwners.Count -eq 0 -or
         @($owners | Where-Object { $PreviousOwners -notcontains $_ }).Count -gt 0
     )
+    if ($Name -eq 'postgres') { return ($owners.Count -gt 0) }
     if ($Name -eq 'cosmos') {
         if (-not $changed) { return $false }
         try {
@@ -142,6 +139,12 @@ function Wait-StackReady {
     $workerGoneAt = $null
     while ($pending.Count -gt 0 -and (Get-Date) -lt $Deadline) {
         foreach ($name in @($pending)) {
+            if ($name -eq 'postgres') {
+                # An existing listener is not evidence that this invocation
+                # authenticated and wrote the selected backend configuration.
+                if (-not (Test-Path -LiteralPath $WorkerLog)) { continue }
+                if (-not (Select-String -LiteralPath $WorkerLog -SimpleMatch 'PostgreSQL ready at' -Quiet)) { continue }
+            }
             if (Test-ServerReady -Name $name -Port $ports[$name] -PreviousOwners $Previous[$name]) {
                 Write-Host "==> $name is ready"
                 $pending.Remove($name)
@@ -301,7 +304,7 @@ function Start-DockerDaemon {
     $desktop = Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'
     if (Test-Path -LiteralPath $desktop) {
         Write-Host '==> Starting Docker Desktop'
-        Start-Process -FilePath $desktop | Out-Null
+        Start-Process -FilePath $desktop -WindowStyle Hidden | Out-Null
     }
     $deadline = (Get-Date).AddSeconds(180)
     do {
@@ -355,6 +358,12 @@ $helperArgs = @('run', '--no-sync', 'python', 'scripts/local/dev_tokens.py', '--
 if ($Rotate) { $helperArgs += '--rotate' }
 & uv @helperArgs
 if ($LASTEXITCODE -ne 0) { throw "dev_tokens.py failed (exit $LASTEXITCODE)" }
+
+if ($Servers -contains 'postgres') {
+    if (-not (Test-DockerDaemon)) { Start-DockerDaemon }
+    & uv run --no-sync python scripts/local/thesis_postgres.py --env-file $EnvFile
+    if ($LASTEXITCODE -ne 0) { throw 'local PostgreSQL startup failed' }
+}
 
 Write-Host '==> Loading environment'
 Get-Content -LiteralPath $EnvFile | ForEach-Object {

@@ -42,7 +42,7 @@ class WorkStore(Protocol):
     """Create-only work identities and fenced attempt state."""
 
     def enqueue(self, work: Work) -> None: ...
-    def ready(self, limit: int | None = 64) -> tuple[Work, ...]: ...
+    def ready(self, limit: int | None = 64) -> tuple[Work | WorkReference, ...]: ...
     def start(self) -> tuple[WorkReference, ...]: ...
     def wait(self, timeout: float) -> tuple[WorkReference, ...]:
         """Return bounded durable notifications, redelivering after restart."""
@@ -62,7 +62,7 @@ class DurableWorker:
         ownership: OwnershipStore,
         handlers: Mapping[str, Callable[[Work], None]],
         interrupted: Callable[[Work], None],
-        repair: Callable[[], None] | None = None,
+        repair: Callable[[], bool | None] | None = None,
     ) -> None:
         self.store = store
         self.ownership = ownership
@@ -124,35 +124,76 @@ class DurableWorker:
         pending: dict[tuple[str, str], Work | WorkReference] = {}
         retry_at: dict[tuple[str, str], float] = {}
         initialized = False
-        next_reconcile = monotonic() + 60
+        next_reconcile = 0.0
         next_repair = 0.0
+        next_discovery = 0.0
         logger = logging.getLogger(__name__)
-        with ThreadPoolExecutor(
-            max_workers=8, thread_name_prefix="thesis-work"
-        ) as pool:
+        discovery: Future[tuple[WorkReference, ...]] | None = None
+        reconciliation: Future[tuple[Work | WorkReference, ...]] | None = None
+        repair: Future[bool | None] | None = None
+        with (
+            ThreadPoolExecutor(max_workers=8, thread_name_prefix="thesis-work") as pool,
+            ThreadPoolExecutor(
+                max_workers=3, thread_name_prefix="thesis-recovery"
+            ) as background,
+        ):
             while not self.stopped.is_set():
                 now = monotonic()
-                if not initialized:
+                if discovery is not None and discovery.done():
                     try:
-                        # Capture server feed progress before the retained-work
-                        # snapshot. Their overlap prevents an admission gap.
                         pending.update(
                             ((work.workspace_id, work.key), work)
-                            for work in self.store.start()
+                            for work in discovery.result()
                         )
-                        initialized = True
+                        if not initialized:
+                            # The feed cursor must precede a retained snapshot.
+                            # Repeat an early scan which raced feed initialization.
+                            next_reconcile = 0.0
+                            initialized = True
                     except Exception:
-                        logger.exception("durable startup reconciliation failed")
-                        self.stopped.wait(1)
-                        continue
-                if self.repair is not None and now >= next_repair:
+                        logger.exception(
+                            "durable notification read failed; cursor remains recoverable"
+                        )
+                        next_discovery = now + 1
+                    discovery = None
+                if reconciliation is not None and reconciliation.done():
                     try:
-                        self.repair()
+                        batch = reconciliation.result()
+                        pending.update(
+                            ((work.workspace_id, work.key), work) for work in batch
+                        )
+                        next_reconcile = now + (1 if len(batch) == 64 else 60)
                     except Exception:
+                        logger.exception(
+                            "durable work reconciliation failed; queued work remains retained"
+                        )
+                        next_reconcile = now + 60
+                    reconciliation = None
+                if repair is not None and repair.done():
+                    try:
+                        more = repair.result()
+                    except Exception:
+                        more = False
                         logger.exception(
                             "durable recovery pass failed; queued work remains retained"
                         )
-                    next_repair = monotonic() + 60
+                    repair = None
+                    # Continue a bounded sweep promptly, without overlapping it.
+                    next_repair = now + (1 if more else 60)
+                if discovery is None and now >= next_discovery and len(pending) < 256:
+                    discovery = (
+                        background.submit(self.store.wait, 0.25)
+                        if initialized
+                        else background.submit(self.store.start)
+                    )
+                if (
+                    reconciliation is None
+                    and now >= next_reconcile
+                    and len(pending) < 256
+                ):
+                    reconciliation = background.submit(self.store.ready, 64)
+                if self.repair is not None and repair is None and now >= next_repair:
+                    repair = background.submit(self.repair)
                 for resource, (future, work) in tuple(active.items()):
                     if not future.done():
                         continue
@@ -168,20 +209,6 @@ class DurableWorker:
                     if not finished:
                         pending[key] = work
                         retry_at[key] = monotonic() + 5
-                try:
-                    candidates: tuple[Work | WorkReference, ...] = self.store.wait(
-                        0.1 if active else 0.25
-                    )
-                    if monotonic() >= next_reconcile:
-                        candidates += self.store.ready()
-                        next_reconcile = monotonic() + 60
-                    for work in candidates:
-                        pending[(work.workspace_id, work.key)] = work
-                except Exception:
-                    logger.exception(
-                        "durable notification read failed; cursor remains recoverable"
-                    )
-                    self.stopped.wait(1)
                 for key, work in sorted(
                     pending.items(), key=lambda item: (item[1].created_at, item[1].key)
                 ):
@@ -193,6 +220,7 @@ class DurableWorker:
                     del pending[key]
                     retry_at.pop(key, None)
                     active[resource] = (pool.submit(self.tick, (work,)), work)
+                self.stopped.wait(0.05)
 
     def stop(self) -> None:
         self.stopped.set()

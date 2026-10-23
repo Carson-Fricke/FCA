@@ -12,4 +12,4 @@ Cosmos implementations for conversation records, sequence commits, payload chunk
 - `records.py`: Workspace records, atomic message/cursor/chat/work admission, root ETag merge updates, and indexed history/input windows.
 - `stack.py`: Compose all runtime adapters over one workspace-partitioned Cosmos catalog.
 - `timeline.py`: Authoritative per-chat sequencing, transactional admission, identity reconciliation after uncertain responses, and post-commit timeline/work wake hints.
-- `work.py`: Durable work, compact change-feed notifications, startup reconciliation, and local post-commit wake hints.
+- `work.py`: Durable work, compact change-feed notifications, bounded metadata-only retained-work reconciliation, and local post-commit wake hints.

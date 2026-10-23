@@ -28,8 +28,32 @@ from thesis_runtime.conversations import ChatService
 from thesis_runtime.workflows.execution_store import InMemoryExecutionStore
 
 
+def _sdk_checkout(source: Path, destination: Path, newlines: str) -> Path:
+    for relative in (
+        "harness/strategy-sdk",
+        "harness/contracts",
+        "harness/num",
+        "lake/contracts",
+    ):
+        crate = source.parents[1] / relative
+        for path in [crate / "Cargo.toml", *sorted((crate / "src").rglob("*.rs"))]:
+            target = destination / relative / path.relative_to(crate)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            data = path.read_bytes().replace(b"\r\n", b"\n")
+            if newlines == "crlf":
+                data = data.replace(b"\n", b"\r\n")
+            elif newlines == "mixed":
+                data = b"".join(
+                    line.replace(b"\n", b"\r\n") if index % 2 else line
+                    for index, line in enumerate(data.splitlines(keepends=True))
+                )
+            target.write_bytes(data)
+    return destination / "harness/strategy-sdk"
+
+
+@pytest.mark.parametrize("newlines", ["lf", "crlf", "mixed"])
 def test_serving_authors_template_validates_and_runs_by_id(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, newlines: str
 ) -> None:
     git_factory = MemoryGitFactory()
     repositories = Repositories(tmp_path / "workspaces", git_factory)
@@ -50,18 +74,28 @@ def test_serving_authors_template_validates_and_runs_by_id(
     repositories.create(WorkspaceManifest.model_validate(manifest))
     calls: list[tuple[str, Mapping[str, object]]] = []
     catalogs: list[Sequence[Mapping[str, object]]] = []
+    source_sdk = program_module._PACKAGED_SDK_ROOT
+    serving = WorkspacePrograms(
+        repositories,
+        sdk_root=_sdk_checkout(source_sdk, tmp_path / "serving", "lf"),
+    )
+    sdk_version, sdk_abi = serving._sdk_metadata(serving.sdk_root)
+    serving_identity = serving._sdk_identity()
+    monkeypatch.setattr(
+        program_module,
+        "_PACKAGED_SDK_ROOT",
+        _sdk_checkout(source_sdk, tmp_path / "local", newlines),
+    )
 
     class Harness(HarnessToolProvider):
         validation_identity = "compiler-one"
 
         def current_server_info(self) -> Mapping[str, object]:
-            local = WorkspacePrograms(repositories)
-            version, abi = local._sdk_metadata(local.sdk_root)
             return {
                 "serverInfo": {
-                    "sdkIdentity": local._sdk_identity(),
-                    "sdkVersion": version,
-                    "sdkAbiVersion": abi,
+                    "sdkIdentity": serving_identity,
+                    "sdkVersion": sdk_version,
+                    "sdkAbiVersion": sdk_abi,
                     "validationIdentity": self.validation_identity,
                 }
             }

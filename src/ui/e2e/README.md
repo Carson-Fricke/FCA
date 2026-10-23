@@ -23,3 +23,7 @@ configuration belongs in the parent `playwright.config.ts`.
 These checks assert rendered user behavior, not internal component call order.
 
 - `thinking-stream.spec.ts`: Reasoning growth, collapsed disclosure, refresh reconstruction, stable completion identity and expansion retention through the real chat surface with scripted external timeline responses.
+
+- `history-loading.spec.ts`: rendered recent root history, explicit older paging,
+  and selected child history against scripted external HTTP responses; no model
+  calls, workspace mutations, or child transcript prefetch.

@@ -5,7 +5,9 @@ FCA investigation storage and retained harness-submission identity. Generic runt
 - `__init__.py`: Durable workspace journaling and fenced Git publication.
 - `cosmos_submissions.py`: Persists retained FCA harness submissions in their domain-owned Cosmos container.
 - `git.py`: Process-safe, compare-and-swap fenced Git publication.
-- `investigations.py`: FCA-owned Cosmos persistence for research investigations.
+- `investigations.py`: investigation decoding and selected research-store composition, including the Cosmos adapter.
+- `postgres.py`: native PostgreSQL investigation and immutable submission stores, using the runtime's shared pool and ownership fences.
+- `stack.py`: selects the FCA submission adapter using the configured runtime backend.
 - `journal.py`: Append-only workspace command journal with a rebuildable publication outbox.
 - `reconcile.py`: Reconciliation of accepted workspace state, Git history, and queue state.
 - `submissions.py`: Immutable submission references; this module neither dispatches nor polls.

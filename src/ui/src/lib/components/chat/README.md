@@ -8,7 +8,7 @@ to `lib/transcript.ts`, and backend contracts remain authoritative.
 
 - `ChatComposer.svelte`: conversation input and attachments; clears immediately and restores failed drafts only if no newer text exists.
 - `ChatStarters.svelte`: suggested initial conversation inputs.
-- `ChatSurface.svelte`: conversation page composition and active scope input; an unresolved phase agent is unavailable, never inferred to be deterministic.
+- `ChatSurface.svelte`: conversation page composition, explicit older-history/retry controls, current scoped workflow fallback cards, and active scope input; an unresolved phase agent is unavailable, never inferred to be deterministic.
 - `ChatTranscript.svelte`: root message and structured activity presentation; execution metadata updates workflow cards without rendering raw event rows.
 - `ConsentCard.svelte`: activation consent presentation.
 - `ConversationDeleteDialog.svelte`: conversation deletion interaction.

@@ -26,11 +26,11 @@ from thesis.http.streaming import (
     StreamSleeper,
     _resume_cursor,
 )
-from thesis.http.wire import TimelineItemWire, TimelinePageWire
+from thesis.http.wire import TimelineItemWire, TimelinePageWire, WorkflowMetadataWire
 from thesis_runtime.contracts.codec import record_from_payload
 from thesis_runtime.contracts.records import ChatMessage, WorkflowExecution
 from thesis_runtime.conversations import ChatService, RecordNotFound
-from thesis_runtime.conversations.timeline import TimelineReader
+from thesis_runtime.conversations.timeline import TimelineOutputPrefixes, TimelineReader
 
 DEFAULT_RECOVERY_INTERVAL_SECONDS = 15.0
 DEFAULT_LIMIT = 200
@@ -204,6 +204,28 @@ def create_timeline_router(
     router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["timeline"])
     wait = sleeper
 
+    @router.get("/chats/{chat_id}/executions", response_model=WorkflowMetadataWire)
+    async def workflow_metadata(
+        workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
+        chat_id: Annotated[str, Path(min_length=1, max_length=128)],
+        request: Request,
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
+    ) -> dict[str, object]:
+        timeline = _timeline(request)
+        watermark = await asyncio.to_thread(
+            timeline.latest_sequence, workspace_id=workspace_id, chat_id=chat_id
+        )
+        try:
+            records = await asyncio.to_thread(
+                chat_service.list_chat_executions,
+                workspace_id,
+                chat_id,
+                include_nested=True,
+            )
+        except Exception as error:
+            raise _service_error(error) from error
+        return {"items": [record.as_dict() for record in records], "after": watermark}
+
     @router.get(
         "/chats/{chat_id}/timeline",
         response_model=TimelinePageWire,
@@ -281,11 +303,21 @@ def create_timeline_router(
                 limit=limit,
                 thread_id=thread,
             )
-        return {
+        result: dict[str, object] = {
             "items": [_clean(item) for item in items],
             "nextBefore": min(_seq(item) for item in items) if items else None,
             "after": watermark,
         }
+        if isinstance(timeline, TimelineOutputPrefixes):
+            prefixes = await asyncio.to_thread(
+                timeline.output_prefixes,
+                workspace_id=workspace_id,
+                chat_id=chat_id,
+                items=items,
+            )
+            if prefixes:
+                result["outputPrefixes"] = [_clean(item) for item in prefixes]
+        return result
 
     @router.get("/chats/{chat_id}/timeline/stream")
     async def stream_timeline(

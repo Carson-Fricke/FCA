@@ -58,5 +58,14 @@ class TimelineWriter(Protocol):
     ) -> dict[str, object]: ...
 
 
+@runtime_checkable
+class TimelineOutputPrefixes(Protocol):
+    """Optional history optimization retaining open output without moving page cursors."""
+
+    def output_prefixes(
+        self, *, workspace_id: str, chat_id: str, items: list[dict[str, object]]
+    ) -> list[dict[str, object]]: ...
+
+
 class Timeline(TimelineReader, TimelineWriter, Protocol):
     """A composed timeline used by an application that also executes agents."""

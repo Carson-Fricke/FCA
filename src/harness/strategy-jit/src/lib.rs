@@ -22,6 +22,7 @@ mod error;
 mod load;
 mod provenance;
 mod runtime;
+mod sdk_reference;
 mod toolchain;
 mod validation;
 mod workspace;

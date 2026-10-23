@@ -24,8 +24,8 @@ projection, workflow phase policy, or a second incoming-message writer.
 | `workspaces.py` | Workspace catalog, durable workspace deletion, summary and overview snapshots, and local data composition. |
 | `state.py` | Workspace evidence, lineage, and consent/audit record projection. |
 | `artifacts.py` | Durable artifact catalog, strategy-sketch revision inspection and bounded UTF-8 file reads. |
-| `strategies.py` | Workspace strategy registry projection and strategy-domain endpoints. |
-| `backtests.py` | Backtest records and result views, with launch delegated to the harness adapter. |
+| `strategies.py` | Shared authored-program and published-bundle strategy projection, actual source/manifest inspection, and linked execution counts. |
+| `backtests.py` | Retained execution catalog, job inspection and optional published report views; launch delegates to the harness adapter. Canonical report records live in `thesis.backtests.records`. |
 | `deployments.py` | Deployment, order, portfolio, and risk-decision endpoints. |
 | `dashboards.py` | Workspace-persisted dashboard widget endpoints. |
 | `screeners.py` | Workspace screener definitions and harness-backed screening endpoints. |
@@ -78,3 +78,8 @@ model-requested tool outcomes.
 Production `thesis/application/composition.py` binds stateless API intake and independent durable worker handlers. Synchronous handlers/dependencies run blocking storage and MCP work in FastAPI threads. Backtest and screening mutation routes accept immutable inputs and return 202; screening materialization and submission inspection are explicit endpoints.
 
 Harness catalog status includes discovered MCP read-only annotations for inspection.
+
+`timeline.py` exposes lightweight chat-scoped workflow metadata and bounded
+selected-thread history. PostgreSQL history elides closed provisional frames and
+returns open-output prefixes separately so pagination never skips interleaved
+records. Canonical timeline sequence remains the SSE cursor.

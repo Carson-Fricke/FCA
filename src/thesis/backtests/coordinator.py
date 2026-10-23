@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 
 from thesis.agent.harness_tools import HarnessToolProvider, HarnessToolResult
 from thesis.application.job_classification import is_harness_execution_tool
+from thesis.backtests.records import BacktestRecord, BacktestStore
 from thesis.backtests.run_import import (
     _COMPLETE_STATES,
     _FAILED_STATES,
@@ -30,7 +31,6 @@ from thesis.backtests.run_import import (
     BacktestRunPending,
     import_backtest_run,
 )
-from thesis.http.backtests import BacktestDataService, BacktestRecord
 from thesis.integrations.mcp import TOOL_GET_JOB_RESULT, TOOL_RUN_BACKTEST
 from thesis_runtime.contracts.records import ToolJob
 
@@ -46,20 +46,16 @@ class BacktestRunCoordinator:
 
     def __init__(
         self,
-        service: BacktestDataService,
+        store: BacktestStore,
         tools: HarnessToolProvider,
         *,
         tracking: TrackingLookup | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        self._service = service
+        self._store = store
         self._tools = tools
         self._tracking = tracking
         self._clock = clock if clock is not None else _utc_now
-
-    @property
-    def service(self) -> BacktestDataService:
-        return self._service
 
     def tracked_job(self, workspace_id: str, job_id: str) -> ToolJob | None:
         """Return the tracking record for one job id, when the boundary knows it."""
@@ -162,12 +158,12 @@ class BacktestRunCoordinator:
             if tracked is not None:
                 return _tracking_card(tracked, error=str(error))
             return {"job_id": job_id, "state": "unknown", "error": str(error)}
-        record = self._service.store.add(record)
+        record = self._store.add(record)
         return _complete_card(job_id, record)
 
     def find_by_job(self, workspace_id: str, job_id: str) -> BacktestRecord | None:
         """Return the workspace record already imported for ``job_id``, if any."""
-        return self._service.store.get(workspace_id, job_id)
+        return self._store.get(workspace_id, job_id)
 
 
 def _complete_card(job_id: str, record: BacktestRecord) -> dict[str, object]:

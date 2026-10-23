@@ -160,6 +160,7 @@
 	const isNodeScope = $derived(active?.kind === 'sub_agent');
 	const isPhaseScope = $derived(active?.kind === 'phase');
 	const historyThread = $derived(isNodeScope && active ? active.id : 'root');
+	const unanchoredWorkflows = $derived([...workflows.values()].filter((live) => !live.anchored && !timeline.initialLoading && (live.execution.conversation_id ?? chatId) === (isNodeScope && active ? active.id : chatId)));
 
 	/**
 	 * The active phase's run view state (REQ-D2): every attempt's
@@ -345,6 +346,12 @@
 					pending={nodePending}
 					onEnterSubAgent={enterSubAgent}
 				/>
+				{#each unanchoredWorkflows as live (live.execution.execution_id)}
+					<WorkflowCard execution={live.execution} phases={live.phases} status={live.execution.state}
+						summary={live.execution.phase ? `Current phase ${live.execution.phase}` : 'Awaiting phase transitions'}
+						attentionPhases={live.attentionPhases}
+						onEnterPhase={(phase, options) => enterPhase(live.execution.execution_id, phase, options)} />
+				{/each}
 			{/if}
 		</ScopeStack>
 	{:else}
@@ -375,7 +382,7 @@
 				onEnterPhase={enterPhase}
 			/>
 
-			{#each [...workflows.values()].filter((live) => !live.anchored && !timeline.initialLoading) as live (live.execution.execution_id)}
+			{#each unanchoredWorkflows as live (live.execution.execution_id)}
 				<div class="mt-3">
 					<WorkflowCard
 						execution={live.execution}
@@ -408,6 +415,14 @@
 		>
 			{nodeSendError}
 		</div>
+	{/if}
+	{#if timeline.metadataError}
+		<p class="px-3 py-2 text-xs text-warn" role="status">{timeline.metadataError}</p>
+		<button class="px-3 py-2 text-xs text-accent" onclick={() => timeline.refreshMetadata()}>Retry Workflow Metadata</button>
+	{/if}
+	{#if timeline.history[historyThread]?.loaded && !timeline.history[historyThread]?.complete && !timeline.history[historyThread]?.error}
+		<button class="px-3 py-2 text-xs text-accent" data-testid="history-older"
+			disabled={timeline.history[historyThread]?.loading} onclick={() => timeline.loadHistory(historyThread, true)}>Load older history</button>
 	{/if}
 	{#if timeline.history[historyThread]?.error}
 		<p class="px-3 py-2 text-xs text-warn" role="status">{timeline.history[historyThread].error}</p>

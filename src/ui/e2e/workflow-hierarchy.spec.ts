@@ -59,6 +59,7 @@ test('nested workflow phases stay inside their card while ordinary helpers remai
                 !url.searchParams.has('thread') || url.searchParams.get('thread') === item.threadId),
             nextBefore: null, after: 1
         } });
+        if (path.endsWith('/executions')) return route.fulfill({ json: { items: [], after: 1 } });
         if (path.endsWith('/sub_agents')) return route.fulfill({ json: { chatId: chat.chat_id, roots: [], items: nodes } });
         if (path.endsWith('/workflows/research-investigation')) return route.fulfill({ json: {
             workflow_id: 'research-investigation', version: '2.0.0', title: 'Research investigation', splits: {},

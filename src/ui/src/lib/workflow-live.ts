@@ -13,7 +13,7 @@ function workflowAnchor(message: ChatMessage, data: Record<string, unknown>): Wo
 	const id = data.executionId;
 	if (typeof id !== 'string' || !id) return null;
 	return {
-		execution_id: id, chat_id: message.chat_id, trigger_message_id: message.message_id,
+		execution_id: id, chat_id: message.chat_id, conversation_id: message.conversation_id ?? message.chat_id, trigger_message_id: message.message_id,
 		workflow_id: String(data.workflowId ?? ''),
 		workflow_version: String(data.version ?? ''),
 		requested_by: message.actor_id, state: (data.state ?? 'running') as WorkflowExecutionRecord['state'],
@@ -24,7 +24,8 @@ function workflowAnchor(message: ChatMessage, data: Record<string, unknown>): Wo
 
 export function deriveWorkflowLive(
 	messages: ChatMessage[], eventsByExecution: Map<string, ExecutionEvent[]>,
-	snapshots: Map<string, { execution: WorkflowExecutionRecord; seq: number }> = new Map()
+	snapshots: Map<string, { execution: WorkflowExecutionRecord; seq: number }> = new Map(),
+	metadata: Map<string, { execution: WorkflowExecutionRecord; seq: number }> = new Map()
 ): Map<string, WorkflowLiveState> {
 	const anchors = new Map<string, { execution: WorkflowExecutionRecord; phases: WorkflowPhase[] }>();
 	for (const message of messages) {
@@ -45,13 +46,14 @@ export function deriveWorkflowLive(
 		}
 	}
 	const result = new Map<string, WorkflowLiveState>();
-	for (const id of new Set([...anchors.keys(), ...snapshots.keys()])) {
+	for (const id of new Set([...anchors.keys(), ...snapshots.keys(), ...metadata.keys()])) {
 		const anchor = anchors.get(id);
-		const snapshot = snapshots.get(id);
+		const current = metadata.get(id);
+		const snapshot = current ?? snapshots.get(id);
 		const execution = snapshot?.execution ?? anchor!.execution;
 		const events = eventsByExecution.get(id) ?? [];
 		// First-save snapshots may arrive late; every lifecycle event remains evidence.
-		const projected = projectExecution(execution, events);
+		const projected = projectExecution(execution, current ? events.filter((event) => event.seq > current.seq) : events);
 		const phases = new Map((anchor?.phases ?? []).filter((phase) => isWorkflowPhase(phase.name)).map((phase) => [phase.name, { ...phase }]));
 		const phaseEvents = events.filter((event) => event.eventType !== 'sub_agent.spawned' ||
 			event.payload.phaseExecutor === true);

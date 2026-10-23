@@ -12,6 +12,7 @@ import pytest
 
 from thesis.agent.harness_tools import HarnessToolProvider, HarnessToolResult
 from thesis.backtests.coordinator import BacktestRunCoordinator
+from thesis.backtests.records import BacktestRecord, InMemoryBacktestStore
 from thesis.backtests.run_import import (
     BacktestRunError,
     BacktestRunPending,
@@ -19,8 +20,6 @@ from thesis.backtests.run_import import (
 )
 from thesis.http.backtests import (
     BacktestDataService,
-    BacktestRecord,
-    InMemoryBacktestStore,
 )
 
 JOB_ID = "job-0123456789abcdef0123456789abcdef"
@@ -172,7 +171,7 @@ def test_pending_and_failed_jobs_do_not_import() -> None:
 def test_materialization_creates_one_projection_per_workspace_job() -> None:
     store = InMemoryBacktestStore()
     service = BacktestDataService(store=store, clock=lambda: NOW)
-    coordinator = BacktestRunCoordinator(service, _tools(), clock=lambda: NOW)
+    coordinator = BacktestRunCoordinator(service.store, _tools(), clock=lambda: NOW)
 
     first = coordinator.materialize("workspace-one", JOB_ID)
     assert first["state"] == "succeeded"
@@ -190,7 +189,7 @@ def test_materialization_creates_one_projection_per_workspace_job() -> None:
 def test_tool_result_enrichment_uses_job_id_only() -> None:
     store = InMemoryBacktestStore()
     service = BacktestDataService(store=store, clock=lambda: NOW)
-    coordinator = BacktestRunCoordinator(service, _tools(), clock=lambda: NOW)
+    coordinator = BacktestRunCoordinator(service.store, _tools(), clock=lambda: NOW)
 
     running = coordinator.handle_tool_result(
         "workspace-one",
@@ -235,3 +234,40 @@ def test_store_add_is_atomic_add_if_absent_under_concurrency() -> None:
 
     assert len(store.list("workspace-one")) == 1
     assert all(item is stored[0] for item in stored)
+
+
+def test_report_import_never_downloads_oversized_equity_but_preserves_published_metrics() -> (
+    None
+):
+    class PublishedTools(FakeTools):
+        def call_tool(
+            self, name: str, arguments: Mapping[str, object] | None = None
+        ) -> HarnessToolResult:
+            if name == "list_artifacts":
+                return HarnessToolResult(
+                    tool=name,
+                    ok=True,
+                    structured={
+                        "job_id": JOB_ID,
+                        "artifacts": [
+                            {
+                                "name": "artifacts/equity.parquet",
+                                "sizeBytes": 4_000_000_000,
+                            }
+                        ],
+                    },
+                )
+            return super().call_tool(name, arguments)
+
+    original = _tools()
+    tools = PublishedTools(original._responses, ARTIFACTS)
+    record = import_backtest_run(
+        tools=tools, workspace_id="workspace-one", job_id=JOB_ID
+    )
+    assert record.equity == ()
+    assert record.trade_log
+    assert record.stats["equity_unavailable_reason"] == "artifact_unavailable"
+    assert not any(
+        name == "read_artifact" and args.get("name") == "artifacts/equity.parquet"
+        for name, args in tools.calls
+    )

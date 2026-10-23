@@ -34,7 +34,11 @@ def test_phase_entry_is_durable_and_can_be_entered_by_a_reconstructed_engine(tmp
     request = _request(kit)
     assert kit.workflow.prepare_phase(request) is None
     assert not kit.woke
-    phase = next(work for work in queue.ready() if work.kind == "workflow")
+    phase = next(
+        work
+        for work in (queue.get(ref.workspace_id, ref.key) for ref in queue.ready())
+        if work.kind == "workflow"
+    )
     rebuilt = build_hypothesis_development_workflow(
         chat=kit.chat,
         runner=kit.runner,
@@ -51,9 +55,23 @@ def test_phase_entry_is_durable_and_can_be_entered_by_a_reconstructed_engine(tmp
         WORKSPACE, request.chat_id, executors[0].sub_agent_id
     )
     assert any(IDEAS in row.body for row in transcript)
-    assert any(work.kind == "conversation" for work in queue.ready())
+    assert any(
+        work.kind == "conversation"
+        for work in (queue.get(ref.workspace_id, ref.key) for ref in queue.ready())
+    )
     rebuilt.prepare_phase(request)
-    assert len([work for work in queue.ready() if work.kind == "workflow"]) == 1
+    assert (
+        len(
+            [
+                work
+                for work in (
+                    queue.get(ref.workspace_id, ref.key) for ref in queue.ready()
+                )
+                if work.kind == "workflow"
+            ]
+        )
+        == 1
+    )
 
 
 def test_queued_phase_cannot_adopt_a_new_intent_epoch(tmp_path):
@@ -68,7 +86,11 @@ def test_queued_phase_cannot_adopt_a_new_intent_epoch(tmp_path):
     )
     request = _request(kit)
     kit.workflow.prepare_phase(request)
-    phase = next(work for work in queue.ready() if work.kind == "workflow")
+    phase = next(
+        work
+        for work in (queue.get(ref.workspace_id, ref.key) for ref in queue.ready())
+        if work.kind == "workflow"
+    )
     execution = kit.chat.steer_workflow(
         WORKSPACE, request.execution_id, actor_id="operator", body="Change direction"
     )

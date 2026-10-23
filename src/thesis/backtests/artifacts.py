@@ -44,8 +44,20 @@ class HarnessArtifactReader:
         self._http_get: HttpGet = (
             http_get if http_get is not None else _default_http_get
         )
+        self._catalogs: dict[str, tuple[Mapping[str, object], ...]] = {}
 
     def read(self, job_id: str, name: str) -> bytes | None:
+        # A report preview must not download multi-gigabyte historical equity
+        # artifacts just to draw a bounded chart. Explicit exports use their
+        # artifact endpoint, independently of this preview reader.
+        if name.endswith(".parquet"):
+            entries = self._artifact_entries(job_id)
+            entry = next(
+                (entry for entry in entries if entry.get("name") == name), None
+            )
+            size = None if entry is None else entry.get("sizeBytes")
+            if not isinstance(size, int) or size > 16 * 1024 * 1024:
+                return None
         via_mcp = self._read_via_mcp(job_id, name)
         if via_mcp is not None:
             return via_mcp
@@ -66,20 +78,28 @@ class HarnessArtifactReader:
         return _decode(result.structured)
 
     def _artifact_url(self, job_id: str, name: str) -> str | None:
-        result = self._tools.call_tool(TOOL_LIST_ARTIFACTS, {"job_id": job_id})
-        if not result.ok:
-            return None
-        entries = result.structured.get("artifacts")
-        if not isinstance(entries, (list, tuple)):
-            return None
-        for entry in entries:
-            if not isinstance(entry, Mapping) or entry.get("name") != name:
+        for entry in self._artifact_entries(job_id):
+            if entry.get("name") != name:
                 continue
             for key in ("sas_url", "sasUrl", "uri"):
                 value = entry.get(key)
                 if isinstance(value, str) and value.startswith(("http://", "https://")):
                     return value
         return None
+
+    def _artifact_entries(self, job_id: str) -> tuple[Mapping[str, object], ...]:
+        if job_id in self._catalogs:
+            return self._catalogs[job_id]
+        result = self._tools.call_tool(TOOL_LIST_ARTIFACTS, {"job_id": job_id})
+        if not result.ok:
+            return ()
+        entries = result.structured.get("artifacts")
+        if not isinstance(entries, (list, tuple)):
+            return ()
+        self._catalogs[job_id] = tuple(
+            entry for entry in entries if isinstance(entry, Mapping)
+        )
+        return self._catalogs[job_id]
 
 
 def _decode(structured: Mapping[str, object]) -> bytes | None:

@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from copy import deepcopy
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, Path, Request
@@ -37,33 +38,44 @@ class ArtifactCatalogService:
         self.strategies = strategies
         self.programs = programs
 
+    def strategy_items(self, workspace_id: str) -> tuple[dict[str, object], ...]:
+        """Share one projection of published bundles and authored strategy programs."""
+        bundles = (
+            []
+            if self.strategies is None
+            else list(self.strategies.catalog(workspace_id))
+        )
+        programs = (
+            []
+            if self.programs is None
+            else list(self.programs.catalog(workspace_id, "strategy"))
+        )
+        bundle_ids = {str(item["id"]) for item in bundles}
+        return tuple(
+            deepcopy(item)
+            for item in [
+                *bundles,
+                *(item for item in programs if item["id"] not in bundle_ids),
+            ]
+        )
+
     def catalog(self, workspace_id: str) -> dict[str, object]:
         """Return one workspace's committed artifacts and their file manifests."""
         try:
-            strategy_items = (
-                []
-                if self.strategies is None
-                else [dict(item) for item in self.strategies.catalog(workspace_id)]
-            )
+            strategy_items = list(self.strategy_items(workspace_id))
             program_items: dict[ProgramKind, list[dict[str, object]]] = {
                 "strategy": [],
                 "study": [],
                 "indicator": [],
             }
             if self.programs is not None:
-                for kind in _ARTIFACT_KINDS:
+                for kind in ("study", "indicator"):
                     program_items[kind] = [
-                        dict(item) for item in self.programs.catalog(workspace_id, kind)
+                        deepcopy(item)
+                        for item in self.programs.catalog(workspace_id, kind)
                     ]
         except WorkspaceNotFoundError:
             raise KeyError(workspace_id) from None
-        bundle_ids = {str(item["id"]) for item in strategy_items}
-        # A bundle-manifest strategy and a program-layout strategy can share an
-        # ID; the verified bundle projection wins and the program entry is
-        # dropped rather than duplicated.
-        strategy_items.extend(
-            item for item in program_items["strategy"] if item["id"] not in bundle_ids
-        )
         indicator_items = program_items["indicator"]
         items = [*strategy_items, *program_items["study"], *indicator_items]
         if self.programs is not None:
@@ -181,13 +193,17 @@ class ArtifactCatalogService:
         if not separator or kind not in _ARTIFACT_KINDS or not name:
             raise KeyError(artifact_id)
         try:
-            payload: bytes | None = None
-            if kind == "strategy" and self.strategies is not None:
-                try:
-                    payload = self.strategies.read_file(workspace_id, name, file_path)
-                except KeyError:
-                    payload = None
-            if payload is None:
+            is_bundle = (
+                kind == "strategy"
+                and self.strategies is not None
+                and any(
+                    item["id"] == name for item in self.strategies.catalog(workspace_id)
+                )
+            )
+            if is_bundle:
+                assert self.strategies is not None
+                payload = self.strategies.read_file(workspace_id, name, file_path)
+            else:
                 if self.programs is None:
                     raise KeyError(name)
                 payload = self.programs.file_content(

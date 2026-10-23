@@ -7,7 +7,7 @@ only a cache. Immutable chunk trees share the same workspace partition.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -61,19 +61,28 @@ class CosmosExecutionStore:
         self._chunks = ChunkedPayloadStore(container)
         self._scopes: dict[str, str] = {}
 
-    def identities(self) -> tuple[ExecutionIdentity, ...]:
-        """Enumerate durable launches for missing-handoff repair by the worker."""
-        documents = self._container.query_items(
-            query="SELECT * FROM c WHERE c.recordType = @type",
-            parameters=[{"name": "@type", "value": RECORD_TYPE}],
-            enable_cross_partition_query=True,
-        )
-        return tuple(
-            ExecutionDocument.from_dict(
-                self._chunks.load(item["payload"], item["workspaceId"])
-            ).identity
-            for item in documents
-        )
+    def identities(self) -> Iterator[ExecutionIdentity]:
+        """Bounded metadata pages; defer launch hydration until each candidate."""
+        cursor = ""
+        while True:
+            rows = list(
+                self._container.query_items(
+                    query="SELECT TOP 64 c.id, c.workspaceId FROM c WHERE c.recordType = @type AND c.id > @after ORDER BY c.id ASC",
+                    parameters=[
+                        {"name": "@type", "value": RECORD_TYPE},
+                        {"name": "@after", "value": cursor},
+                    ],
+                    enable_cross_partition_query=True,
+                    max_item_count=64,
+                )
+            )
+            if not rows:
+                return
+            for row in rows:
+                cursor = row["id"]
+                execution_id = cursor.removeprefix("execution-store:")
+                self._scopes[execution_id] = row["workspaceId"]
+                yield self.get(execution_id).identity
 
     def create(
         self,

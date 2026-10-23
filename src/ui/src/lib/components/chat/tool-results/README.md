@@ -5,7 +5,9 @@ never dispatch executions or reconstruct financial statistics. Parent chat
 components own timeline selection; job observation uses the shared read-only poller.
 
 - `ArtifactsToolCard.svelte`: renders stored artifact manifests.
-- `BacktestToolCard.svelte`: renders backtest outcome details.
+- `BacktestToolCard.svelte`: observes actual job status through the shared reader
+  until terminal state or unmount, retries report reads without replaying the job,
+  and links to execution inspection independently of report availability.
 - `GenericToolCard.svelte`: renders unrecognized structured tool results.
 - `JobToolCard.svelte`: renders job lookup outcomes.
 - `OperatorQuestionCard.svelte`: renders an agent's conversational input request.

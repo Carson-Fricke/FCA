@@ -25,6 +25,13 @@ the authorized scope, and only a necessary one-time conversion outside runtime
 reads/startup/execution. Compatibility paths still in source are cleanup debt;
 this documentation update does not claim their removal.
 
+Local Thesis conversation, workflow, ownership and retained submission persistence
+uses native PostgreSQL on loopback port 5433 with the `thesis-postgres-data` volume.
+The harness endpoint remains independently selected through `HARNESS_MCP_URL`;
+local PostgreSQL does not change Azure execution or replay retained jobs. Azure
+Thesis continues using Cosmos. Runtime recovery uses bounded background batches;
+selected-thread history loads one recent page, with older/child history on demand.
+
 ## Status
 
 Unified inline study lifecycle cards and independently published dataset semantics
@@ -92,8 +99,9 @@ must pass, and an old healthy revision never satisfies the rollout check.
 The public UI publishes only after this runtime smoke succeeds.
 SDK version and ABI are read from packaged metadata; SDK identity
 hashes all four crates' manifests and source files using canonical LF bytes on
-Windows and Linux; Git attributes and the installed SDK build smoke enforce
-that byte contract. Compiler provenance covers
+Windows and Linux. Runtime hashing canonicalizes CRLF to LF; repository-wide
+Git/editor settings, hooks, CI and the installed SDK build smoke also enforce
+LF source files. Compiler provenance covers
 the same complete dependency sources. The shared image verifies the portable
 SDK Cargo dependency graph offline before publishing. Remote harness access does not
 replace these local reference assets. Shared `prompts/sdk.py` asks for operator
@@ -803,12 +811,38 @@ a profit factor that is undefined (with a reason), never a gross-profit
 substitute, when there are no net losses — and an `equity` block whose Sharpe is
 published with its own reason. Import and candidate selection read this one
 authority instead of recomputing statistics or rebuilding trades from fills.
+Replay-owned `backtest::valuation` updates cash/inventory once per booked fill
+and values it only with marks observed at that dispatch. Consecutive identical
+states retain logical sample multiplicity and the last observed timestamp in
+bounded compressed scratch. Full-stream metric passes preserve return weighting,
+decimal arithmetic and ordered floating-point variance accumulation. The report
+trail retains observed minute-bucket endpoints/extrema and every fill boundary;
+constant spans collapse to observed endpoints. Equity metrics explicitly declare
+logical `samples`, `retained_samples`, `report_interval_ns`,
+`metric_sample_basis: causal_dispatch` and `constant_state_compaction`.
+Execution ordering, fills and valuation causality do not depend on report cadence.
+SDK `FillLedger` and `PendingOrder` support cumulative actual-fill accounting:
+requested order completion and actual position closure are distinct facts.
 Artifact bytes are read through the harness boundary when available and
 otherwise via the artifact's published SAS/object URL, so one importer serves
 local and Azure jobs. A materialization
 route (`GET /v1/workspaces/{ws}/backtests/jobs/{job_id}`) lets the UI fetch the
 card data once the tool returns, so neither side blocks on a long poll;
-`GET /v1/workspaces/{ws}/backtests/{job_id}` serves the imported detail.
+`GET /v1/workspaces/{ws}/backtests/{job_id}` serves or materializes published detail.
+The workspace catalog discovers retained submissions, runtime tool-job references
+and existing reports without parsing conversation text. Its inspection route
+`backtests/jobs/{job_id}/inspection` reads accepted inputs and small published
+evidence independently of report materialization. Terminal observations are
+immutable; transient read failures preserve prior state with a separate error.
+Discovery does not submit or replay work. `thesis.backtests.records` owns report
+records/persistence, while `thesis.backtests.catalog` owns observational discovery;
+neither depends on the HTTP package. HTTP composition binds workspace counts to
+the same retained execution catalog. Strategy pages share the artifact catalog's
+authored-program and published-bundle projection and load actual source/history.
+Links use retained program attribution or an explicitly submitted strategy ID;
+an execution-local instance name never establishes an artifact association.
+Report preview readers require a declared Parquet size at most 16 MiB, preventing
+multi-gigabyte historical downloads while preserving published metrics/trades.
 `thesis.backtests` coordinates this lifecycle: on a terminal success it imports
 the job into the workspace backtest store as a `BacktestRecord` keyed by
 `(workspace_id, job_id)` carrying the equity curve, the canonical closed trades

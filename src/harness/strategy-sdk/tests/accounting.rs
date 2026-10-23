@@ -4,6 +4,7 @@ use harness_strategy_sdk::building_blocks::empirical_quantile;
 use harness_strategy_sdk::building_blocks::haar_random_walk_energy_share;
 use harness_strategy_sdk::building_blocks::log_price_slope_bps;
 use harness_strategy_sdk::building_blocks::FillLedger;
+use harness_strategy_sdk::building_blocks::PendingOrder;
 use harness_strategy_sdk::Decimal;
 use harness_strategy_sdk::Fill;
 
@@ -55,6 +56,39 @@ fn partial_entries_and_exits_reconcile_inventory_cash_and_fees() {
         .apply(&fill("1", "entry", "buy", "5", "100"))
         .is_err());
     assert_eq!(ledger.net_pnl(d("102")).unwrap(), before);
+}
+
+#[test]
+fn first_partial_fill_never_completes_an_entry_or_exit() {
+    let mut ledger = FillLedger::new("MSFT");
+    let entry = PendingOrder::new("entry", d("121")).unwrap();
+    ledger
+        .apply(&fill("1", "entry", "sell", "4", "100"))
+        .unwrap();
+    assert!(!entry.is_filled(&ledger));
+    assert_eq!(entry.remaining(&ledger).unwrap(), d("117"));
+    ledger
+        .apply(&fill("2", "entry", "sell", "45", "101"))
+        .unwrap();
+    ledger
+        .apply(&fill("3", "entry", "sell", "72", "102"))
+        .unwrap();
+    assert!(entry.is_filled(&ledger));
+    assert_eq!(ledger.quantity(), d("-121"));
+    assert_eq!(
+        ledger.average_fill_price("entry").unwrap(),
+        d("12289") / d("121")
+    );
+    let exit = PendingOrder::new("exit", ledger.quantity().abs()).unwrap();
+    ledger.apply(&fill("4", "exit", "buy", "4", "99")).unwrap();
+    assert!(!exit.is_filled(&ledger));
+    assert_eq!(ledger.quantity(), d("-117"));
+    ledger
+        .apply(&fill("5", "exit", "buy", "117", "99"))
+        .unwrap();
+    assert!(exit.is_filled(&ledger));
+    assert_eq!(ledger.quantity(), Decimal::ZERO);
+    assert_eq!(ledger.net_pnl(d("99")).unwrap(), d("309.5"));
 }
 
 #[test]

@@ -369,7 +369,9 @@ def test_durable_research_phases_read_and_complete_without_turning_workflow_node
         ]
         work = next(
             work
-            for work in kit.queue.ready()
+            for work in (
+                kit.queue.get(ref.workspace_id, ref.key) for ref in kit.queue.ready()
+            )
             if work.payload.get("anchor_id") == executor.sub_agent_id
         )
         assert worker.tick((work,)) == 1
@@ -380,7 +382,10 @@ def test_durable_research_phases_read_and_complete_without_turning_workflow_node
         ):
             join_work = next(
                 item
-                for item in kit.queue.ready()
+                for item in (
+                    kit.queue.get(ref.workspace_id, ref.key)
+                    for ref in kit.queue.ready()
+                )
                 if item.payload.get("phase") == "collect_critiques"
             )
             assert worker.tick((join_work,)) == 1
@@ -404,7 +409,9 @@ def test_durable_research_phases_read_and_complete_without_turning_workflow_node
         )
         assert not any(
             work.payload.get("anchor_id") == workflow_node.sub_agent_id
-            for work in kit.queue.ready()
+            for work in (
+                kit.queue.get(ref.workspace_id, ref.key) for ref in kit.queue.ready()
+            )
         )
 
     assert not kit.chat.persistence.list_conversation(
@@ -837,7 +844,9 @@ def test_provider_recovery_after_study_submission_retains_one_job_and_completes(
     )
     work = next(
         item
-        for item in kit.queue.ready()
+        for item in (
+            kit.queue.get(ref.workspace_id, ref.key) for ref in kit.queue.ready()
+        )
         if item.payload.get("anchor_id") == investigator
     )
     assert worker.tick((work,)) == 1

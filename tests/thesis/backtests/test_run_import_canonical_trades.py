@@ -19,8 +19,8 @@ from typing import cast
 import pytest
 
 from thesis.agent.harness_tools import HarnessToolProvider, HarnessToolResult
+from thesis.backtests.records import BacktestRecord
 from thesis.backtests.run_import import BacktestRunError, import_backtest_run
-from thesis.http.backtests import BacktestRecord
 from thesis.integrations.mcp import TOOL_GET_JOB_RESULT, TOOL_GET_JOB_STATUS
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"

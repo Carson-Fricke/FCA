@@ -30,6 +30,9 @@ it does not own agent turns, provider projection, or workflow transitions.
   forward holdout rewrites, the committed window before submission.
 - `sketch_contract.py` defines closed strategy-sketch contracts and validates
   representation and assumption dependencies without depending on the runtime.
+- `sdk.py` hashes the complete SDK source inventory with CRLF normalized to LF;
+  every other byte and filename remains significant. Program-content hashes and
+  compiler provenance have separate owners.
 - `sketches.py` stores immutable sketch revisions in Git and CAS-fences edits.
 - `exploration.py` projects bounded pages from authoritative job output artifacts.
 - `repository.py` defines the structural create/open/resolve/publish/locator port
@@ -67,7 +70,10 @@ the canonical `harness/strategy-sdk`, `harness/contracts`, `harness/num`, and
 `lake/contracts` Cargo manifests and Rust
 sources with portable relative dependencies. Version/ABI metadata is read from
 the SDK and checked against the packaged copy; SDK identity hashes all four
-crates' manifests and source files. The shared templates in `programs.py` back
+crates' manifests and source files after canonicalizing CRLF to LF. Runtime
+hashing does not depend on an editor honoring Git attributes. True source drift
+still rejects templates and execution; mismatch errors identify differing files
+when serving source hashes are available. The shared templates in `programs.py` back
 reference reads and basic authoring. They are minimal SDK contracts, not research
 models with substantive falsifiers or fitted outputs.
 

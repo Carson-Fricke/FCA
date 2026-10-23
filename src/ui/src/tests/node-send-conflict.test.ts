@@ -7,6 +7,7 @@ const fixture = vi.hoisted(() => ({ terminal: false, cancelled: false, backfill:
 vi.mock('$lib/api', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/api')>();
 	return { ...actual, fixtureMode: false,
+		listWorkflowMetadata: vi.fn(async () => ({ items: [], after: 0 })),
 		getWorkflowDefinition: vi.fn(async () => { throw new Error('Unavailable'); }),
 		listChatSubAgents: vi.fn(async () => [{ subAgentId: 'subagent-a', parentSubAgentId: null,
 			phase: 'model_creation', role: 'researcher', phaseExecutor: true,
@@ -230,11 +231,11 @@ describe('node input and canonical history', () => {
 		expect(screen.queryByTestId('sub-agent-composer-input')).toBeNull();
 	});
 	it('uses loaded history for pending state and deduplicates live/history by timeline identity', async () => {
-		const messages = Array.from({ length: 1250 }, (_, index) => message(`history-${index}`, 'assistant'));
+		const messages = Array.from({ length: 200 }, (_, index) => message(`history-${index}`, 'assistant'));
 		fixture.backfill = timelineFixture(messages).items;
-		surface([messages[1249]]);
+		surface([messages[199]]);
 		await screen.findByText('history-0');
-		expect(screen.getAllByTestId('chat-message')).toHaveLength(1250);
+		expect(screen.getAllByTestId('chat-message')).toHaveLength(200);
 		expect(screen.queryByTestId('scope-pending')).toBeNull();
 		expect(listTimelinePage).toHaveBeenCalledWith('ws-1', 'chat-1', 'subagent-a', null, expect.any(AbortSignal));
 	}, 20_000);
@@ -266,8 +267,9 @@ describe('node input and canonical history', () => {
 		timeline.history['subagent-a'].complete = false;
 		vi.mocked(listTimelinePage).mockResolvedValueOnce({ items: [first], nextBefore: 1, after: first.seq })
 			.mockRejectedValueOnce(new Error('Scoped history page timed out after 30 seconds.'));
-		await timeline.loadHistory('subagent-a');
+		await timeline.loadHistory('subagent-a', true);
 		await screen.findByText('first page visible');
+		await fireEvent.click(screen.getByTestId('history-older'));
 		await screen.findByText(/timed out after 30 seconds/);
 		vi.mocked(listTimelinePage).mockResolvedValueOnce({ items: [first], nextBefore: null, after: first.seq });
 		await fireEvent.click(screen.getByTestId('history-retry'));

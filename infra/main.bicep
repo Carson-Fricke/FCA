@@ -146,7 +146,7 @@ param thesisEnableExternalIngress bool = false
 @description('Entra application client ID the Thesis API accepts as token audience. Empty keeps the Thesis API on static bearer authentication only.')
 param thesisApiAudience string = ''
 
-@description('OpenRouter model name injected into the Thesis API as THESIS_MODEL. Empty uses the runtime default (deepseek/deepseek-v4.1-flash).')
+@description('OpenRouter model name injected into the Thesis API as THESIS_MODEL. Empty uses the runtime default (deepseek/deepseek-v4.1-flash-1017).')
 param thesisModel string = ''
 
 @description('Harness MCP endpoint for the Thesis workflow runtime. Empty derives the quant API HTTPS ingress endpoint.')

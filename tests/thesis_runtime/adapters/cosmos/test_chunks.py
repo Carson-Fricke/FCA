@@ -231,6 +231,8 @@ class LimitedContainer:
                 continue
             if "@type" in values and item.get("recordType") != values["@type"]:
                 continue
+            if "c.id > @after" in query and item["id"] <= values["@after"]:
+                continue
             if "@id" in values and item["id"] != values["@id"]:
                 continue
             if (
@@ -299,6 +301,8 @@ class LimitedContainer:
                 if "SELECT TOP @count c.id" in query
                 else deepcopy(item)
             )
+        if "ORDER BY c.id" in query:
+            selected.sort(key=lambda item: item["id"])
         if "ORDER BY c.createdAt" in query:
             selected.sort(key=lambda item: item["createdAt"])
         if "ORDER BY c.seq" in query:

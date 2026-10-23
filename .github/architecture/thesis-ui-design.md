@@ -138,11 +138,16 @@ live timeline subscription, backward history loading, ID deduplication, ascendin
 that same owner. History preserves partial pages on failure, checks cursor
 progress, and rejects aborted or previous-chat replies. Scope navigation does
 not create another message/event cache or an execution SSE subscription.
-The first history page fetches all root-owned threads and returns an `after`
-watermark. SSE starts only afterward and reads strictly greater sequences, with
+The first history page fetches at most 200 records for the root thread and returns an `after`
+watermark. Child history loads when that child opens; older history loads only
+through the explicit Load older history action. Current chat workflow metadata
+and the durable node tree load independently of transcript history. Nested
+workflow fallback cards remain in their owning conversation scope. SSE starts only afterward and reads strictly greater sequences, with
 `Last-Event-ID` reconnect resume; it never independently backfills old history.
-Fallback execution cards wait for that initial page. Older pages remain
-progressive, and a history failure exposes retry without opening an unanchored
+Fallback execution cards wait for that initial page. PostgreSQL history omits
+closed provisional output when the canonical message exists. Open output prefixes
+retain complete UTF-8 fragment offsets without moving the history cursor or
+skipping interleaved records. Raw output remains in the durable audit log. Older pages retain their per-thread cursor and load on demand, and a history failure exposes retry without opening an unanchored
 stream. Conversation and node read routes run synchronous
 storage work off the HTTP event loop. Timeline projection repair is removed;
 the workspace catalog is the authoritative timeline and streams wake on the
@@ -393,8 +398,8 @@ executor-free terminal nodes.
 | --- | --- | --- |
 | **Overview** | Workspace landing | Recent activity feed, strategy health cards, latest backtests, pinned widgets strip, open chats. |
 | **AI chats** | Full-page workspace chat | Conversation list (workspace-scoped, searchable) + transcript pane. Multiple concurrent threads per workspace. |
-| **Strategies** | Strategy registry projection | Rebuildable projection over the workspace's Rust strategy artifacts (`strategies/*/*/manifest.json`); the tree is the source of truth, not a store. List/grid toggle, status filters (live/paper/paused/draft), per-strategy code view with lineage (version ancestry), New-strategy flow. |
-| **Backtests** | Run history + results | Summary strip (count, best return, average Sharpe), filterable history table, **detail view with train/test split** (below). |
+| **Strategies** | Authored strategy catalog | Shared artifact projection over committed strategy programs and published bundles. Rows show revision, declared inputs and linked execution count. Detail shows actual source/manifest, committed history and executions with their frozen source hashes. Unrun strategies remain visible. |
+| **Backtests** | Retained executions + published evidence | Paginated workspace ledger sourced from submissions and runtime tool-job references, independently of report import. Actual state, evidence availability, read failures, queue/execution timing and exact window remain visible. Detail separates Overview, Execution, Fills & positions, and Source & inputs; a published report can declare a train/test split. |
 | **Deployments** | Paper/live monitoring | Running/paused cards with health, allocated capital, P&L; orders and fills table with mode badges (paper/live); risk panel. |
 | **Dashboards** | Custom widgets | Widget grid, pin/unpin to sidebar, create/remove widgets, widget cards for equity, P&L, allocation, win rate, orders. |
 | **Screener** | Symbol screening | Volume/liquidity filters plus custom screeners authored as Rust programs (the filter builder generates SDK source and compiler errors render inline); definitions saved as content-addressed workspace artifacts; imported results carry bundle-hash provenance. |
@@ -579,6 +584,17 @@ Backtest launch submits an inline configuration snapshot and receives HTTP 202.
 Screening launch receives a retained job_id immediately; the UI owns status waiting
 and calls the materialize endpoint after completion. Interrupted execution remains
 inspectable through its retained job_id rather than triggering an automatic retry.
+
+`GET /v1/workspaces/{ws}/backtests` observes only the requested catalog page.
+`backtests/jobs/{job_id}/inspection` exposes status and accepted source/parameters
+even when no report has been imported. A failed status read keeps the last
+observation, its timestamp and a separate read error. Unknown acceptance is never
+displayed as execution failure. The browser owns observation until terminal state
+or navigation; there is no fixed two-minute limit and no automatic submission retry.
+Report preview failures do not hide the execution. Oversized historical Parquet
+is excluded from preview rather than downloaded to draw a chart. Strategy-reported
+metrics are displayed alongside actual fills and final positions, without treating
+successful execution as strategy validation.
 
 
 ## Inline study evidence and dataset semantics
