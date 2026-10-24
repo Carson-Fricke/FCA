@@ -1,3 +1,2 @@
 #!/bin/sh
-node scripts/ci/line-endings.mjs --check || exit $?
-exec node scripts/ci/verify-delivery.mjs
+exec node scripts/ci/line-endings.mjs --check

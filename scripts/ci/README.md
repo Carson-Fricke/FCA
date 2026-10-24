@@ -11,14 +11,10 @@ Build and deployment checks belong here, outside the pytest behavior suite.
 
 - `line-endings.mjs` enforces LF for Git-classified text in the index and working
   tree. `--fix` rewrites CRLF only, preserving binary/ignored files and all other
-  bytes. CI and the tracked pre-commit hook run its check.
-- `verify-delivery.mjs` is the pre-push check for staged, unstaged and untracked
-  leftovers. The default delivery includes every pending non-ignored change;
-  a one-push `FCA_EXPLICIT_PARTIAL_PUSH_REASON` is permitted only for a human's
-  explicit exclusion, as described in root `AGENTS.md`.
+  bytes. CI and the tracked pre-commit and pre-push hooks run its check.
 - `line-endings.test.mjs` verifies inventory parsing, binary exclusions and
-  byte-preserving normalization. `verify-delivery.test.mjs` verifies pending-file
-  detection and the explicit-exclusion requirement.
+  byte-preserving normalization. Root `AGENTS.md` defines which pending changes
+  agents include when asked to push; hooks do not enforce that delivery choice.
 
 - `merge_cargo_recipes.py` composes the pinned cargo-chef recipes for both Rust
   workspaces in either direction. All local crates become dependency-build stubs

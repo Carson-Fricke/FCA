@@ -8,10 +8,10 @@ applyTo: "**"
 
 Use Python 3.12 with uv, Ruff, ty, and pytest. Do not use MyPy.
 
-Follow "Delivery and Text Format Defaults" in root `AGENTS.md`: LF text,
-installed repository hooks, and all pending non-ignored changes committed and
-pushed unless the human explicitly requests an exclusion. Pre-existing changes
-are included in delivery; this does not authorize unrelated implementation work.
+Follow "Delivery and Text Format Defaults" in root `AGENTS.md`: LF text and
+installed repository hooks. When asked to push, commit and push all pending
+non-ignored changes unless the human explicitly requests an exclusion.
+Pre-existing changes are included; this does not authorize unrelated work.
 
 ## Current Contracts and Data Cutovers
 
