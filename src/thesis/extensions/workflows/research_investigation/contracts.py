@@ -8,7 +8,7 @@ from typing import Any
 from thesis.workspaces.sketch_contract import SKETCH_REFERENCE_SCHEMA
 
 WORKFLOW_ID = "research-investigation"
-VERSION = "3.0.0"
+VERSION = "4.0.0"
 REVIEW_PHASES = {
     "implementation": "implementation_critique",
     "experimental": "experimental_critique",
@@ -118,16 +118,27 @@ INVESTIGATION_SCHEMA = record(
         "evidence": {"type": "array", "items": EVIDENCE_SCHEMA, "maxItems": 512},
     }
 )
-TRANSITIONS = {
-    "proposal": ("critique", "focused_critique"),
-    "critique": tuple(REVIEW_PHASES.values()),
-    **{phase: ("collect_critiques",) for phase in REVIEW_PHASES.values()},
-    "collect_critiques": ("adjudicate",),
-    "focused_critique": ("adjudicate",),
-    "adjudicate": ("proposal", "investigation", "completed"),
-    "investigation": ("critique", "focused_critique"),
-    "completed": (),
-    "failed": (),
+ROUTES = {
+    "proposal": {
+        "critique": tuple(f"{phase}.input" for phase in REVIEW_PHASES.values()),
+        "focused_critique": ("focused_critique.input",),
+    },
+    **{
+        phase: {"collect_critiques": (f"collect_critiques.{name}",)}
+        for name, phase in REVIEW_PHASES.items()
+    },
+    "collect_critiques": {"adjudicate": ("adjudicate.input",)},
+    "focused_critique": {"adjudicate": ("adjudicate.input",)},
+    "adjudicate": {
+        target: (f"{target}.input",)
+        for target in ("proposal", "investigation", "completed")
+    },
+    "investigation": {
+        "critique": tuple(f"{phase}.input" for phase in REVIEW_PHASES.values()),
+        "focused_critique": ("focused_critique.input",),
+    },
+    "completed": {},
+    "failed": {},
 }
 PAYLOADS = {
     "proposal": PROPOSAL_SCHEMA,
@@ -151,7 +162,7 @@ def completion_schema(phase: str) -> dict[str, Any]:
     )
     return record(
         {
-            "target": {"enum": list(TRANSITIONS[phase])},
+            "target": {"enum": list(ROUTES[phase])},
             "intentEpoch": {"type": "integer", "minimum": 0},
             field: PAYLOADS[phase],
         }

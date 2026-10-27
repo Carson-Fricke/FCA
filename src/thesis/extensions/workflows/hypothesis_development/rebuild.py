@@ -271,7 +271,7 @@ def fold_transition(
 ) -> HypothesisDevelopmentState:
     """Fold one stored transition into the typed state."""
     source = _phase(transition.from_phase)
-    target = _phase(transition.to_phase)
+    target = _phase(transition.route)
     from .spec import phase_declarations, piping
 
     if source != state.phase or transition.sequence != len(state.transitions) + 1:

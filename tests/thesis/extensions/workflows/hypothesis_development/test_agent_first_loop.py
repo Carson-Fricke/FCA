@@ -32,10 +32,8 @@ from thesis.research.models import ResearchModelRef
 from thesis.workflows.backtests import BacktestRunResult
 from thesis.workflows.research_models import ResearchModelRunResult
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage as ProviderChatMessage,
-)
-from thesis_runtime.adapters.providers.invocations import (
     ModelCompletion,
+    ProviderMessage,
     Role,
     ToolCall,
 )
@@ -111,7 +109,7 @@ class _QueuedCompletionProvider:
     def complete(
         self,
         *,
-        messages: Sequence[ProviderChatMessage],
+        messages: Sequence[ProviderMessage],
         role: Role = "primary",
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
@@ -122,13 +120,12 @@ class _QueuedCompletionProvider:
         name, arguments = self._calls[index]
         call = ToolCall(id=f"call-{self.calls}", name=name, arguments=arguments)
         return ModelCompletion(
-            content="",
+            message=ProviderMessage("assistant", "", tool_calls=(call,)),
             model="stub",
             provider="stub",
             role=role,
             prompt_tokens=0,
             completion_tokens=0,
-            tool_calls=(call,),
         )
 
 
@@ -151,7 +148,7 @@ class _RecordingProvider:
     def complete(
         self,
         *,
-        messages: Sequence[ProviderChatMessage],
+        messages: Sequence[ProviderMessage],
         role: Role = "primary",
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
@@ -166,7 +163,7 @@ class _RecordingProvider:
                 if message.tool_call_id not in self.announced:
                     self.bare_tool_messages.append(message.tool_call_id)
         return ModelCompletion(
-            content="No further action.",
+            message=ProviderMessage("assistant", "No further action."),
             model="stub",
             provider="stub",
             role=role,
@@ -188,7 +185,7 @@ class _FaultingProvider:
     def complete(
         self,
         *,
-        messages: Sequence[ProviderChatMessage],
+        messages: Sequence[ProviderMessage],
         role: Role = "primary",
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
@@ -551,7 +548,7 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     # The execution store is authoritative: all transitions committed with
     # their completion contracts, and the fold restores the full typed state.
     document = kit.execution_store.get(request.execution_id)
-    assert [(item.from_phase, item.to_phase) for item in document.transitions] == [
+    assert [(item.from_phase, item.route) for item in document.transitions] == [
         ("discovery", "model_creation"),
         ("model_creation", "falsification_trials"),
         ("falsification_trials", "verdict"),
@@ -647,7 +644,7 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     execution = kit.chat.get_execution(WORKSPACE, request.execution_id)
     assert execution.phase == HypothesisDevelopmentPhase.STRATEGY_DESIGN.value
     document = kit.execution_store.get(request.execution_id)
-    assert [item.to_phase for item in document.transitions] == [
+    assert [item.route for item in document.transitions] == [
         "model_creation",
         "falsification_trials",
         "verdict",
@@ -1179,7 +1176,7 @@ def test_output_mismatch_is_repairable_before_trials(tmp_path: Path) -> None:
         )
 
     document = kit.execution_store.get(request.execution_id)
-    assert [item.to_phase for item in document.transitions] == ["model_creation"]
+    assert [item.route for item in document.transitions] == ["model_creation"]
     assert _only_active_phase(kit, WORKSPACE, request.execution_id) == "model_creation"
     assert len(_phase_seeds(kit.chat, request.chat_id, request.execution_id)) == 2
 

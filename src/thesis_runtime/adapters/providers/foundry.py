@@ -12,8 +12,8 @@ from urllib.parse import urlsplit
 import httpx
 
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage,
     ModelCompletion,
+    ProviderMessage,
     ProviderRejectedError,
     ProviderUnreachableError,
     Role,
@@ -370,7 +370,7 @@ class FoundryDeploymentInvoker:
     def stream(
         self,
         *,
-        messages: Sequence[ChatMessage],
+        messages: Sequence[ProviderMessage],
         role: Role = "primary",
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
@@ -383,7 +383,7 @@ class FoundryDeploymentInvoker:
         yield self.complete(messages=messages, role=role)
 
     def complete(
-        self, *, messages: Sequence[ChatMessage], role: Role = "primary"
+        self, *, messages: Sequence[ProviderMessage], role: Role = "primary"
     ) -> ModelCompletion:
         """Run one deployment-bound chat completion, failing closed."""
         token = self._resolve_token()

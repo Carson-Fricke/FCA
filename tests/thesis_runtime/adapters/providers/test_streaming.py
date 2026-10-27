@@ -71,7 +71,7 @@ def test_stream_assembles_tools_by_index_without_exposing_partial_arguments() ->
     assert result[:-1] == [OutputDelta("reasoning", "Plan")]
     completion = result[-1]
     assert isinstance(completion, ModelCompletion)
-    assert completion.tool_calls == (
+    assert completion.message.tool_calls == (
         ToolCall("one", "first", '{"x":1}'),
         ToolCall("two", "second", "{}"),
     )

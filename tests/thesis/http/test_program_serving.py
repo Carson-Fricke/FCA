@@ -17,8 +17,8 @@ from thesis.workspaces import programs as program_module
 from thesis.workspaces.manifest import WorkspaceManifest, load_workspace_manifest
 from thesis.workspaces.programs import WorkspacePrograms
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage,
     ModelCompletion,
+    ProviderMessage,
     Role,
     ToolCall,
 )
@@ -131,6 +131,7 @@ def test_serving_authors_template_validates_and_runs_by_id(
 
     class Provider:
         model = "test/model"
+        provider_name = "fake"
 
         def stream(self, *, message_id=None, **kwargs):
             from tests.thesis_runtime.provider_fakes import completion_frames
@@ -142,7 +143,7 @@ def test_serving_authors_template_validates_and_runs_by_id(
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role,
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -158,15 +159,18 @@ def test_serving_authors_template_validates_and_runs_by_id(
             )
             names = ("author_study", "validate_study", "run_study")
             return ModelCompletion(
-                content="Finished" if index == 3 else "Working",
+                message=ProviderMessage(
+                    "assistant",
+                    "Finished" if index == 3 else "Working",
+                    tool_calls=()
+                    if index == 3
+                    else (ToolCall(f"call-{index}", names[index], arguments[index]),),
+                ),
                 model="fake",
                 provider="fake",
                 role=role,
                 prompt_tokens=0,
                 completion_tokens=0,
-                tool_calls=()
-                if index == 3
-                else (ToolCall(f"call-{index}", names[index], arguments[index]),),
             )
 
     chat = ChatService()

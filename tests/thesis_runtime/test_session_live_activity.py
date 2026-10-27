@@ -13,6 +13,7 @@ import pytest
 
 from thesis_runtime.adapters.providers.invocations import (
     ModelCompletion,
+    ProviderMessage,
     ProviderRejectedError,
     ProviderUnreachableError,
     Role,
@@ -42,13 +43,12 @@ from thesis_runtime.tools.registry import (
 
 def _completion(*calls: ToolCall, content: str = "") -> ModelCompletion:
     return ModelCompletion(
-        content=content,
+        message=ProviderMessage("assistant", content, tool_calls=calls),
         model="test-model",
         provider="test-provider",
         role="primary",
         prompt_tokens=0,
         completion_tokens=0,
-        tool_calls=calls,
     )
 
 
@@ -96,10 +96,11 @@ class _Provider:
             message_id=f"output-{uuid.uuid4().hex}",
             direction="outgoing",
             content=MessageContent(
-                text=response.content,
+                text=response.message.content,
                 source="model",
                 requests=tuple(
-                    ToolRequest(c.id, c.name, c.arguments) for c in response.tool_calls
+                    ToolRequest(c.id, c.name, c.arguments)
+                    for c in response.message.tool_calls
                 ),
             ),
         )

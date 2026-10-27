@@ -49,7 +49,7 @@ def _discovery_transition() -> StoreTransition:
     return StoreTransition(
         sequence=1,
         from_phase="discovery",
-        to_phase="model_creation",
+        route="model_creation",
         occurred_at=_moment(),
         intent_epoch=1,
         reason="discovery candidate accepted",
@@ -65,7 +65,7 @@ def _model_transition() -> StoreTransition:
     return StoreTransition(
         sequence=2,
         from_phase="model_creation",
-        to_phase="falsification_trials",
+        route="falsification_trials",
         occurred_at=_moment(),
         intent_epoch=1,
         reason="accepted model",
@@ -88,7 +88,7 @@ def _trials_transition(
     return StoreTransition(
         sequence=sequence,
         from_phase="falsification_trials",
-        to_phase="verdict",
+        route="verdict",
         occurred_at=_moment(),
         intent_epoch=1,
         reason="accepted trials",

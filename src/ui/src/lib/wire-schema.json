@@ -2971,15 +2971,30 @@
     "WorkflowDefinitionWire": {
       "additionalProperties": false,
       "properties": {
+        "inputs": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        },
         "phases": {
           "items": {
             "type": "string"
           },
           "type": "array"
         },
-        "splits": {
+        "routes": {
           "additionalProperties": {
-            "$ref": "#/$defs/WorkflowSplitWire"
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object"
           },
           "type": "object"
         },
@@ -2991,15 +3006,6 @@
         },
         "title": {
           "type": "string"
-        },
-        "transitions": {
-          "additionalProperties": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "type": "object"
         },
         "version": {
           "type": "string"
@@ -3014,8 +3020,8 @@
         "title",
         "phases",
         "terminal_phases",
-        "transitions",
-        "splits"
+        "inputs",
+        "routes"
       ],
       "type": "object"
     },
@@ -3184,25 +3190,6 @@
       "required": [
         "items",
         "after"
-      ],
-      "type": "object"
-    },
-    "WorkflowSplitWire": {
-      "additionalProperties": false,
-      "properties": {
-        "branches": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "type": "object"
-        },
-        "join": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "branches",
-        "join"
       ],
       "type": "object"
     }

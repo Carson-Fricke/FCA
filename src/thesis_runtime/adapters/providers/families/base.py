@@ -1,14 +1,18 @@
-"""Pure model-family tool presentation and completion decoding contracts."""
+"""Pure model-family message/tool presentation and call decoding contracts."""
 
 from collections.abc import Mapping, Sequence
 from typing import Protocol
 
-from thesis_runtime.adapters.providers.invocations import ToolCall
+from thesis_runtime.adapters.providers.invocations import ProviderMessage, ToolCall
 
 
 class ModelFamilyAdapter(Protocol):
     family: str
     version: str
+
+    def prepare_messages(
+        self, messages: Sequence[ProviderMessage]
+    ) -> tuple[ProviderMessage, ...]: ...
 
     def prepare_tools(
         self, tools: Sequence[Mapping[str, object]]
@@ -22,6 +26,11 @@ class NativeToolsAdapter:
 
     family = "generic"
     version = "1"
+
+    def prepare_messages(
+        self, messages: Sequence[ProviderMessage]
+    ) -> tuple[ProviderMessage, ...]:
+        return tuple(messages)
 
     def prepare_tools(
         self, tools: Sequence[Mapping[str, object]]

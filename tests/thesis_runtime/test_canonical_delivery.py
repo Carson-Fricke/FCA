@@ -6,8 +6,8 @@ from dataclasses import replace
 import pytest
 
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage,
     ModelCompletion,
+    ProviderMessage,
     ProviderUnreachableError,
     Role,
     ToolCall,
@@ -57,12 +57,19 @@ def setup_service() -> tuple[Conversations, Anchor, list[Callable[[], None]]]:
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
         ) -> ModelCompletion:
-            return ModelCompletion("Finished", "model", "provider", role, 0, 0)
+            return ModelCompletion(
+                message=ProviderMessage("assistant", "Finished"),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
 
     return (
         Conversations(
@@ -177,7 +184,7 @@ def test_live_tool_result_is_one_canonical_message_with_all_datums(
 ) -> None:
     chat = ChatService()
     thread = chat.create_chat("workspace", title="Live", owner_actor_id="operator")
-    requests: list[tuple[ChatMessage, ...]] = []
+    requests: list[tuple[ProviderMessage, ...]] = []
     workers: list[Callable[[], None]] = []
 
     class Provider:
@@ -191,7 +198,7 @@ def test_live_tool_result_is_one_canonical_message_with_all_datums(
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -200,15 +207,25 @@ def test_live_tool_result_is_one_canonical_message_with_all_datums(
             if len(requests) == 1:
                 assert chat.read_consumed_input("workspace", thread.chat_id, "") == 0
                 return ModelCompletion(
-                    "Checking",
-                    "model",
-                    "provider",
-                    role,
-                    0,
-                    0,
-                    tool_calls=(ToolCall("call-one", "check", "{}"),),
+                    message=ProviderMessage(
+                        "assistant",
+                        "Checking",
+                        tool_calls=(ToolCall("call-one", "check", "{}"),),
+                    ),
+                    model="model",
+                    provider="provider",
+                    role=role,
+                    prompt_tokens=0,
+                    completion_tokens=0,
                 )
-            return ModelCompletion("Finished", "model", "provider", role, 0, 0)
+            return ModelCompletion(
+                message=ProviderMessage("assistant", "Finished"),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
 
     service = Conversations(
         chat=chat,
@@ -284,7 +301,7 @@ def test_provider_failure_does_not_ack_initial_input(monkeypatch) -> None:
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -437,7 +454,7 @@ def test_midturn_terminal_input_stays_durable_but_unconsumed() -> None:
     chat = ChatService()
     thread = chat.create_chat("workspace", title="Terminal", owner_actor_id="operator")
     workers: list[Callable[[], None]] = []
-    requests: list[tuple[ChatMessage, ...]] = []
+    requests: list[tuple[ProviderMessage, ...]] = []
 
     class Provider:
         def stream(self, *, message_id=None, **kwargs):
@@ -450,7 +467,7 @@ def test_midturn_terminal_input_stays_durable_but_unconsumed() -> None:
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -469,7 +486,14 @@ def test_midturn_terminal_input_stays_durable_but_unconsumed() -> None:
                 anchor.sub_agent_id or "",
                 result={"accepted": True},
             )
-            return ModelCompletion("Finished", "model", "provider", role, 0, 0)
+            return ModelCompletion(
+                message=ProviderMessage("assistant", "Finished"),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
 
     service = Conversations(
         chat=chat,
@@ -529,7 +553,7 @@ def test_midturn_input_keeps_arrival_order_and_is_consumed_next_boundary() -> No
     chat = ChatService()
     thread = chat.create_chat("workspace", title="Midturn", owner_actor_id="operator")
     workers: list[Callable[[], None]] = []
-    requests: list[tuple[ChatMessage, ...]] = []
+    requests: list[tuple[ProviderMessage, ...]] = []
 
     class Provider:
         def stream(self, *, message_id=None, **kwargs):
@@ -542,7 +566,7 @@ def test_midturn_input_keeps_arrival_order_and_is_consumed_next_boundary() -> No
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -550,16 +574,26 @@ def test_midturn_input_keeps_arrival_order_and_is_consumed_next_boundary() -> No
             requests.append(tuple(messages))
             if len(requests) == 1:
                 return ModelCompletion(
-                    "Checking",
-                    "model",
-                    "provider",
-                    role,
-                    0,
-                    0,
-                    tool_calls=(ToolCall("call", "check", "{}"),),
+                    message=ProviderMessage(
+                        "assistant",
+                        "Checking",
+                        tool_calls=(ToolCall("call", "check", "{}"),),
+                    ),
+                    model="model",
+                    provider="provider",
+                    role=role,
+                    prompt_tokens=0,
+                    completion_tokens=0,
                 )
             assert chat.read_consumed_input("workspace", thread.chat_id, "") == 1
-            return ModelCompletion("Finished", "model", "provider", role, 0, 0)
+            return ModelCompletion(
+                message=ProviderMessage("assistant", "Finished"),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
 
     def handler(arguments: Mapping[str, object], context: ToolContext) -> ToolExecution:
         service.root("workspace", thread.chat_id).send("Fresh steering", "operator")

@@ -6,6 +6,7 @@ import json
 from collections import Counter, defaultdict
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import closing
+from dataclasses import replace
 from typing import Protocol, cast
 from uuid import uuid4
 
@@ -14,12 +15,13 @@ from thesis_runtime.adapters.providers.families.base import (
     NativeToolsAdapter,
 )
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage,
     ModelCompletion,
+    ProviderMessage,
     ProviderRejectedError,
     Role,
     ToolCall,
     content_digest,
+    messages_payload,
 )
 from thesis_runtime.contracts.messages import (
     MessageContent,
@@ -42,7 +44,7 @@ class NativeProvider(Protocol):
     def stream(
         self,
         *,
-        messages: Sequence[ChatMessage],
+        messages: Sequence[ProviderMessage],
         role: Role = "primary",
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
@@ -67,9 +69,37 @@ def _failed_output_excerpt(value: str, message_id: str) -> str:
     )
 
 
+def _continuation(
+    message: SessionMessage, origin: tuple[str, str] | None
+) -> Mapping[str, object] | None:
+    """Only completed outgoing model messages can supply native continuation."""
+    result = message.content.result or {}
+    if message.direction != "outgoing" or result.get("interrupted") is True:
+        return None
+    value = result.get("provider_continuation")
+    if value is None:
+        if "provider_continuation" not in result and result.get("provider_metadata"):
+            raise ValueError(
+                "outdated model message has no captured provider continuation"
+            )
+        return None
+    if not isinstance(value, Mapping) or not isinstance(value.get("fields"), Mapping):
+        raise ValueError("invalid provider continuation in canonical message")
+    if not all(
+        isinstance(value.get(name), str) and value[name]
+        for name in ("provider", "model")
+    ):
+        raise ValueError("provider continuation has no origin")
+    if origin is not None and (value["provider"], value["model"]) != origin:
+        raise ValueError("provider continuation belongs to a different provider/model")
+    return cast(Mapping[str, object], value["fields"])
+
+
 def project_native_messages(
     messages: Sequence[SessionMessage],
-) -> tuple[ChatMessage, ...]:
+    *,
+    origin: tuple[str, str] | None = None,
+) -> tuple[ProviderMessage, ...]:
     """Project an immutable, already-scoped arrival sequence into native history.
 
     Only exact explicit correlations join. Complete groups emit contiguous native
@@ -122,21 +152,22 @@ def project_native_messages(
                 for result_index in results[correlation]
             )
 
-    projected: list[ChatMessage] = []
-    deferred: list[ChatMessage] = []
+    projected: list[ProviderMessage] = []
+    deferred: list[ProviderMessage] = []
     defer_until = -1
     for index, message in enumerate(scope):
         if index in consumed:
-            native: list[ChatMessage] = []
+            native: list[ProviderMessage] = []
         elif index in groups:
             native = [
-                ChatMessage(
+                ProviderMessage(
                     role="assistant",
                     content=message.content.text,
                     tool_calls=tuple(
                         ToolCall(request.id, request.name, request.arguments)
                         for request in message.content.requests
                     ),
+                    continuation=_continuation(message, origin),
                 )
             ]
             for correlation in groups[index]:
@@ -154,7 +185,7 @@ def project_native_messages(
                         sort_keys=True,
                     )
                 native.append(
-                    ChatMessage(
+                    ProviderMessage(
                         role="tool",
                         content=content,
                         tool_call_id=correlation.request_id,
@@ -174,13 +205,19 @@ def project_native_messages(
                 if any(counts[request.id] != 1 for request in message.content.requests)
                 else "missing results"
             )
+            # Opaque continuation cannot be replayed after its call group was lost.
+            result = dict(message.content.result or {})
+            result.pop("provider_continuation", None)
+            evidence = replace(
+                message, content=replace(message.content, result=result or None)
+            )
             native = [
-                ChatMessage(
+                ProviderMessage(
                     role="user",
                     content=(
                         f"Incomplete request group ({reason}) / runtime evidence:\n"
                         + json.dumps(
-                            message.as_dict(),
+                            evidence.as_dict(),
                             ensure_ascii=True,
                             separators=(",", ":"),
                             sort_keys=True,
@@ -219,7 +256,7 @@ def project_native_messages(
                     + content
                 )
             native = [
-                ChatMessage(
+                ProviderMessage(
                     role=role,
                     content=(
                         content
@@ -227,6 +264,7 @@ def project_native_messages(
                         and message.content.text.strip()
                         else message.content.as_content()
                     ),
+                    continuation=_continuation(message, origin),
                 )
             ]
         if index in groups and not deferred:
@@ -245,11 +283,11 @@ class NativeSessionAdapter:
 
     The caller reserves the output ID before execution; synchronous consumers
     allocate a fresh ID at stream start through the ID factory. Reasoning
-    stays separate from answer text in optional ``content.result['reasoning']``;
-    usage and native protocol metadata do not become session fields.
+    stays separate from answer text in ``content.result['reasoning']``. Exact
+    continuation is opaque result data; only this boundary interprets it.
     """
 
-    __slots__ = ("_family", "_id_factory", "_provider")
+    __slots__ = ("_family", "_id_factory", "_provider", "_origin")
 
     def __init__(
         self,
@@ -257,8 +295,10 @@ class NativeSessionAdapter:
         *,
         family: ModelFamilyAdapter | None = None,
         id_factory: Callable[[], str] | None = None,
+        origin: tuple[str, str] | None = None,
     ) -> None:
         self._provider = provider
+        self._origin = origin
         self._family = family if family is not None else NativeToolsAdapter()
         self._id_factory = id_factory if id_factory is not None else lambda: uuid4().hex
 
@@ -275,24 +315,24 @@ class NativeSessionAdapter:
         This is a versioned provider request, not a canonical session message.
         The caller owns persistence before invocation starts. No IDs are created.
         """
-        native_messages: list[dict[str, object]] = []
-        for message in project_native_messages(messages):
-            entry: dict[str, object] = {
-                "role": message.role,
-                "content": message.content,
-            }
-            if message.tool_calls:
-                entry["tool_calls"] = [
-                    request.as_wire() for request in message.tool_calls
-                ]
-            if message.tool_call_id is not None:
-                entry["tool_call_id"] = message.tool_call_id
-            native_messages.append(entry)
+        native_messages = self._family.prepare_messages(
+            project_native_messages(messages, origin=self._origin)
+        )
+        return self._snapshot(native_messages, role, tools, response_format)
+
+    def _snapshot(
+        self,
+        messages: Sequence[ProviderMessage],
+        role: Role,
+        tools: Sequence[Mapping[str, object]] | None,
+        response_format: Mapping[str, object] | None,
+    ) -> Mapping[str, object]:
+        """Use the transport's encoder; no intermediate message reconstruction."""
         snapshot = json.loads(
             json.dumps(
                 {
-                    "projection": "native-session-v3",
-                    "messages": native_messages,
+                    "projection": "native-session-v4",
+                    "messages": messages_payload(messages),
                     "role": role,
                     "tools": [
                         {"type": "function", "function": dict(tool)}
@@ -360,29 +400,10 @@ class NativeSessionAdapter:
             )
         if any(message.message_id == message_id for message in scope):
             raise ValueError("completion message ID must be fresh within session scope")
-        snapshot = self.request_snapshot(
-            messages=scope, role=role, tools=tools, response_format=response_format
+        native_messages = self._family.prepare_messages(
+            project_native_messages(scope, origin=self._origin)
         )
-        native_messages: list[ChatMessage] = []
-        for entry in cast(list[dict[str, object]], snapshot["messages"]):
-            calls: list[ToolCall] = []
-            for request in cast(list[dict[str, object]], entry.get("tool_calls", [])):
-                function = cast(dict[str, str], request["function"])
-                calls.append(
-                    ToolCall(
-                        cast(str, request["id"]),
-                        function["name"],
-                        function["arguments"],
-                    )
-                )
-            native_messages.append(
-                ChatMessage(
-                    role=cast(str, entry["role"]),
-                    content=cast(str, entry["content"]),
-                    tool_calls=tuple(calls),
-                    tool_call_id=cast(str | None, entry.get("tool_call_id")),
-                )
-            )
+        snapshot = self._snapshot(native_messages, role, tools, response_format)
         events = self._provider.stream(
             messages=tuple(native_messages),
             role=cast(Role, snapshot["role"]),
@@ -420,20 +441,29 @@ class NativeSessionAdapter:
             "completion_tokens": completion.completion_tokens,
         }
         if completion.finish_reason == "length" or (
-            not completion.content.strip() and not completion.tool_calls
+            not completion.message.content.strip() and not completion.message.tool_calls
         ):
             raise ProviderRejectedError(
                 "provider completion was truncated or contained no answer/tool requests; continue with a smaller actionable step",
                 transient=True,
                 diagnostics=diagnostics,
             )
-        reasoning = normalise_reasoning(completion.reasoning)
+        message = completion.message
+        reasoning = normalise_reasoning(message.reasoning)
         result: dict[str, object] = {"reasoning": reasoning} if reasoning else {}
+        if message.continuation is not None:
+            origin = self._origin or (completion.provider, completion.model)
+            result["provider_continuation"] = {
+                "provider": origin[0],
+                "model": origin[1],
+                "fields": dict(message.continuation),
+            }
         if (
             completion.upstream_provider is not None
             or completion.generation_id is not None
             or completion.finish_reason is not None
         ):
+            result.setdefault("provider_continuation", None)
             result["provider_metadata"] = {
                 "model": completion.model,
                 "provider": completion.provider,
@@ -447,12 +477,12 @@ class NativeSessionAdapter:
             message_id=message_id,
             direction="outgoing",
             content=MessageContent(
-                text=completion.content,
+                text=message.content,
                 source="agent",
                 result=result or None,
                 requests=tuple(
                     ToolRequest.from_provider(request)
-                    for request in self._family.decode_calls(completion.tool_calls)
+                    for request in self._family.decode_calls(message.tool_calls)
                 ),
             ),
         )

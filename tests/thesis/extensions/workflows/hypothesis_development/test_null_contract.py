@@ -189,7 +189,7 @@ def test_null_test_fold_reconstructs_after_pure_rebuild(target: str) -> None:
     transition = StoreTransition(
         sequence=1,
         from_phase="null_testing",
-        to_phase=target,
+        route=target,
         occurred_at=_moment(),
         intent_epoch=1,
         reason="null test accepted",

@@ -14,7 +14,6 @@ from thesis_runtime.workflows.extensions import RunRequest, StateSnapshot
 from thesis_runtime.workflows.phase import (
     DeterministicPhase,
     OneShotPhase,
-    SplitPhase,
     TerminalPhase,
 )
 from thesis_runtime.workflows.workflow import Workflow, WorkflowDoctrine, WorkflowPorts
@@ -22,7 +21,7 @@ from thesis_runtime.workflows.workflow import Workflow, WorkflowDoctrine, Workfl
 from .contracts import (
     LAUNCH_SCHEMA,
     REVIEW_PHASES,
-    TRANSITIONS,
+    ROUTES,
     VERSION,
     WORKFLOW_ID,
     completion_schema,
@@ -75,8 +74,8 @@ def accepted_state(history: list[Mapping[str, Any]]) -> dict[str, Any]:
     for transition in history:
         handoff = transition["sequence"]
         source = transition["fromPhase"]
-        completion = transition["completion"]
-        state["phase"] = transition["toPhase"]
+        completion = transition["output"]
+        state["phase"] = transition["route"]
         if source == "proposal":
             state["proposal"] = completion["proposal"]
             for repair in completion["proposal"]["repairs"]:
@@ -127,7 +126,7 @@ def accepted_state(history: list[Mapping[str, Any]]) -> dict[str, Any]:
                         status=resolution["disposition"],
                         resolution=resolution["reason"],
                     )
-            if transition["toPhase"] == "proposal":
+            if transition["route"] == "proposal":
                 state["revisions"] += 1
     return state
 
@@ -224,7 +223,7 @@ class ResearchExtension:
             return {"failure": render_violations(errors) if errors else None}
         if operation == "execute":
             # Pure collection: keep all independent findings, never select a verdict.
-            branches = payload["handoff"]["completion"]["branches"]
+            branches = payload["inputs"]
             return {
                 "completion": {
                     "target": "adjudicate",
@@ -275,19 +274,14 @@ def build_research_investigation_workflow(
     builder = WorkflowBuilder().workflow(
         WORKFLOW_ID, version=VERSION, title="Research investigation"
     )
-    for phase in TRANSITIONS:
-        if phase == "critique":
-            builder.phase(
-                SplitPhase(
-                    phase=phase, branches=REVIEW_PHASES, join="collect_critiques"
-                )
-            )
-            continue
+    for phase in ROUTES:
         if phase == "collect_critiques":
             builder.phase(
                 DeterministicPhase(
                     phase=phase,
+                    inputs=tuple(REVIEW_PHASES),
                     contract="execute",
+                    replay_safe=True,
                     validate="validate",
                     completion_schema=completion_schema(phase),
                     on_complete="adjudicate",
@@ -309,14 +303,14 @@ def build_research_investigation_workflow(
                 completion_schema=completion_schema(phase),
             )
         )
-    builder.transitions(TRANSITIONS)
+    builder.routes(ROUTES)
     builder.doctrine(
         WorkflowDoctrine(
             definition=WorkflowDefinition(
                 workflow_id=WORKFLOW_ID,
                 version=VERSION,
                 title="Research investigation",
-                phases=tuple(TRANSITIONS),
+                phases=tuple(ROUTES),
             ),
             initial_phase="proposal",
             actor="thesis-research",

@@ -8,7 +8,8 @@ Behavior fixtures and tests for the owning capability. No production implementat
 
 - `job_id_contract.rs`: Authored program or behavior fixture for job id contract.
 
-- `lake_parallel.rs`: Multi-symbol lake acquisition for a study window.
+- `lake_parallel.rs`: Multi-symbol acquisition and streamed merge ordering,
+  including equal-time ties at single, odd and maximum cursor counts.
 
 - `mixed.rs`: Loaded ABI declarations and exact mixed-input dispatch without engine filters.
 

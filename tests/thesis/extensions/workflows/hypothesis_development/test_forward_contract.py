@@ -261,7 +261,7 @@ def test_forward_fold_reconstructs_after_pure_rebuild(target: str) -> None:
     transition = StoreTransition(
         sequence=1,
         from_phase="forward_validation",
-        to_phase=target,
+        route=target,
         occurred_at=_moment(),
         intent_epoch=1,
         reason="forward validation accepted",

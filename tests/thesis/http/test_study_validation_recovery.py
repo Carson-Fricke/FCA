@@ -203,7 +203,10 @@ def setup_workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     work = []
     stack = serving.build_serving_stack(
         chat_service=chat,
-        model_provider=cast(OpenRouterProvider, SimpleNamespace(model="test/model")),
+        model_provider=cast(
+            OpenRouterProvider,
+            SimpleNamespace(model="test/model", provider_name="openrouter"),
+        ),
         harness_tools=harness,
         workspace_repositories=repositories,
         execution_store=InMemoryExecutionStore(),
@@ -444,7 +447,10 @@ def test_root_catalog_failure_is_a_durable_notice_without_fake_tool(monkeypatch)
     monkeypatch.setattr(serving, "build_session_registry", fail_registry)
     stack = serving.build_serving_stack(
         chat_service=chat,
-        model_provider=cast(OpenRouterProvider, SimpleNamespace(model="test/model")),
+        model_provider=cast(
+            OpenRouterProvider,
+            SimpleNamespace(model="test/model", provider_name="openrouter"),
+        ),
     )
     try:
         assert stack.conversations is not None

@@ -161,8 +161,12 @@ Each returned handle includes executionId and subAgentId. Results arrive at YOUR
 conversation asynchronously and wake you; do not relaunch a pending branch or wait
 for every branch before acting on useful findings. If all useful work is delegated,
 end the turn with an accurate pending-work status or use bounded await_sub_agent.
-Use read_research_investigations (optional execution_id) to inspect your branches,
-retained jobs and accepted findings. Reconcile unknown launch outcomes and failed
+Use read_research_investigations to inspect your branches. Supply all four arguments:
+execution_id=null lists branches or an execution ID selects one; handoff=null reads
+state, 0 reads its brief and a positive index reads that accepted handoff; offset=0
+starts a paged read; max_chars=6000 is a normal page size. Copy nextArguments for
+subsequent pages until null. Inspect retained jobs and accepted findings.
+Reconcile unknown launch outcomes and failed
 branches through this read tool rather than replaying or losing their attempts.
 
 Triage each result against the original brief and the CURRENT question/sketch:

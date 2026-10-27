@@ -177,3 +177,14 @@ fn stop_limit_activation_is_sticky_until_a_later_limit_touch() {
     assert!(a);
     assert_eq!(p, Some(d(90)));
 }
+
+#[test]
+fn completed_orders_do_not_match_again_when_later_quotes_arrive() {
+    let (outcome, calls, _) = run("reject_order", None, "market");
+    assert_eq!(calls, 12);
+    assert_eq!(outcome.fills.len(), calls);
+    for (index, fill) in outcome.fills.iter().enumerate() {
+        assert_eq!(fill.order_id, format!("o-{index}"));
+        assert_eq!(fill.quantity, Decimal::from_i128(10));
+    }
+}

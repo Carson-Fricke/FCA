@@ -73,7 +73,8 @@ transform, and transform only bars during planning; ticks transform during repla
 - `engine_core.rs` owns causal dispatch and strategy execution.
 - `fees.rs` assesses and aggregates execution fees.
 - `fixture.rs` loads and fingerprints fixture data.
-- `history.rs` stores bounded, compressed scratch histories.
+- `history.rs` stores bounded, compressed scratch histories with reusable codec
+  workspaces and snapshot-isolated scratch ownership.
 - `manifest.rs` records accepted inputs and acquired data provenance.
 - `null.rs` applies declared null transformations.
 - `portfolio.rs` owns portfolio and allocation accounting.
@@ -81,19 +82,24 @@ transform, and transform only bars during planning; ticks transform during repla
 - `rng.rs` supplies deterministic seeded randomness.
 - `screen.rs` executes screening programs.
 - `stream.rs` defines re-iterable replay inputs and their evidence contract.
-- `valuation.rs` owns incremental valuation, exact metric weighting and sparse reporting.
+- `valuation.rs` owns incremental valuation, exact metric weighting and sparse
+  reporting. Its bounded return cache avoids recalculating exact returns and
+  rereading financial states during the variance pass.
 - `yaml.rs` reads the supported configuration syntax.
 
-- `event_bus.rs`: Owns deterministic dispatch ordering and its hash; no venue or strategy policy.
+- `event_bus.rs`: Owns deterministic dispatch ordering and its hash. A dedicated
+  feed head bypasses heap operations in the common case; generated events and
+  ties retain the full ordering key. Reuses identity storage and timestamp
+  prefixes without changing canonical bytes; no venue or strategy policy.
 
 - `identity.rs`: Builds replay provenance and configured program identities; no execution.
 
 - `outcome.rs`: Owns immutable replay outcomes and canonical artifact projection; no execution or publication.
 
-- `projection.rs`: Converts replay source events into program-facing observations; no acquisition.
+- `projection.rs`: Precomputes run-scoped numeric scales and consumes replay events into program observations without copying identifiers; no acquisition.
 
 - `risk.rs`: Projects validated replay rules into shared trading risk policy; no execution or persistence.
 
 - `subscriptions.rs`: Owns replay requirement normalization and causal bar-frame assembly; no execution or storage.
 
-- `venue.rs`: Owns resting-order lifecycle and event scheduling using shared matching policy.
+- `venue.rs`: Owns resting-order lifecycle, stable per-symbol active-order indexes and event scheduling using shared matching policy. Completed orders remain in history but are not scanned on market events.

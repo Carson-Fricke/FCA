@@ -64,6 +64,42 @@ new investigations and report a scoped status, preserving existing evidence.
 
 ## Assessment
 
+### Research read selection and pagination
+
+Qualify the actual model and upstream endpoint, not only the model slug. Record
+the provider and generation ID from each response; OpenRouter's
+[provider routing](https://openrouter.ai/docs/guides/routing/provider-selection)
+can pin a provider for a controlled comparison. Keep this a bounded read-only
+evaluation, separate from the default offline test suite.
+
+Ask for the original brief, a specific accepted critique handoff, and a later
+page using returned `nextArguments`. Verify the emitted `execution_id`, `handoff`,
+`offset` and `max_chars` values, including explicit null selectors for the owning
+phase. Verify that another page advances the offset while retaining the product.
+For discovery, verify the exact branch ID as well; merely including all fields
+is insufficient. Repeating a successful first-page read does not count as progress.
+
+If argument values disappear, compare raw provider tool-call fragments, assembled
+completion arguments, canonical outgoing requests and the dispatched receipt.
+An audited request proves which schema was advertised, not which raw response
+the upstream returned. Do not infer dispatch corruption from model planning
+text or infer model compliance from a scripted provider that supplies ideal
+arguments. Missing required selectors must yield argument feedback, not an
+implicit state/page-zero response. Test the current contract without relying on
+prompt-substring assertions or adding an engine policy to interpret intent.
+
+### Sketch prose and constrained schema generation
+
+Qualify `author_strategy_sketch` with full sentences in the actual nested sketch
+schema, using the selected family adapter. Request exact text and inspect the
+raw returned arguments without executing a workspace mutation. Check both
+canonical and advertised schema validation and compare supplied values,
+including nested representations and assumptions. Valid single letters do not
+establish useful prose generation. Include multiline text and whitespace-only
+rejection in deterministic schema tests; literal examples/defaults/constants
+must remain data. Compare advertised patterns and raw responses before treating
+truncation as a dispatch defect. Record the model, upstream and adapter version.
+
 ### Parallel investigation branches and independent review
 
 Use an idea with complementary representation and setup questions. Observe whether

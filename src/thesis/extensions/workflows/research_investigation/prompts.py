@@ -9,10 +9,15 @@ supports. Profit is an objective, never a promised result. Do not replace candid
 development with unconditional bar tests. Diagnostics improve representations; they
 do not veto an untested strategy.
 The seed contains excerpts and indices, not full products. Read the ORIGINAL brief
-with read_research_investigations(handoff=0), including its runtime-preserved
+with read_research_investigations(execution_id=null, handoff=0, offset=0,
+max_chars=6000), including its runtime-preserved
 operatorRequest, the pinned sketch with read_strategy_sketch,
-and relevant accepted products by handoff index; follow nextOffset. A read without
-handoff returns accepted state and the issue ledger. No sibling transcripts.
+and relevant accepted products by handoff index: pass that integer as the handoff
+argument (for example 5 for handoff 5). Always supply all four tool arguments;
+execution_id=null selects your own branch. Copy returned nextArguments
+unchanged into the next call until null; repeating execution_id alone rereads page
+zero. handoff=null reads the full accepted state and issue ledger;
+prefer the specific handoff when you know the product needed. No sibling transcripts.
 Briefs, sketches and prior interpretations express intended scope or claims, not
 verified empirical facts. Check decision-driving facts against source/artifacts.
 Separate operator/data/environment constraints from provisional implementation

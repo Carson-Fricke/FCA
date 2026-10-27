@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 import pytest
 
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage,
     ModelCompletion,
+    ProviderMessage,
     Role,
     ToolCall,
 )
@@ -47,7 +47,7 @@ def test_consumed_input_has_no_duplicate_turn_but_late_input_does(
     thread = chat.create_chat("workspace", title="Shared", owner_actor_id="operator")
     workers: list[Callable[[], None]] = []
     contexts: list[ToolContext] = []
-    requests: list[tuple[ChatMessage, ...]] = []
+    requests: list[tuple[ProviderMessage, ...]] = []
     dispatched: list[str] = []
     wake_pending: DurableChatMessage | None = None
 
@@ -77,7 +77,7 @@ def test_consumed_input_has_no_duplicate_turn_but_late_input_does(
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -86,19 +86,29 @@ def test_consumed_input_has_no_duplicate_turn_but_late_input_does(
             index = len(requests)
             if index == 1:
                 return ModelCompletion(
-                    "Checking",
-                    "model",
-                    "provider",
-                    role,
-                    0,
-                    0,
-                    tool_calls=(ToolCall("call", "check", "{}"),),
+                    message=ProviderMessage(
+                        "assistant",
+                        "Checking",
+                        tool_calls=(ToolCall("call", "check", "{}"),),
+                    ),
+                    model="model",
+                    provider="provider",
+                    role=role,
+                    prompt_tokens=0,
+                    completion_tokens=0,
                 )
             if index == 2:
                 if wake_pending:
                     service.schedule_input(wake_pending)
             assert index <= (3 if late else 2), "duplicate follow-up turn"
-            return ModelCompletion("Finished", "model", "provider", role, 0, 0)
+            return ModelCompletion(
+                message=ProviderMessage("assistant", "Finished"),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
 
     def handler(arguments: Mapping[str, object], context: ToolContext) -> ToolExecution:
         envelope = service.transcript(anchor)[-1]
@@ -205,7 +215,7 @@ def test_child_send_uses_authorized_anchored_answer_path() -> None:
     chat = ChatService()
     thread = chat.create_chat("workspace", title="Input", owner_actor_id="operator")
     workers: list[Callable[[], None]] = []
-    requests: list[tuple[ChatMessage, ...]] = []
+    requests: list[tuple[ProviderMessage, ...]] = []
 
     class Provider:
         def stream(self, *, message_id=None, **kwargs):
@@ -218,13 +228,20 @@ def test_child_send_uses_authorized_anchored_answer_path() -> None:
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
         ) -> ModelCompletion:
             requests.append(tuple(messages))
-            return ModelCompletion("Finished", "model", "provider", role, 0, 0)
+            return ModelCompletion(
+                message=ProviderMessage("assistant", "Finished"),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
 
     service = Conversations(
         chat=chat,
@@ -296,7 +313,7 @@ def test_acknowledging_snapshot_does_not_consume_a_newer_wake() -> None:
 def test_cancelled_child_keeps_actual_result_and_durable_final_state() -> None:
     chat = ChatService()
     thread = chat.create_chat("workspace", title="Cancel", owner_actor_id="operator")
-    requests: list[Sequence[ChatMessage]] = []
+    requests: list[Sequence[ProviderMessage]] = []
 
     class Provider:
         def stream(self, *, message_id=None, **kwargs):
@@ -309,7 +326,7 @@ def test_cancelled_child_keeps_actual_result_and_durable_final_state() -> None:
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -317,16 +334,19 @@ def test_cancelled_child_keeps_actual_result_and_durable_final_state() -> None:
             requests.append(tuple(messages))
             assert len(requests) == 1
             return ModelCompletion(
-                "Checking",
-                "model",
-                "provider",
-                role,
-                0,
-                0,
-                tool_calls=(
-                    ToolCall("first", "check", "{}"),
-                    ToolCall("second", "check", "{}"),
+                message=ProviderMessage(
+                    "assistant",
+                    "Checking",
+                    tool_calls=(
+                        ToolCall("first", "check", "{}"),
+                        ToolCall("second", "check", "{}"),
+                    ),
                 ),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
             )
 
     def handler(arguments: Mapping[str, object], context: ToolContext) -> ToolExecution:
@@ -386,7 +406,7 @@ def test_snapshot_registers_input_before_wake_and_ack(
         "workspace", title="Snapshot race", owner_actor_id="operator"
     )
     workers: list[Callable[[], None]] = []
-    requests: list[tuple[ChatMessage, ...]] = []
+    requests: list[tuple[ProviderMessage, ...]] = []
 
     class Provider:
         def stream(self, *, message_id=None, **kwargs):
@@ -399,22 +419,25 @@ def test_snapshot_registers_input_before_wake_and_ack(
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
         ) -> ModelCompletion:
             requests.append(tuple(messages))
             return ModelCompletion(
-                "Checking" if len(requests) == 1 else "Finished",
-                "model",
-                "provider",
-                role,
-                0,
-                0,
-                tool_calls=(ToolCall("call", "check", "{}"),)
-                if len(requests) == 1
-                else (),
+                message=ProviderMessage(
+                    "assistant",
+                    "Checking" if len(requests) == 1 else "Finished",
+                    tool_calls=(ToolCall("call", "check", "{}"),)
+                    if len(requests) == 1
+                    else (),
+                ),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
             )
 
     def input_message(body: str) -> DurableChatMessage:
@@ -530,7 +553,7 @@ def test_runtime_tool_is_neutral_input_and_root_publishes_every_row_once(
         "workspace", title="Internal activity", owner_actor_id="operator"
     )
     workers: list[Callable[[], None]] = []
-    requests: list[tuple[ChatMessage, ...]] = []
+    requests: list[tuple[ProviderMessage, ...]] = []
     contexts: list[ToolContext] = []
 
     class Provider:
@@ -544,7 +567,7 @@ def test_runtime_tool_is_neutral_input_and_root_publishes_every_row_once(
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -552,15 +575,18 @@ def test_runtime_tool_is_neutral_input_and_root_publishes_every_row_once(
             requests.append(tuple(messages))
             assert len(requests) <= 2, "internal activity caused a follow-up"
             return ModelCompletion(
-                "Checking" if len(requests) == 1 else "Finished",
-                "model",
-                "provider",
-                role,
-                0,
-                0,
-                tool_calls=(ToolCall("outer", "check", "{}"),)
-                if len(requests) == 1
-                else (),
+                message=ProviderMessage(
+                    "assistant",
+                    "Checking" if len(requests) == 1 else "Finished",
+                    tool_calls=(ToolCall("outer", "check", "{}"),)
+                    if len(requests) == 1
+                    else (),
+                ),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
             )
 
     def registry(context: ToolContext) -> SessionToolRegistry:

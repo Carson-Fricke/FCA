@@ -129,9 +129,9 @@ describe('WorkflowCard phase transition graph', () => {
 	it('fetches definition phases and title instead of inventing a hypothesis topology', async () => {
 		vi.mocked(getWorkflowDefinition).mockResolvedValueOnce({
 			workflow_id: execution.workflow_id, version: execution.workflow_version, title: 'Versioned backend workflow',
-			splits: {},
+
 			phases: ['discovery', 'new_backend_phase', 'completed'], terminal_phases: ['completed'],
-			transitions: { discovery: ['new_backend_phase'], new_backend_phase: ['completed'], completed: [] }
+			inputs: {"discovery":["input"],"new_backend_phase":["input"],"completed":["input"]}, routes: {"discovery":{"new_backend_phase":["new_backend_phase.input"]},"new_backend_phase":{"completed":["completed.input"]},"completed":{}}
 		});
 		render(WorkflowCard, { props: { execution, phases: [{ name: 'discovery', status: 'active' }] } });
 		await screen.findByText('Versioned backend workflow');
@@ -144,7 +144,7 @@ describe('WorkflowCard phase transition graph', () => {
 
 	it('keeps persisted phases readable but refuses current topology for an older version', async () => {
 		vi.mocked(getWorkflowDefinition).mockResolvedValueOnce({ workflow_id: execution.workflow_id, version: '2.0.0',
-			title: 'New workflow', phases: ['replacement'], terminal_phases: [], splits: {}, transitions: { replacement: [] } });
+			title: 'New workflow', phases: ['replacement'], terminal_phases: [],  inputs: {"replacement":["input"]}, routes: {"replacement":{}} });
 		render(WorkflowCard, { props: { execution, phases: [{ name: 'model_creation', status: 'done' }] } });
 		await waitFor(() => expect(screen.getByTestId('workflow-definition-error')).toHaveTextContent('recorded version 1.0.0'));
 		expect(screen.getAllByTestId('phase-step').map((node) => node.dataset.phase)).toEqual(['model_creation']);

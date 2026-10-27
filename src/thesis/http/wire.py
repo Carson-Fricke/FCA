@@ -258,13 +258,6 @@ class TimelinePageWire(BaseModel):
     )
 
 
-class WorkflowSplitWire(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    branches: dict[str, str]
-    join: str
-
-
 class WorkflowDefinitionWire(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -273,5 +266,5 @@ class WorkflowDefinitionWire(BaseModel):
     title: str
     phases: tuple[str, ...]
     terminal_phases: tuple[str, ...]
-    transitions: dict[str, list[str]]
-    splits: dict[str, WorkflowSplitWire]
+    inputs: dict[str, tuple[str, ...]]
+    routes: dict[str, dict[str, tuple[str, ...]]]

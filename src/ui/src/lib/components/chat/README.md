@@ -31,6 +31,6 @@ to `lib/transcript.ts`, and backend contracts remain authoritative.
   marginal and declared joint plots, matched comparisons, complete evidence
   export, and on-demand job and artifact inspection. Matched vectors use the
   backend canonical parameter identity rather than reconstructed UI hashes.
-- `WorkflowCard.svelte`: workflow summary, independently active graph nodes and read-only waiting joins.
+- `WorkflowCard.svelte`: workflow summary, independently active graph nodes and read-only pending input ports.
 - `sub-agent-live-view.ts`: live subagent view projections.
 - `workflow-live-view.ts`: live workflow view projections.

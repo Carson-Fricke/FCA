@@ -9,6 +9,6 @@ Neutral value and transport contracts shared by runtime components and adapters.
 - `datum.py`: Typed datums with required rendering types: the contract between tool results and the chat surface.
 - `errors.py`: Transport-neutral canonical delivery, provider, and extension catalog failures, including explicit transient-provider classification and optional retry timing. Recovery eligibility never declares an unknown attempt safe to replay.
 - `messages.py`: Provider-neutral session values and the durable transcript decode boundary.
-- `records.py`: Workspace-scoped contracts for Thesis chat and autonomous work.
+- `records.py`: Workspace-scoped storage/UI envelopes for Thesis chat and autonomous work. A chat record's `data.sessionMessage` owns canonical execution content; body, role and reasoning are presentation/index projections.
 - `output.py`: Provider-neutral reasoning and answer fragments, separate from the session inbox.
 - `reply.py`: Neutral tool-result observation contracts.

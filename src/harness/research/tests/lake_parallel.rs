@@ -354,6 +354,36 @@ fn multiple_timeframes_acquire_one_canonical_minute_source_window() {
 }
 
 #[test]
+fn streamed_cursor_merge_preserves_ties_at_single_odd_and_maximum_input_counts() {
+    for count in [1, 3, 32] {
+        let start = config().start_ns;
+        let server = FakeLakeServer::start(FakeLakeConfig {
+            partitions_by_type: BTreeMap::from([("quote".into(), quote_parquet("SPY", &[
+                FakeQuoteRow::new(start, "10", "11", 100, 100, "XNYS"),
+                FakeQuoteRow::new(start, "10", "11", 100, 100, "XNYS"),
+                FakeQuoteRow::new(start + 1, "10", "11", 100, 100, "XNYS"),
+            ]))]),
+            ..FakeLakeConfig::new(TOKEN)
+        });
+        let mut configuration = config();
+        configuration.symbols = (0..count).map(|index| format!("A{index:02}")).collect();
+        let inputs = [MarketSubscription {
+            data_type: "quote".into(), symbols: configuration.symbols.clone(), interval: None,
+        }];
+        let fixture = lake_fixture_with_subscriptions(&configuration, &client(&server), &inputs).unwrap();
+        let actual: Vec<_> = fixture.open_events().unwrap().map(|event| {
+            let event = event.unwrap();
+            (event.timestamp_ns(), event.sequence(), event.symbol().to_string())
+        }).collect();
+        let mut expected: Vec<_> = [start, start, start + 1].into_iter().enumerate().flat_map(|(sequence, time)| {
+            configuration.symbols.iter().map(move |symbol| (time, sequence as u64, symbol.clone()))
+        }).collect();
+        expected.sort();
+        assert_eq!(actual, expected, "{count} inputs");
+    }
+}
+
+#[test]
 fn catalog_preflight_pins_objects_without_reading_ticks_and_external_deletion_fails_replay() {
     let start = config().start_ns;
     let server = FakeLakeServer::start(FakeLakeConfig {

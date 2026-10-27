@@ -80,7 +80,7 @@ from thesis_runtime.workflows.execution_store import ExecutionIdentity, Executio
 from thesis_runtime.workflows.registry import WorkflowRegistry
 from thesis_runtime.workflows.state import TERMINAL_EXECUTION_STATES
 
-DEFAULT_SERVING_MODEL = "deepseek/deepseek-v4.1-flash-1017"
+DEFAULT_SERVING_MODEL = "deepseek/deepseek-v4.1-flash"
 _SERVING_PROFILE_ID = "serving-openrouter"
 
 
@@ -89,7 +89,9 @@ class _WorkflowModelProvider:
 
     def __init__(self, provider: OpenRouterProvider) -> None:
         self._session = NativeSessionAdapter(
-            provider, family=model_family_adapter(provider.model)
+            provider,
+            family=model_family_adapter(provider.model),
+            origin=(provider.provider_name, provider.model),
         )
 
     def invoke(
@@ -355,7 +357,9 @@ def build_serving_stack(
         store=store,
         work_store=work_store,
         provider=NativeSessionAdapter(
-            model_provider, family=model_family_adapter(model_provider.model)
+            model_provider,
+            family=model_family_adapter(model_provider.model),
+            origin=(model_provider.provider_name, model_provider.model),
         ),
         registry_factory=registry_for,
         root_allowed_tools=allowed_tools,

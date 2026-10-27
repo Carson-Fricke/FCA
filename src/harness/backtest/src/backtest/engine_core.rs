@@ -23,7 +23,7 @@ use std::collections::BTreeSet;
 use super::event_bus::EngineEvent;
 use super::event_bus::EventBus;
 use super::outcome::BacktestOutcome;
-use super::projection::market_event;
+use super::projection::EventProjection;
 use super::risk::evaluate_rule;
 use super::risk::resolve_risk_rules;
 use super::risk::ResolvedRiskRule;
@@ -178,6 +178,7 @@ pub fn run_native_engine(
     let mut observed: BTreeMap<String, [usize; 3]> = BTreeMap::new();
     let mut observed_days = std::collections::BTreeSet::new();
     let mut last_observed_day = None;
+    let projection = EventProjection::new(synthetic_options);
     let mut input = fixture.open_events()?;
     let mut frames = frames.into_iter().peekable();
     let mut next_tick = None;
@@ -230,10 +231,7 @@ pub fn run_native_engine(
                         ));
                     }
                     if !matches!(event, MarketEvent::Bar { .. }) {
-                        next_tick = Some(EngineEvent::Market(market_event(
-                            &event,
-                            synthetic_options,
-                        )?));
+                        next_tick = Some(EngineEvent::Market(projection.project(event)?));
                     }
                 }
                 None => exhausted = true,
@@ -268,7 +266,7 @@ pub fn run_native_engine(
             next_tick.take()
         };
         let boundary = incoming.as_ref().map(&external_key);
-        while bus.heap.peek().is_some_and(|queued| {
+        while bus.peek().is_some_and(|queued| {
             boundary.is_none_or(|key| {
                 (
                     queued.event.timestamp_ns(),
@@ -527,7 +525,11 @@ fn dispatch_event(
                 venue.on_market(market, clock_ns, bus)?;
             }
             let mark = market.mark_price();
-            prices.insert(market.symbol().to_string(), mark);
+            if let Some(price) = prices.get_mut(market.symbol()) {
+                *price = mark;
+            } else {
+                prices.insert(market.symbol().to_string(), mark);
+            }
             hub.mark(market.symbol(), mark);
             for (instance, inputs) in strategies.iter_mut().zip(subscriptions) {
                 if halted_strategies.contains(&instance.instance_id) {

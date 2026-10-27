@@ -69,7 +69,8 @@ pub use recorder::{
     LocalLiveObjectStore, RecordedRow, SessionResolver, UtcDaySessionResolver, XnysSessionResolver,
 };
 pub use replay::{
-    events_from_arrow, events_from_parquet, LakeReplayFeed, ReplayFingerprints, ReplayStream,
+    events_from_arrow, events_from_parquet, map_arrow_events, LakeReplayFeed, ReplayFingerprints,
+    ReplayStream,
 };
 pub use security_master::{SecurityMasterView, SecuritySnapshot};
 pub use symbol::{canonical_osi_symbol, canonical_symbol, crypto_pair, is_osi_symbol};

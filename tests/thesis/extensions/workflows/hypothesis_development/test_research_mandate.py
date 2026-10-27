@@ -329,14 +329,14 @@ def _completion_service(tmp_path: Path, phase: str, programs: ProgramSnapshots):
 
             transition = StoreTransition(
                 len(document.transitions) + 1,
-                document.transitions[-1].to_phase,
+                document.transitions[-1].route,
                 target,
                 NOW,
                 0,
                 "accepted",
                 completion,
                 attempt_id=kit.workflow.graph_state(request)
-                .positions[document.transitions[-1].to_phase]
+                .positions[document.transitions[-1].route]
                 .attempt_id,
             )
 

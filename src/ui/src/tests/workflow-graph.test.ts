@@ -4,9 +4,9 @@ import type { WorkflowDefinition } from '$lib/types';
 
 const definition: WorkflowDefinition = {
 	workflow_id: 'custom', version: '2', title: 'Custom research',
-	splits: {},
+
 	phases: ['new_phase', 'model_creation', 'completed'], terminal_phases: ['completed'],
-	transitions: { new_phase: ['model_creation'], model_creation: ['new_phase', 'completed'], completed: [] }
+	inputs: {"new_phase":["input"],"model_creation":["input"],"completed":["input"]}, routes: {"new_phase":{"model_creation":["model_creation.input"]},"model_creation":{"new_phase":["new_phase.input"],"completed":["completed.input"]},"completed":{}}
 };
 
 describe('backend-owned workflow topology', () => {

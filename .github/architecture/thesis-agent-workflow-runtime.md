@@ -1,4 +1,4 @@
-﻿# Thesis Durable Agent and Workflow Runtime
+# Thesis Durable Agent and Workflow Runtime
 
 ## Runtime and FCA extension boundary
 
@@ -57,7 +57,12 @@ FCA composition selects a family once from the configured model namespace and
 injects it into the shared `NativeSessionAdapter`, including workflow model
 calls. DeepSeek is the only specialized implementation: object-root parameter
 properties expose types while the original `oneOf` retains branch coupling,
-required fields, references, and extra-property rejection. Tool names and raw
+required fields, references, and extra-property rejection. Its provider-facing
+schemas expand the nonblank substring regex `\S` to `^[\s\S]*\S[\s\S]*$`,
+preserving accepted values for endpoints whose constrained generators require
+whole-string matches. Traversal visits schema positions, including nested
+objects, arrays, unions and definitions; literal defaults/examples/constants
+and unrelated regexes retain their meaning. Tool names and raw
 arguments are unchanged; canonical dispatch remains the validation authority.
 Other families use shared native tool behavior. Adding a family requires one
 pure implementation, a resolver entry, and provider-exchange behavior tests.
@@ -78,7 +83,7 @@ and current definitions are never substituted for outdated executions.
 FCA registrations retain their recovery callback for both queued initial phase
 entry and restart recovery. Execution-specific recovery faults are logged and
 retained as deduplicated `workflow.progress` diagnostics, without completing a
-phase or replaying interrupted mutations. Only pure paired joins may be recomputed. A failed repair pass does not terminate
+phase or replaying interrupted mutations. Only explicitly replay-safe deterministic activities may be recomputed. A failed repair pass does not terminate
 the durable worker's queued-work loop.
 `workflows/extensions.py` defines the versioned JSON endpoint for launch parsing,
 state folding, seed text, validation, deterministic execution, and reporting.
@@ -180,7 +185,8 @@ durable and unconsumed, but dispatch admission prevents another model request or
 tool call. Accepted terminal tool completion retains its existing success policy.
 
 The canonical outgoing message is the atomic completion signal for presentation.
-It uses the reserved identity and contains the complete normalized output. Model
+It uses the reserved identity and contains display output plus exact, opaque
+provider continuation. Display normalization never modifies continuation. Model
 invocation success is saved only after that message persists, then the session
 acknowledges the included input snapshot and may dispatch tools. Persistence
 faults propagate; partial evidence is interrupted when storage is available.
@@ -225,7 +231,7 @@ Verification: `tests/thesis/http/test_model_output_streaming.py`,
 
 ## Status
 
-Discovery in workflow `5.0.0` develops a Git-committed strategy sketch through
+Discovery in workflow `6.0.0` develops a Git-committed strategy sketch through
 ordinary session tools. Workspace `sketch_contract.py` owns pure contracts;
 `sketches.py` owns immutable content-addressed revisions and CAS updates.
 Completion carries only `sketchReference`. Model creation, falsification,
@@ -248,7 +254,7 @@ This is agent guidance, not an engine gate or proof of alpha or model compliance
 ### Bounded research investigations
 
 `thesis/extensions/workflows/research_investigation/` implements workflow
-`research-investigation@3.0.0`. Discovery's skill 1.11.0 prompts default delegation
+`research-investigation@4.0.0`. Discovery's skill 1.11.0 prompts default delegation
 of substantive implementation/testing while retaining directions, allocation and
 integration. Constructions remain provisional, structural alternatives have no fixed
 quota, and substantial concentration is justified through evidence. It prompts
@@ -290,8 +296,18 @@ or fixed experimentation checklist is introduced.
 
 Phase seeds carry bounded brief/active-issue excerpts and accepted handoff indices,
 not accumulated phase bodies. `read_research_investigations` provides bounded reads
-of exact accepted handoffs (zero denotes the original brief); research executors
-can read only their own branch. It never exposes another agent's transcript.
+with required `execution_id`, `handoff`, `offset` and `max_chars` arguments.
+Null branch selection means the phase's own branch or discovery's branch list;
+null handoff selects state/branch inspection, zero selects the original brief,
+and a positive integer selects an accepted handoff. Missing selectors are invalid
+arguments rather than an implicit page-zero read. Paged responses include
+`nextArguments` carrying the exact selector, page size and next offset for the
+next call, or null at the end. Repeated arguments reread the same page; the tool
+does not infer selection from prose or maintain a hidden cursor. The descriptor
+and phase prompt explain these arguments and favor a known handoff over paging
+through the complete accepted state. Handoff zero denotes the original brief;
+positive indices select exact accepted handoffs. Research executors can read
+only their own branch's accepted causal products, never private transcripts.
 Proposals record repair responses by issue ID; Critique explicitly records verified
 repairs. The accepted issue ledger survives proposal replacement and distinguishes
 pending repairs from verified repairs and adjudicated accepted limitations. Scientific
@@ -403,6 +419,29 @@ only the runtime-configured initial bootstrap instruction MAY project as native
 `system`. A durable record without canonical session data is not decoded at
 all; no persisted role, prose, or marker selects privileged instructions.
 
+There are two logical message representations: canonical `SessionMessage` and
+native `ProviderMessage`. The durable `ChatMessage` is a storage/UI envelope
+around canonical content; its body, role and reasoning do not drive replay.
+`ModelCompletion` wraps one `ProviderMessage` with invocation attribution and
+accounting, rather than defining another copy of message content. Native request
+audits and transport use the same `ProviderMessage.as_wire` encoder; execution
+does not decode audit dictionaries back into another message model.
+
+Successful model output retains `result.provider_continuation` as an opaque
+provider/model origin plus exact replay fields, separately from normalized
+`result.reasoning`. The decoder assembles reasoning strings and structured
+reasoning blocks, preserving their order, encrypted data, signatures and empty
+values. Stream indices are assembly coordinates and are not replayed. DeepSeek
+preparation supplies the required empty reasoning field when none was returned.
+Only complete outgoing messages supply native continuation; incoming evidence
+cannot inject it and interrupted/ambiguous groups do not replay opaque state.
+Serving composition binds continuation to its configured provider/model and
+rejects mismatches. Existing persistence and chunk hydration carry this data;
+there is no second history or continuation store. Old completed model records
+with provider attribution but no captured continuation marker are outdated for
+resume and rejected. Display text is never used to infer the missing state;
+affected development sessions must start fresh at deployment cutover.
+
 Every incoming producer MUST converge on `Conversations.deliver_session_message`
 through service or handle delegation, and ultimately
 `thesis_runtime/conversations/incoming.py::write_incoming`. `DeliveryService` wrappers use that writer;
@@ -452,7 +491,7 @@ Historical full-message invocation audit formats must be rejected under the
 current-contract policy; their acceptance is removed.
 The opaque audit
 records actual projected messages, advertised tool catalog,
-options, protocol-mapping/projection version (`native-session-v2`), and
+options, protocol-mapping/projection version (`native-session-v4`), and
 tool-catalog version prepared purely at the provider boundary. Caller persistence
 owns this opaque runtime effect; the adapter remains pure. Terminal updates
 preserve those fields. Cosmos forces `provider_request` into workspace-scoped,
@@ -606,7 +645,7 @@ reasoning/text is sealed as canonical outgoing partial evidence with
 No empty outgoing message is invented when nothing was received. Large failed
 outputs remain complete canonically but project labeled bounded excerpts with
 message references, so reasoning-only failures cannot poison the next context.
-The current audit projection is native-session-v3. The shared pure
+The current audit projection is native-session-v4. The shared pure
 provider projection distinguishes provider interruption from operator steering.
 Recovery notices enter the singular incoming writer as neutral runtime evidence,
 never fabricated operator input. Every recovery is a separately audited fresh model
@@ -738,7 +777,7 @@ REQ-034..REQ-040) is implemented in `thesis_runtime.conversations.conversation` 
   and `phase_executor` is explicit completion authority. Phase executors always
   use explicit completion, even with one-shot input. The codec does not infer these fields. The current contract requires explicit
   persisted fields and rejection when required metadata is missing;
-- the workflow engine sees only the service (`ports.conversations`) and the
+- the conversation-facing workflow host sees the service (`ports.conversations`) and the
   handles: phase children are spawned through `service.spawn` with the
   workflow node as their return anchor, phase results route through the
   service's delivery, and the engine builds no spawner, delivery, or scheduler
@@ -748,8 +787,9 @@ REQ-034..REQ-040) is implemented in `thesis_runtime.conversations.conversation` 
   agent. Entry reuses the phase's existing conversation on revisits and delivers
   the attempt-scoped prompt through `Conversations.spawn`;
 - phase specs are the sealed union of frozen dataclasses:
-  `ConversationPhase`, `OneShotPhase`, `DeterministicPhase`, `TerminalPhase`, and
-  structural `SplitPhase`.
+  `ConversationPhase`, `OneShotPhase`, `DeterministicPhase`, and `TerminalPhase`.
+  These are host activity bindings; the generic graph reads only named inputs,
+  selected routes and terminal outcomes.
   Exhaustive dispatch keeps invalid combinations unrepresentable. Deterministic
   phases create no conversation; terminal phases have no executor or contract.
 
@@ -852,12 +892,13 @@ through pure `workflows/graph/topology.py` and `graph/control.py`; extensions re
 each active position's causal history through JSON protocol 2. Domain folds do not
 select the host's active nodes.
 
-`SplitPhase` declares fixed disjoint branches and one existing deterministic join.
-Branches can loop independently and contain nested regions. All declared arrivals
-for the exact split occurrence are required. Paired reducers receive the subject,
-named accepted products and immutable provenance references, and must be pure.
-Existing hypothesis and research phase flows, prompts and tool policies remain
-unchanged; research keeps one critic. Parallel activation is a separate change.
+Named routes wire output to explicit node.input destinations. Multiple selected
+consumers create concurrency; separate required input ports provide synchronization.
+Alternative conditional producers feed one port. Forward branches and loopbacks
+share route semantics. The pure graph engine has no agent or conversation imports;
+the conversation-facing host binds activity implementations and applies effects.
+Research critique is a route to three reviewer inputs, not a structural phase.
+The collector receives named accepted reports as ordinary activity inputs.
 
 Acceptance verifies intent epoch, executor/chat/parent/node and exact attempt.
 Under the shared execution guard it commits history by revision CAS, projects
@@ -866,9 +907,9 @@ identical acceptance returns its journal receipt; conflicting content is rejecte
 Events, delivery, extension work and successor dispatch stay outside the guard.
 Durable work is per attempt. Recovery preserves arrivals, repairs missing frontier
 publication/dispatch and accepted terminal finalization, and may recompute only
-interrupted pure joins. Execution lifecycle fences unfinished conversations.
+explicitly replay-safe deterministic activities. Execution lifecycle fences unfinished conversations.
 No additional scheduler, transaction framework or materialized graph store exists.
-See [the fixed graph contract](thesis-fixed-workflow-graph-plan.md) for supported
+See [the route and input contract](thesis-fixed-workflow-graph-plan.md) for supported
 topologies, cutover and the bounded behavior verification scope.
 
 The HTTP factory registers root and `/api` routes on the same app; both resolve
@@ -1067,7 +1108,7 @@ Required assertions and verification paths:
 | Required modules fail when absent; AST imports/calls and aliases reject native session construction, hidden incoming writers, parallel result queues, and adapter effects; reference-only audits, unconditional pre-provider persistence, terminal preservation, exact root reference/globs, and mutation controls remain mandatory with no optional bypass | `tests/thesis_runtime/test_delivery_architecture.py` |
 | Every source (operator, initial prompt, tool result, helper result, workflow outcome, runtime notification/check, repair, asynchronous completion) converges on the writer; receipt identity, arrival order, assigned input position, retries, visibility-before-wake prevention, and one receipt for multi-datum outcomes | `tests/thesis_runtime/test_canonical_delivery.py`, `test_initial_intake.py`, `test_session_delivery.py`, `test_session_live_activity.py` in the same directory |
 | Canonical decode and live/replay equivalence, exact scoped correlation, only runtime-configured initial bootstrap projects as native system, a record without canonical session data is not decoded, foreign/reused IDs, partial groups, and interleaved inputs without fabrication or privilege | `tests/thesis_runtime/adapters/providers/test_session_adapter.py`, `tests/thesis_runtime/test_session_delivery.py` |
-| DeepSeek tool exchange preserves canonical argument validation and live/replay history, records family/version and upstream identity, and leaves other families' native schemas unchanged | `tests/thesis_runtime/adapters/providers/test_model_families.py` |
+| DeepSeek tool exchange preserves prose under whole-string regex generation, canonical argument validation and live/replay history, records family/version and upstream identity, and leaves other families' native schemas unchanged | `tests/thesis_runtime/adapters/providers/test_model_families.py` |
 | Repeated structural argument failures interrupt without dispatch; operator steering resets the repair budget; unexpected root faults produce durable notices and interrupted worker attempts without replay | `tests/thesis/agent/test_root_live_persistence.py`, `tests/thesis/http/test_stateless_ownership.py` |
 | Mandatory opaque audit retains actual protocol mapping, advertised tool catalog and their versions/options, ordered canonical message references and request IDs without full canonical duplication; detached, hashed caller persistence and Cosmos request chunks precede execution and survive success/failure terminal updates; adapter stays pure and audit/output persistence faults prevent execution/ACK/dispatch as applicable | `tests/thesis_runtime/test_session_input_snapshot.py`, `tests/thesis_runtime/adapters/providers/test_session_adapter.py`, `tests/thesis_runtime/adapters/cosmos/test_chunks.py` |
 | Live inbox reconciles scoped authoritative durable order at each eligible model boundary; arrivals after provider pull and before output persistence never rearrange the live snapshot | `tests/thesis_runtime/test_arrival_reconciliation.py`, `tests/thesis_runtime/test_session_input_snapshot.py` |
@@ -1077,6 +1118,7 @@ Required assertions and verification paths:
 | Synchronous and asynchronous completion, skipped/not-started calls, unknown mutation outcomes, terminal/cancelled late delivery, and private child transcripts do not resurrect nodes or replay effects | `tests/thesis_runtime/test_canonical_delivery.py`, `test_session_live_activity.py`, `test_durable_architecture.py` in the same directory; `tests/thesis/extensions/workflows/hypothesis_development/test_live_tool_recovery.py` |
 | Restart/reload/resume preserve all incoming sources and per-anchor input/consumed positions, pending partial groups, correlations, idempotency, delayed-wake fences, and the same projection, without synthetic results or side-effect replay | `tests/thesis_runtime/test_durable_architecture.py`, `test_turn_retirement.py`, `test_unified_conversation.py` in the same directory |
 | Steering epoch is installed before canonical wake for synchronous and asynchronous workers; root/model-only routing, source completion, node lifecycle, store CAS, and effects outside the acceptance guard remain unchanged; deterministic executor faults still fail workflows | `tests/thesis/workflows/test_steering_delivery.py`, `test_unified_session.py` in the same directory; `tests/thesis/http/test_input_acknowledgement_wiring.py`, `test_serving_midturn.py` in the same directory; `tests/thesis/extensions/workflows/hypothesis_development/test_acceptance_fence.py`; `tests/thesis_runtime/test_lifecycle_acceptance_guard.py` |
+| Exact reasoning and structured continuation survive rejected tools, multiple tool turns, Cosmos hydration and replay; UI normalization is separate, incoming data cannot inject state, and incompatible provider/model replay is rejected | `tests/thesis/http/test_provider_continuation.py` |
 
 These suites are required verification locations, not a claim that every row is
 already completely asserted. The coordinator MUST close/report coverage gaps,

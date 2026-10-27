@@ -39,6 +39,31 @@ impl WorkingOrder {
     }
 }
 
+/// The venue retains only prices and liquidity, not copied feed identifiers.
+/// Execution responses derive their own identities and use the observed clock.
+#[derive(Clone, Copy, Debug)]
+struct MarketSnapshot {
+    prices: [Decimal; 2],
+    quantities: [Decimal; 2],
+    quote: bool,
+}
+impl MarketSnapshot {
+    fn from_event(market: &EngineMarket) -> Option<Self> {
+        match market {
+            EngineMarket::Quote { bid, ask, bid_quantity, ask_quantity, .. } => Some(Self {
+                prices: [*bid, *ask], quantities: [*bid_quantity, *ask_quantity], quote: true,
+            }),
+            EngineMarket::Trade { price, quantity, .. } => Some(Self {
+                prices: [*price; 2], quantities: [*quantity; 2], quote: false,
+            }),
+            EngineMarket::Bar(_) => None,
+        }
+    }
+    fn quantity(self, side: &str) -> Decimal {
+        self.quantities[usize::from(side == "buy")]
+    }
+}
+
 /// Synchronous deterministic resting-order venue with `simple_touch` fills.
 #[derive(Debug)]
 pub struct SimulatedVenue {
@@ -46,7 +71,9 @@ pub struct SimulatedVenue {
     sequence: i64,
     ordinal: u64,
     orders: Vec<WorkingOrder>,
-    latest_markets: BTreeMap<String, EngineMarket>,
+    latest_markets: BTreeMap<String, MarketSnapshot>,
+    active: BTreeMap<String, Vec<usize>>,
+    order_indices: BTreeMap<String, usize>,
 }
 
 impl Default for SimulatedVenue {
@@ -57,6 +84,8 @@ impl Default for SimulatedVenue {
             ordinal: 0,
             orders: Vec::new(),
             latest_markets: BTreeMap::new(),
+            active: BTreeMap::new(),
+            order_indices: BTreeMap::new(),
         }
     }
 }
@@ -108,24 +137,37 @@ impl SimulatedVenue {
     ) -> Result<(), BacktestError> {
         // The venue trades book and print events only; a bar is explicitly not
         // a matchable event and never enters the last-trade book.
-        if matches!(market, EngineMarket::Bar(_)) {
+        let Some(snapshot) = MarketSnapshot::from_event(market) else {
+            return Ok(());
+        };
+        self.observe(market.timestamp_ns(), market.sequence());
+        if let Some(latest) = self.latest_markets.get_mut(market.symbol()) {
+            *latest = snapshot;
+        } else {
+            self.latest_markets.insert(market.symbol().into(), snapshot);
+        }
+        // Retain submission order while scanning only this symbol's live orders.
+        // Taking/restoring the vector reuses its allocation, including on errors.
+        let Some(indices) = self.active.get_mut(market.symbol()) else {
+            return Ok(());
+        };
+        if indices.is_empty() {
             return Ok(());
         }
-        self.observe(market.timestamp_ns(), market.sequence());
-        self.latest_markets
-            .insert(market.symbol().to_string(), market.clone());
-        for index in 0..self.orders.len() {
-            if !self.orders[index].is_active() || self.orders[index].response_pending {
-                continue;
+        let mut indices = std::mem::take(indices);
+        let result = (|| {
+            for &index in &indices {
+                if self.orders[index].response_pending {
+                    continue;
+                }
+                let available = snapshot.quantity(&self.orders[index].order.side);
+                self.attempt(index, snapshot, available, clock_ns, bus)?;
             }
-            if self.orders[index].order.symbol != market.symbol() {
-                continue;
-            }
-            let side = self.orders[index].order.side.clone();
-            let available = market_quantity(&side, market);
-            // A single match per event is enough for the simple-touch model.
-            self.attempt(index, market, available, clock_ns, bus)?;
-        }
+            Ok(())
+        })();
+        indices.retain(|&index| self.orders[index].is_active());
+        *self.active.get_mut(market.symbol()).expect("symbol index retained") = indices;
+        result?;
         Ok(())
     }
 
@@ -134,12 +176,8 @@ impl SimulatedVenue {
         if report.execution_type == "acknowledged" {
             return;
         }
-        if let Some(working) = self
-            .orders
-            .iter_mut()
-            .find(|working| working.order.order_id == report.order_id)
-        {
-            working.response_pending = false;
+        if let Some(&index) = self.order_indices.get(&report.order_id) {
+            self.orders[index].response_pending = false;
         }
     }
 
@@ -161,16 +199,18 @@ impl SimulatedVenue {
             response_pending: false,
             stop_triggered: false,
         };
+        let index = self.orders.len();
+        self.order_indices.entry(order.order_id.clone()).or_insert(index);
+        self.active.entry(order.symbol.clone()).or_default().push(index);
         self.orders.push(working);
         self.schedule_report(&order, "acknowledged", "accepted", clock_ns, bus);
-        if let Some(market) = self.latest_markets.get(&order.symbol).cloned() {
-            let available = market_quantity(&order.side, &market);
-            let index = self
-                .orders
-                .iter()
-                .position(|working| working.order.order_id == order.order_id);
-            if let Some(index) = index {
-                self.attempt(index, &market, available, clock_ns, bus)?;
+        if let Some(market) = self.latest_markets.get(&order.symbol).copied() {
+            let available = market.quantity(&order.side);
+            let index = self.order_indices[&order.order_id];
+            self.attempt(index, market, available, clock_ns, bus)?;
+            if !self.orders[index].is_active() {
+                self.active.get_mut(&order.symbol).expect("submitted symbol")
+                    .retain(|&candidate| candidate != index);
             }
         }
         Ok(())
@@ -179,7 +219,7 @@ impl SimulatedVenue {
     fn attempt(
         &mut self,
         index: usize,
-        market: &EngineMarket,
+        market: MarketSnapshot,
         available: Decimal,
         clock_ns: i64,
         bus: &mut EventBus,
@@ -279,29 +319,9 @@ impl SimulatedVenue {
     }
 }
 
-fn market_quantity(side: &str, market: &EngineMarket) -> Decimal {
-    match market {
-        EngineMarket::Trade { quantity, .. } => *quantity,
-        EngineMarket::Quote {
-            bid_quantity,
-            ask_quantity,
-            ..
-        } => {
-            if side == "buy" {
-                *ask_quantity
-            } else {
-                *bid_quantity
-            }
-        }
-        // Bars are not tradable book or print events: the venue explicitly
-        // exposes no quantity for them, so no resting order can ever match.
-        EngineMarket::Bar(_) => Decimal::ZERO,
-    }
-}
-
 fn simple_touch_price(
     order: &EngineOrder,
-    market: &EngineMarket,
+    market: MarketSnapshot,
     activated: &mut bool,
 ) -> Option<Decimal> {
     use harness_trading::orders::{OrderType, Side};
@@ -317,11 +337,8 @@ fn simple_touch_price(
         "stop_limit" => OrderType::StopLimit,
         _ => return None,
     };
-    let (price, quote) = match market {
-        EngineMarket::Trade { price, .. } => (*price, false),
-        EngineMarket::Quote { bid, ask, .. } => (if side == Side::Buy { *ask } else { *bid }, true),
-        EngineMarket::Bar(_) => return None,
-    };
+    let price = market.prices[usize::from(side == Side::Buy)];
+    let quote = market.quote;
     let (triggered, price) = harness_trading::matching::touch(
         side,
         kind,

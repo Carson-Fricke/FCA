@@ -52,7 +52,7 @@ describe('multiple workflows on one timeline', () => {
 	it('keeps parallel critics active, shows the blocked join, and ignores a delayed earlier frontier', async () => {
 		const graph = (seq: number, controlSequence: number, activePhases: string[], arrived: string[]) => event('one', seq, 'workflow.phase', {
 			phase: 'join_reviews', controlSequence, activePhases,
-			joins: { join_reviews: { required: ['strategy', 'correctness'], arrived, splitAttemptId: 'round-one' } }
+			pendingInputs: { join_reviews: { required: ['strategy', 'correctness'], arrived, activationId: 'round-one' } }
 		});
 		const reviewer = (name: string, seq: number) => event('one', seq, 'sub_agent.spawned', {
 			subAgentId: name, phase: name, role: 'reviewer', phaseExecutor: true, acceptsInput: true, phaseAttemptId: `attempt-${name}`

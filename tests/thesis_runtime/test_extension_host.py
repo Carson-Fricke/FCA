@@ -52,7 +52,7 @@ class DocumentExtension:
         if operation == "state":
             history = payload["history"]
             return {
-                "phase": history[-1]["toPhase"] if history else "render",
+                "phase": history[-1]["route"] if history else "render",
                 "intentEpoch": 0,
             }
         if operation == "validate":
@@ -101,7 +101,7 @@ def test_unrelated_workflow_launch_completion_replay_and_version_pinned_recovery
             .workflow("documents", version=version, title="Documents")
             .phase(DeterministicPhase(phase="render", contract="execute"))
             .phase(TerminalPhase(phase="published"))
-            .transitions({"render": ("published",), "published": ()})
+            .routes({"render": {"published": ("published.input",)}, "published": {}})
             .doctrine(
                 WorkflowDoctrine(
                     definition,

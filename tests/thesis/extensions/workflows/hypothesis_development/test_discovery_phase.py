@@ -71,7 +71,7 @@ def _discovery_transition(
     return StoreTransition(
         sequence=sequence,
         from_phase="discovery",
-        to_phase="model_creation",
+        route="model_creation",
         occurred_at=_moment(),
         intent_epoch=1,
         reason="discovery candidate accepted",
@@ -89,7 +89,7 @@ def _verdict_transition(
     return StoreTransition(
         sequence=sequence,
         from_phase="verdict",
-        to_phase=target,
+        route=target,
         occurred_at=_moment(),
         intent_epoch=2,
         reason="verdict loop-back accepted",
@@ -205,7 +205,7 @@ def test_verdict_loopback_folds_keep_or_clear_discovery() -> None:
         StoreTransition(
             sequence=2,
             from_phase="model_creation",
-            to_phase="falsification_trials",
+            route="falsification_trials",
             occurred_at=_moment(),
             intent_epoch=1,
             reason="accepted model",
@@ -215,7 +215,7 @@ def test_verdict_loopback_folds_keep_or_clear_discovery() -> None:
         StoreTransition(
             sequence=3,
             from_phase="falsification_trials",
-            to_phase="verdict",
+            route="verdict",
             occurred_at=_moment(),
             intent_epoch=1,
             reason="accepted trials",
@@ -340,7 +340,7 @@ def test_discovery_no_candidate_folds_to_completed() -> None:
     transition = StoreTransition(
         sequence=1,
         from_phase="discovery",
-        to_phase="completed",
+        route="completed",
         occurred_at=_moment(),
         intent_epoch=1,
         reason="discovery found nothing to pursue",

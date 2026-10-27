@@ -63,9 +63,9 @@ export function deriveWorkflowLive(
         }
         const graphEvent = events.filter((event) => event.eventType === 'workflow.phase' && typeof event.payload.controlSequence === 'number')
             .sort((a, b) => Number(b.payload.controlSequence) - Number(a.payload.controlSequence))[0];
-        const joins = graphEvent?.payload.controlSequence === projected.control_sequence ? graphEvent.payload.joins : null;
-        if (joins && typeof joins === 'object' && !Array.isArray(joins)) {
-            for (const [name, raw] of Object.entries(joins)) {
+        const pendingInputs = graphEvent?.payload.controlSequence === projected.control_sequence ? graphEvent.payload.pendingInputs : null;
+        if (pendingInputs && typeof pendingInputs === 'object' && !Array.isArray(pendingInputs)) {
+            for (const [name, raw] of Object.entries(pendingInputs)) {
                 if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
                 const join = raw as { required?: unknown; arrived?: unknown };
                 if (!Array.isArray(join.required) || !Array.isArray(join.arrived)) continue;

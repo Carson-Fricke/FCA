@@ -1,8 +1,8 @@
-"""Generic phase vocabulary and phase specifications.
+"""Host activity bindings and handoff metadata.
 
-A phase is a named structural step: conversation, one-shot, deterministic,
-terminal or fixed split. Seeds, validation and deterministic contracts are extension handler
-names rather than native callbacks. Terminal phases declare their host outcome.
+Conversation, one-shot and deterministic implementations remain host concerns.
+The graph consumes only their named inputs, declared routes and terminal outcome;
+seeds and validators name extension operations rather than live callbacks.
 """
 
 from __future__ import annotations
@@ -12,9 +12,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Literal
 
-
-class WorkflowSpecError(ValueError):
-    """Raised when workflow specification parts are invalid or incomplete."""
+from thesis_runtime.workflows.graph.contracts import WorkflowSpecError
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +30,7 @@ class HandoffContext:
     completion: Mapping[str, object] = field(
         default_factory=lambda: MappingProxyType({})
     )
+    inputs: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
     trigger_message_id: str | None = None
     sub_agent_id: str = ""
 
@@ -50,6 +49,7 @@ class _PhaseSpec[WorkflowT, RequestT, StateT]:
     """The fields every phase type shares."""
 
     phase: str
+    inputs: tuple[str, ...] = ("input",)
     terminal: bool = False
     validate: str | None = None
     on_complete: str | None = None
@@ -98,6 +98,7 @@ class DeterministicPhase[WorkflowT, RequestT, StateT](
     """
 
     contract: str
+    replay_safe: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,41 +111,10 @@ class TerminalPhase[WorkflowT, RequestT, StateT](
     outcome: Literal["completed", "failed"] = "completed"
 
 
-@dataclass(frozen=True, slots=True)
-class SplitPhase[WorkflowT, RequestT, StateT](_PhaseSpec[WorkflowT, RequestT, StateT]):
-    """Fixed named branches with one matching deterministic join; no executor."""
-
-    branches: Mapping[str, str] = field(default_factory=dict)
-    join: str = ""
-
-    def __post_init__(self) -> None:
-        _PhaseSpec.__post_init__(self)
-        object.__setattr__(self, "branches", MappingProxyType(dict(self.branches)))
-        if len(self.branches) < 2 or any(
-            not isinstance(name, str)
-            or not name.strip()
-            or not isinstance(target, str)
-            or not target.strip()
-            for name, target in self.branches.items()
-        ):
-            raise WorkflowSpecError("a split requires at least two named branches")
-        if not isinstance(self.join, str) or not self.join.strip():
-            raise WorkflowSpecError("a split requires its matching join name")
-        if (
-            self.terminal
-            or self.validate
-            or self.on_complete
-            or self.required
-            or self.completion_schema
-        ):
-            raise WorkflowSpecError("a structural split cannot declare executor policy")
-
-
-#: The supported node vocabulary; structural splits never create executors.
+#: Host activity bindings; generic graph nodes do not know these execution kinds.
 type PhaseSpec[WorkflowT, RequestT, StateT] = (
     ConversationPhase[WorkflowT, RequestT, StateT]
     | OneShotPhase[WorkflowT, RequestT, StateT]
     | DeterministicPhase[WorkflowT, RequestT, StateT]
     | TerminalPhase[WorkflowT, RequestT, StateT]
-    | SplitPhase[WorkflowT, RequestT, StateT]
 )

@@ -10,10 +10,8 @@ import pytest
 
 from thesis.application import composition as serving
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage as ProviderChatMessage,
-)
-from thesis_runtime.adapters.providers.invocations import (
     ModelCompletion,
+    ProviderMessage,
     Role,
     ToolCall,
 )
@@ -51,10 +49,11 @@ def test_root_full_baseline_and_midturn_send_drain_only_fresh_root_input(
         ToolCall("first-call", "pause", "{}"),
         ToolCall("second-call", "pause", "{}"),
     )
-    requests: list[tuple[ProviderChatMessage, ...]] = []
+    requests: list[tuple[ProviderMessage, ...]] = []
 
     class Provider:
         model = "test/model"
+        provider_name = "test-provider"
 
         def stream(self, *, message_id=None, **kwargs):
             from tests.thesis_runtime.provider_fakes import completion_frames
@@ -66,7 +65,7 @@ def test_root_full_baseline_and_midturn_send_drain_only_fresh_root_input(
         def complete(
             self,
             *,
-            messages: Sequence[ProviderChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role,
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -74,13 +73,16 @@ def test_root_full_baseline_and_midturn_send_drain_only_fresh_root_input(
             requests.append(tuple(messages))
             index = len(requests) - 1
             return ModelCompletion(
-                content="Finished" if index == 2 else "Checking",
+                message=ProviderMessage(
+                    "assistant",
+                    "Finished" if index == 2 else "Checking",
+                    tool_calls=() if index == 2 else (calls[index],),
+                ),
                 model="test-model",
                 provider="test-provider",
                 role=role,
                 prompt_tokens=0,
                 completion_tokens=0,
-                tool_calls=() if index == 2 else (calls[index],),
             )
 
     monkeypatch.setattr(

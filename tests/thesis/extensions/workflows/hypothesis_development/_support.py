@@ -32,9 +32,9 @@ from thesis.workflows.backtests import (
 )
 from thesis.workflows.research_models import ProgramSnapshots, ResearchModelRunner
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage as ProviderChatMessage,
+    ModelCompletion,
+    ProviderMessage,
 )
-from thesis_runtime.adapters.providers.invocations import ModelCompletion
 from thesis_runtime.adapters.providers.invocations import Role as ProviderRole
 from thesis_runtime.adapters.providers.session_adapter import NativeSessionAdapter
 from thesis_runtime.contracts.records import (
@@ -714,7 +714,7 @@ class FakeNativeFixture:
     def complete(
         self,
         *,
-        messages: Sequence[ProviderChatMessage],
+        messages: Sequence[ProviderMessage],
         role: ProviderRole = "primary",
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,

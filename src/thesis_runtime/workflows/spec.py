@@ -10,10 +10,11 @@ through :class:`~thesis_runtime.workflows.registry.WorkflowRegistry`.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from thesis_runtime.workflows.graph.contracts import Destination, Node
 from thesis_runtime.workflows.phase import (
     HandoffContext,
     PhaseSpec,
@@ -59,7 +60,8 @@ class WorkflowSpec[WorkflowT, RequestT, StateT]:
     version: str
     title: str
     phases: tuple[PhaseSpec[WorkflowT, RequestT, StateT], ...]
-    transitions: Mapping[str, frozenset[str]]
+    routes: Mapping[str, Mapping[str, tuple[Destination, ...]]]
+    _nodes: Mapping[str, Node] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.workflow_id, str) or not self.workflow_id.strip():
@@ -67,18 +69,41 @@ class WorkflowSpec[WorkflowT, RequestT, StateT]:
         object.__setattr__(self, "workflow_id", self.workflow_id.strip())
         object.__setattr__(
             self,
-            "transitions",
+            "routes",
             MappingProxyType(
                 {
-                    str(phase): frozenset(str(target) for target in targets)
-                    for phase, targets in self.transitions.items()
+                    source: MappingProxyType(dict(routes))
+                    for source, routes in self.routes.items()
+                }
+            ),
+        )
+        object.__setattr__(
+            self,
+            "_nodes",
+            MappingProxyType(
+                {
+                    phase.phase: Node(
+                        phase.phase,
+                        phase.inputs,
+                        self.routes[phase.phase],
+                        getattr(phase, "outcome", None) if phase.terminal else None,
+                    )
+                    for phase in self.phases
                 }
             ),
         )
         from thesis_runtime.workflows.graph.topology import validate_topology
 
         if self.phases:
-            validate_topology(self.phase_specs, self.transitions, self.phases[0].phase)
+            validate_topology(self.graph_nodes, self.phases[0].phase)
+
+    @property
+    def graph_nodes(self) -> Mapping[str, Node]:
+        return self._nodes
+
+    @property
+    def route_names(self) -> Mapping[str, frozenset[str]]:
+        return {source: frozenset(routes) for source, routes in self.routes.items()}
 
     @property
     def phase_specs(self) -> Mapping[str, PhaseSpec[WorkflowT, RequestT, StateT]]:

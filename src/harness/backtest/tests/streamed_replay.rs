@@ -161,3 +161,46 @@ fn compressed_histories_preserve_every_row_and_exact_full_resolution_metrics() {
     assert_eq!(snapshot.iter().unwrap().count(), points.len());
     assert_eq!(history.iter().unwrap().count(), points.len() + 8192);
 }
+
+#[test]
+fn cached_returns_preserve_dense_metrics_through_spills_flat_runs_and_undefined_means() {
+    use backtest::backtest::history::HistoryResources;
+    use backtest::backtest::valuation::ValuationTracker;
+    use num::Decimal;
+
+    for initial in ["100000", "0", "0.000000000000000001"] {
+        let initial_cash: Decimal = initial.parse().unwrap();
+        let mut tracker = ValuationTracker::new(0, initial_cash, HistoryResources::new(
+            4 * 1024 * 1024, Arc::new(tempfile::NamedTempFile::new),
+        )).unwrap();
+        tracker.observe(1, [("SPY", Decimal::ONE)], &[]).unwrap();
+        let price: Decimal = "0.000000000000000001".parse().unwrap();
+        let fill = EngineFill {
+            fill_id: "entry".into(), order_id: "order".into(), symbol: "SPY".into(),
+            side: "buy".into(), quantity: Decimal::ONE, price, fee: Decimal::ZERO,
+            liquidity: "taker".into(), timestamp_ns: 2, sequence: 1, event_id: "entry".into(),
+        };
+        tracker.observe(2, [("SPY", price)], std::slice::from_ref(&fill)).unwrap();
+        for index in 3..30_003 {
+            let mark = if initial == "0.000000000000000001" {
+                "99999999999999999999.999999999999999999".parse().unwrap()
+            } else {
+                Decimal::from_i128(100 + (index / 3) % 97)
+            };
+            tracker.observe(index as i64, [("SPY", mark)], std::slice::from_ref(&fill)).unwrap();
+        }
+        let history = tracker.finish().unwrap();
+        let mut dense = Vec::new();
+        for row in history.iter().unwrap() {
+            let row = row.unwrap();
+            for offset in 0..row.samples {
+                dense.push(EquityPoint {
+                    timestamp_ns: row.timestamp_ns + offset as i64,
+                    equity: row.equity,
+                });
+            }
+        }
+        assert_eq!(history.sample_count() as usize, dense.len());
+        assert_eq!(history.summarize().unwrap().0, equity_curve_metrics(&dense), "{initial}");
+    }
+}

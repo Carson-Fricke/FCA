@@ -1459,8 +1459,11 @@ def build_hypothesis_development_workflow(
     )
     for item in declarations:
         builder.phase(item.spec.host_spec())
-    builder.transitions(
-        {item.spec.phase: frozenset(item.edges) for item in declarations}
+    builder.routes(
+        {
+            item.spec.phase: {target: (f"{target}.input",) for target in item.edges}
+            for item in declarations
+        }
     )
     from .endpoint import HypothesisExtension
 

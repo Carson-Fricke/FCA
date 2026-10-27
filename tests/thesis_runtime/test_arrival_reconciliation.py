@@ -8,8 +8,8 @@ import pytest
 from tests.thesis_runtime.adapters.cosmos.test_chunks import LimitedContainer, store_for
 
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage,
     ModelCompletion,
+    ProviderMessage,
     Role,
     ToolCall,
 )
@@ -107,7 +107,7 @@ def _service(
 def test_steering_closes_generation_retains_reasoning_and_replays_exact_context(
     phase: bool, cosmos: bool
 ) -> None:
-    requests: list[tuple[ChatMessage, ...]] = []
+    requests: list[tuple[ProviderMessage, ...]] = []
     closed: list[bool] = []
     dispatched: list[object] = []
     thoughts = "Reasoning before steering \U0001f9e0"
@@ -147,7 +147,14 @@ def test_steering_closes_generation_retains_reasoning_and_replays_exact_context(
                 assert tuple(messages[1:]) == project_native_messages(canonical)
                 assert any(thoughts in message.content for message in messages)
                 assert any("New direction" in message.content for message in messages)
-                yield ModelCompletion("Steered answer", "model", "provider", role, 0, 0)
+                yield ModelCompletion(
+                    message=ProviderMessage("assistant", "Steered answer"),
+                    model="model",
+                    provider="provider",
+                    role=role,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                )
 
     service, anchor = _service(Provider(), phase=phase, cosmos=cosmos)
 
@@ -203,7 +210,7 @@ def test_steering_closes_generation_retains_reasoning_and_replays_exact_context(
 def test_arrival_after_post_provider_pull_matches_exact_live_replay_request(
     phase: bool, cosmos: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    requests: list[tuple[ChatMessage, ...]] = []
+    requests: list[tuple[ProviderMessage, ...]] = []
     boundary_records: list[SessionMessage] = []
     outputs: list[str] = []
     late = SessionMessage(
@@ -225,7 +232,7 @@ def test_arrival_after_post_provider_pull_matches_exact_live_replay_request(
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -237,13 +244,16 @@ def test_arrival_after_post_provider_pull_matches_exact_live_replay_request(
             if len(requests) == 1:
                 assert position == 0
                 return ModelCompletion(
-                    "Checking",
-                    "model",
-                    "provider",
-                    role,
-                    0,
-                    0,
-                    tool_calls=(ToolCall("call", "check", "{}"),),
+                    message=ProviderMessage(
+                        "assistant",
+                        "Checking",
+                        tool_calls=(ToolCall("call", "check", "{}"),),
+                    ),
+                    model="model",
+                    provider="provider",
+                    role=role,
+                    prompt_tokens=0,
+                    completion_tokens=0,
                 )
             assert len(requests) == 2
             assert position == initial_position
@@ -258,7 +268,14 @@ def test_arrival_after_post_provider_pull_matches_exact_live_replay_request(
                 "incoming",
             ]
             assert boundary_records[1].message_id == late.message_id
-            return ModelCompletion("Finished", "model", "provider", role, 0, 0)
+            return ModelCompletion(
+                message=ProviderMessage("assistant", "Finished"),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
 
     service, anchor = _service(Provider(), phase=phase, cosmos=cosmos)
     service._registry_factory = lambda context: SessionToolRegistry(
@@ -390,7 +407,7 @@ def test_empty_native_completion_interrupts_without_ack_or_workflow_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("thesis_runtime.sessions.recovery.sleep", lambda _: None)
-    requests: list[tuple[ChatMessage, ...]] = []
+    requests: list[tuple[ProviderMessage, ...]] = []
 
     class EmptyModelCompletion:
         def stream(self, *, message_id=None, **kwargs):
@@ -403,13 +420,20 @@ def test_empty_native_completion_interrupts_without_ack_or_workflow_failure(
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
         ) -> ModelCompletion:
             requests.append(tuple(messages))
-            return ModelCompletion(" \n", "model", "provider", role, 0, 0)
+            return ModelCompletion(
+                message=ProviderMessage("assistant", " \n"),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
 
     service, anchor = _service(EmptyModelCompletion(), phase=phase)
     faults: list[Exception] = []

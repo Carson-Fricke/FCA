@@ -5,79 +5,96 @@ use harness_trading::program::*;
 use harness_trading::replay_errors::BacktestError;
 use num::Decimal;
 
-/// Convert one fixture event to a Python-scale market event.
-///
-/// # Errors
-///
-/// Returns [`BacktestError::DataPreflight`] when a market value cannot be
-/// represented as an engine decimal. Such a value never becomes zero.
-pub fn market_event(
-    event: &MarketEvent,
-    options: &SyntheticDataOptions,
-) -> Result<EngineMarket, BacktestError> {
-    let (quote_scale, trade_scale) = crate::backtest::fixture::synthetic_scales(options);
-    match event {
-        MarketEvent::Quote {
-            event_id,
-            timestamp_ns,
-            sequence,
-            symbol,
-            bid,
-            ask,
-            bid_quantity,
-            ask_quantity,
-            venue,
-        } => Ok(EngineMarket::Quote {
-            event_id: event_id.clone(),
-            timestamp_ns: *timestamp_ns,
-            sequence: *sequence,
-            symbol: symbol.clone(),
-            bid: py_from(*bid, quote_scale, "bid", symbol)?,
-            ask: py_from(*ask, quote_scale, "ask", symbol)?,
-            bid_quantity: py_from(*bid_quantity, options.quantity_scale, "bid size", symbol)?,
-            ask_quantity: py_from(*ask_quantity, options.quantity_scale, "ask size", symbol)?,
-            venue: venue.clone(),
-        }),
-        MarketEvent::Trade {
-            event_id,
-            timestamp_ns,
-            sequence,
-            symbol,
-            price,
-            quantity,
-            venue,
-            trade_id,
-        } => Ok(EngineMarket::Trade {
-            event_id: event_id.clone(),
-            timestamp_ns: *timestamp_ns,
-            sequence: *sequence,
-            symbol: symbol.clone(),
-            price: py_from(*price, trade_scale, "trade price", symbol)?,
-            quantity: py_from(*quantity, options.quantity_scale, "trade size", symbol)?,
-            venue: venue.clone(),
-            trade_id: trade_id.clone(),
-        }),
-        MarketEvent::Bar {
-            event_id,
-            timestamp_ns,
-            sequence,
-            symbol,
-            open,
-            high,
-            low,
-            close,
-            volume,
-        } => Ok(EngineMarket::Bar(EngineBar {
-            event_id: event_id.clone(),
-            timestamp_ns: *timestamp_ns,
-            sequence: *sequence,
-            symbol: symbol.clone(),
-            open: py_from(*open, quote_scale, "bar open", symbol)?,
-            high: py_from(*high, quote_scale, "bar high", symbol)?,
-            low: py_from(*low, quote_scale, "bar low", symbol)?,
-            close: py_from(*close, quote_scale, "bar close", symbol)?,
-            volume: py_from(*volume, options.quantity_scale, "bar volume", symbol)?,
-        })),
+/// Run-scoped conversion settings. Owns exact numeric projection and moves event
+/// identifiers into execution; acquisition and replay ordering remain separate.
+#[derive(Clone, Copy, Debug)]
+pub struct EventProjection {
+    quote_scale: u32,
+    trade_scale: u32,
+    quantity_scale: u32,
+}
+
+impl EventProjection {
+    pub fn new(options: &SyntheticDataOptions) -> Self {
+        let (quote_scale, trade_scale) = crate::backtest::fixture::synthetic_scales(options);
+        Self {
+            quote_scale,
+            trade_scale,
+            quantity_scale: options.quantity_scale,
+        }
+    }
+
+    /// Consume an event without cloning its owned identifiers. Unrepresentable
+    /// numeric values fail rather than becoming zero.
+    pub fn project(&self, event: MarketEvent) -> Result<EngineMarket, BacktestError> {
+        let Self {
+            quote_scale,
+            trade_scale,
+            quantity_scale,
+        } = *self;
+        match event {
+            MarketEvent::Quote {
+                event_id,
+                timestamp_ns,
+                sequence,
+                symbol,
+                bid,
+                ask,
+                bid_quantity,
+                ask_quantity,
+                venue,
+            } => Ok(EngineMarket::Quote {
+                event_id,
+                timestamp_ns,
+                sequence,
+                bid: py_from(bid, quote_scale, "bid", &symbol)?,
+                ask: py_from(ask, quote_scale, "ask", &symbol)?,
+                bid_quantity: py_from(bid_quantity, quantity_scale, "bid size", &symbol)?,
+                ask_quantity: py_from(ask_quantity, quantity_scale, "ask size", &symbol)?,
+                venue,
+                symbol,
+            }),
+            MarketEvent::Trade {
+                event_id,
+                timestamp_ns,
+                sequence,
+                symbol,
+                price,
+                quantity,
+                venue,
+                trade_id,
+            } => Ok(EngineMarket::Trade {
+                event_id,
+                timestamp_ns,
+                sequence,
+                price: py_from(price, trade_scale, "trade price", &symbol)?,
+                quantity: py_from(quantity, quantity_scale, "trade size", &symbol)?,
+                venue,
+                trade_id,
+                symbol,
+            }),
+            MarketEvent::Bar {
+                event_id,
+                timestamp_ns,
+                sequence,
+                symbol,
+                open,
+                high,
+                low,
+                close,
+                volume,
+            } => Ok(EngineMarket::Bar(EngineBar {
+                event_id,
+                timestamp_ns,
+                sequence,
+                open: py_from(open, quote_scale, "bar open", &symbol)?,
+                high: py_from(high, quote_scale, "bar high", &symbol)?,
+                low: py_from(low, quote_scale, "bar low", &symbol)?,
+                close: py_from(close, quote_scale, "bar close", &symbol)?,
+                volume: py_from(volume, quantity_scale, "bar volume", &symbol)?,
+                symbol,
+            })),
+        }
     }
 }
 

@@ -11,8 +11,8 @@ from typing import cast
 import pytest
 
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage,
     ModelCompletion,
+    ProviderMessage,
     ProviderRejectedError,
     Role,
     ToolCall,
@@ -169,7 +169,7 @@ def test_all_incoming_sources_use_one_json_content_without_authority(
         "input", "incoming", MessageContent("text", source, result={"ok": False})
     )
     native = project_native_messages([message])
-    assert native == (ChatMessage("user", message.content.as_content()),)
+    assert native == (ProviderMessage("user", message.content.as_content()),)
     assert json.loads(native[0].content) == {
         "source": source,
         "text": "text",
@@ -184,8 +184,8 @@ def test_directions_not_sources_choose_native_roles() -> None:
         SessionMessage("answer", "outgoing", MessageContent("Answer", "runtime")),
     ]
     assert project_native_messages(messages) == (
-        ChatMessage("system", "Rules"),
-        ChatMessage("assistant", "Answer"),
+        ProviderMessage("system", "Rules"),
+        ProviderMessage("assistant", "Answer"),
     )
 
 
@@ -196,7 +196,7 @@ def test_explicit_canonical_instruction_retains_trusted_port_direction() -> None
     durable = record("configured", data={"sessionMessage": instruction.as_dict()})
     assert from_record(durable) == instruction
     assert project_native_messages(decode_transcript([durable])) == (
-        ChatMessage("system", "Rules"),
+        ProviderMessage("system", "Rules"),
     )
 
 
@@ -205,7 +205,7 @@ def test_empty_outgoing_text_preserves_evidence_without_invalid_native_content()
 ):
     message = SessionMessage("empty", "outgoing", MessageContent("", "agent"))
     assert project_native_messages([message]) == (
-        ChatMessage("assistant", message.content.as_content()),
+        ProviderMessage("assistant", message.content.as_content()),
     )
 
 
@@ -367,13 +367,14 @@ def test_canonical_decode_overrides_legacy_metadata_and_round_trip_projects_same
 
 def test_adapter_forwards_options_and_returns_canonical_outgoing_message() -> None:
     completion = ModelCompletion(
-        "Answer",
-        "model",
-        "provider",
-        "research",
-        1,
-        2,
-        tool_calls=(ToolCall("call", "check", "{}"),),
+        message=ProviderMessage(
+            "assistant", "Answer", tool_calls=(ToolCall("call", "check", "{}"),)
+        ),
+        model="model",
+        provider="provider",
+        role="research",
+        prompt_tokens=1,
+        completion_tokens=2,
     )
     seen: dict[str, object] = {}
 
@@ -388,7 +389,7 @@ def test_adapter_forwards_options_and_returns_canonical_outgoing_message() -> No
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -436,13 +437,20 @@ def test_adapter_ids_are_fresh_and_reasoning_stays_separate() -> None:
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
         ) -> ModelCompletion:
             return ModelCompletion(
-                "Answer", "model", "provider", role, 1, 2, reasoning="Reasoning"
+                message=ProviderMessage(
+                    "assistant", "Answer", continuation={"reasoning": "Reasoning"}
+                ),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=1,
+                completion_tokens=2,
             )
 
     adapter = NativeSessionAdapter(Provider())
@@ -452,9 +460,12 @@ def test_adapter_ids_are_fresh_and_reasoning_stays_separate() -> None:
     assert first.direction == "outgoing"
     assert first.content.text == "Answer"
     assert first.content.source == "agent"
-    assert first.content.result == {"reasoning": "Reasoning"}
+    assert first.content.result is not None
+    assert first.content.result["reasoning"] == "Reasoning"
     assert SessionMessage.from_dict(first.as_dict()) == first
-    assert project_native_messages([first]) == (ChatMessage("assistant", "Answer"),)
+    assert project_native_messages([first]) == (
+        ProviderMessage("assistant", "Answer", continuation={"reasoning": "Reasoning"}),
+    )
     with pytest.raises(ValueError, match="fresh"):
         NativeSessionAdapter(Provider(), id_factory=lambda: "input").complete(
             messages=[incoming("input")]
@@ -473,23 +484,30 @@ def test_adapter_normalizes_provider_reasoning_before_projection() -> None:
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
         ) -> ModelCompletion:
             return ModelCompletion(
-                "Answer",
-                "model",
-                "provider",
-                role,
-                1,
-                2,
-                reasoning="step\x00 one\r\nstep\x07 two\tend",
+                message=ProviderMessage(
+                    "assistant",
+                    "Answer",
+                    continuation={"reasoning": "step\x00 one\r\nstep\x07 two\tend"},
+                ),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=1,
+                completion_tokens=2,
             )
 
     output = NativeSessionAdapter(Provider()).complete(messages=[incoming("input")])
-    assert output.content.result == {"reasoning": "step one\nstep two\tend"}
+    assert output.content.result is not None
+    assert output.content.result["reasoning"] == "step one\nstep two\tend"
+    assert project_native_messages([output])[0].continuation == {
+        "reasoning": "step\x00 one\r\nstep\x07 two\tend"
+    }
 
 
 def test_durable_decode_restores_assigned_position_without_mutating_content() -> None:
@@ -545,19 +563,22 @@ def test_tool_only_completion_maps_raw_arguments_without_native_fields(
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
         ) -> ModelCompletion:
             return ModelCompletion(
-                text,
-                "model",
-                "provider",
-                role,
-                1,
-                2,
-                tool_calls=(ToolCall("call", "check", "malformed JSON"),),
+                message=ProviderMessage(
+                    "assistant",
+                    text,
+                    tool_calls=(ToolCall("call", "check", "malformed JSON"),),
+                ),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=1,
+                completion_tokens=2,
             )
 
     output = NativeSessionAdapter(Provider(), id_factory=lambda: "output").complete(
@@ -591,14 +612,21 @@ def test_blank_native_reply_is_rejected_with_reserved_output_identity(
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
         ) -> ModelCompletion:
             calls.append("provider")
             return ModelCompletion(
-                text, "model", "provider", role, 1, 2, reasoning=reasoning
+                message=ProviderMessage(
+                    "assistant", text, continuation={"reasoning": reasoning}
+                ),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=1,
+                completion_tokens=2,
             )
 
     def new_id() -> str:
@@ -645,7 +673,7 @@ def test_adapter_propagates_provider_failure_without_inventing_completion() -> N
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -675,13 +703,13 @@ def test_request_snapshot_is_pure_detached_and_matches_emitted_request(
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
         ) -> ModelCompletion:
             seen.update(
-                projection="native-session-v3",
+                projection="native-session-v4",
                 model_family="generic",
                 family_adapter_version="1",
                 catalog_version="sha256:"
@@ -695,7 +723,14 @@ def test_request_snapshot_is_pure_detached_and_matches_emitted_request(
                 tools=tools,
                 response_format=response_format,
             )
-            return ModelCompletion("Answer", "model", "provider", role, 1, 2)
+            return ModelCompletion(
+                message=ProviderMessage("assistant", "Answer"),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=1,
+                completion_tokens=2,
+            )
 
     def new_id() -> str:
         ids.append("output")
@@ -726,7 +761,7 @@ def test_request_snapshot_is_pure_detached_and_matches_emitted_request(
         messages_payload(project_native_messages(messages))
     )
     assert snapshot["role"] == "research"
-    assert snapshot["projection"] == "native-session-v3"
+    assert snapshot["projection"] == "native-session-v4"
     assert (
         snapshot["catalog_version"]
         == "sha256:"
@@ -771,7 +806,7 @@ def test_request_snapshot_preserves_absent_and_empty_options() -> None:
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -782,7 +817,7 @@ def test_request_snapshot_preserves_absent_and_empty_options() -> None:
         Provider(), id_factory=lambda: pytest.fail("snapshot must not allocate IDs")
     )
     assert adapter.request_snapshot(messages=[]) == {
-        "projection": "native-session-v3",
+        "projection": "native-session-v4",
         "stream": True,
         "model_family": "generic",
         "family_adapter_version": "1",
@@ -793,7 +828,7 @@ def test_request_snapshot_preserves_absent_and_empty_options() -> None:
         "catalog_version": "sha256:" + hashlib.sha256(b"null").hexdigest(),
     }
     assert adapter.request_snapshot(messages=[], tools=[], response_format={}) == {
-        "projection": "native-session-v3",
+        "projection": "native-session-v4",
         "stream": True,
         "model_family": "generic",
         "family_adapter_version": "1",

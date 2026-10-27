@@ -19,8 +19,8 @@ from thesis_runtime.adapters.providers.foundry import (
     ProviderCapabilitySnapshot,
 )
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage,
     ModelCompletion,
+    ProviderMessage,
     ProviderRejectedError,
     ProviderUnreachableError,
     Role,
@@ -141,7 +141,7 @@ class OpenRouterProvider:
     def complete(
         self,
         *,
-        messages: Sequence[ChatMessage],
+        messages: Sequence[ProviderMessage],
         role: Role = "primary",
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
@@ -163,7 +163,7 @@ class OpenRouterProvider:
     def stream(
         self,
         *,
-        messages: Sequence[ChatMessage],
+        messages: Sequence[ProviderMessage],
         role: Role = "primary",
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,

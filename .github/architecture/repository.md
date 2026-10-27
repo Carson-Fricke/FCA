@@ -15,7 +15,18 @@ venue state, configuration-to-risk projection, outcome rendering and identity ha
 separate modules. `research` owns configuration-file loading, authored-program
 composition, acquisition/cursors, scratch allocation and capacity, telemetry cadence,
 result-ledger reconstruction and publication. The replay history consumes an injected
-allocator and capacity; it reads no environment variables.
+allocator and capacity; it reads no environment variables. Replay projection prepares numeric scales
+once per run and consumes owned event identifiers. Arrow decoding binds typed
+columns once per batch and maps directly into the research cursor's event
+representation. The event bus reuses canonical identity buffers and timestamp
+prefixes while retaining the dispatch digest bytes. Venue matching scans stable
+per-symbol active-order indexes; completed orders remain historical evidence.
+Ordered lake cursors merge through a fixed, bounded tournament. The event bus
+keeps a dedicated feed head beside generated-event/backlog ordering, preserving
+all ordinal ties. Exact numeric kernels cancel factors and use narrow arithmetic
+before wide division. Valuation summaries cache rounded returns in bounded
+execution scratch and preserve the original ordered variance sum; scratch codec
+workspaces are reusable and cloned histories retain independent snapshots.
 `strategy-jit` compiles, loads and adapts programs without a backtest dependency;
 raw vtables and program state are crate-private and borrowed from library owners.
 
@@ -225,7 +236,7 @@ guard and behavior verification. Missing modules MUST fail without optional
 bypasses; instructions do not guarantee LLM compliance/honesty, and module
 presence does not prove complete recovery coverage.
 
-The current hypothesis-development topology is runtime contract version `5.0.0`: discovery,
+The current hypothesis-development topology is runtime contract version `6.0.0`: discovery,
 model creation, deterministic falsification trials, verdict, and the
 strategy/backtest/RCA/optimization/null-testing/variation/forward-validation
 chain, with one-shot agent strategy backtesting, a deterministic
@@ -1008,27 +1019,16 @@ rows; the snapshot guarantee is not a general scientific sandbox.
 
 ## Fixed parallel workflow regions
 
-The runtime supports structured fixed split/join graphs through `SplitPhase` and
-existing deterministic phases. `thesis_runtime/workflows/graph/` contains only
-pure topology validation and accepted-history control reconstruction; the workflow
-host still owns acceptance and dispatch through its existing ports. No second
-scheduler or graph store is introduced. Ordinary decisions move one position;
-splits open fixed disjoint branches and joins restore one parent position.
-
-Execution records project `active_phases` and `control_sequence`; transition
-history retains explicit attempt and executor identities. Journal acceptance,
-CAS and ownership remain authoritative. JSON extension protocol 2 supplies each
-node's causal path, and paired joins receive fixed named accepted products.
-Recovery preserves arrivals, reconciles accepted terminals and missing dispatch,
-and may recompute only pure paired joins after interruption. Side-effecting work
-keeps its retained-ID/no-auto-replay policy. Incoming messages continue through
-Option 1's canonical writer and provider projection.
-
-This capability does not activate parallelism in either current concrete workflow.
-Hypothesis development 5.0.0 and research investigation 2.0.0 retain their existing
-phase flows, prompts and tool policies; research still has one critic. Old runtime
-records are rejected rather than inferred or upgraded. See
-[the bounded implementation contract](thesis-fixed-workflow-graph-plan.md).
+The runtime's pure workflow graph uses named required input ports and explicit
+routes to node.port destinations. Multiple destinations create concurrency;
+multiple required ports synchronize. Alternative routes can feed one port and
+loopbacks create fresh activations. No split/join phase or parallel block exists.
+The conversation-facing host binds deterministic and agent implementations while
+routing/replay imports no conversation, agent, tool, provider or storage service.
+Accepted history is revision-CAS committed with explicit route, output and attempt
+identity. Current versions are hypothesis development 6.0.0 and research
+investigation 4.0.0; outdated history and definitions are rejected.
+See [the execution contract](thesis-fixed-workflow-graph-plan.md).
 
 
 ## Build and verification execution

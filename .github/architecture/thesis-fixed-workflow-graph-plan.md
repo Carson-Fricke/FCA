@@ -1,176 +1,83 @@
-# Fixed workflow graph implementation
+# Workflow routes and named inputs
 
-## Status and scope
+This is the current execution contract. Workflows declare activity nodes, required
+input ports, named routes and terminal outcomes. There are no split/join phases or
+parallel blocks. The generic graph engine has no conversation, agent, provider,
+tool, persistence or scheduling dependencies.
 
-This is the narrowed implementation contract. It adds fixed split/join graphs to
-the existing host. Hypothesis development and research investigation retain their
-existing phase sequences, prompts, tool policies and scientific decisions. In
-particular, research still has one critic. Enabling two critics is a separate
-workflow-definition change, not part of this update.
+## Definition and completion
 
-The implementation reuses the accepted transition journal, revision CAS,
-execution ownership guards, conversation service and durable work store. There
-is no additional scheduler, graph database, receipt store, transaction framework,
-model checker, or compatibility engine.
+Each route is a set of explicit `node.port` destinations. Connections are declared
+once in the route table. A completion has one selected `route` and one JSON-object
+`output`. Only destinations on that route receive its output. Forward branches and
+loopbacks use the same rule; stored results on unselected routes supply no inputs.
+The definition endpoint publishes `inputs` and `routes` alongside node identities
+and terminal outcomes. The UI derives edges from destinations and never invents
+control flow.
 
-## Authored topology
+A node starts only when every required port has one value. Its input is always a
+map from the declared port names to accepted output objects. Concurrent aggregation
+uses separate required ports. Alternative paths feed the same port. Duplicate
+conflicting producers are rejected; arrival order never chooses a winner.
 
-An ordinary node chooses one declared successor. A `SplitPhase` declares a fixed
-mapping of branch names to entry nodes and its matching join. The join is an
-existing `DeterministicPhase` with one successor. Only an explicit split creates
-concurrency; ordinary decisions and loopbacks move one current position.
+A route with several destinations creates concurrent eligibility. There is no
+activity for starting branches. A multi-input consumer provides synchronization,
+regardless of whether its implementation is deterministic, agent-backed or terminal.
+Domain reduction is ordinary activity work, separate from input synchronization.
 
-```mermaid
-flowchart LR
-    P[Accepted subject] --> S[Fixed split]
-    S --> A[Review A]
-    S --> B[Review B]
-    A --> AR[Repair A]
-    AR --> A
-    B --> BR[Repair B]
-    BR --> B
-    A --> J[Deterministic join]
-    B --> J
-    J --> N[Next agent]
-```
+## Activations and replay
 
-Each sequential branch has at most one current position. A nested split suspends
-that position, opens its declared child branches, then restores one position at
-its join. Distinct branches can loop independently. After a region closes, an
-outer loop may enter it again with fresh attempt identities and no reused arrivals.
-This expresses the intended restriction more precisely than forbidding two nodes
-in the same graph-theoretic cycle.
+Every visit has a stable attempt identity scoped to the execution and causal
+history. A workflow permits one live activation per node. Fan-out occurrences
+retain causal branch coverage through partial convergence; no paired join is inferred. Branch-local
+loops and nested fan-out preserve sibling isolation and cannot reuse arrivals from
+an earlier occurrence. A conditional return to a prior node creates a new attempt.
+Unfinished concurrent branches prevent successful workflow finalization.
 
-The compiler checks declared nodes and edges, one matching deterministic join per
-split, disjoint sibling ownership, proper nesting, join reachability and terminal
-placement. Branches cannot cross into siblings, bypass a join with success, or
-share executable nodes. An explicitly declared failure terminal aborts the whole
-execution. These checks establish the supported structural grammar; they do not
-prove that a model will terminate its loops or choose a useful scientific action.
+The execution document is the only accepted history. A replay folds explicit source
+attempt, selected route and output into the frontier, required input maps and pending
+deliveries. The engine neither executes activities nor interprets domain outputs.
+`pendingInputs` events project required and arrived ports for UI display; they are
+not execution authority or a second inbox.
 
-Dynamic branch counts, copied subgraphs, arbitrary unstructured merges, optional
-branches, quorum joins and branch-local success terminals are outside this contract.
+## Host ownership
 
-## Control and domain boundaries
+`workflows/graph/` owns pure definitions, topology validation and activation replay.
+`workflows/workflow.py` is the conversation-facing host: it binds activities,
+validates trusted executor/intent identity, commits by execution-store revision CAS,
+and publishes lifecycle projections outside acceptance. `phase.py` describes host
+activity bindings, not generic engine activity types.
 
-`thesis_runtime/workflows/graph/topology.py` validates the fixed definition.
-`graph/control.py::replay_graph` reconstructs the active positions and open regions
-from accepted history. Both are pure functions with no storage or provider calls.
+The host translates its domain phase-completion contract into a selected route and
+opaque output. Domain extensions receive the fixed named input map and their scoped
+accepted products. Agents own their turns, operator input and completion requests.
+The graph never sees a conversation or drives a model. Incoming messages and tool
+results retain the existing canonical writer and provider projection.
 
-The workflow host owns control, identity, acceptance, lifecycle and dispatch.
-Extensions own their domain fold, prompts, contract validation and deterministic
-activities. The host supplies the actual node name and causal history to protocol
-2 extensions and overrides a returned domain phase with that host-owned node.
-No concrete Thesis workflow, scientific schema or critic policy belongs in the
-control projection.
+Durable work is retained per activation. Only deterministic bindings explicitly
+marked `replay_safe` may be recomputed after interruption. Unknown-outcome mutations
+are reconciled by retained identities, never replayed automatically.
 
-This keeps responsibilities separate without inventing new interfaces: the
-existing execution, conversation and work ports remain the effect boundaries.
-`SplitPhase` extends the phase vocabulary; paired joins reuse deterministic phases.
-Serial workflows run through this same control projection, with a singleton
-frontier and their existing domain reducer.
+## Current-contract cutover
 
-## Attempts, inputs and joins
+Hypothesis development is `6.0.0`; research investigation is `4.0.0`. Accepted history
+requires explicit `route` and `output` fields as well as attempt/executor identity.
+Old definitions, split metadata and old history are rejected. There is no decoder,
+version-selected implementation or read-time conversion for the previous format.
+Existing obsolete development executions require an explicit reset in their owning
+environment. This source change performs no local or Azure data deletion.
 
-Each activation has a stable bounded attempt ID derived from execution identity,
-node name and accepted sequence. The phase tool captures it in trusted
-`ToolContext`; the model does not supply it. Reopening the same phase conversation
-for a new loop visit gives it a new attempt ID.
+## Verification
 
-A split occurrence is identified by its own attempt ID. Its branch membership and
-accepted subject are fixed. Each branch sees the common causal prefix plus its
-own subsequent accepted contracts, excluding sibling arrivals. A branch arriving
-at its matching join parks its result and has no active executor until a later
-occurrence. Only all declared arrivals for this exact occurrence make the join
-runnable.
-
-The join handoff contains the subject, branch completion bodies, branch attempt
-IDs and immutable accepted handoff indices. The reducer combines these products
-in declared branch order. It must be pure and must not call a model, submit jobs,
-read changing external state or make scientific decisions. Purity is a workflow
-authoring contract; there is no source-code purity verifier.
-
-After the join, the successor receives the parent causal path plus the accepted
-combined product. Joined handoff references become available through the host's
-`visible_history`; branch transcripts remain private. Extensions implementing
-future parallel workflows must use scoped history and check retrieval references
-against this visibility boundary.
-
-Steering retains existing semantics: it increments intent epoch and rejects
-unaccepted completions from the old epoch. It does not retract already accepted
-history or implicitly start another split occurrence. Changing an accepted
-subject requires the declared workflow path to a new occurrence.
-
-## Acceptance, recovery and cancellation
-
-Every accepted transition carries explicit source attempt and executor identity
-(null executor for deterministic work). Before acceptance the host validates the
-completion and projects the prospective graph. Under the existing short execution
-guard it rechecks live intent, lifecycle and executor ownership, commits journal
-revision CAS, updates the frontier projection and closes the accepted executor.
-Extension code, conversation delivery and downstream dispatch stay outside that
-guard. Concurrent sibling arrivals retry CAS against the new global history while
-retaining their own causal input path.
-
-The journal entry is the receipt. An identical completion for the same accepted
-attempt returns it; conflicting content is rejected. A stale tool context cannot
-complete a reopened conversation. Late lifecycle/report events carry their
-original attempt identity and cannot close the new visit.
-
-The journal remains the only control authority. `WorkflowExecution.active_phases`
-and `control_sequence` are presentation projections. Restart reconstructs open
-regions, preserves parked arrivals, closes a stranded accepted executor and
-repairs missing current dispatch. A missing frontier event is republished from
-the journal; events never determine acceptance. An accepted terminal arrival also
-finalizes correctly if publication was interrupted.
-
-Durable work is keyed and serialized by exact node attempt and intent epoch.
-Interrupted paired joins can get another work generation under the same attempt
-because their reducer is pure. Other interrupted deterministic activities and
-external mutations keep the existing no-auto-replay rule and retained job IDs.
-A late queued wake for a retired attempt does nothing.
-
-Execution cancellation, stop or failure prevents new completions and dispatch.
-All attributed conversations check execution lifecycle at turn/dispatch
-boundaries. A phase that just completed retains its successful tool response;
-unfinished siblings stop at the next boundary. Cancellation does not claim that
-an already dispatched external job was undone, and failure never counts as a
-successful join arrival. Operator input remains inside the agent conversation
-using `request_workflow_input`; the engine adds no operator interaction layer.
-
-## UI and current-contract cutover
-
-Workflow definitions expose their fixed `splits` alongside existing nodes and
-edges. The UI shows multiple active nodes and a blocked join's missing branches.
-Control sequence orders frontier events independently of arrival on the timeline,
-so a delayed earlier event cannot reactivate a completed sibling. Serial graph
-layout and conversation navigation remain supported.
-
-The stored singleton `phase` field and unused scalar transition-machine facade
-are removed. Python's single-phase accessor and the browser's display label are
-derived only for a singleton frontier; neither is persisted control authority.
-The JSON extension protocol is 2, hypothesis development is version 5.0.0 and
-research investigation is 2.0.0. These version changes identify the runtime data
-cutover, not new scientific workflow behavior.
-
-Old execution records or transitions missing required frontier/attempt metadata
-are rejected. There is no reader inference, old implementation selection or lazy
-migration. Before deploying, stop outdated writers and reset affected obsolete
-development executions within the authorized environment. No user data was
-removed by this implementation task; preserving old runs would require an
-explicit bounded one-time operational conversion outside the runtime.
-
-## Proportionate verification
-
-Use the existing behavior suites and one small generic workflow fixture. Focused
-graph checks cover independent branch loops, frozen inputs, concurrent arrivals,
-identical/conflicting retries, nested repeated regions, stale attempt authority,
-restart after accepted storage, cancellation and interrupted pure joins. A
-rendered UI flow covers two current nodes, waiting-join navigation and delayed
-frontier events. Existing concrete workflow suites verify their unchanged routes
-and phase policies. The mandated delivery architecture guard remains required.
-
-There is no exhaustive topology enumeration, model-checking harness, second
-simulator or generic property-testing project. Run the canonical repository
-verification once after the implementation freezes, with one corrective rerun
-only if needed, as required by repository policy.
+- `tests/thesis_runtime/test_workflow_ports.py`: pure forward/backward routing,
+  alternative producers, required ports, activation freshness and conflicts.
+- `tests/thesis_runtime/test_workflow_graph.py`: real conversation completion,
+  concurrent arrivals, nested fan-out, loopbacks, cancellation, restart and lost
+  acknowledgement recovery through the authoritative store.
+- `tests/thesis_runtime/test_package_boundaries.py`: mandatory graph modules and
+  prohibition on conversation, agent, provider, tool and storage imports.
+- `tests/thesis_runtime/test_delivery_architecture.py`: the existing canonical
+  incoming writer, shared projection and durability guards remain mandatory.
+- `tests/thesis/http/test_workflow_routes.py`: current topology and version rejection.
+- Research workflow behavior and UI workflow graph/live/card tests cover current
+  product composition and pending-input presentation.

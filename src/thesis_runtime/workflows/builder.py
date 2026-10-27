@@ -3,7 +3,7 @@
 The builder is the one construction path for a
 :class:`~thesis_runtime.workflows.spec.WorkflowSpec`.  It fails closed: a spec
 with a missing piece or an inconsistent table never reaches the registry.
-``build`` rejects a spec whose transitions reference undeclared phases or that
+``build`` rejects a spec whose routes reference undeclared ports or that
 declares no terminal phase, then returns the single general
 :class:`~thesis_runtime.workflows.workflow.Workflow` object that runs it.
 
@@ -17,7 +17,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any, Self
 
-from thesis_runtime.workflows.phase import PhaseSpec, SplitPhase, WorkflowSpecError
+from thesis_runtime.workflows.graph.contracts import Destination
+from thesis_runtime.workflows.phase import PhaseSpec, WorkflowSpecError
 from thesis_runtime.workflows.spec import (
     WorkflowSpec,
 )
@@ -40,7 +41,7 @@ class WorkflowBuilder[
         self._version = ""
         self._title = ""
         self._phases: list[PhaseSpec[WorkflowT, RequestT, StateT]] = []
-        self._transitions: dict[str, set[str]] = {}
+        self._routes: dict[str, dict[str, tuple[Destination, ...]]] = {}
         self._doctrine: WorkflowDoctrine[RequestT, StateT, Any] | None = None
         self._ports: WorkflowPorts | None = None
 
@@ -60,25 +61,23 @@ class WorkflowBuilder[
     def phase(self, spec: PhaseSpec[WorkflowT, RequestT, StateT]) -> Self:
         """Declare one ordered phase as a sealed-union spec object."""
         self._phases.append(spec)
-        if isinstance(spec, SplitPhase):
-            self._transitions[spec.phase] = set(spec.branches.values())
+        self._routes.setdefault(spec.phase, {})
         return self
 
-    def transition(self, source: str, target: str) -> Self:
-        """Declare one allowed transition between two phases."""
-        self._transitions.setdefault(source, set()).add(target)
+    def route(self, source: str, name: str, *destinations: str) -> Self:
+        """Wire one named route to explicit node.input destinations."""
+        routes = self._routes.setdefault(source, {})
+        if name in routes:
+            raise WorkflowSpecError(f"route {source}.{name} is declared twice")
+        routes[name] = tuple(Destination.parse(value) for value in destinations)
         return self
 
-    def transitions(self, table: Mapping[str, Iterable[str]]) -> Self:
-        """Declare every transition in one table.
-
-        A source with no reachable phases is still declared, so a terminal
-        phase keeps its empty allowed-target set in the assembled spec.
-        """
-        for source, targets in table.items():
-            self._transitions.setdefault(source, set())
-            for target in targets:
-                self.transition(source, target)
+    def routes(self, table: Mapping[str, Mapping[str, Iterable[str]]]) -> Self:
+        """Declare routes; the table is the sole authority for graph connections."""
+        for source, routes in table.items():
+            self._routes.setdefault(source, {})
+            for name, destinations in routes.items():
+                self.route(source, name, *destinations)
         return self
 
     def doctrine(self, doctrine: WorkflowDoctrine[RequestT, StateT, Any]) -> Self:
@@ -101,10 +100,7 @@ class WorkflowBuilder[
             version=self._version,
             title=self._title,
             phases=tuple(self._phases),
-            transitions={
-                phase: frozenset(targets)
-                for phase, targets in self._transitions.items()
-            },
+            routes=self._routes,
         )
         return Workflow(
             spec,
@@ -129,29 +125,20 @@ class WorkflowBuilder[
             declared.add(phase.phase)
             if phase.on_complete is not None and phase.on_complete not in {
                 target
-                for source, targets in self._transitions.items()
+                for source, targets in self._routes.items()
                 if source == phase.phase
                 for target in targets
             }:
                 errors.append(
                     f"phase {phase.phase!r} declares on_complete "
-                    f"{phase.on_complete!r}, which is not a declared transition"
+                    f"{phase.on_complete!r}, which is not a declared route"
                 )
-        for source, targets in self._transitions.items():
-            if source not in declared:
-                errors.append(f"transition source {source!r} is not a phase")
-            for target in targets:
-                if target not in declared:
-                    errors.append(f"transition target {target!r} is not a phase")
         for phase in self._phases:
-            if phase.phase not in self._transitions:
-                errors.append(
-                    f"phase {phase.phase!r} has no explicit transition declaration"
-                )
-            if phase.terminal and self._transitions.get(phase.phase):
-                errors.append(
-                    f"terminal phase {phase.phase!r} has outgoing transitions"
-                )
+            if phase.terminal and self._routes.get(phase.phase):
+                errors.append(f"terminal phase {phase.phase!r} has outgoing routes")
+        for source in self._routes:
+            if source not in declared:
+                errors.append(f"route source {source!r} is not a node")
         if not any(phase.terminal for phase in self._phases):
             errors.append("workflow requires at least one terminal phase")
         return errors

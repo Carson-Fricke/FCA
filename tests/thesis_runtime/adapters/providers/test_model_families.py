@@ -1,6 +1,7 @@
 """Family tool presentation through real provider exchange and durable sessions."""
 
 import json
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -42,7 +43,9 @@ def branch(name: str, field: str = "idea") -> dict[str, Any]:
             "workflow": {"const": name},
             "input": {
                 "type": "object",
-                "properties": {field: {"type": "string", "minLength": 1}},
+                "properties": {
+                    field: {"type": "string", "minLength": 1, "pattern": r"\S"}
+                },
                 "required": [field],
                 "additionalProperties": False,
             },
@@ -64,7 +67,8 @@ def test_deepseek_launch_exchange_preserves_validation_audit_and_replay(
         + ([branch("review", "report")] if multiple else [])
     }
     original = json.dumps(schema, sort_keys=True)
-    arguments = {"workflow": "research", "input": {"idea": "Momentum"}}
+    premise = "Completed daily trends condition intraday pullback entries."
+    arguments = {"workflow": "research", "input": {"idea": premise}}
     requests: list[dict[str, Any]] = []
     dispatched: list[Mapping[str, object]] = []
 
@@ -81,6 +85,15 @@ def test_deepseek_launch_exchange_preserves_validation_audit_and_replay(
                 != "object"
             ):
                 supplied["input"] = json.dumps(supplied["input"])
+            else:
+                # Ionstream's constrained generation treats pattern as a full match.
+                # With the canonical substring pattern it emits a single character.
+                input_schema = advertised["properties"]["input"]
+                idea = input_schema.get("anyOf", [input_schema])[0]["properties"][
+                    "idea"
+                ]
+                if re.fullmatch(idea["pattern"], premise) is None:
+                    supplied["input"] = {"idea": "."}
             message = {
                 "content": None,
                 "tool_calls": [
@@ -150,6 +163,8 @@ def test_deepseek_launch_exchange_preserves_validation_audit_and_replay(
         {"workflow": "review", "input": {"idea": "wrong branch"}},
         {"workflow": "research", "input": "{}"},
         {"workflow": "research", "input": {"idea": ""}},
+        {"workflow": "research", "input": {"idea": " \n\t"}},
+        {"workflow": "research", "input": {"idea": " \nFull premise\n "}},
         {"workflow": "research", "input": {"idea": "x", "extra": 1}},
         {},
     ]
@@ -180,7 +195,76 @@ def test_deepseek_launch_exchange_preserves_validation_audit_and_replay(
     audit = audits[0].as_dict()["provider_request"]
     assert isinstance(audit, dict)
     assert audit["tools"] == requests[0]["tools"]
-    assert audit["family_adapter_version"] == "1"
+    assert audit["family_adapter_version"] == "3"
+
+
+def test_deepseek_nested_schemas_preserve_validation_and_literal_data() -> None:
+    text = {"type": "string", "pattern": r"\S", "minLength": 1}
+    literal = {"pattern": r"\S"}
+    schema: dict[str, Any] = {
+        "type": "object",
+        "$defs": {"text": text},
+        "properties": {
+            "pattern": {"$ref": "#/$defs/text"},
+            "lines": {
+                "type": "array",
+                "prefixItems": [text],
+                "items": {"anyOf": [text, {"type": "null"}]},
+                "contains": text,
+            },
+            "literal": {
+                "const": literal,
+                "enum": [literal],
+                "default": literal,
+                "examples": [literal],
+            },
+            "code": {"type": "string", "pattern": "^[A-Z]{2}$"},
+        },
+        "patternProperties": {"^extra": text},
+        "additionalProperties": text,
+        "required": ["pattern"],
+        "allOf": [
+            {"if": {"required": ["lines"]}, "then": {"properties": {"pattern": text}}}
+        ],
+    }
+    original = json.dumps(schema, sort_keys=True)
+    tool = {"name": "record", "parameters": schema}
+    adapter = model_family_adapter("deepseek/test")
+    prepared = adapter.prepare_tools([tool])
+    advertised = prepared[0]["parameters"]
+    assert isinstance(advertised, dict)
+    Draft202012Validator.check_schema(advertised)
+    # These data values are not subschemas even though they contain 'pattern'.
+    assert advertised["properties"]["literal"] == schema["properties"]["literal"]
+    assert advertised["properties"]["code"] == schema["properties"]["code"]
+    assert adapter.prepare_tools(prepared) == prepared
+    assert json.dumps(schema, sort_keys=True) == original
+    assert model_family_adapter("other/model").prepare_tools([tool])[0] == tool
+    nonblank_schemas = [
+        advertised["$defs"]["text"],
+        advertised["properties"]["lines"]["prefixItems"][0],
+        advertised["properties"]["lines"]["items"]["anyOf"][0],
+        advertised["properties"]["lines"]["contains"],
+        advertised["patternProperties"]["^extra"],
+        advertised["additionalProperties"],
+        advertised["allOf"][0]["then"]["properties"]["pattern"],
+    ]
+    for value in ["", " \t\n", "P", "Full premise.", "\n多行\ntext\n", "\u00a0"]:
+        candidate = {
+            "pattern": value,
+            "lines": [value, None],
+            "extra": value,
+            "other": value,
+            "literal": literal,
+            "code": "AB",
+        }
+        assert Draft202012Validator(advertised).is_valid(
+            candidate
+        ) == Draft202012Validator(schema).is_valid(candidate)
+        for presented in nonblank_schemas:
+            assert (re.fullmatch(presented["pattern"], value) is not None) == (
+                re.search(r"\S", value) is not None
+            )
 
 
 def test_other_families_keep_native_tool_schema_and_raw_arguments() -> None:

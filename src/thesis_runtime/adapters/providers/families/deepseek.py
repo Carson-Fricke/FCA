@@ -1,8 +1,57 @@
-"""Expose parameter types to DeepSeek endpoints that inspect root properties."""
+"""DeepSeek reasoning-field requirements and equivalent tool-schema presentation."""
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 
 from thesis_runtime.adapters.providers.families.base import NativeToolsAdapter
+from thesis_runtime.adapters.providers.invocations import ProviderMessage
+
+
+def _patterns(schema: Mapping[str, object]) -> dict[str, object]:
+    result = dict(schema)
+    # JSON Schema patterns search anywhere. Some DeepSeek endpoints instead
+    # constrain the whole generated string, reducing this pattern to one letter.
+    # Spell out its existing meaning, including surrounding whitespace/newlines.
+    if result.get("pattern") == r"\S":
+        result["pattern"] = r"^[\s\S]*\S[\s\S]*$"
+    # Traverse schema positions only; defaults, examples, enum and const are data.
+    for keyword in (
+        "$defs",
+        "definitions",
+        "properties",
+        "patternProperties",
+        "dependentSchemas",
+    ):
+        children = schema.get(keyword)
+        if isinstance(children, Mapping):
+            result[keyword] = {
+                name: _patterns(child) if isinstance(child, Mapping) else child
+                for name, child in children.items()
+            }
+    for keyword in (
+        "items",
+        "contains",
+        "additionalProperties",
+        "unevaluatedProperties",
+        "unevaluatedItems",
+        "propertyNames",
+        "not",
+        "if",
+        "then",
+        "else",
+        "contentSchema",
+    ):
+        child = schema.get(keyword)
+        if isinstance(child, Mapping):
+            result[keyword] = _patterns(child)
+    for keyword in ("allOf", "anyOf", "oneOf", "prefixItems"):
+        children = schema.get(keyword)
+        if isinstance(children, list | tuple):
+            result[keyword] = [
+                _patterns(child) if isinstance(child, Mapping) else child
+                for child in children
+            ]
+    return result
 
 
 def _explicit_type(schema: Mapping[str, object]) -> dict[str, object]:
@@ -58,9 +107,21 @@ def _parameters(schema: Mapping[str, object]) -> dict[str, object]:
 
 
 class DeepSeekAdapter(NativeToolsAdapter):
-    """Keep canonical names/arguments while making union parameter types explicit."""
+    """Preserve tool semantics with explicit union types and nonblank patterns."""
 
     family = "deepseek"
+    version = "3"
+
+    def prepare_messages(
+        self, messages: Sequence[ProviderMessage]
+    ) -> tuple[ProviderMessage, ...]:
+        """DeepSeek requires the reasoning field even when a turn has none."""
+        return tuple(
+            replace(message, continuation={"reasoning_content": ""})
+            if message.role == "assistant" and not message.continuation
+            else message
+            for message in messages
+        )
 
     def prepare_tools(
         self, tools: Sequence[Mapping[str, object]]
@@ -70,6 +131,6 @@ class DeepSeekAdapter(NativeToolsAdapter):
             descriptor = dict(tool)
             schema = descriptor.get("parameters")
             if isinstance(schema, Mapping):
-                descriptor["parameters"] = _parameters(schema)
+                descriptor["parameters"] = _parameters(_patterns(schema))
             prepared.append(descriptor)
         return tuple(prepared)

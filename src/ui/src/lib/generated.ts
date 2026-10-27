@@ -119,7 +119,6 @@ export interface WireTypes {
 	WorkflowExecutionState: WorkflowExecutionState;
 	WorkflowExecutionWire: WorkflowExecutionWire;
 	WorkflowMetadataWire: WorkflowMetadataWire;
-	WorkflowSplitWire: WorkflowSplitWire;
 }
 export interface ActorRequest {
 	actor_id: string;
@@ -756,23 +755,19 @@ export interface UploadAttachmentRequest {
 	sha256: string;
 }
 export interface WorkflowDefinitionWire {
+	inputs: {
+		[k: string]: string[];
+	};
 	phases: string[];
-	splits: {
-		[k: string]: WorkflowSplitWire;
+	routes: {
+		[k: string]: {
+			[k: string]: string[];
+		};
 	};
 	terminal_phases: string[];
 	title: string;
-	transitions: {
-		[k: string]: string[];
-	};
 	version: string;
 	workflow_id: string;
-}
-export interface WorkflowSplitWire {
-	branches: {
-		[k: string]: string;
-	};
-	join: string;
 }
 export interface WorkflowMetadataWire {
 	after: number;

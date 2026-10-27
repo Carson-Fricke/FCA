@@ -84,18 +84,49 @@ class ResearchInvestigationRuntime:
             RegisteredTool(
                 descriptor={
                     "name": "read_research_investigations",
-                    "description": "Read accepted research products, never agent transcripts. Discovery may inspect its own branches by execution_id. Research phases may read only their own branch. Set handoff=0 for the full original brief, or a positive handoff index from the seed for that exact accepted completion. Reads with handoff or from a research phase return bounded JSON text with offset/nextOffset; follow pages to read the complete product. Without handoff, a phase reads the current accepted state including the repair ledger. No searches or mutations.",
+                    "description": (
+                        "Read accepted research products, never agent transcripts. "
+                        "Discovery may inspect only its child branches; a research phase "
+                        "may read only its own branch. Choose the product in the actual "
+                        "tool arguments: handoff=0 reads the original brief; "
+                        "handoff=5 reads accepted handoff 5 from the seed's index. "
+                        "handoff=null reads the full accepted state for a phase, "
+                        "or lists branches for discovery (execution_id selects one). "
+                        "For a known proposal, critique or adjudication, use its handoff "
+                        "instead of paging through the full state. Paged reads return "
+                        "content and nextArguments: copy that object unchanged into "
+                        "the next call until it is null. Supply all four arguments: "
+                        "execution_id=null selects the phase's own branch (or discovery's "
+                        "branch list), handoff=null selects state, offset=0 starts at "
+                        "the first page, and max_chars=6000 is a normal page size. Repeating "
+                        "the same arguments rereads the same page and never advances "
+                        "automatically. No searches or mutations."
+                    ),
                     "parameters": {
                         "type": "object",
                         "additionalProperties": False,
+                        "required": ["execution_id", "handoff", "offset", "max_chars"],
                         "properties": {
-                            "execution_id": {"type": "string", "minLength": 1},
-                            "handoff": {"type": "integer", "minimum": 0},
-                            "offset": {"type": "integer", "minimum": 0},
+                            "execution_id": {
+                                "type": ["string", "null"],
+                                "minLength": 1,
+                                "description": "Branch to read. Use its ID for discovery to select one child; use null for a phase's own branch or discovery's branch list. This argument alone does not select a handoff or advance a page.",
+                            },
+                            "handoff": {
+                                "type": ["integer", "null"],
+                                "minimum": 0,
+                                "description": "Product selector: 0 is the original brief; a positive integer is the exact accepted handoff index from the seed. Use null for current accepted state (phase) or branch inspection (discovery). Preserve it when paging.",
+                            },
+                            "offset": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Character offset into the selected product. Use 0 for the first page. For another page, use the returned nextArguments object (its offset equals nextOffset). Repeating offset 0 returns page zero again.",
+                            },
                             "max_chars": {
                                 "type": "integer",
                                 "minimum": 1,
                                 "maximum": 8000,
+                                "description": "Maximum content characters per page; use 6000 for a normal page or at most 8000. Preserved in nextArguments.",
                             },
                         },
                     },
@@ -108,7 +139,8 @@ class ResearchInvestigationRuntime:
     def read(
         self, arguments: Mapping[str, object], context: ToolContext
     ) -> ToolExecution:
-        selected = arguments.get("execution_id")
+        selected = arguments["execution_id"]
+        handoff = cast(int | None, arguments["handoff"])
         caller = self.conversations.store.get_sub_agent(
             context.workspace_id, context.sub_agent_id or ""
         )
@@ -130,11 +162,10 @@ class ResearchInvestigationRuntime:
             requests = [self.request(context.workspace_id, str(selected))]
         else:
             requests = self._read_requests(context, selected)
-        if "handoff" in arguments or own_branch:
+        if handoff is not None or own_branch:
             if len(requests) != 1:
                 raise ValueError("a paged research read requires one execution_id")
             request = requests[0]
-            handoff = cast(int | None, arguments.get("handoff"))
             if handoff == 0:
                 product = {
                     **cast(Mapping[str, object], request.payload["brief"]),
@@ -160,10 +191,17 @@ class ResearchInvestigationRuntime:
                     phase=caller.phase if own_branch and caller is not None else None,
                 )
             content = json.dumps(product, ensure_ascii=False, separators=(",", ":"))
-            offset = cast(int, arguments.get("offset", 0))
-            end = min(
-                len(content), offset + cast(int, arguments.get("max_chars", 6000))
-            )
+            offset = cast(int, arguments["offset"])
+            max_chars = cast(int, arguments["max_chars"])
+            end = min(len(content), offset + max_chars)
+            continuation: dict[str, object] | None = None
+            if end < len(content):
+                continuation = {
+                    "execution_id": request.execution_id,
+                    "handoff": handoff,
+                    "offset": end,
+                    "max_chars": max_chars,
+                }
             return ToolExecution(
                 ok=True,
                 structured={
@@ -171,6 +209,7 @@ class ResearchInvestigationRuntime:
                     "handoff": handoff,
                     "offset": offset,
                     "nextOffset": end if end < len(content) else None,
+                    "nextArguments": continuation,
                     "totalChars": len(content),
                     "content": content[offset:end],
                 },

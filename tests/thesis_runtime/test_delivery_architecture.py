@@ -9,6 +9,8 @@ selected structural checks do not certify the full behavioral contract.
 from __future__ import annotations
 
 import ast
+from copy import deepcopy
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -19,7 +21,13 @@ ROOT = next(
     if (parent / "pyproject.toml").is_file()
 )
 RUNTIME = ROOT / "src/thesis_runtime"
-NATIVE = {"ChatMessage", "ProviderChatMessage", "ToolCall", "normalize_tool_history"}
+NATIVE = {
+    "ProviderMessage",
+    "ChatMessage",
+    "ProviderChatMessage",
+    "ToolCall",
+    "normalize_tool_history",
+}
 ROLES = {"user", "assistant", "system", "tool"}
 REQUIRED = (
     "src/thesis_runtime/contracts/messages.py",
@@ -43,10 +51,31 @@ REQUIRED = (
 )
 
 
+@lru_cache(maxsize=32)
+def _parsed(path: str, source: str) -> ast.Module:
+    return ast.parse(source, filename=path)
+
+
 def _source(path: str) -> ast.Module:
+    # Every access still checks existence and reads current bytes. Only parsing
+    # identical content is shared; deleted or changed modules cannot hit a bypass.
     file = ROOT / path
     assert file.is_file(), f"Required Option 1 module is missing: {path}"
-    return ast.parse(file.read_text(encoding="utf-8"), filename=path)
+    return _parsed(path, file.read_text(encoding="utf-8"))
+
+
+def test_source_cache_observes_changed_and_missing_modules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(globals(), "ROOT", tmp_path)
+    source = tmp_path / "module.py"
+    source.write_text("value = 1\n", encoding="utf-8", newline="\n")
+    before = ast.dump(_source("module.py"))
+    source.write_text("value = 2\n", encoding="utf-8", newline="\n")
+    assert ast.dump(_source("module.py")) != before
+    source.unlink()
+    with pytest.raises(AssertionError, match="module is missing"):
+        _source("module.py")
 
 
 def _name(node: ast.AST | None) -> str:
@@ -57,6 +86,7 @@ def _name(node: ast.AST | None) -> str:
     return ""
 
 
+@lru_cache(maxsize=32)
 def _aliases(tree: ast.AST) -> dict[str, str]:
     aliases: dict[str, str] = {}
     for node in ast.walk(tree):
@@ -142,6 +172,19 @@ def _fields(tree: ast.ClassDef) -> dict[str, str]:
 
 def _incoming_create_errors(tree: ast.Module, path: str) -> list[str]:
     """Allow only the canonical writer and explicitly bounded output writes."""
+    # Resolving aliases can only reach create_message if that identifier occurs
+    # in an attribute, name or imported alias. Scan every module, including ones
+    # without calls; avoid building alias/parent maps for unrelated modules.
+    if not any(
+        isinstance(node, ast.Attribute)
+        and node.attr == "create_message"
+        or isinstance(node, ast.Name)
+        and node.id == "create_message"
+        or isinstance(node, ast.alias)
+        and node.name.rsplit(".", 1)[-1] == "create_message"
+        for node in ast.walk(tree)
+    ):
+        return []
     aliases = _aliases(tree)
     parents = {
         child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)
@@ -704,7 +747,12 @@ def test_adapter_is_pure_and_completion_uses_the_shared_projector() -> None:
     assert any(
         _name(call.func) == "project_native_messages" for call in _calls(preparation)
     )
-    assert any(_name(call.func) == "self.request_snapshot" for call in _calls(wrapper))
+    assert any(_name(call.func) == "self._snapshot" for call in _calls(wrapper))
+    assert any(_name(call.func) == "self._snapshot" for call in _calls(preparation))
+    assert not any(
+        _name(call.func) in {"ProviderMessage", "ChatMessage"}
+        for call in _calls(wrapper)
+    ), "Execution must not reconstruct messages from the audit snapshot"
     assert any(_name(call.func) == "SessionMessage" for call in _calls(wrapper))
     for path in (
         "src/thesis_runtime/sessions/session.py",
@@ -906,7 +954,7 @@ def test_model_snapshot_is_durable_before_provider_execution() -> None:
             _function(_class(tree, "ModelInvocation"), method)
         )
     adapter = _source("src/thesis_runtime/adapters/providers/session_adapter.py")
-    snapshot = _function(_class(adapter, "NativeSessionAdapter"), "request_snapshot")
+    snapshot = _function(_class(adapter, "NativeSessionAdapter"), "_snapshot")
     keys = {
         key.value
         for node in ast.walk(snapshot)
@@ -994,7 +1042,7 @@ def test_snapshot_guard_rejects_full_or_inexact_message_audits(expression: str) 
 
 def test_snapshot_guard_rejects_terminal_audit_loss() -> None:
     tree = _source("src/thesis_runtime/sessions/model_invocation.py")
-    terminal = _function(_class(tree, "ModelInvocation"), "commit")
+    terminal = deepcopy(_function(_class(tree, "ModelInvocation"), "commit"))
     update = next(call for call in _calls(terminal) if _name(call.func) == "replace")
     update.keywords.append(
         ast.keyword(arg="provider_request", value=ast.Constant(None))

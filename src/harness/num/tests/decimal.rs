@@ -92,3 +92,26 @@ fn try_from_matches_the_checked_method_for_finite_values() {
         assert_eq!(f64::try_from(value), value.to_f64_checked());
     }
 }
+#[test]
+fn exact_arithmetic_keeps_context_precision_scale_sign_and_exponent() {
+    use num::{Context, Decimal, RoundingMode};
+    for (left, right, expected) in [
+        ("800.00", "2", "400.00"),
+        ("1.00", "2.0", "0.5"),
+        ("-1.00", "2", "-0.50"),
+        ("-0.00", "2.0", "-0.0"),
+        ("1E+20", "2", "5E+19"),
+        ("864.250000000000000000", "2", "432.125000000000000000"),
+    ] {
+        let result = left.parse::<Decimal>().unwrap().checked_div(right.parse().unwrap()).unwrap();
+        assert_eq!(result.to_string(), expected, "{left}/{right}");
+    }
+    for (mode, expected) in [(RoundingMode::HalfEven, "6.2E+2"), (RoundingMode::Truncate, "6.1E+2")] {
+        let context = Context::new(2, mode);
+        let result = "1234".parse::<Decimal>().unwrap().checked_div_with("2".parse().unwrap(), &context).unwrap();
+        assert_eq!(result.to_string(), expected);
+    }
+    let sum = "432.100000000000000000".parse::<Decimal>().unwrap()
+        .checked_add("432.150000000000000000".parse().unwrap()).unwrap();
+    assert_eq!(sum.to_string(), "864.250000000000000000");
+}

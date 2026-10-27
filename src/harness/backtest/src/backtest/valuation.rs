@@ -295,6 +295,33 @@ pub struct ValuationHistory {
     samples: u64,
 }
 
+/// Execution scratch for rounded returns, including exact zero-return weights.
+/// Errors need no encoded placeholder: an overflow makes the mean undefined,
+/// and that same mean controls whether variance can consume any cached value.
+#[derive(Clone)]
+struct ReturnRun {
+    value: Decimal18,
+    samples: u64,
+    flat: u64,
+}
+
+impl Record for ReturnRun {
+    fn encode(&self, output: &mut Vec<u8>) {
+        output.extend(self.value.unscaled().to_le_bytes());
+        output.extend(self.samples.to_le_bytes());
+        output.extend(self.flat.to_le_bytes());
+    }
+
+    fn decode(input: &mut &[u8]) -> std::io::Result<Self> {
+        Ok(Self {
+            value: Decimal18::from_unscaled(i128::from_le_bytes(take(input)?))
+                .map_err(std::io::Error::other)?,
+            samples: u64::from_le_bytes(take(input)?),
+            flat: u64::from_le_bytes(take(input)?),
+        })
+    }
+}
+
 impl ValuationHistory {
     pub fn sample_count(&self) -> u64 {
         self.samples
@@ -313,9 +340,22 @@ impl ValuationHistory {
             output: History::new(self.rows.resources()),
             ..ReportSampler::default()
         };
+        let mut returns = History::new(self.rows.resources());
         for row in self.iter()? {
             let row = row?;
-            summary.push(row.point());
+            let sample = summary.push_and_return(row.point());
+            let (value, mut samples) = match sample {
+                Some(Ok(value)) => (value, 1),
+                _ => (Decimal18::ZERO, 0),
+            };
+            let mut flat = row.samples - 1;
+            if value.is_zero() {
+                samples += flat;
+                flat = 0;
+            }
+            // One return record per valuation record keeps the spill threshold
+            // and caller-supplied scratch requirement aligned with the source.
+            returns.push(ReturnRun { value, samples, flat })?;
             summary.extend_flat(row.end_timestamp_ns, row.samples as usize - 1);
             sampler.push(row.first())?;
             if row.samples > 1 {
@@ -323,10 +363,10 @@ impl ValuationHistory {
             }
         }
         let mut variance = summary.variance();
-        for row in self.iter()? {
-            let row = row?;
-            variance.push(row.point());
-            variance.extend_flat(row.end_timestamp_ns, row.samples as usize - 1);
+        for run in returns.iter()? {
+            let run = run?;
+            variance.add_returns(Ok(run.value), run.samples);
+            variance.add_returns(Ok(Decimal18::ZERO), run.flat);
         }
         Ok((summary.finish(variance), sampler.finish()?))
     }

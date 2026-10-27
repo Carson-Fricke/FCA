@@ -8,7 +8,10 @@ This capability follows the ownership boundaries in `.github/architecture/reposi
 - `error.rs`: Owns typed failures crossing research configuration, acquisition and publication boundaries.
 - `ledger.rs`: Owns fill-to-trade reconstruction and exact valuation/report projections.
 - `lib.rs`: Owns replay/screening job composition, acquisition and artifact publication.
-- `market_replay.rs`: Owns lake snapshot planning, bounded cursor threads and chronological merging.
+- `market_replay.rs`: Owns lake snapshot planning, bounded cursor threads and
+  chronological merging through a fixed tournament over at most 32 cursor heads.
+  Maps bound Arrow batches directly into replay events, moving identifiers through
+  acquisition instead of retaining an intermediate normalized-event vector.
 - `publishing.rs`: Owns current research artifact paths, Parquet/report writes and publication progress.
 - `replay.rs`: Owns application composition from acquired inputs through replay and result publication.
 - `run.rs`: Configuration-level run entry points over the JIT seam.

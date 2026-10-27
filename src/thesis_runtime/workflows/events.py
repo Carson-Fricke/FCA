@@ -25,17 +25,16 @@ from thesis_runtime.workflows.graph import Graph
 
 
 def graph_payload(graph: Graph) -> dict[str, object]:
-    """Present a frontier and pending joins; this is never execution authority."""
+    """Present a frontier and pending inputs; this is never execution authority."""
     return {
         "activePhases": list(graph.positions),
         "controlSequence": graph.sequence,
-        "joins": {
-            region.split.join: {
-                "arrived": list(region.arrivals),
-                "required": list(region.split.branches),
-                "splitAttemptId": key,
+        "pendingInputs": {
+            name: {
+                "arrived": list(pending.arrivals),
+                "required": list(pending.required),
             }
-            for key, region in graph.regions.items()
+            for name, pending in graph.pending.items()
         },
     }
 

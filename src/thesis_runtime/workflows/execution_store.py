@@ -20,6 +20,8 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Protocol
 
+from thesis_runtime.workflows.graph.contracts import ActivityCompletion
+
 #: Default launch-request payload for an execution created without one.
 _EMPTY_REQUEST: Mapping[str, object] = {}
 
@@ -117,7 +119,7 @@ class StoreTransition:
 
     sequence: int
     from_phase: str
-    to_phase: str
+    route: str
     occurred_at: datetime
     intent_epoch: int
     reason: str
@@ -131,7 +133,7 @@ class StoreTransition:
         if self.sequence < 1:
             raise ExecutionStoreError("transition sequence starts at one")
         object.__setattr__(self, "from_phase", _text(self.from_phase, "from_phase"))
-        object.__setattr__(self, "to_phase", _text(self.to_phase, "to_phase"))
+        object.__setattr__(self, "route", _text(self.route, "route"))
         object.__setattr__(
             self, "occurred_at", _moment(self.occurred_at, "occurred_at")
         )
@@ -142,12 +144,16 @@ class StoreTransition:
         object.__setattr__(self, "attempt_id", _text(self.attempt_id, "attempt_id"))
         if not isinstance(self.completion, Mapping):
             raise ExecutionStoreError("completion must be a mapping")
-        object.__setattr__(self, "completion", dict(self.completion))
+        try:
+            validated = ActivityCompletion(self.route, self.completion)
+        except (TypeError, ValueError) as error:
+            raise ExecutionStoreError(str(error)) from error
+        object.__setattr__(self, "completion", dict(validated.output))
 
     def as_dict(self) -> dict[str, object]:
         """Return the canonical, JSON-ready transition."""
         return {
-            "completion": dict(self.completion),
+            "output": dict(self.completion),
             "attemptId": self.attempt_id,
             "executorId": self.executor_id,
             "fromPhase": self.from_phase,
@@ -157,15 +163,18 @@ class StoreTransition:
             .replace("+00:00", "Z"),
             "reason": self.reason,
             "sequence": self.sequence,
-            "toPhase": self.to_phase,
+            "route": self.route,
         }
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, object]) -> StoreTransition:
         """Rebuild one transition from its canonical transport form."""
-        if "attemptId" not in payload or "executorId" not in payload:
+        if any(
+            name not in payload
+            for name in ("attemptId", "executorId", "route", "output")
+        ):
             raise ExecutionStoreError(
-                "outdated workflow history: explicit attemptId and executorId are required"
+                "outdated workflow history: explicit activation, route and output are required"
             )
         occurred_at = payload["occurredAt"]
         try:
@@ -174,13 +183,13 @@ class StoreTransition:
             raise ExecutionStoreError(
                 "transition occurredAt must be an ISO-8601 timestamp"
             ) from error
-        completion = payload["completion"]
+        completion = payload["output"]
         if not isinstance(completion, Mapping):
             raise ExecutionStoreError("completion must be a mapping")
         return cls(
             sequence=_count(payload["sequence"], "sequence"),
             from_phase=str(payload["fromPhase"]),
-            to_phase=str(payload["toPhase"]),
+            route=str(payload["route"]),
             occurred_at=moment,
             intent_epoch=_count(payload["intentEpoch"], "intent_epoch"),
             reason=str(payload["reason"]),

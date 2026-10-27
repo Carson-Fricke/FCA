@@ -6,10 +6,10 @@ from unittest.mock import Mock
 from fastapi.testclient import TestClient
 
 from thesis.http.application import create_app
+from thesis_runtime.workflows.graph.contracts import Destination
 from thesis_runtime.workflows.phase import (
     ConversationPhase,
     DeterministicPhase,
-    SplitPhase,
     TerminalPhase,
 )
 from thesis_runtime.workflows.registry import WorkflowRegistration, WorkflowRegistry
@@ -31,11 +31,15 @@ def test_definition_preserves_topology_and_prefix_parity_without_executing() -> 
             ConversationPhase(phase="repair"),
             TerminalPhase(phase="publish"),
         ),
-        transitions={
-            "draft": frozenset({"review", "draft"}),
-            "review": frozenset({"publish", "repair"}),
-            "repair": frozenset({"draft"}),
-            "publish": frozenset(),
+        routes={
+            "draft": {
+                name: (Destination(name, "input"),) for name in ("review", "draft")
+            },
+            "review": {
+                name: (Destination(name, "input"),) for name in ("publish", "repair")
+            },
+            "repair": {"draft": (Destination("draft", "input"),)},
+            "publish": {},
         },
     )
     execute = Mock(side_effect=AssertionError("must not execute"))
@@ -57,37 +61,46 @@ def test_definition_preserves_topology_and_prefix_parity_without_executing() -> 
                 "title": "Custom research",
                 "phases": ["draft", "review", "repair", "publish"],
                 "terminal_phases": ["publish"],
-                "splits": {},
-                "transitions": {
-                    "draft": ["draft", "review"],
-                    "review": ["publish", "repair"],
-                    "repair": ["draft"],
-                    "publish": [],
+                "inputs": {
+                    name: ["input"] for name in ("draft", "review", "repair", "publish")
+                },
+                "routes": {
+                    "draft": {name: [f"{name}.input"] for name in ("review", "draft")},
+                    "review": {
+                        name: [f"{name}.input"] for name in ("publish", "repair")
+                    },
+                    "repair": {"draft": ["draft.input"]},
+                    "publish": {},
                 },
             }
     execute.assert_not_called()
 
 
-def test_definition_exposes_fixed_split_membership_and_its_deterministic_join() -> None:
+def test_definition_exposes_fanout_routes_and_named_aggregation_inputs() -> None:
     spec: WorkflowSpec[Any, Any, Any] = WorkflowSpec(
         workflow_id="parallel-review",
         version="1.0.0",
         title="Parallel review",
         phases=(
-            SplitPhase(
-                phase="split", branches={"left": "left", "right": "right"}, join="join"
-            ),
+            ConversationPhase(phase="start"),
             ConversationPhase(phase="left"),
             ConversationPhase(phase="right"),
-            DeterministicPhase(phase="join", contract="combine", on_complete="done"),
+            DeterministicPhase(
+                phase="join",
+                inputs=("left", "right"),
+                contract="combine",
+                on_complete="done",
+            ),
             TerminalPhase(phase="done"),
         ),
-        transitions={
-            "split": frozenset({"left", "right"}),
-            "left": frozenset({"join"}),
-            "right": frozenset({"join"}),
-            "join": frozenset({"done"}),
-            "done": frozenset(),
+        routes={
+            "start": {
+                "review": (Destination("left", "input"), Destination("right", "input"))
+            },
+            "left": {"join": (Destination("join", "left"),)},
+            "right": {"join": (Destination("join", "right"),)},
+            "join": {"done": (Destination("done", "input"),)},
+            "done": {},
         },
     )
     execute = Mock()
@@ -100,9 +113,10 @@ def test_definition_exposes_fixed_split_membership_and_its_deterministic_join() 
     ) as client:
         response = client.get("/v1/workflows/parallel-review", headers=HEADERS)
         assert response.status_code == 200
-        assert response.json()["splits"] == {
-            "split": {"branches": {"left": "left", "right": "right"}, "join": "join"}
+        assert response.json()["routes"]["start"] == {
+            "review": ["left.input", "right.input"]
         }
+        assert response.json()["inputs"]["join"] == ["left", "right"]
     execute.assert_not_called()
 
 
@@ -129,7 +143,7 @@ def test_builtin_definition_and_current_version_checks_without_execution_service
         assert response.status_code == 200
         definition = response.json()
         assert definition["workflow_id"] == "hypothesis-development"
-        assert definition["splits"] == {}
+        assert set(definition["inputs"]) == set(definition["phases"])
         current_version = definition["version"]
         assert (
             client.get(
@@ -138,12 +152,10 @@ def test_builtin_definition_and_current_version_checks_without_execution_service
             == definition
         )
         assert definition["phases"][:2] == ["discovery", "model_creation"]
-        assert {"model_creation", "discovery"} <= set(
-            definition["transitions"]["verdict"]
-        )
+        assert {"model_creation", "discovery"} <= set(definition["routes"]["verdict"])
         assert definition["terminal_phases"] == ["completed", "failed"]
-        assert definition["transitions"]["completed"] == []
-        assert definition["transitions"]["failed"] == []
+        assert definition["routes"]["completed"] == {}
+        assert definition["routes"]["failed"] == {}
         for version in ("not-current", ""):
             response = client.get(path, params={"version": version}, headers=HEADERS)
             assert response.status_code == 409

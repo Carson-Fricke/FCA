@@ -17,11 +17,11 @@ from thesis_runtime.adapters.providers.foundry import (
     runtime_capability_preflight,
 )
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage,
     InMemoryInvocationLedger,
     InvocationLedger,
     ModelCompletion,
     ModelInvocation,
+    ProviderMessage,
     ProviderProfileView,
     ProviderRejectedError,
     ProviderUnreachableError,
@@ -42,7 +42,7 @@ from thesis_runtime.adapters.providers.openrouter import (
 )
 
 __all__ = [
-    "ChatMessage",
+    "ProviderMessage",
     "DEFAULT_BASE_URL",
     "EnvironmentKeySource",
     "EntraAccessToken",

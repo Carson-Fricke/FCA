@@ -16,7 +16,6 @@ from thesis_runtime.workflows.phase import (
     DeterministicPhase,
     OneShotPhase,
     PhaseSpec,
-    SplitPhase,
     TerminalPhase,
 )
 from thesis_runtime.workflows.registry import (
@@ -46,7 +45,6 @@ __all__ = [
     "DeterministicPhase",
     "OneShotPhase",
     "PhaseSpec",
-    "SplitPhase",
     "TERMINAL_EXECUTION_STATES",
     "TerminalPhase",
     "UnknownWorkflowError",

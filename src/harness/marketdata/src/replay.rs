@@ -11,6 +11,8 @@
 //! run. Frames are `u64` big-endian length prefixes of UTF-8 field text, exactly
 //! matching `harness.data.replay._canonical_fields` and `_update_frame`.
 
+use std::borrow::Cow;
+
 use arrow_array::Array;
 use arrow_array::Decimal128Array;
 use arrow_array::Int64Array;
@@ -52,11 +54,24 @@ pub fn events_from_arrow(
     symbol: &str,
     batches: &[RecordBatch],
 ) -> Result<Vec<MarketEvent>, DataError> {
-    let mut events = Vec::new();
-    let mut row_number = 0usize;
+    map_arrow_events(data_type, symbol, batches, |event| event)
+}
+
+/// Decode directly into the caller's event representation. Column types are
+/// bound once per batch; the mapper takes ownership without an intermediate
+/// normalized-event vector or identifier copies.
+pub fn map_arrow_events<T>(
+    data_type: DataType,
+    symbol: &str,
+    batches: &[RecordBatch],
+    mut map: impl FnMut(MarketEvent) -> T,
+) -> Result<Vec<T>, DataError> {
+    let mut events = Vec::with_capacity(batches.iter().map(RecordBatch::num_rows).sum());
+    let mut row_number = 0;
     for batch in batches {
+        let bound = BoundBatch::new(batch);
         for row in 0..batch.num_rows() {
-            events.push(row_event(data_type, symbol, batch, row, row_number)?);
+            events.push(map(row_event(data_type, symbol, &bound, row, row_number)?));
             row_number += 1;
         }
     }
@@ -84,8 +99,9 @@ pub fn events_from_parquet(
     let mut row_number = 0usize;
     for batch in reader {
         let batch = batch.map_err(|error| DataError::value(format!("parquet batch: {error}")))?;
+        let bound = BoundBatch::new(&batch);
         for row in 0..batch.num_rows() {
-            events.push(row_event(data_type, symbol, &batch, row, row_number)?);
+            events.push(row_event(data_type, symbol, &bound, row, row_number)?);
             row_number += 1;
         }
     }
@@ -96,7 +112,7 @@ pub fn events_from_parquet(
 fn row_event(
     data_type: DataType,
     source_symbol: &str,
-    batch: &RecordBatch,
+    batch: &BoundBatch<'_>,
     row: usize,
     row_number: usize,
 ) -> Result<MarketEvent, DataError> {
@@ -104,11 +120,12 @@ fn row_event(
         .ok_or_else(|| DataError::value("lake replay rows must contain datetime timestamps"))?;
     let raw_symbol = string_value(batch, "symbol", row)?
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| source_symbol.to_string());
+        .unwrap_or_else(|| Cow::Borrowed(source_symbol));
     let symbol = canonical_symbol(&raw_symbol)?;
     let event_id = string_value(batch, "event_id", row)?
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| format!("{source_symbol}#{row_number}"));
+        .unwrap_or_else(|| Cow::Owned(format!("{source_symbol}#{row_number}")))
+        .into_owned();
     let sequence = integer_value(batch, "sequence", row)?
         .or(integer_value(batch, "trade_id", row)?)
         .unwrap_or(row_number as i64);
@@ -128,7 +145,8 @@ fn row_event(
             let venue = string_value(batch, "venue", row)?
                 .or(string_value(batch, "bid_exchange", row)?)
                 .or(string_value(batch, "ask_exchange", row)?)
-                .filter(|value| !value.is_empty());
+                .filter(|value| !value.is_empty())
+                .map(Cow::into_owned);
             Ok(MarketEvent::Quote(QuoteEvent {
                 event_id,
                 timestamp,
@@ -149,8 +167,11 @@ fn row_event(
                 .ok_or_else(|| DataError::value("trade row is missing quantity"))?;
             let venue = string_value(batch, "venue", row)?
                 .or(string_value(batch, "exchange", row)?)
-                .filter(|value| !value.is_empty());
-            let trade_id = string_value(batch, "trade_id", row)?.filter(|value| !value.is_empty());
+                .filter(|value| !value.is_empty())
+                .map(Cow::into_owned);
+            let trade_id = string_value(batch, "trade_id", row)?
+                .filter(|value| !value.is_empty())
+                .map(Cow::into_owned);
             Ok(MarketEvent::Trade(TradeEvent {
                 event_id,
                 timestamp,
@@ -191,98 +212,178 @@ fn row_event(
     }
 }
 
-fn column_index(batch: &arrow_array::RecordBatch, name: &str) -> Option<usize> {
-    batch
-        .schema()
-        .fields()
-        .iter()
-        .position(|field| field.name() == name)
+#[derive(Clone, Copy)]
+enum Column<'a> {
+    Missing,
+    Unsupported(&'a dyn Array),
+    Text(&'a StringArray),
+    U64(&'a UInt64Array),
+    I64(&'a Int64Array),
+    U32(&'a arrow_array::UInt32Array),
+    Decimal(&'a Decimal128Array),
+    Nanos(&'a TimestampNanosecondArray),
+    Micros(&'a TimestampMicrosecondArray),
 }
-
-fn string_value(
-    batch: &arrow_array::RecordBatch,
-    name: &str,
-    row: usize,
-) -> Result<Option<String>, DataError> {
-    let Some(index) = column_index(batch, name) else {
+impl<'a> Column<'a> {
+    fn bind(batch: &'a RecordBatch, name: &str) -> Self {
+        let Some(column) = batch.column_by_name(name) else {
+            return Self::Missing;
+        };
+        let array = column.as_any();
+        if let Some(array) = array.downcast_ref::<StringArray>() {
+            return Self::Text(array);
+        }
+        if let Some(array) = array.downcast_ref::<UInt64Array>() {
+            return Self::U64(array);
+        }
+        if let Some(array) = array.downcast_ref::<Int64Array>() {
+            return Self::I64(array);
+        }
+        if let Some(array) = array.downcast_ref::<arrow_array::UInt32Array>() {
+            return Self::U32(array);
+        }
+        if let Some(array) = array.downcast_ref::<Decimal128Array>() {
+            return Self::Decimal(array);
+        }
+        if let Some(array) = array.downcast_ref::<TimestampNanosecondArray>() {
+            return Self::Nanos(array);
+        }
+        if let Some(array) = array.downcast_ref::<TimestampMicrosecondArray>() {
+            return Self::Micros(array);
+        }
+        Self::Unsupported(column.as_ref())
+    }
+    fn present(self, row: usize) -> Option<Self> {
+        let null = match self {
+            Self::Missing => true,
+            Self::Unsupported(a) => a.is_null(row),
+            Self::Text(a) => a.is_null(row),
+            Self::U64(a) => a.is_null(row),
+            Self::I64(a) => a.is_null(row),
+            Self::U32(a) => a.is_null(row),
+            Self::Decimal(a) => a.is_null(row),
+            Self::Nanos(a) => a.is_null(row),
+            Self::Micros(a) => a.is_null(row),
+        };
+        (!null).then_some(self)
+    }
+}
+struct BoundBatch<'a> {
+    timestamp: Column<'a>,
+    symbol: Column<'a>,
+    event_id: Column<'a>,
+    sequence: Column<'a>,
+    trade_id: Column<'a>,
+    bid_price: Column<'a>,
+    ask_price: Column<'a>,
+    bid_quantity: Column<'a>,
+    bid_size: Column<'a>,
+    ask_quantity: Column<'a>,
+    ask_size: Column<'a>,
+    venue: Column<'a>,
+    bid_exchange: Column<'a>,
+    ask_exchange: Column<'a>,
+    price: Column<'a>,
+    quantity: Column<'a>,
+    size: Column<'a>,
+    exchange: Column<'a>,
+    open: Column<'a>,
+    high: Column<'a>,
+    low: Column<'a>,
+    close: Column<'a>,
+    volume: Column<'a>,
+}
+impl<'a> BoundBatch<'a> {
+    fn new(batch: &'a RecordBatch) -> Self {
+        Self {
+            timestamp: Column::bind(batch, "timestamp"),
+            symbol: Column::bind(batch, "symbol"),
+            event_id: Column::bind(batch, "event_id"),
+            sequence: Column::bind(batch, "sequence"),
+            trade_id: Column::bind(batch, "trade_id"),
+            bid_price: Column::bind(batch, "bid_price"),
+            ask_price: Column::bind(batch, "ask_price"),
+            bid_quantity: Column::bind(batch, "bid_quantity"),
+            bid_size: Column::bind(batch, "bid_size"),
+            ask_quantity: Column::bind(batch, "ask_quantity"),
+            ask_size: Column::bind(batch, "ask_size"),
+            venue: Column::bind(batch, "venue"),
+            bid_exchange: Column::bind(batch, "bid_exchange"),
+            ask_exchange: Column::bind(batch, "ask_exchange"),
+            price: Column::bind(batch, "price"),
+            quantity: Column::bind(batch, "quantity"),
+            size: Column::bind(batch, "size"),
+            exchange: Column::bind(batch, "exchange"),
+            open: Column::bind(batch, "open"),
+            high: Column::bind(batch, "high"),
+            low: Column::bind(batch, "low"),
+            close: Column::bind(batch, "close"),
+            volume: Column::bind(batch, "volume"),
+        }
+    }
+    fn column(&self, name: &str) -> Column<'a> {
+        match name {
+            "timestamp" => self.timestamp,
+            "symbol" => self.symbol,
+            "event_id" => self.event_id,
+            "sequence" => self.sequence,
+            "trade_id" => self.trade_id,
+            "bid_price" => self.bid_price,
+            "ask_price" => self.ask_price,
+            "bid_quantity" => self.bid_quantity,
+            "bid_size" => self.bid_size,
+            "ask_quantity" => self.ask_quantity,
+            "ask_size" => self.ask_size,
+            "venue" => self.venue,
+            "bid_exchange" => self.bid_exchange,
+            "ask_exchange" => self.ask_exchange,
+            "price" => self.price,
+            "quantity" => self.quantity,
+            "size" => self.size,
+            "exchange" => self.exchange,
+            "open" => self.open,
+            "high" => self.high,
+            "low" => self.low,
+            "close" => self.close,
+            "volume" => self.volume,
+            _ => Column::Missing,
+        }
+    }
+}
+fn string_value<'a>(batch: &BoundBatch<'a>, name: &str, row: usize) -> Result<Option<Cow<'a, str>>, DataError> {
+    let Some(column) = batch.column(name).present(row) else {
         return Ok(None);
     };
-    let column = batch.column(index);
-    if column.is_null(row) {
-        return Ok(None);
-    }
-    if let Some(array) = column.as_any().downcast_ref::<StringArray>() {
-        return Ok(Some(array.value(row).to_string()));
-    }
-    if let Some(array) = column.as_any().downcast_ref::<UInt64Array>() {
-        return Ok(Some(array.value(row).to_string()));
-    }
-    if let Some(array) = column.as_any().downcast_ref::<Int64Array>() {
-        return Ok(Some(array.value(row).to_string()));
-    }
-    if let Some(array) = column.as_any().downcast_ref::<arrow_array::UInt32Array>() {
-        return Ok(Some(array.value(row).to_string()));
-    }
-    Err(DataError::value(format!(
-        "Parquet column {name} must be a UTF-8 string"
-    )))
+    Ok(Some(match column {
+        Column::Text(a) => Cow::Borrowed(a.value(row)),
+        Column::U64(a) => Cow::Owned(a.value(row).to_string()),
+        Column::I64(a) => Cow::Owned(a.value(row).to_string()),
+        Column::U32(a) => Cow::Owned(a.value(row).to_string()),
+        _ => return Err(DataError::value(format!("Parquet column {name} must be a UTF-8 string"))),
+    }))
 }
-
-fn integer_value(
-    batch: &arrow_array::RecordBatch,
-    name: &str,
-    row: usize,
-) -> Result<Option<i64>, DataError> {
-    let Some(index) = column_index(batch, name) else {
+fn integer_value(batch: &BoundBatch<'_>, name: &str, row: usize) -> Result<Option<i64>, DataError> {
+    let Some(column) = batch.column(name).present(row) else {
         return Ok(None);
     };
-    let column = batch.column(index);
-    if column.is_null(row) {
-        return Ok(None);
-    }
-    if let Some(array) = column.as_any().downcast_ref::<UInt64Array>() {
-        return Ok(Some(array.value(row) as i64));
-    }
-    if let Some(array) = column.as_any().downcast_ref::<Int64Array>() {
-        return Ok(Some(array.value(row)));
-    }
-    if let Some(array) = column.as_any().downcast_ref::<arrow_array::UInt32Array>() {
-        return Ok(Some(i64::from(array.value(row))));
-    }
-    Err(DataError::value(format!(
-        "Parquet column {name} must be an integer"
-    )))
+    Ok(Some(match column {
+        Column::U64(a) => a.value(row) as i64,
+        Column::I64(a) => a.value(row),
+        Column::U32(a) => i64::from(a.value(row)),
+        _ => return Err(DataError::value(format!("Parquet column {name} must be an integer"))),
+    }))
 }
-
-fn decimal_value(
-    batch: &arrow_array::RecordBatch,
-    name: &str,
-    row: usize,
-) -> Result<Option<Decimal18>, DataError> {
-    let Some(index) = column_index(batch, name) else {
+fn decimal_value(batch: &BoundBatch<'_>, name: &str, row: usize) -> Result<Option<Decimal18>, DataError> {
+    let Some(column) = batch.column(name).present(row) else {
         return Ok(None);
     };
-    let column = batch.column(index);
-    if column.is_null(row) {
-        return Ok(None);
-    }
-    if let Some(array) = column.as_any().downcast_ref::<Decimal128Array>() {
-        let unscaled = array.value(row);
-        let adjusted = rescale(unscaled, array.scale())?;
-        return Ok(Some(Decimal18::from_unscaled(adjusted)?));
-    }
-    if let Some(array) = column.as_any().downcast_ref::<arrow_array::UInt32Array>() {
-        return Ok(Some(Decimal18::from_i64(i64::from(array.value(row)))));
-    }
-    if let Some(array) = column.as_any().downcast_ref::<UInt64Array>() {
-        return Ok(Some(Decimal18::from_i64(array.value(row) as i64)));
-    }
-    if let Some(array) = column.as_any().downcast_ref::<Int64Array>() {
-        return Ok(Some(Decimal18::from_i64(array.value(row))));
-    }
-    Err(DataError::value(format!(
-        "Parquet column {name} must be a decimal128 or integer"
-    )))
+    Ok(Some(match column {
+        Column::Decimal(a) => Decimal18::from_unscaled(rescale(a.value(row), a.scale())?)?,
+        Column::U64(a) => Decimal18::from_i64(a.value(row) as i64),
+        Column::I64(a) => Decimal18::from_i64(a.value(row)),
+        Column::U32(a) => Decimal18::from_i64(i64::from(a.value(row))),
+        _ => return Err(DataError::value(format!("Parquet column {name} must be a decimal128 or integer"))),
+    }))
 }
 
 /// Rescale a decimal128 unscaled value to the crate's fixed scale 18.
@@ -306,27 +407,15 @@ fn rescale(unscaled: i128, scale: i8) -> Result<i128, DataError> {
     }
 }
 
-fn read_timestamp(
-    batch: &arrow_array::RecordBatch,
-    name: &str,
-    row: usize,
-) -> Result<Option<DateTime>, DataError> {
-    let Some(index) = column_index(batch, name) else {
+fn read_timestamp(batch: &BoundBatch<'_>, name: &str, row: usize) -> Result<Option<DateTime>, DataError> {
+    let Some(column) = batch.column(name).present(row) else {
         return Ok(None);
     };
-    let column = batch.column(index);
-    if column.is_null(row) {
-        return Ok(None);
-    }
-    if let Some(array) = column.as_any().downcast_ref::<TimestampNanosecondArray>() {
-        return Ok(Some(DateTime::from_nanos(array.value(row))));
-    }
-    if let Some(array) = column.as_any().downcast_ref::<TimestampMicrosecondArray>() {
-        return Ok(Some(DateTime::from_micros(array.value(row))));
-    }
-    Err(DataError::value(format!(
-        "Parquet column {name} must be a timestamp"
-    )))
+    Ok(Some(match column {
+        Column::Nanos(a) => DateTime::from_nanos(a.value(row)),
+        Column::Micros(a) => DateTime::from_micros(a.value(row)),
+        _ => return Err(DataError::value(format!("Parquet column {name} must be a timestamp"))),
+    }))
 }
 
 /// One explicitly ordered, per-symbol event stream.

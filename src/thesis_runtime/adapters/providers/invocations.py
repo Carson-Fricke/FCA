@@ -1,4 +1,8 @@
-"""Immutable invocation records, typed provider errors, and role bindings."""
+"""Provider messages, completion accounting and immutable invocation attribution.
+
+Requests and responses share ProviderMessage and one wire encoder. Canonical
+delivery, persistence and session execution remain outside this provider boundary.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +14,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal, Protocol
 
+from thesis_runtime.adapters.providers.reasoning import (
+    freeze_continuation,
+    reasoning_fields,
+    reasoning_text,
+)
 from thesis_runtime.contracts.errors import (
     ProviderRejectedError,
     ProviderUnreachableError,
@@ -77,8 +86,8 @@ class ToolCall:
 
 
 @dataclass(frozen=True, slots=True)
-class ChatMessage:
-    """One chat message sent to a provider; carries no credentials.
+class ProviderMessage:
+    """The single provider message value, shared by requests and completions.
 
     ``tool_calls`` is set on an assistant message that requested functions and
     ``tool_call_id`` on the matching ``tool`` role result.  Assistant messages
@@ -89,12 +98,25 @@ class ChatMessage:
     content: str
     tool_calls: tuple[ToolCall, ...] = ()
     tool_call_id: str | None = None
+    continuation: Mapping[str, object] | None = None
+    display_reasoning: str | None = None
 
     def __post_init__(self) -> None:
         if self.role not in _CHAT_ROLES:
             raise ValueError(f"unsupported chat message role: {self.role}")
         if not isinstance(self.content, str):
             raise ValueError("chat message content must be text")
+        if self.display_reasoning is not None and not isinstance(
+            self.display_reasoning, str
+        ):
+            raise ValueError("display reasoning must be text")
+        object.__setattr__(self, "tool_calls", tuple(self.tool_calls))
+        if self.continuation is not None:
+            if self.role != "assistant":
+                raise ValueError("only assistant messages may carry continuation")
+            object.__setattr__(
+                self, "continuation", freeze_continuation(self.continuation)
+            )
         for call in self.tool_calls:
             if not isinstance(call, ToolCall):
                 raise ValueError("tool_calls must contain ToolCall values")
@@ -105,40 +127,53 @@ class ChatMessage:
             raise ValueError("only tool messages may carry a tool_call_id")
         if self.tool_calls and self.role != "assistant":
             raise ValueError("only assistant messages may carry tool_calls")
-        if not self.content.strip() and not self.tool_calls:
+        if (
+            self.role != "assistant"
+            and not self.content.strip()
+            and not self.tool_calls
+        ):
             raise ValueError("chat message content must be non-empty")
+
+    @property
+    def reasoning(self) -> str:
+        """Readable projection; continuation remains exact provider data."""
+        if self.display_reasoning is not None:
+            return self.display_reasoning
+        return reasoning_text(self.continuation or {})
+
+    def as_wire(self) -> dict[str, object]:
+        """Encode once for request audits and provider transport alike."""
+        result: dict[str, object] = {"role": self.role, "content": self.content}
+        if self.tool_calls:
+            result["tool_calls"] = [call.as_wire() for call in self.tool_calls]
+        if self.tool_call_id is not None:
+            result["tool_call_id"] = self.tool_call_id
+        if self.continuation is not None:
+            result.update(reasoning_fields(self.continuation))
+        return result
 
 
 @dataclass(frozen=True, slots=True)
 class ModelCompletion:
-    """Typed completion result; carries no credentials or raw payloads.
+    """A provider message with invocation attribution and accounting."""
 
-    ``reasoning`` is the model's chain-of-thought side channel, kept strictly
-    separate from ``content`` so a caller can surface it on its own channel
-    without ever mixing it into the assistant answer.
-    """
-
-    content: str
+    message: ProviderMessage
     model: str
     provider: str
     role: Role
     prompt_tokens: int
     completion_tokens: int
-    reasoning: str = ""
-    tool_calls: tuple[ToolCall, ...] = ()
     schema_version: Literal[1] = 1
     upstream_provider: str | None = None
     generation_id: str | None = None
     finish_reason: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.content, str):
-            raise ValueError("completion content must be text")
-        if not isinstance(self.reasoning, str):
-            raise ValueError("completion reasoning must be text")
-        for call in self.tool_calls:
-            if not isinstance(call, ToolCall):
-                raise ValueError("tool_calls must contain ToolCall values")
+        if (
+            not isinstance(self.message, ProviderMessage)
+            or self.message.role != "assistant"
+        ):
+            raise ValueError("completion must contain an assistant provider message")
         for name in ("model", "provider"):
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip():
@@ -157,6 +192,7 @@ def parse_chat_completion(
     provider: str,
     fallback_model: str,
     role: Role,
+    display_reasoning: str | None = None,
 ) -> ModelCompletion:
     """Parse an OpenAI-compatible chat completion body, failing closed."""
     try:
@@ -174,12 +210,9 @@ def parse_chat_completion(
     message = choice.get("message") if isinstance(choice, dict) else None
     if not isinstance(message, dict):
         raise ProviderRejectedError("provider response did not contain a message")
-    # ``reasoning``/``reasoning_content`` are a separate, explicitly-surfaced
-    # channel: they populate ``ModelCompletion.reasoning`` and never enter the
-    # assistant ``content``.  A malformed (non-string) reasoning value is
-    # ignored rather than treated as a provider failure.
+    # Exact continuation belongs to the provider message. Readable reasoning is
+    # derived separately, never substituted for signed or structured payloads.
     content = message.get("content")
-    reasoning = _parse_reasoning(message)
     tool_calls = _parse_tool_calls(message.get("tool_calls"))
     if isinstance(content, str):
         text = content
@@ -193,14 +226,18 @@ def parse_chat_completion(
     if not isinstance(model, str) or not model.strip():
         model = fallback_model
     return ModelCompletion(
-        content=text,
+        message=ProviderMessage(
+            role="assistant",
+            content=text,
+            tool_calls=tool_calls,
+            continuation=reasoning_fields(message) or None,
+            display_reasoning=display_reasoning,
+        ),
         model=model,
         provider=provider,
         role=role,
         prompt_tokens=tokens[0],
         completion_tokens=tokens[1],
-        reasoning=reasoning,
-        tool_calls=tool_calls,
         upstream_provider=data.get("provider")
         if isinstance(data.get("provider"), str)
         else None,
@@ -209,20 +246,6 @@ def parse_chat_completion(
         if isinstance(choice.get("finish_reason"), str)
         else None,
     )
-
-
-def _parse_reasoning(message: Mapping[str, object]) -> str:
-    """Read a string reasoning field, ignoring malformed or absent values.
-
-    Both the ``reasoning`` and ``reasoning_content`` field names are accepted;
-    the first non-empty string wins, and every non-string value is ignored so a
-    provider quirk never becomes a reply failure.
-    """
-    for name in ("reasoning", "reasoning_content"):
-        value = message.get(name)
-        if isinstance(value, str) and value:
-            return value
-    return ""
 
 
 def _parse_tool_calls(value: object) -> tuple[ToolCall, ...]:
@@ -441,25 +464,14 @@ def bind_role(
 
 
 def messages_payload(
-    messages: Sequence[ChatMessage],
+    messages: Sequence[ProviderMessage],
 ) -> tuple[dict[str, object], ...]:
     """Serialize chat messages into the wire-level payload tuple."""
-    payload: list[dict[str, object]] = []
-    for message in messages:
-        entry: dict[str, object] = {
-            "role": message.role,
-            "content": message.content,
-        }
-        if message.tool_calls:
-            entry["tool_calls"] = [call.as_wire() for call in message.tool_calls]
-        if message.tool_call_id is not None:
-            entry["tool_call_id"] = message.tool_call_id
-        payload.append(entry)
-    return tuple(payload)
+    return tuple(message.as_wire() for message in messages)
 
 
 __all__ = [
-    "ChatMessage",
+    "ProviderMessage",
     "InMemoryInvocationLedger",
     "InvocationLedger",
     "ModelCompletion",

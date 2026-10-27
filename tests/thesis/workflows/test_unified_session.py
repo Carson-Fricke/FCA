@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 import pytest
 
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage,
     ModelCompletion,
+    ProviderMessage,
     Role,
     ToolCall,
 )
@@ -44,7 +44,7 @@ def test_root_and_workflow_phase_have_identical_durable_tool_protocol() -> None:
     chat = ChatService()
     thread = chat.create_chat("workspace", title="Unified", owner_actor_id="operator")
     contexts: list[ToolContext] = []
-    requests: list[tuple[ChatMessage, ...]] = []
+    requests: list[tuple[ProviderMessage, ...]] = []
     profiles: list[Role] = []
 
     class Provider:
@@ -58,7 +58,7 @@ def test_root_and_workflow_phase_have_identical_durable_tool_protocol() -> None:
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -66,15 +66,18 @@ def test_root_and_workflow_phase_have_identical_durable_tool_protocol() -> None:
             requests.append(tuple(messages))
             profiles.append(role)
             return ModelCompletion(
-                "Checking" if len(requests) % 2 else "Finished",
-                "model",
-                "provider",
-                role,
-                0,
-                0,
-                tool_calls=(ToolCall("call", "check", "{}"),)
-                if len(requests) % 2
-                else (),
+                message=ProviderMessage(
+                    "assistant",
+                    "Checking" if len(requests) % 2 else "Finished",
+                    tool_calls=(ToolCall("call", "check", "{}"),)
+                    if len(requests) % 2
+                    else (),
+                ),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
             )
 
     def registry(context: ToolContext) -> SessionToolRegistry:
@@ -193,7 +196,7 @@ def test_fresh_live_and_replay_inputs_share_exact_projection(source: str) -> Non
         "workspace", title="Projection", owner_actor_id="operator"
     )
     anchor = Anchor("workspace", thread.chat_id)
-    requests: list[tuple[ChatMessage, ...]] = []
+    requests: list[tuple[ProviderMessage, ...]] = []
     incoming = (
         SessionMessage(
             "fresh",
@@ -218,22 +221,25 @@ def test_fresh_live_and_replay_inputs_share_exact_projection(source: str) -> Non
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
         ) -> ModelCompletion:
             requests.append(tuple(messages))
             return ModelCompletion(
-                "Checking" if len(requests) == 1 else "Finished",
-                "model",
-                "provider",
-                role,
-                0,
-                0,
-                tool_calls=(ToolCall("call", "check", "{}"),)
-                if len(requests) == 1
-                else (),
+                message=ProviderMessage(
+                    "assistant",
+                    "Checking" if len(requests) == 1 else "Finished",
+                    tool_calls=(ToolCall("call", "check", "{}"),)
+                    if len(requests) == 1
+                    else (),
+                ),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
             )
 
     def handler(arguments: Mapping[str, object], context: ToolContext) -> ToolExecution:

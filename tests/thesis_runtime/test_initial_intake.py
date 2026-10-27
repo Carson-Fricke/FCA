@@ -9,8 +9,8 @@ import pytest
 
 from thesis_runtime.adapters.filesystem.records import FileChatPersistence
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage,
     ModelCompletion,
+    ProviderMessage,
     Role,
 )
 from thesis_runtime.adapters.providers.session_adapter import (
@@ -40,7 +40,7 @@ def test_all_sixty_pending_inputs_are_consumed_then_restart_history_is_bounded(
     chat = ChatService(persistence=FileChatPersistence(tmp_path))
     thread = chat.create_chat("workspace", title="Queued", owner_actor_id="operator")
     workers: list[Callable[[], None]] = []
-    requests: list[tuple[ChatMessage, ...]] = []
+    requests: list[tuple[ProviderMessage, ...]] = []
 
     class Provider:
         def stream(self, *, message_id=None, **kwargs):
@@ -53,7 +53,7 @@ def test_all_sixty_pending_inputs_are_consumed_then_restart_history_is_bounded(
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -62,7 +62,14 @@ def test_all_sixty_pending_inputs_are_consumed_then_restart_history_is_bounded(
             assert chat.read_consumed_input("workspace", thread.chat_id, "") == (
                 0 if len(requests) == 1 else 60
             )
-            return ModelCompletion("Finished", "model", "provider", role, 0, 0)
+            return ModelCompletion(
+                message=ProviderMessage("assistant", "Finished"),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
 
     service = Conversations(
         chat=chat,
@@ -151,7 +158,7 @@ def test_persisted_input_fifo_uses_positions_not_clock_or_reverse_ids(
         "Accepted A",
         "Accepted B",
     ]
-    requests: list[tuple[ChatMessage, ...]] = []
+    requests: list[tuple[ProviderMessage, ...]] = []
 
     class Provider:
         def stream(self, *, message_id=None, **kwargs):
@@ -164,13 +171,20 @@ def test_persisted_input_fifo_uses_positions_not_clock_or_reverse_ids(
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
         ) -> ModelCompletion:
             requests.append(tuple(messages))
-            return ModelCompletion("Finished", "model", "provider", role, 0, 0)
+            return ModelCompletion(
+                message=ProviderMessage("assistant", "Finished"),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
 
     runtime = Conversations(chat=reloaded, provider=NativeSessionAdapter(Provider()))
     runtime.run_node_turn("workspace", thread.chat_id, anchor.sub_agent_id or "")

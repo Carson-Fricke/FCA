@@ -7,8 +7,9 @@
 //! using half-even by default, and every operation is range-checked against
 //! `decimal128(38, 18)`.
 //!
-//! All arithmetic uses a stack-resident 256-bit intermediate
-//! ([`crate::wide::U256`]); no heap allocation happens on an arithmetic path.
+//! Arithmetic cancels exact factors before widening and uses a stack-resident
+//! 256-bit intermediate ([`crate::wide::U256`]) when needed. No heap allocation
+//! happens on an arithmetic path.
 
 use core::fmt;
 use core::ops::Add;
@@ -246,10 +247,10 @@ impl Decimal18 {
     /// Checked multiplication, rounded half-even at scale 18.
     pub fn checked_mul(self, rhs: Self) -> Result<Self, DecimalError> {
         let negative = (self.0 < 0) != (rhs.0 < 0);
-        let numerator = U256::mul_u128(self.0.unsigned_abs(), rhs.0.unsigned_abs());
-        let quotient = div_round(
-            numerator,
-            U256::from_u128(ONE_UNSCALED as u128),
+        let quotient = mul_div_magnitude(
+            self.0.unsigned_abs(),
+            rhs.0.unsigned_abs(),
+            ONE_UNSCALED as u128,
             negative,
             RoundingMode::HalfEven,
         )?;
@@ -267,10 +268,10 @@ impl Decimal18 {
             return Err(DecimalError::DivisionByZero);
         }
         let negative = (self.0 < 0) != (rhs.0 < 0);
-        let numerator = U256::mul_u128(self.0.unsigned_abs(), ONE_UNSCALED as u128);
-        let quotient = div_round(
-            numerator,
-            U256::from_u128(rhs.0.unsigned_abs()),
+        let quotient = mul_div_magnitude(
+            self.0.unsigned_abs(),
+            ONE_UNSCALED as u128,
+            rhs.0.unsigned_abs(),
             negative,
             mode,
         )?;
@@ -294,10 +295,10 @@ impl Decimal18 {
             return Err(DecimalError::DivisionByZero);
         }
         let negative = ((self.0 < 0) != (factor.0 < 0)) != (divisor.0 < 0);
-        let numerator = U256::mul_u128(self.0.unsigned_abs(), factor.0.unsigned_abs());
-        let quotient = div_round(
-            numerator,
-            U256::from_u128(divisor.0.unsigned_abs()),
+        let quotient = mul_div_magnitude(
+            self.0.unsigned_abs(),
+            factor.0.unsigned_abs(),
+            divisor.0.unsigned_abs(),
             negative,
             mode,
         )?;
@@ -335,6 +336,70 @@ impl Decimal18 {
         let value = value as i128;
         Ok(Self(if negative { -value } else { value }))
     }
+}
+
+/// Compute an exact unsigned product/ratio, rounding only after cancellation.
+/// Inputs and divisors are decimal magnitudes, so twice the narrow remainder
+/// fits `u128`. Cancellation never changes a tie or any directed rounding rule.
+fn mul_div_magnitude(
+    mut lhs: u128,
+    mut rhs: u128,
+    mut divisor: u128,
+    negative: bool,
+    mode: RoundingMode,
+) -> Result<U256, DecimalError> {
+    if lhs == 0 || rhs == 0 {
+        return Ok(U256::ZERO);
+    }
+    if lhs == divisor {
+        return Ok(U256::from_u128(rhs));
+    }
+    if rhs == divisor {
+        return Ok(U256::from_u128(lhs));
+    }
+    if let Some(product) = lhs.checked_mul(rhs) {
+        return round_magnitude(product, divisor, negative, mode).map(U256::from_u128);
+    }
+    let common = gcd(rhs, divisor);
+    rhs /= common;
+    divisor /= common;
+    if let Some(product) = lhs.checked_mul(rhs) {
+        return round_magnitude(product, divisor, negative, mode).map(U256::from_u128);
+    }
+    let common = gcd(lhs, divisor);
+    lhs /= common;
+    divisor /= common;
+    if let Some(product) = lhs.checked_mul(rhs) {
+        return round_magnitude(product, divisor, negative, mode).map(U256::from_u128);
+    }
+    div_round(
+        U256::mul_u128(lhs, rhs),
+        U256::from_u128(divisor),
+        negative,
+        mode,
+    )
+}
+
+fn gcd(mut lhs: u128, mut rhs: u128) -> u128 {
+    if lhs < rhs {
+        core::mem::swap(&mut lhs, &mut rhs);
+    }
+    while lhs > u64::MAX as u128 && rhs != 0 {
+        let remainder = lhs % rhs;
+        lhs = rhs;
+        rhs = remainder;
+    }
+    if rhs == 0 {
+        return lhs;
+    }
+    let mut lhs = lhs as u64;
+    let mut rhs = rhs as u64;
+    while rhs != 0 {
+        let remainder = lhs % rhs;
+        lhs = rhs;
+        rhs = remainder;
+    }
+    u128::from(lhs)
 }
 
 /// Divide two 256-bit magnitudes with the requested rounding.

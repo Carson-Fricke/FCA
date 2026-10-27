@@ -18,6 +18,13 @@ Tests exercise the public application and acquisition boundaries; fake transport
 - `runtime_decimal_failures.rs` — Malformed, overflowed, and unknown values on the paper, shadow, reconciler,
 - `study_frames.rs` — Atomic frame dispatch, separate backtest execution feeds
   and causal tick fills without expanding consumer callbacks.
-- `streamed_replay.rs` — Streamed replay preserves dispatch and full valuation evidence; compressed histories retain every row, exact metrics and independent cloned snapshots.
+- `streamed_replay.rs` — Streamed replay preserves dispatch and full valuation
+  evidence; compressed histories retain every row and independent snapshots.
+  Cached returns match dense metrics through spills, flat runs and undefined means.
 
 - `result_encoding.rs` — Numeric and text equity inputs produce identical Parquet bytes and manifest digests across flush boundaries.
+
+- `dispatch_identity.rs` — Canonical dispatch hashes across timestamp cache
+  boundaries, negative instants, Unicode identifiers and maximum sequences;
+  feed-head and generated-event backlogs preserve all ordering ties.
+- `risk_and_stops.rs` — Replay matching, terminal order retirement, sticky stops and risk decisions.

@@ -285,7 +285,11 @@ impl VirtualBook {
 
     /// Apply one explicit mark.
     pub fn mark(&mut self, symbol: &str, price: Decimal) {
-        self.markers.insert(symbol.to_string(), price);
+        if let Some(mark) = self.markers.get_mut(symbol) {
+            *mark = price;
+        } else {
+            self.markers.insert(symbol.to_string(), price);
+        }
     }
 
     fn position_snapshot(&self, symbol: &str, ledger: &PositionLedger) -> PositionSnapshot {

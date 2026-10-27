@@ -11,8 +11,8 @@ from fastapi.testclient import TestClient
 from thesis.application.composition import build_serving_stack
 from thesis.http.application import create_app
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage,
     ModelCompletion,
+    ProviderMessage,
     Role,
 )
 from thesis_runtime.adapters.providers.openrouter import OpenRouterProvider
@@ -21,6 +21,7 @@ from thesis_runtime.conversations import ChatService
 
 class Provider:
     model = "test/model"
+    provider_name = "test"
 
     def stream(self, *, message_id=None, **kwargs):
         from tests.thesis_runtime.provider_fakes import completion_frames
@@ -32,13 +33,13 @@ class Provider:
     def complete(
         self,
         *,
-        messages: Sequence[ChatMessage],
+        messages: Sequence[ProviderMessage],
         role: Role,
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
     ) -> ModelCompletion:
         return ModelCompletion(
-            content="Acknowledged",
+            message=ProviderMessage("assistant", "Acknowledged"),
             model="test",
             provider="test",
             role=role,

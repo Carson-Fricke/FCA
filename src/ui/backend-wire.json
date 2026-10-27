@@ -3340,6 +3340,16 @@
       "WorkflowDefinitionWire": {
         "additionalProperties": false,
         "properties": {
+          "inputs": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Inputs",
+            "type": "object"
+          },
           "phases": {
             "items": {
               "type": "string"
@@ -3347,11 +3357,17 @@
             "title": "Phases",
             "type": "array"
           },
-          "splits": {
+          "routes": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/WorkflowSplitWire"
+              "additionalProperties": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": "object"
             },
-            "title": "Splits",
+            "title": "Routes",
             "type": "object"
           },
           "terminal_phases": {
@@ -3364,16 +3380,6 @@
           "title": {
             "title": "Title",
             "type": "string"
-          },
-          "transitions": {
-            "additionalProperties": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "title": "Transitions",
-            "type": "object"
           },
           "version": {
             "title": "Version",
@@ -3390,8 +3396,8 @@
           "title",
           "phases",
           "terminal_phases",
-          "transitions",
-          "splits"
+          "inputs",
+          "routes"
         ],
         "title": "WorkflowDefinitionWire",
         "type": "object"
@@ -3589,28 +3595,6 @@
           "after"
         ],
         "title": "WorkflowMetadataWire",
-        "type": "object"
-      },
-      "WorkflowSplitWire": {
-        "additionalProperties": false,
-        "properties": {
-          "branches": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Branches",
-            "type": "object"
-          },
-          "join": {
-            "title": "Join",
-            "type": "string"
-          }
-        },
-        "required": [
-          "branches",
-          "join"
-        ],
-        "title": "WorkflowSplitWire",
         "type": "object"
       }
     },

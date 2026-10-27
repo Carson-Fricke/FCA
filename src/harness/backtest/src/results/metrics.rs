@@ -523,6 +523,16 @@ impl EquityAccumulator {
     }
 
     pub fn push(&mut self, point: EquityPoint) {
+        let _ = self.push_and_return(point);
+    }
+
+    /// Supply the already-rounded return to bounded history consumers. The
+    /// public point-only accumulator and cached-return path share this math.
+    pub(crate) fn push_and_return(
+        &mut self,
+        point: EquityPoint,
+    ) -> Option<Result<Decimal18, MetricsError>> {
+        let mut sample = None;
         self.negative |= point.equity.is_negative();
         if self.first.is_none() {
             self.first = Some(point);
@@ -531,10 +541,11 @@ impl EquityAccumulator {
         }
         if let Some(previous) = self.last {
             self.zero_predecessor |= previous.equity.is_zero();
-            self.sum = self.sum.and_then(|total| {
-                sample_return(point.equity, previous.equity)
-                    .and_then(|r| add(total, r, "sharpe_per_sample"))
-            });
+            let value = sample_return(point.equity, previous.equity);
+            sample = Some(value);
+            self.sum = self
+                .sum
+                .and_then(|total| value.and_then(|r| add(total, r, "sharpe_per_sample")));
             if point.equity >= self.peak {
                 if let Some(start) = self.opened.take() {
                     match span_ns(start, point.timestamp_ns) {
@@ -560,6 +571,7 @@ impl EquityAccumulator {
         }
         self.last = Some(point);
         self.count += 1;
+        sample
     }
     pub fn variance(&self) -> EquityVariance {
         let mean = if self.count < 4 {
@@ -669,19 +681,11 @@ impl EquityVariance {
         if additional == 0 {
             return;
         }
-        if let (Ok(mean), Some(previous)) = (self.mean, self.previous) {
-            self.squares = self.squares.and_then(|mut squares| {
-                let deviation = sample_return(previous.equity, previous.equity)
-                    .and_then(|r| sub(r, mean, "sharpe_per_sample"))?
-                    .to_f64();
-                let contribution = deviation * deviation;
-                if contribution != 0.0 {
-                    for _ in 0..additional {
-                        squares += contribution;
-                    }
-                }
-                Ok(squares)
-            });
+        if let (Ok(_), Some(previous)) = (self.mean, self.previous) {
+            self.add_returns(
+                sample_return(previous.equity, previous.equity),
+                additional as u64,
+            );
             self.previous = Some(EquityPoint {
                 timestamp_ns,
                 equity: previous.equity,
@@ -690,14 +694,36 @@ impl EquityVariance {
     }
 
     pub fn push(&mut self, point: EquityPoint) {
-        if let (Ok(mean), Some(previous)) = (self.mean, self.previous) {
-            self.squares = self.squares.and_then(|s| {
-                sample_return(point.equity, previous.equity)
-                    .and_then(|r| sub(r, mean, "sharpe_per_sample"))
-                    .map(|d| s + d.to_f64() * d.to_f64())
-            });
+        if self.mean.is_ok() {
+            if let Some(previous) = self.previous {
+                self.add_returns(sample_return(point.equity, previous.equity), 1);
+            }
         }
         self.previous = Some(point);
+    }
+
+    /// Add cached, exact returns in their original sample order. Repeated
+    /// contributions are deliberately added one by one, never multiplied.
+    pub(crate) fn add_returns(
+        &mut self,
+        sample: Result<Decimal18, MetricsError>,
+        count: u64,
+    ) {
+        if count == 0 {
+            return;
+        }
+        if let Ok(mean) = self.mean {
+            self.squares = self.squares.and_then(|mut squares| {
+                let deviation = sample.and_then(|r| sub(r, mean, "sharpe_per_sample"))?.to_f64();
+                let contribution = deviation * deviation;
+                if contribution != 0.0 {
+                    for _ in 0..count {
+                        squares += contribution;
+                    }
+                }
+                Ok(squares)
+            });
+        }
     }
     fn finish(self) -> Outcome<f64> {
         let mean = self.mean?;

@@ -95,11 +95,12 @@ be extended as an alternative design.
   turn runner, coordinator or spawner.
 - A chat is a conversation at the root anchor; a sub-agent is a nested one.
   Phase specs are the sealed union `ConversationPhase` / `OneShotPhase` /
-  `DeterministicPhase` / `TerminalPhase` / `SplitPhase`; deterministic and
-  structural split nodes build no conversation. A split declares fixed named
-  branches and one deterministic join. Keep branch scopes disjoint; only an
-  explicit split creates concurrency. Paired join reducers are pure. Existing
-  workflow definitions stay sequential until their topology is explicitly changed.
+  `DeterministicPhase` / `TerminalPhase`; deterministic and terminal nodes build
+  no conversation. Routes wire one accepted output to named node.input ports.
+  Multiple destinations create concurrency; multiple required ports create
+  synchronization. Conditional forward routes and loopbacks use the same mechanism.
+  The pure graph engine has no agent or conversation dependencies. Only explicitly
+  replay-safe deterministic activities may be recomputed after interruption.
 - `ChildConversation` composes the return layer: `returns_to` anchor,
   complete/fail/result/await_result/children/cancel, and one turn-end policy
   (`OneShotPolicy` completes on the final answer; `ConversationalPolicy`

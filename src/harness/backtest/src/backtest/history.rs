@@ -4,7 +4,6 @@
 //! retained; statistics and Parquet output never require a full in-memory copy.
 
 use std::fs::File;
-use std::fs::OpenOptions;
 use std::io;
 use std::io::Read;
 use std::io::Write;
@@ -51,7 +50,7 @@ pub trait Record: Clone {
     fn decode(input: &mut &[u8]) -> io::Result<Self>;
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct History<T: Record> {
     tail: Vec<T>,
     file: Option<Arc<NamedTempFile>>,
@@ -59,6 +58,39 @@ pub struct History<T: Record> {
     bytes: u64,
     last: Option<T>,
     resources: HistoryResources,
+    writer: Option<FrameWriter>,
+}
+
+/// Reusable execution-local compression workspace, never shared by snapshots.
+struct FrameWriter {
+    raw: Vec<u8>,
+    compressed: Vec<u8>,
+    compressor: zstd::bulk::Compressor<'static>,
+}
+impl std::fmt::Debug for FrameWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FrameWriter").finish_non_exhaustive()
+    }
+}
+impl FrameWriter {
+    fn new() -> io::Result<Self> {
+        let mut compressor = zstd::bulk::Compressor::new(1)?;
+        compressor.set_parameter(zstd::zstd_safe::CParameter::ChecksumFlag(true))?;
+        Ok(Self { raw: Vec::new(), compressed: Vec::new(), compressor })
+    }
+}
+impl<T: Record> Clone for History<T> {
+    fn clone(&self) -> Self {
+        Self {
+            tail: self.tail.clone(),
+            file: self.file.clone(),
+            count: self.count,
+            bytes: self.bytes,
+            last: self.last.clone(),
+            resources: self.resources.clone(),
+            writer: None,
+        }
+    }
 }
 impl<T: Record> Default for History<T> {
     fn default() -> Self {
@@ -69,6 +101,7 @@ impl<T: Record> Default for History<T> {
             bytes: 0,
             last: None,
             resources: HistoryResources::default(),
+            writer: None,
         }
     }
 }
@@ -87,17 +120,21 @@ impl<T: Record> History<T> {
         self.tail.push(value);
         self.count += 1;
         if self.tail.len() >= CHUNK {
-            let mut raw = Vec::new();
-            for record in &self.tail {
-                record.encode(&mut raw);
+            if self.writer.is_none() {
+                self.writer = Some(FrameWriter::new()?);
             }
-            if raw.len() > MAX_FRAME {
+            let writer = self.writer.as_mut().unwrap();
+            writer.raw.clear();
+            for record in &self.tail {
+                record.encode(&mut writer.raw);
+            }
+            if writer.raw.len() > MAX_FRAME {
                 return Err(io::Error::other("replay history frame exceeds capacity"));
             }
-            let mut compressor = zstd::bulk::Compressor::new(1)?;
-            compressor.set_parameter(zstd::zstd_safe::CParameter::ChecksumFlag(true))?;
-            let compressed = compressor.compress(&raw)?;
-            let bytes = self.bytes + compressed.len() as u64 + 16;
+            writer.compressed.clear();
+            writer.compressed.reserve(zstd::zstd_safe::compress_bound(writer.raw.len()));
+            writer.compressor.compress_to_buffer(&writer.raw, &mut writer.compressed)?;
+            let bytes = self.bytes + writer.compressed.len() as u64 + 16;
             if bytes > self.resources.max_bytes {
                 return Err(io::Error::other(
                     "replay history scratch capacity exhausted",
@@ -116,12 +153,10 @@ impl<T: Record> History<T> {
                 }
                 self.file = Some(Arc::new(replacement));
             }
-            let mut file = OpenOptions::new()
-                .append(true)
-                .open(self.file.as_ref().unwrap().path())?;
-            file.write_all(&(compressed.len() as u64).to_le_bytes())?;
-            file.write_all(&(raw.len() as u64).to_le_bytes())?;
-            file.write_all(&compressed)?;
+            let file = Arc::get_mut(self.file.as_mut().unwrap()).unwrap().as_file_mut();
+            file.write_all(&(writer.compressed.len() as u64).to_le_bytes())?;
+            file.write_all(&(writer.raw.len() as u64).to_le_bytes())?;
+            file.write_all(&writer.compressed)?;
             self.bytes = bytes;
             self.tail.clear();
         }
@@ -147,6 +182,9 @@ impl<T: Record> History<T> {
             batch: Vec::new().into_iter(),
             marker: PhantomData,
             failed: false,
+            compressed: Vec::new(),
+            raw: Vec::new(),
+            decompressor: None,
         }
         .chain(self.tail.iter().cloned().map(Ok)))
     }
@@ -156,6 +194,9 @@ struct HistoryReader<T: Record> {
     batch: std::vec::IntoIter<T>,
     marker: PhantomData<T>,
     failed: bool,
+    compressed: Vec<u8>,
+    raw: Vec<u8>,
+    decompressor: Option<zstd::bulk::Decompressor<'static>>,
 }
 impl<T: Record> Iterator for HistoryReader<T> {
     type Item = io::Result<T>;
@@ -179,11 +220,20 @@ impl<T: Record> Iterator for HistoryReader<T> {
             if compressed > MAX_FRAME || size > MAX_FRAME {
                 return Err(io::Error::other("invalid replay history frame"));
             }
-            let mut bytes = vec![0; compressed];
-            file.read_exact(&mut bytes)?;
-            let raw = zstd::bulk::decompress(&bytes, size)?;
-            let mut input = raw.as_slice();
-            let mut records = Vec::new();
+            self.compressed.resize(compressed, 0);
+            file.read_exact(&mut self.compressed)?;
+            self.raw.clear();
+            self.raw.reserve(size);
+            if self.decompressor.is_none() {
+                self.decompressor = Some(zstd::bulk::Decompressor::new()?);
+            }
+            let decoded = self.decompressor.as_mut().unwrap()
+                .decompress_to_buffer(&self.compressed, &mut self.raw)?;
+            if decoded != size {
+                return Err(io::Error::other("invalid replay history frame size"));
+            }
+            let mut input = self.raw.as_slice();
+            let mut records = Vec::with_capacity(CHUNK);
             while !input.is_empty() {
                 records.push(T::decode(&mut input)?);
             }

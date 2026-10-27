@@ -89,11 +89,13 @@ pub fn assemble_subscription_frames(
     options: &SyntheticDataOptions,
     requirements: &[MarketSubscription],
 ) -> Result<Vec<EngineBarFrame>, BacktestError> {
+    let projection = EventProjection::new(options);
     let bars = fixture
         .events
         .iter()
         .filter(|event| matches!(event, MarketEvent::Bar { .. }))
-        .map(|event| market_event(event, options))
+        .cloned()
+        .map(|event| projection.project(event))
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .filter_map(|event| match event {
@@ -188,10 +190,12 @@ pub fn assemble_study_frames(
     fixture: &ReplayFixture,
     options: &SyntheticDataOptions,
 ) -> Result<Vec<EngineBarFrame>, BacktestError> {
+    let projection = EventProjection::new(options);
     let bars = fixture
         .events
         .iter()
-        .map(|event| market_event(event, options))
+        .cloned()
+        .map(|event| projection.project(event))
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .filter_map(|event| match event {
@@ -329,4 +333,4 @@ pub fn assemble_bar_observations(
         .collect())
 }
 
-use super::projection::market_event;
+use super::projection::EventProjection;

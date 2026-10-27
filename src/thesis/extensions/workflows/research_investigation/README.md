@@ -12,7 +12,6 @@ the hypothesis-development phase table stays unchanged.
 | Phase | Owns | Requested next phase |
 | --- | --- | --- |
 | `proposal` | Design/repair a construction, treating the supplied prototype as provisional. | `critique`, `focused_critique` |
-| `critique` | Structural split; starts all three independent reviewers, with no agent. | Three specialist phases |
 | `implementation_critique` | Check source fidelity, units, boundaries, timing, fills, state and executable controls. | `collect_critiques` |
 | `experimental_critique` | Check comparisons, confounding, denominators, selection, support and feasibility. | `collect_critiques` |
 | `alignment_critique` | Compare original operator intent with branch scope, alternatives and evidence-driven adaptation. | `collect_critiques` |
@@ -22,8 +21,9 @@ the hypothesis-development phase table stays unchanged.
 | `investigation` | Author/validate/execute a training strategy or targeted diagnostic; inspect artifacts and interpret findings. | `critique`, `focused_critique` |
 | `completed`, `failed` | Terminal outcomes. | None |
 
-Proposal, reviews, adjudication and investigation are model-backed; the split and
-collection phases are deterministic. The engine routes accepted contracts; it chooses
+Proposal, reviews, adjudication and investigation are model-backed; collection is deterministic.
+The `critique` route fans out to all three reviewer input ports. Each reviewer
+feeds a distinct required port on `collect_critiques`; there is no split phase. The engine routes accepted contracts; it chooses
 no statistic, research direction or scientific verdict. Review/research budgets are
 declared in the brief and visible in accepted state. Runtime caps bound resource use;
 they do not select studies or scientific conclusions. The execution cap (1..512) counts actual retained jobs, including individual batch
@@ -34,7 +34,7 @@ Scientific sufficiency remains
 the judge's responsibility. Discovery and its branches progress autonomously;
 mandatory approval in later hypothesis phases remains unchanged.
 
-The current runtime contract is `research-investigation@3.0.0`. Older executions are rejected
+The current runtime contract is `research-investigation@4.0.0`. Older executions are rejected
 for execution rather than decoded under the new contracts. Proposals include `repairs`
 with original issue IDs and responses. Critics supply concrete `evidence` for every
 issue and each `verifiedRepairs` entry (`issueId`, `evidence`). New issue IDs have
@@ -48,7 +48,16 @@ Seeds contain bounded original-brief and active-issue excerpts, pinned sketch an
 references, and exact accepted handoff indices. The existing
 `read_research_investigations` tool reads full accepted products in bounded pages:
 handoff zero is the original brief; positive indices identify immutable accepted
-transitions. A phase can read only its own branch. This is accepted-contract retrieval,
+transitions. All four tool arguments are required: `execution_id` is a branch ID
+or null for the phase's own branch/discovery's branch list; `handoff` is null for
+state or branch inspection, zero for the brief, or a positive accepted handoff
+index; `offset` selects the first character (zero initially); `max_chars` bounds
+a page. Missing selectors fail argument validation instead of silently rereading
+page zero.
+Paged results return `nextArguments` with the same branch, handoff and page size,
+and the next offset; callers can submit it unchanged until it is null. Reads are
+stateless: identical arguments return the same page, not an implicit next page.
+A phase can read only its own branch. This is accepted-contract retrieval,
 not transcript reading or search. Reentered phases retain their own conversations.
 Critique compares original intent, approved construction, executed source and claims;
 it distinguishes omitted tests from adverse evidence. Job-specific `read_study` and `read_strategy`
@@ -66,7 +75,7 @@ Hard constraints and their origins must be distinguished from provisional choice
 Accepted handoffs carry the original brief and phase products, never private sibling
 transcripts. Specialist attempts see identical accepted ancestors and cannot read
 the current siblings' reports before the join. Substantive changes use the full
-split; prompted narrow repairs may use `focused_critique` without restarting three
+review fan-out; prompted narrow repairs may use `focused_critique` without restarting three
 reviews. No fixed strategy quota, experiment sequence, or scientific gate is added.
 Execution uses existing committed-program tools and retained job IDs.
 Every branch submission is also recorded as exposure in discovery before dispatch.
@@ -82,10 +91,10 @@ resume reconciles delivery without resubmitting studies. Host fault delivery is 
 ## Files
 
 - `__init__.py`: Public workflow factory.
-- `contracts.py`: Current launch schema, phase payload schemas and transition table.
-- `definition.py`: Fixed specialist split/join specification, pure report collection, JSON extension, accepted-state fold and seeds.
+- `contracts.py`: Current launch schema, phase payload schemas and named routes.
+- `definition.py`: Specialist fan-out and required-input specification, pure report collection, JSON extension, accepted-state fold and seeds.
 - `prompts.py`: Proposal, three specialist critiques, focused repair verification, adjudication and constructive training guidance.
-- `runtime.py`: Trusted original-request snapshot, scoped session capabilities and accepted reads, job retention, completion and asynchronous returns.
+- `runtime.py`: Trusted original-request snapshot, scoped session capabilities and accepted reads with required selectors and stateless continuations, job retention, completion and asynchronous returns.
 
 The package depends on shared experiment/program capabilities and runtime ports.
 It imports no other concrete workflow. Parent exposure recording is an injected port.

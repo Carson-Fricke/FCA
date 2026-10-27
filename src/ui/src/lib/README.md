@@ -18,7 +18,7 @@ claims don't belong here.
 | `timeline.svelte.ts` | One ordered timeline owner: selected-thread recent history then cursor-only SSE, explicit older-page loading, current workflow metadata, indexes, and local pending messages reconciled with POST/SSE by identity without advancing cursors. |
 | `fixture-timeline.ts` | In-memory offline timeline seeded from messages, events, and execution fixtures; mutations publish to subscribers. |
 | `sse.ts` | Sole `TimelineStream` SSE client, with frame parsing, timeline URL construction, and reconnect cursors. |
-| `workflow-live.ts` | Pure execution-indexed live workflow map; sequence-ordered active frontiers, waiting joins, explicit phase-executor projection, attention, and active/terminal selectors. |
+| `workflow-live.ts` | Pure execution-indexed live workflow map; sequence-ordered active frontiers, pending input ports, explicit phase-executor projection, attention, and active/terminal selectors. |
 | `workflow-scope.svelte.ts` | Execution-scoped phase navigation, node capability snapshots, history selection, and immediate node sends with stable explicit-retry identities. |
 | `scope.svelte.ts` | Scope path serialization, storage, and navigation stack. |
 | `subagent.ts` | Workflow and sub-agent event projections, including attempt freshness and phase recovery diagnostics. |

@@ -69,6 +69,7 @@ from thesis.persistence.investigations import open_investigations
 from thesis.persistence.stack import open_submission_store
 from thesis.research.investigations import Investigations, MemoryInvestigationStore
 from thesis.screening.service import ScreenerService
+from thesis_runtime.adapters.providers.families import model_family_adapter
 from thesis_runtime.adapters.providers.openrouter import OpenRouterProvider
 from thesis_runtime.adapters.providers.session_adapter import NativeSessionAdapter
 from thesis_runtime.contracts.reply import ToolResultChunk, ToolResultObserver
@@ -557,7 +558,11 @@ def create_app(
             chat=chat_service,
             provider=None
             if model_provider is None
-            else NativeSessionAdapter(model_provider),
+            else NativeSessionAdapter(
+                model_provider,
+                family=model_family_adapter(model_provider.model),
+                origin=(model_provider.provider_name, model_provider.model),
+            ),
             registry_factory=lambda context: SessionToolRegistry(),
             root_system_prompt=FCA_REPLY_SYSTEM_PROMPT,
             tool_result_observer=tool_result_observer,

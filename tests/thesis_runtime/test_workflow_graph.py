@@ -19,7 +19,6 @@ from thesis_runtime.workflows.execution_store import (
 from thesis_runtime.workflows.phase import (
     DeterministicPhase,
     OneShotPhase,
-    SplitPhase,
     TerminalPhase,
     WorkflowSpecError,
 )
@@ -58,7 +57,7 @@ class ReviewExtension:
             self.inputs[payload["phase"]] = payload["history"]
             return {"text": "Review the accepted subject independently."}
         if operation == "execute":
-            reports = payload["handoff"]["completion"]["branches"]
+            reports = payload["inputs"]
             self.joins.append(reports)
             return {"completion": {"report": reports}}
         if operation == "report":
@@ -82,48 +81,40 @@ class InterruptedStore(InMemoryExecutionStore):
 
 
 def build(ports, extension, *, nested=False):
-    phases = (
-        "start",
-        "split",
-        "left",
-        "repair",
-        "right",
-        "right_repair",
-        "join",
-        "done",
-    ) + (
-        ("inner_split", "source_check", "timing_check", "inner_join") if nested else ()
+    phases = ("start", "left", "repair", "right", "right_repair", "join", "done") + (
+        ("source_check", "timing_check", "inner_join") if nested else ()
     )
     builder = WorkflowBuilder().workflow(
-        "graph-review", version="1.0.0", title="Review"
+        "graph-review", version="2.0.0", title="Review"
     )
     for phase in ("start", "left", "repair", "right", "right_repair"):
         builder.phase(OneShotPhase(phase=phase, seed="seed"))
     builder.phase(
-        SplitPhase(
-            phase="split", branches={"left": "left", "right": "right"}, join="join"
+        DeterministicPhase(
+            phase="join",
+            inputs=("left", "right"),
+            contract="execute",
+            on_complete="done",
+            replay_safe=True,
         )
     )
-    builder.phase(
-        DeterministicPhase(phase="join", contract="execute", on_complete="done")
-    )
     builder.phase(TerminalPhase(phase="done"))
-    builder.transitions(
+    builder.routes(
         {
-            "start": ("split",),
-            "left": ("repair", "join"),
-            "repair": ("left",),
-            "right": ("right_repair", "join"),
-            "right_repair": ("right",),
-            "join": ("done",),
-            "done": (),
+            "start": {"split": ("left.input", "right.input")},
+            "left": {"repair": ("repair.input",), "join": ("join.left",)},
+            "repair": {"left": ("left.input",)},
+            "right": {"right_repair": ("right_repair.input",), "join": ("join.right",)},
+            "right_repair": {"right": ("right.input",)},
+            "join": {"done": ("done.input",)},
+            "done": {},
         }
     )
     builder.doctrine(
         WorkflowDoctrine(
             WorkflowDefinition(
                 workflow_id="graph-review",
-                version="1.0.0",
+                version="2.0.0",
                 title="Review",
                 phases=phases,
             ),
@@ -140,24 +131,22 @@ def build(ports, extension, *, nested=False):
         )
     )
     if nested:
-        builder.phase(
-            SplitPhase(
-                phase="inner_split",
-                branches={"source": "source_check", "timing": "timing_check"},
-                join="inner_join",
-            )
-        )
         for phase in ("source_check", "timing_check"):
             builder.phase(OneShotPhase(phase=phase, seed="seed"))
-            builder.transition(phase, "inner_join")
         builder.phase(
             DeterministicPhase(
-                phase="inner_join", contract="execute", on_complete="repair"
+                phase="inner_join",
+                inputs=("source", "timing"),
+                contract="execute",
+                on_complete="repair",
+                replay_safe=True,
             )
         )
-        builder.transition("left", "inner_split")
-        builder.transition("inner_join", "repair")
-        builder.transition("repair", "join")
+        builder.route("left", "inner_split", "source_check.input", "timing_check.input")
+        builder.route("source_check", "inner_join", "inner_join.source")
+        builder.route("timing_check", "inner_join", "inner_join.timing")
+        builder.route("inner_join", "repair", "repair.input")
+        builder.route("repair", "join", "join.left")
     return builder.ports(ports).build()
 
 
@@ -227,6 +216,13 @@ def kit():
 
 def test_branch_loop_waiting_join_and_frozen_inputs(kit):
     kit.complete("start", "split", "subject-v1")
+    assert all(
+        event.payload["phase"] in kit.workflow.phase_names
+        for event in kit.chat.replay_events(
+            "workspace", kit.request.execution_id
+        ).events
+        if event.event_type.value == "workflow.phase"
+    )
     left_input = kit.extension.inputs["left"]
     assert left_input == kit.extension.inputs["right"]
     kit.complete("right", "right_repair")
@@ -307,12 +303,20 @@ def test_rebuilt_host_preserves_arrival_and_rejects_cancelled_completion(kit):
     assert kit.extension.joins == []
 
 
-def test_compiler_rejects_sibling_cross_edge(kit):
-    spec = kit.workflow.spec
+def test_compiler_rejects_undeclared_input_port(kit):
     from dataclasses import replace
 
-    with pytest.raises(WorkflowSpecError, match="branch"):
-        replace(spec, transitions={**spec.transitions, "right": frozenset({"left"})})
+    from thesis_runtime.workflows.graph.contracts import Destination
+
+    spec = kit.workflow.spec
+    with pytest.raises(WorkflowSpecError, match="undeclared destination"):
+        replace(
+            spec,
+            routes={
+                **spec.routes,
+                "right": {"join": (Destination("join", "missing"),)},
+            },
+        )
 
 
 def test_interrupted_pure_join_resumes_under_the_same_attempt(kit):
@@ -542,3 +546,15 @@ def test_completion_tool_preserves_current_attempt_authority(kit):
         )
         == 1
     )
+
+
+def test_execution_history_rejects_the_removed_transition_format(kit):
+    from thesis_runtime.workflows.execution_store import ExecutionDocument
+
+    kit.complete("start", "split")
+    payload = kit.executions.get(kit.request.execution_id).as_dict()
+    transition = payload["transitions"][0]
+    transition["toPhase"] = transition.pop("route")
+    transition["completion"] = transition.pop("output")
+    with pytest.raises(ExecutionStoreError, match="outdated workflow history"):
+        ExecutionDocument.from_dict(payload)

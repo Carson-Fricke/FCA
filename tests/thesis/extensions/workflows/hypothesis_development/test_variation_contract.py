@@ -286,7 +286,7 @@ def test_variation_fold_reconstructs_after_pure_rebuild(target: str) -> None:
     transition = StoreTransition(
         sequence=1,
         from_phase="variation",
-        to_phase=target,
+        route=target,
         occurred_at=_moment(),
         intent_epoch=1,
         reason="variation accepted",

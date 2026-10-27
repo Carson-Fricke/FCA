@@ -368,6 +368,14 @@ impl Decimal {
         }
 
         let precision = context.precision.max(1) as usize;
+        // Exact integer quotients already have their canonical coefficient
+        // and exponent. Avoid allocating significant-digit vectors and text.
+        let integer = self.coefficient / rhs.coefficient;
+        if self.coefficient % rhs.coefficient == 0
+            && decimal_digits_u128(integer) as usize <= precision
+        {
+            return finish(negative, integer, i64::from(self.scale) - i64::from(rhs.scale));
+        }
         let (digits, adjusted_ratio, more, exact) =
             significant_digits(self.coefficient, rhs.coefficient, precision + 1)?;
         let exponent_shift = i64::from(rhs.scale) - i64::from(self.scale);
@@ -557,8 +565,11 @@ fn round_significant(
             scale,
         });
     }
-    let digits = u256_to_digits(magnitude);
     let precision = context.precision.max(1) as usize;
+    if magnitude.high == 0 && decimal_digits_u128(magnitude.low) as usize <= precision {
+        return Ok(Decimal { negative, coefficient: magnitude.low, scale });
+    }
+    let digits = u256_to_digits(magnitude);
     if digits.len() <= precision {
         let coefficient = digits_to_u128(&digits).ok_or(DecimalError::Overflow)?;
         return Ok(Decimal {

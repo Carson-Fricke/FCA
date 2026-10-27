@@ -8,10 +8,8 @@ from collections.abc import Mapping, Sequence
 import pytest
 
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage as ProviderChatMessage,
-)
-from thesis_runtime.adapters.providers.invocations import (
     ModelCompletion,
+    ProviderMessage,
     ProviderUnreachableError,
     Role,
     ToolCall,
@@ -36,13 +34,20 @@ _CALL = ToolCall("root-call", "check", '{"value":42}')
 
 
 def completion(text: str, *calls: ToolCall) -> ModelCompletion:
-    return ModelCompletion(text, "model", "provider", "primary", 0, 0, tool_calls=calls)
+    return ModelCompletion(
+        message=ProviderMessage("assistant", text, tool_calls=calls),
+        model="model",
+        provider="provider",
+        role="primary",
+        prompt_tokens=0,
+        completion_tokens=0,
+    )
 
 
 class Provider:
     def __init__(self, *responses: ModelCompletion | Exception) -> None:
         self.responses = iter(responses)
-        self.requests: list[tuple[ProviderChatMessage, ...]] = []
+        self.requests: list[tuple[ProviderMessage, ...]] = []
 
     def stream(self, *, message_id=None, **kwargs):
         from tests.thesis_runtime.provider_fakes import completion_frames
@@ -54,7 +59,7 @@ class Provider:
     def complete(
         self,
         *,
-        messages: Sequence[ProviderChatMessage],
+        messages: Sequence[ProviderMessage],
         role: Role = "primary",
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
@@ -102,7 +107,7 @@ def test_root_persists_envelope_and_results_before_next_dispatch(
         def complete(
             self,
             *,
-            messages: Sequence[ProviderChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -368,13 +373,16 @@ def test_provider_reasoning_is_normalized_before_durable_persistence() -> None:
     chat.send_message(_WORKSPACE, thread.chat_id, actor_id="operator", body="Check")
     provider = Provider(
         ModelCompletion(
-            "Finished",
-            "model",
-            "provider",
-            "primary",
-            0,
-            0,
-            reasoning="step\x00 one\r\nstep\x07 two\tend",
+            message=ProviderMessage(
+                "assistant",
+                "Finished",
+                continuation={"reasoning": "step\x00 one\r\nstep\x07 two\tend"},
+            ),
+            model="model",
+            provider="provider",
+            role="primary",
+            prompt_tokens=0,
+            completion_tokens=0,
         )
     )
     result = (
@@ -385,9 +393,12 @@ def test_provider_reasoning_is_normalized_before_durable_persistence() -> None:
 
     assert isinstance(result, ChatMessage)
     assert result.reasoning == "step one\nstep two\tend"
-    assert from_record(result).content.result == {
-        "reasoning": "step one\nstep two\tend"
-    }
+    canonical = from_record(result)
+    assert canonical.content.result is not None
+    assert canonical.content.result["reasoning"] == "step one\nstep two\tend"
+    continuation = canonical.content.result["provider_continuation"]
+    assert isinstance(continuation, Mapping)
+    assert continuation["fields"] == {"reasoning": "step\x00 one\r\nstep\x07 two\tend"}
 
 
 def test_model_only_root_uses_durable_session() -> None:

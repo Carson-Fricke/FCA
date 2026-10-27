@@ -237,7 +237,7 @@ def test_optimization_fold_reconstructs_after_pure_rebuild(target: str) -> None:
     transition = StoreTransition(
         sequence=1,
         from_phase="optimization",
-        to_phase=target,
+        route=target,
         occurred_at=_moment(),
         intent_epoch=1,
         reason="candidate evaluation accepted",

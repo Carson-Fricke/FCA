@@ -14,7 +14,6 @@ use harness_lakeclient::LakeClientError;
 use harness_lakeclient::ReadSpec;
 use harness_trading::replay_errors::BacktestError;
 use marketdata::lake::DataType;
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -188,18 +187,18 @@ pub fn lake_factory(
                 };
                 let result = client
                     .visit_arrow(&input.read, |batch| {
-                        let decoded = marketdata::events_from_arrow(
+                        let decoded = marketdata::map_arrow_events(
                             input.data_type,
                             &input.lake_symbol,
                             std::slice::from_ref(&batch),
+                            |event| crate::acquisition::lake_event(event, &input.symbol),
                         )
                         .map_err(|e| LakeClientError::Decode(e.to_string()))?;
                         let nanos = batch.column_by_name("timestamp").and_then(|c| {
                             c.as_any()
                                 .downcast_ref::<arrow_array::TimestampNanosecondArray>()
                         });
-                        for (index, event) in decoded.iter().enumerate() {
-                            let mut event = crate::acquisition::lake_event(event, &input.symbol);
+                        for (index, mut event) in decoded.into_iter().enumerate() {
                             if let Some(nanos) = nanos {
                                 match &mut event {
                                     MarketEvent::Quote { timestamp_ns, .. }
@@ -254,7 +253,9 @@ pub fn lake_factory(
         }
         let mut merged = Merge {
             cursors,
-            heads: BTreeMap::new(),
+            heads: (0..inputs.len()).map(|_| None).collect(),
+            winners: [usize::MAX; 64],
+            width: inputs.len().next_power_of_two(),
             failed: false,
         };
         for index in 0..merged.cursors.len() {
@@ -308,14 +309,36 @@ pub fn key(event: &MarketEvent) -> (i64, u64, u8) {
 }
 struct Merge {
     cursors: Vec<Cursor>,
-    heads: BTreeMap<(i64, u64, u8, usize), MarketEvent>,
+    heads: Vec<Option<Head>>,
+    // At most 32 inputs. A fixed tournament updates only the winner's path;
+    // no tree node is allocated or moved for each incoming market event.
+    winners: [usize; 64],
+    width: usize,
     failed: bool,
+}
+struct Head {
+    key: (i64, u64, u8, usize),
+    event: MarketEvent,
 }
 impl Merge {
     fn advance(&mut self, index: usize) -> Result<(), BacktestError> {
-        if let Some(event) = self.cursors[index].next()? {
+        self.heads[index] = self.cursors[index].next()?.map(|event| {
             let (t, s, c) = key(&event);
-            self.heads.insert((t, s, c, index), event);
+            Head { key: (t, s, c, index), event }
+        });
+        let mut node = self.width + index;
+        self.winners[node] = if self.heads[index].is_some() { index } else { usize::MAX };
+        while node > 1 {
+            node /= 2;
+            let left = self.winners[node * 2];
+            let right = self.winners[node * 2 + 1];
+            self.winners[node] = if left == usize::MAX {
+                right
+            } else if right == usize::MAX || self.heads[left].as_ref().unwrap().key <= self.heads[right].as_ref().unwrap().key {
+                left
+            } else {
+                right
+            };
         }
         Ok(())
     }
@@ -326,7 +349,11 @@ impl Iterator for Merge {
         if self.failed {
             return None;
         }
-        let ((_, _, _, index), event) = self.heads.pop_first()?;
+        let index = self.winners[1];
+        if index == usize::MAX {
+            return None;
+        }
+        let event = self.heads[index].take().unwrap().event;
         if let Err(error) = self.advance(index) {
             self.failed = true;
             return Some(Err(error));

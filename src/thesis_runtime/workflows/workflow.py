@@ -1,10 +1,8 @@
-"""The single general workflow object.
+"""Conversation-facing workflow host over the agent-independent graph engine.
 
-A Workflow instance combines structural phase metadata, runtime ports and a
-versioned JSON extension endpoint. The host owns execution identity, accepted
-history, lifecycle and fencing. Extensions own native domain requests, state
-folding, prompts, deterministic activities and reports; no engine object or
-opaque service bundle crosses that boundary.
+Owns activity bindings, trusted conversation lifecycle, completion admission,
+projection and durable dispatch. Generic routing, port readiness and activation
+replay belong exclusively to workflows.graph; domain policy belongs to extensions.
 """
 
 from __future__ import annotations
@@ -66,11 +64,11 @@ from thesis_runtime.workflows.extensions import (
     WorkflowExtension,
     invoke_extension,
 )
-from thesis_runtime.workflows.graph import Graph, replay_graph
+from thesis_runtime.workflows.graph import Graph, Position, replay_graph
+from thesis_runtime.workflows.graph.contracts import ActivityCompletion
 from thesis_runtime.workflows.phase import (
     ConversationPhase,
     DeterministicPhase,
-    SplitPhase,
     TerminalPhase,
 )
 from thesis_runtime.workflows.spec import (
@@ -336,9 +334,9 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         return self._spec.terminal_phases
 
     @property
-    def transitions(self) -> Mapping[str, frozenset[str]]:
+    def route_names(self) -> Mapping[str, frozenset[str]]:
         """Return the allowed transition table."""
-        return self._spec.transitions
+        return self._spec.route_names
 
     @property
     def definition(self) -> WorkflowDefinition:
@@ -584,7 +582,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                 sequence=sequence,
             )
         # A crash after store acceptance may have left the executor open.
-        if (sequence or graph.regions) and not any(
+        if (sequence or graph.scopes) and not any(
             event.event_type is ExecutionEventType.WORKFLOW_PHASE
             and event.payload.get("controlSequence") == sequence
             for event in self._chat.event_store.replay(request.execution_id).events
@@ -592,9 +590,10 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             history = self._execution_store.get(request.execution_id).transitions
             self._emit_phase(
                 request,
-                history[sequence - 1].to_phase
-                if sequence
-                else self._spec.phases[0].phase,
+                next(
+                    iter(graph.positions),
+                    history[-1].from_phase if history else self._spec.phases[0].phase,
+                ),
                 graph_payload(graph),
             )
         assert self._execution_store is not None
@@ -623,8 +622,14 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         ids = []
         for phase, position in tuple(graph.positions.items()):
             if phase in self.terminal_phases:
+                if (
+                    graph.scopes
+                    or graph.pending
+                    or any(name not in self.terminal_phases for name in graph.positions)
+                ):
+                    continue
                 self._finish_terminal(
-                    request, phase, position.completion, position.source
+                    request, phase, self._handoff_output(position), position.source
                 )
                 continue
             current = self.graph_state(request).positions.get(phase)
@@ -637,7 +642,8 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             context = HandoffContext(
                 source=position.source,
                 target=phase,
-                completion=position.completion,
+                completion=self._handoff_output(position),
+                inputs=position.inputs,
                 trigger_message_id=request.trigger_message_id,
             )
             prompt = self._phase_prompt(request, phase, state, context)
@@ -724,16 +730,23 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         )
         return spec, context, label
 
-    def graph_state(self, request: RequestT) -> Graph:
+    def graph_state(self, request: RequestT) -> Graph[StoreTransition]:
         """Authoritative control projection shared by execution and recovery."""
         assert self._execution_store is not None
         return replay_graph(
             request.execution_id,
             self._spec.phases[0].phase,
-            self._spec.phase_specs,
-            self._spec.transitions,
+            self._spec.graph_nodes,
             self._execution_store.get(request.execution_id).transitions,
+            self._request_payload(request),
         )
+
+    @staticmethod
+    def _handoff_output(position: Position[StoreTransition]) -> Mapping[str, object]:
+        """Project the product's primary handoff; named inputs remain explicit."""
+        if tuple(position.inputs) == ("input",):
+            return position.inputs["input"]
+        return dict(position.inputs)
 
     def causal_history(
         self, request: RequestT, phase: str
@@ -772,7 +785,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         """
         if phase_value in self.terminal_phases:
             return ""
-        targets = sorted(self._spec.transitions.get(phase_value, frozenset()))
+        targets = sorted(self._spec.route_names.get(phase_value, frozenset()))
         if not targets:
             return ""
         # The engine still accepts a terminal failure target, but the agent is
@@ -837,7 +850,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                 )
             return {
                 "executionId": request.execution_id,
-                "phase": accepted.to_phase,
+                "phase": accepted.route,
                 "applied": True,
             }
         self._check_acceptance(request, completion=completion)
@@ -878,7 +891,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                 ) from None
             return {
                 "executionId": request.execution_id,
-                "phase": receipt.to_phase,
+                "phase": receipt.route,
                 "applied": True,
             }
         target = self._phase_value(handed.phase)
@@ -892,8 +905,10 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             raise WorkflowEngineError("durable phase dispatch is not composed")
         attempt = self._phase_attempt_id(request, phase)
         key = f"phase:{attempt}:{request.intent_epoch}"
-        joins = {
-            phase.join for phase in self._spec.phases if isinstance(phase, SplitPhase)
+        replay_safe = {
+            item.phase
+            for item in self._spec.phases
+            if isinstance(item, DeterministicPhase) and item.replay_safe
         }
         generation = 0
         while True:
@@ -901,7 +916,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                 work = self._work_store.get(request.workspace_id, key)
             except LookupError:
                 break
-            if work.state != "interrupted" or phase not in joins:
+            if work.state != "interrupted" or phase not in replay_safe:
                 return
             generation += 1
             key = f"phase:{attempt}:{request.intent_epoch}:recovery:{generation}"
@@ -921,6 +936,9 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                         "source": context.source,
                         "target": context.target,
                         "completion": dict(context.completion),
+                        "inputs": {
+                            name: dict(value) for name, value in context.inputs.items()
+                        },
                         "trigger_message_id": context.trigger_message_id,
                     },
                 },
@@ -942,6 +960,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             source=raw["source"],
             target=raw["target"],
             completion=raw["completion"],
+            inputs=raw["inputs"],
             trigger_message_id=raw["trigger_message_id"],
         )
         from thesis_runtime.storage.ownership import OwnershipLost
@@ -1000,7 +1019,10 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         failure = self._validate_contract(phase, completion)
         if failure:
             raise PhaseCompletionRejected(failure)
-        target = self._resolve_target(phase, completion)
+        selected = ActivityCompletion(
+            self._resolve_target(phase, completion), completion
+        )
+        target = selected.route
         advanced = self._transition(
             request,
             state,
@@ -1069,7 +1091,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
 
     def _resolve_target(self, phase: str, completion: Mapping[str, object]) -> str:
         """Return the declared transition target for an accepted contract."""
-        allowed = sorted(self._spec.transitions.get(phase, frozenset()))
+        allowed = sorted(self._spec.route_names.get(phase, frozenset()))
         if not allowed:
             raise PhaseCompletionRejected(f"phase {phase!r} has no declared transition")
         requested_target = completion.get("target")
@@ -1238,6 +1260,9 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         self, request: RequestT, state: StateT, handoff: HandoffContext | None = None
     ) -> Mapping[str, object]:
         return {
+            "inputs": {}
+            if handoff is None
+            else {name: dict(value) for name, value in handoff.inputs.items()},
             "request": self._request_payload(request),
             "phase": self._phase_value(state.phase),
             "history": [
@@ -1249,6 +1274,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                 "source": handoff.source,
                 "target": handoff.target,
                 "completion": dict(handoff.completion),
+                "inputs": {name: dict(value) for name, value in handoff.inputs.items()},
                 "triggerMessageId": handoff.trigger_message_id,
                 "subAgentId": handoff.sub_agent_id,
             },
@@ -1391,9 +1417,9 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             graph = replay_graph(
                 request.execution_id,
                 self._spec.phases[0].phase,
-                self._spec.phase_specs,
-                self._spec.transitions,
+                self._spec.graph_nodes,
                 observed.transitions,
+                self._request_payload(request),
             )
             position = graph.positions.get(source_phase)
             if position is None or position.history != tuple(state.transitions):
@@ -1401,7 +1427,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             transition = StoreTransition(
                 sequence=len(observed.transitions) + 1,
                 from_phase=source_phase,
-                to_phase=target_phase,
+                route=target_phase,
                 occurred_at=self._clock(),
                 intent_epoch=request.intent_epoch,
                 reason=reason,
@@ -1412,9 +1438,9 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
             advanced_graph = replay_graph(
                 request.execution_id,
                 self._spec.phases[0].phase,
-                self._spec.phase_specs,
-                self._spec.transitions,
+                self._spec.graph_nodes,
                 (*observed.transitions, transition),
+                self._request_payload(request),
             )
             scoped = (*position.history, transition)
             payload = self._extension(
@@ -1440,8 +1466,9 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                 continue
             self._emit_phase(
                 request,
-                target,
+                next(iter(advanced_graph.positions), source_phase),
                 {
+                    "route": target_phase,
                     "reason": reason,
                     **graph_payload(advanced_graph),
                     "attemptId": position.attempt_id,

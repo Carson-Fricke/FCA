@@ -26,6 +26,7 @@ from thesis_runtime.conversations.conversation import Conversations
 from thesis_runtime.conversations.service import ChatService
 from thesis_runtime.execution.events import ExecutionEventType
 from thesis_runtime.workflows.execution_store import InMemoryExecutionStore
+from thesis_runtime.workflows.graph.contracts import Destination
 from thesis_runtime.workflows.phase import ConversationPhase, TerminalPhase
 from thesis_runtime.workflows.spec import WorkflowSpec
 from thesis_runtime.workflows.workflow import Workflow, WorkflowDoctrine, WorkflowPorts
@@ -86,7 +87,7 @@ def runtime() -> tuple[
             version="1.0.0",
             title="Research",
             phases=(ConversationPhase("creation"), TerminalPhase("done")),
-            transitions={"creation": frozenset({"done"}), "done": frozenset()},
+            routes={"creation": {"done": (Destination("done", "input"),)}, "done": {}},
         ),
         doctrine=doctrine,
         ports=WorkflowPorts(

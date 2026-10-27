@@ -13,8 +13,8 @@ from thesis_runtime.adapters.providers.foundry import (
     FoundryProviderProfile,
 )
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage,
     ModelCompletion,
+    ProviderMessage,
     ProviderRejectedError,
     ProviderUnreachableError,
 )
@@ -25,7 +25,7 @@ from thesis_runtime.adapters.providers.openrouter import (
 from thesis_runtime.adapters.providers.transports import HttpOpenRouterTransport
 
 _OK_BODY = '{"choices":[{"message":{"role":"assistant","content":"ok"}}]}'
-_MESSAGES = [ChatMessage(role="user", content="hi")]
+_MESSAGES = [ProviderMessage(role="user", content="hi")]
 
 
 class _Key:
@@ -82,7 +82,7 @@ def test_transient_connection_error_is_retried(
     transport = _ScriptedTransport([error_type("dropped"), (200, _OK_BODY)])
     completion = _provider(transport).complete(messages=_MESSAGES)
     assert isinstance(completion, ModelCompletion)
-    assert completion.content == "ok"
+    assert completion.message.content == "ok"
     assert transport.calls == 2
 
 

@@ -253,10 +253,10 @@ pub(super) fn lake_subscription_events(
 }
 
 /// Convert one normalized lake event into the engine's fixture event.
-pub(super) fn lake_event(event: &marketdata::MarketEvent, symbol: &str) -> MarketEvent {
+pub(super) fn lake_event(event: marketdata::MarketEvent, symbol: &str) -> MarketEvent {
     match event {
         marketdata::MarketEvent::Quote(quote) => MarketEvent::Quote {
-            event_id: quote.event_id.clone(),
+            event_id: quote.event_id,
             timestamp_ns: quote.timestamp.to_nanos(),
             sequence: quote.sequence,
             symbol: symbol.to_string(),
@@ -264,20 +264,20 @@ pub(super) fn lake_event(event: &marketdata::MarketEvent, symbol: &str) -> Marke
             ask: quote.ask_price,
             bid_quantity: quote.bid_size,
             ask_quantity: quote.ask_size,
-            venue: quote.venue.clone().unwrap_or_default(),
+            venue: quote.venue.unwrap_or_default(),
         },
         marketdata::MarketEvent::Trade(trade) => MarketEvent::Trade {
-            event_id: trade.event_id.clone(),
+            event_id: trade.event_id,
             timestamp_ns: trade.timestamp.to_nanos(),
             sequence: trade.sequence,
             symbol: symbol.to_string(),
             price: trade.price,
             quantity: trade.quantity,
-            venue: trade.venue.clone().unwrap_or_default(),
-            trade_id: trade.trade_id.clone().unwrap_or_default(),
+            venue: trade.venue.unwrap_or_default(),
+            trade_id: trade.trade_id.unwrap_or_default(),
         },
         marketdata::MarketEvent::Bar(bar) => MarketEvent::Bar {
-            event_id: bar.event_id.clone(),
+            event_id: bar.event_id,
             timestamp_ns: bar.timestamp.to_nanos(),
             sequence: bar.sequence,
             symbol: symbol.to_string(),

@@ -12,9 +12,10 @@ from fastapi.testclient import TestClient
 from thesis.http.application import create_app
 from thesis.http.chat_sub_agents import authenticated_actor_id
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage as ProviderChatMessage,
+    ModelCompletion,
+    ProviderMessage,
+    Role,
 )
-from thesis_runtime.adapters.providers.invocations import ModelCompletion, Role
 from thesis_runtime.adapters.providers.session_adapter import NativeSessionAdapter
 from thesis_runtime.contracts.messages import from_record
 from thesis_runtime.conversations import (
@@ -121,7 +122,7 @@ def test_steering_effects_precede_first_provider_dispatch(
         def complete(
             self,
             *,
-            messages: Sequence[ProviderChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -141,7 +142,7 @@ def test_steering_effects_precede_first_provider_dispatch(
             ]
             assert sum(item["text"] == "Refocus now" for item in inputs) == 1
             return ModelCompletion(
-                content="Acknowledged",
+                message=ProviderMessage("assistant", "Acknowledged"),
                 model="test",
                 provider="test",
                 role=role,

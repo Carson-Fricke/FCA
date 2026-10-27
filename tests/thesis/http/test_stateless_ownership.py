@@ -16,7 +16,10 @@ from thesis_runtime.adapters.cosmos.execution_store import CosmosExecutionStore
 from thesis_runtime.adapters.cosmos.ownership import CosmosOwnershipStore, lease_id
 from thesis_runtime.adapters.cosmos.timeline import CosmosTimeline
 from thesis_runtime.adapters.cosmos.work import CosmosWorkStore
-from thesis_runtime.adapters.providers.invocations import ModelCompletion
+from thesis_runtime.adapters.providers.invocations import (
+    ModelCompletion,
+    ProviderMessage,
+)
 from thesis_runtime.contracts.messages import (
     MessageContent,
     SessionMessage,
@@ -37,6 +40,7 @@ from thesis_runtime.storage.ownership import OwnershipLost, own
 
 class Provider:
     model = "test/model"
+    provider_name = "test"
 
     def __init__(self) -> None:
         self.calls = 0
@@ -57,8 +61,9 @@ class Provider:
         self.entered.set()
         assert self.release.wait(5)
         return ModelCompletion(
-            content="Durable reply",
-            reasoning="Working",
+            message=ProviderMessage(
+                "assistant", "Durable reply", continuation={"reasoning": "Working"}
+            ),
             model="test",
             provider="test",
             role=kwargs["role"],

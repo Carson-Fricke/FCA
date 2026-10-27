@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
 
+import httpx
 import pytest
 from azure.cosmos import ContainerProxy
 from tests.thesis.extensions.workflows.hypothesis_development._support import (
@@ -26,8 +27,18 @@ from thesis.integrations.mcp import HarnessMcpTransportError, McpToolResult
 from thesis.workspaces.programs import WorkspacePrograms
 from thesis_runtime.adapters.cosmos.ownership import CosmosOwnershipStore
 from thesis_runtime.adapters.cosmos.work import CosmosWorkStore
-from thesis_runtime.adapters.providers.invocations import ModelCompletion, ToolCall
+from thesis_runtime.adapters.providers.families import model_family_adapter
+from thesis_runtime.adapters.providers.invocations import (
+    ModelCompletion,
+    ProviderMessage,
+    ToolCall,
+)
+from thesis_runtime.adapters.providers.openrouter import (
+    OpenRouterProfile,
+    OpenRouterProvider,
+)
 from thesis_runtime.adapters.providers.session_adapter import NativeSessionAdapter
+from thesis_runtime.adapters.providers.transports import HttpOpenRouterTransport
 from thesis_runtime.contracts.context import ToolContext
 from thesis_runtime.contracts.errors import ProviderUnreachableError
 from thesis_runtime.contracts.messages import from_record
@@ -110,16 +121,19 @@ class ResearchModel:
         assert self.responses, "unexpected model turn, including a record-only anchor"
         requests = self.responses.pop(0)()
         yield ModelCompletion(
-            "",
-            "model",
-            "provider",
-            kwargs.get("role", "primary"),
-            0,
-            0,
-            tool_calls=tuple(
-                ToolCall(f"call-{self.calls}-{index}", name, json.dumps(arguments))
-                for index, (name, arguments) in enumerate(requests)
+            message=ProviderMessage(
+                "assistant",
+                "",
+                tool_calls=tuple(
+                    ToolCall(f"call-{self.calls}-{index}", name, json.dumps(arguments))
+                    for index, (name, arguments) in enumerate(requests)
+                ),
             ),
+            model="model",
+            provider="provider",
+            role=kwargs.get("role", "primary"),
+            prompt_tokens=0,
+            completion_tokens=0,
         )
 
 
@@ -429,6 +443,105 @@ def test_durable_research_phases_read_and_complete_without_turning_workflow_node
     assert kit.model.calls == 2 * len(stages)
 
 
+def test_streamed_read_selectors_reach_research_handler_and_durable_receipt(kit):
+    branch = kit.launch()
+    proposal = {**PROPOSAL, "design": "accepted design " * 500}
+    kit.complete(branch, "critique", proposal)
+    critic = kit.node(branch).sub_agent_id
+    arguments = {
+        "execution_id": branch,
+        "handoff": 1,
+        "offset": 1000,
+        "max_chars": 1000,
+    }
+    encoded = json.dumps(arguments)
+    boundary = encoded.index(', "handoff"')
+    requests = []
+
+    def frame(delta, finish=None):
+        return (
+            "data: "
+            + json.dumps(
+                {"choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+            )
+            + "\n\n"
+        ).encode()
+
+    def exchange(request):
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            body = frame(
+                {
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "read-call",
+                            "function": {
+                                "name": "read_research_investigations",
+                                "arguments": encoded[:boundary],
+                            },
+                        }
+                    ]
+                }
+            )
+            body += frame(
+                {
+                    "tool_calls": [
+                        {"index": 0, "function": {"arguments": encoded[boundary:]}}
+                    ]
+                },
+                "tool_calls",
+            )
+        else:
+            assert len(requests) == 2
+            body = frame({"content": "Read the selected accepted page."}, "stop")
+        return httpx.Response(200, content=body + b"data: [DONE]\n\n")
+
+    class Key:
+        def key(self) -> str:
+            return "test-key"
+
+    with httpx.Client(transport=httpx.MockTransport(exchange)) as http:
+        provider = OpenRouterProvider(
+            OpenRouterProfile(profile_id="test", model="deepseek/test"),
+            Key(),
+            HttpOpenRouterTransport("https://provider.test", client=http),
+        )
+        conversations = Conversations(
+            chat=kit.chat,
+            store=kit.conversations.store,
+            provider=NativeSessionAdapter(
+                provider, family=model_family_adapter(provider.model)
+            ),
+            registry_factory=kit.registry,
+            spawn_thread=lambda _: None,
+        )
+        conversations.run_node_turn(WORKSPACE, kit.thread.chat_id, critic)
+
+    handle = conversations.get(WORKSPACE, critic)
+    assert handle is not None
+    messages = [from_record(row) for row in handle.transcript()]
+    receipts = [
+        message.content.result
+        for message in messages
+        if message.content.correlation is not None
+        and message.content.correlation.tool_name == "read_research_investigations"
+    ]
+    assert len(receipts) == 1
+    receipt = cast(dict[str, Any], receipts[0])
+    assert receipt["arguments"] == arguments
+    page = receipt["datums"][0]["structured"]
+    accepted = kit.executions.get(branch).transitions[0].as_dict()
+    assert (
+        page["content"]
+        == json.dumps(accepted, ensure_ascii=False, separators=(",", ":"))[1000:2000]
+    )
+    assert page["handoff"] == 1
+    assert page["offset"] == 1000
+    assert page["nextArguments"] == {**arguments, "offset": 2000}
+    assert any(row["role"] == "tool" for row in requests[-1]["messages"])
+
+
 def test_large_handoffs_are_paged_and_repairs_survive_phase_reentry(kit):
     branch = kit.launch(executionBudget=4)
     sibling = kit.launch()
@@ -466,26 +579,45 @@ def test_large_handoffs_are_paged_and_repairs_survive_phase_reentry(kit):
     kit.complete(branch, "critique", {**proposal, "repairs": [repair]})
     assert kit.node(branch).sub_agent_id == critic
 
-    def read_all(arguments):
+    def read_all(arguments, reader=critic):
         parts = []
-        offset = 0
-        while offset is not None:
+        arguments = {
+            "execution_id": branch,
+            "handoff": None,
+            "offset": 0,
+            "max_chars": 1000,
+            **arguments,
+        }
+        while arguments is not None:
             response = kit.tool(
-                critic,
+                reader,
                 "read_research_investigations",
-                {**arguments, "offset": offset, "max_chars": 1000},
+                arguments,
             )
             assert response.ok, response.failure
             page = response.structured
             assert len(page["content"]) <= 1000
             parts.append(page["content"])
-            offset = page["nextOffset"]
+            continuation = page["nextArguments"]
+            if continuation is not None:
+                assert continuation["execution_id"] == branch
+                assert continuation["offset"] == page["nextOffset"]
+                assert continuation["offset"] > page["offset"]
+                assert continuation.get("handoff") == arguments.get("handoff")
+            else:
+                assert page["nextOffset"] is None
+            arguments = continuation
         return json.loads("".join(parts))
 
+    incomplete = kit.tool(
+        critic, "read_research_investigations", {"execution_id": branch}
+    )
+    assert not incomplete.ok
+    assert incomplete.failure["kind"] == "invalid_arguments"
     history = read_all({})
     assert history["issues"][issue["issueId"]]["status"] == "repair"
     assert history["issues"][issue["issueId"]]["response"] == repair["response"]
-    assert read_all({"handoff": 2})["completion"]["critique"]["issues"] == [issue]
+    assert read_all({"handoff": 2})["output"]["critique"]["issues"] == [issue]
     assert read_all({"handoff": 0}) == {
         **kit.brief,
         "executionBudget": 4,
@@ -494,8 +626,13 @@ def test_large_handoffs_are_paged_and_repairs_survive_phase_reentry(kit):
             "text": kit.trigger.body,
         },
     }
+    assert read_all(
+        {"execution_id": branch, "handoff": 0}, reader=kit.discovery_id
+    ) == read_all({"handoff": 0})
     assert not kit.tool(
-        critic, "read_research_investigations", {"execution_id": sibling}
+        critic,
+        "read_research_investigations",
+        {"execution_id": sibling, "handoff": None, "offset": 0, "max_chars": 1000},
     ).ok
     kit.complete(
         branch,
@@ -525,7 +662,7 @@ def test_large_handoffs_are_paged_and_repairs_survive_phase_reentry(kit):
         if item.from_phase == "investigation"
     )
     assert (
-        read_all({"handoff": investigation_handoff})["completion"]["investigation"]
+        read_all({"handoff": investigation_handoff})["output"]["investigation"]
         == investigation
     )
     assert read_all({})["issues"][issue["issueId"]]["status"] == "verified"
@@ -549,7 +686,9 @@ def test_independent_specialists_preserve_findings_and_narrow_repairs_stay_focus
     issues = {}
     for name, reviewer in reviewers.items():
         brief = kit.tool(
-            reviewer.sub_agent_id, "read_research_investigations", {"handoff": 0}
+            reviewer.sub_agent_id,
+            "read_research_investigations",
+            {"execution_id": None, "handoff": 0, "offset": 0, "max_chars": 6000},
         )
         original = json.loads(brief.structured["content"])["operatorRequest"]
         assert original == {
@@ -595,13 +734,15 @@ def test_independent_specialists_preserve_findings_and_narrow_repairs_stay_focus
             sibling_read = kit.tool(
                 reviewers["alignment"].sub_agent_id,
                 "read_research_investigations",
-                {"handoff": 2},
+                {"execution_id": None, "handoff": 2, "offset": 0, "max_chars": 6000},
             )
             assert not sibling_read.ok
 
     judge = kit.node(branch, "adjudicate")
     read = kit.tool(
-        judge.sub_agent_id, "read_research_investigations", {"max_chars": 8000}
+        judge.sub_agent_id,
+        "read_research_investigations",
+        {"execution_id": None, "handoff": None, "offset": 0, "max_chars": 8000},
     )
     state = json.loads(read.structured["content"])
     assert set(state["critiques"]) == set(REVIEW_PHASES)
@@ -669,7 +810,9 @@ def test_independent_specialists_preserve_findings_and_narrow_repairs_stay_focus
         },
     )
     result = kit.tool(
-        kit.discovery_id, "read_research_investigations", {"execution_id": branch}
+        kit.discovery_id,
+        "read_research_investigations",
+        {"execution_id": branch, "handoff": None, "offset": 0, "max_chars": 6000},
     ).structured["branches"][0]
     assert (
         result["issues"][issues["implementation"]["issueId"]]["verification"] == proof
@@ -716,7 +859,9 @@ def test_independent_specialists_preserve_findings_and_narrow_repairs_stay_focus
     )
     kit.complete_one(branch, "alignment_critique", "collect_critiques", CRITIQUE)
     conflict = kit.tool(
-        kit.discovery_id, "read_research_investigations", {"execution_id": branch}
+        kit.discovery_id,
+        "read_research_investigations",
+        {"execution_id": branch, "handoff": None, "offset": 0, "max_chars": 6000},
     ).structured["branches"][0]
     assert conflict["issues"][issues["implementation"]["issueId"]]["status"] == "open"
     assert (
@@ -950,7 +1095,9 @@ def test_parallel_branches_loop_and_return_independently_with_original_scope(kit
     assert not rejected.ok and kit.node(a).sub_agent_id == judge.sub_agent_id
     kit.complete(a, "completed", ADJUDICATION)
     branches = kit.tool(
-        kit.discovery_id, "read_research_investigations", {}
+        kit.discovery_id,
+        "read_research_investigations",
+        {"execution_id": None, "handoff": None, "offset": 0, "max_chars": 6000},
     ).structured["branches"]
     assert {item["executionId"] for item in branches} == {a, b}
     assert all(item["status"] == "completed" for item in branches)
@@ -1036,7 +1183,9 @@ def test_child_retention_reconciliation_and_discovery_evidence_handoff(kit, mode
     kit.complete(branch, "adjudicate", CRITIQUE)
     kit.complete(branch, "completed", ADJUDICATION)
     read = kit.tool(
-        kit.discovery_id, "read_research_investigations", {"execution_id": branch}
+        kit.discovery_id,
+        "read_research_investigations",
+        {"execution_id": branch, "handoff": None, "offset": 0, "max_chars": 6000},
     )
     assert read.structured["branches"][0]["attempts"] == [attempt]
     # The original discovery contract accepts genuine delegated evidence without
@@ -1096,7 +1245,6 @@ def test_registered_definition_and_launch_scope_use_production_composition(kit):
         assert result.status_code == 200
         assert result.json()["phases"] == [
             "proposal",
-            "critique",
             *REVIEW_PHASES.values(),
             "collect_critiques",
             "focused_critique",
@@ -1105,7 +1253,7 @@ def test_registered_definition_and_launch_scope_use_production_composition(kit):
             "completed",
             "failed",
         ]
-        assert result.json()["transitions"]["adjudicate"] == [
+        assert sorted(result.json()["routes"]["adjudicate"]) == [
             "completed",
             "investigation",
             "proposal",

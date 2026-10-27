@@ -10,6 +10,7 @@ from thesis_runtime.adapters.providers.invocations import (
     Role,
     parse_chat_completion,
 )
+from thesis_runtime.adapters.providers.reasoning import ReasoningStream, reasoning_text
 from thesis_runtime.contracts.errors import ProviderRejectedError
 from thesis_runtime.contracts.output import OutputDelta
 
@@ -73,7 +74,8 @@ def parse_completion_stream(
     is an interrupted request. Scalar reasoning wins over duplicate detail fields.
     """
     text: list[str] = []
-    reasoning: list[str] = []
+    reasoning = ReasoningStream()
+    display_reasoning: list[str] = []
     calls: dict[int, dict[str, object]] = {}
     metadata: dict[str, object] = {}
     finished = False
@@ -85,7 +87,7 @@ def parse_completion_stream(
                 raise ProviderRejectedError("provider stream omitted its finish reason")
             message = {
                 "content": "".join(text),
-                "reasoning": "".join(reasoning),
+                **reasoning.fields(),
                 "tool_calls": [calls[index] for index in sorted(calls)],
             }
             yield parse_chat_completion(
@@ -100,6 +102,7 @@ def parse_completion_stream(
                 provider=provider,
                 fallback_model=model,
                 role=role,
+                display_reasoning="".join(display_reasoning),
             )
             return
         try:
@@ -134,15 +137,28 @@ def parse_completion_stream(
             if not isinstance(delta, dict):
                 raise ProviderRejectedError("provider emitted a malformed delta")
             answer = delta.get("content")
-            thought = _reasoning(delta)
-            if finished and (answer or thought or delta.get("tool_calls")):
+            thought = reasoning_text(delta)
+            if finished and (
+                answer
+                or thought
+                or delta.get("tool_calls")
+                or delta.get("reasoning_details")
+            ):
                 raise ProviderRejectedError(
                     "provider emitted content after its finish reason"
                 )
-            for channel, value, accumulated in (
-                ("reasoning", thought, reasoning),
-                ("text", answer, text),
-            ):
+            # Count opaque blocks too: encrypted continuation has no display text.
+            size += len(
+                json.dumps(
+                    delta.get("reasoning_details", []), ensure_ascii=True
+                ).encode("utf-8")
+            )
+            if size > 8 * 1024 * 1024:
+                raise ProviderRejectedError(
+                    "provider completion exceeded the output limit"
+                )
+            reasoning.add(delta)
+            for channel, value in (("reasoning", thought), ("text", answer)):
                 if value is None:
                     continue
                 if not isinstance(value, str):
@@ -158,7 +174,10 @@ def parse_completion_stream(
                         "provider completion exceeded the output limit"
                     )
                 if value:
-                    accumulated.append(value)
+                    if channel == "text":
+                        text.append(value)
+                    else:
+                        display_reasoning.append(value)
                     yield OutputDelta(channel, value)
             tool_calls = delta.get("tool_calls") or []
             if not isinstance(tool_calls, list):
@@ -231,26 +250,3 @@ def _stream_error(detail: object, message: str) -> ProviderRejectedError:
     code = detail.get("code") if isinstance(detail, Mapping) else None
     status = code if type(code) is int else None
     return ProviderRejectedError(message, status=status, transient=status is None)
-
-
-def _reasoning(delta: Mapping[str, object]) -> str:
-    for key in ("reasoning", "reasoning_content"):
-        value = delta.get(key)
-        if isinstance(value, str) and value:
-            return value
-    details = delta.get("reasoning_details")
-    if not isinstance(details, list):
-        return ""
-    parts: list[str] = []
-    for entry in details:
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("type") == "reasoning.text":
-            value = entry.get("text")
-        elif entry.get("type") == "reasoning.summary":
-            value = entry.get("summary")
-        else:
-            continue
-        if isinstance(value, str):
-            parts.append(value)
-    return "".join(parts)

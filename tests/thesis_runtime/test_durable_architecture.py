@@ -8,8 +8,8 @@ import pytest
 
 from thesis_runtime.adapters.filesystem.records import FileChatPersistence
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage,
     ModelCompletion,
+    ProviderMessage,
     Role,
     ToolCall,
 )
@@ -45,7 +45,7 @@ def test_composed_roots_helpers_phase_reload_and_repair(tmp_path: Path) -> None:
     chat = ChatService(persistence=FileChatPersistence(tmp_path))
     first = chat.create_chat("workspace", title="First", owner_actor_id="operator")
     second = chat.create_chat("workspace", title="Second", owner_actor_id="operator")
-    requests: list[tuple[ChatMessage, ...]] = []
+    requests: list[tuple[ProviderMessage, ...]] = []
     contexts: list[ToolContext] = []
     workers: list[Callable[[], None]] = []
     phase_calls = 0
@@ -67,7 +67,7 @@ def test_composed_roots_helpers_phase_reload_and_repair(tmp_path: Path) -> None:
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -80,21 +80,31 @@ def test_composed_roots_helpers_phase_reload_and_repair(tmp_path: Path) -> None:
                     advance_epoch()
                     phase.send("Re-derive using revised intent", "operator")
                 return ModelCompletion(
-                    "",
-                    "model",
-                    "provider",
-                    role,
-                    0,
-                    0,
-                    tool_calls=(
-                        ToolCall(
-                            f"phase-{phase_calls}",
-                            "request_phase_completion",
-                            '{"completion":{"summary":"accepted"}}',
+                    message=ProviderMessage(
+                        "assistant",
+                        "",
+                        tool_calls=(
+                            ToolCall(
+                                f"phase-{phase_calls}",
+                                "request_phase_completion",
+                                '{"completion":{"summary":"accepted"}}',
+                            ),
                         ),
                     ),
+                    model="model",
+                    provider="provider",
+                    role=role,
+                    prompt_tokens=0,
+                    completion_tokens=0,
                 )
-            return ModelCompletion("Helper evidence", "model", "provider", role, 0, 0)
+            return ModelCompletion(
+                message=ProviderMessage("assistant", "Helper evidence"),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
 
     def registry(context: ToolContext) -> SessionToolRegistry:
         contexts.append(context)
@@ -377,12 +387,19 @@ def test_fast_spawn_persists_policy_before_synchronous_worker() -> None:
         def complete(
             self,
             *,
-            messages: Sequence[ChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
         ) -> ModelCompletion:
-            return ModelCompletion("Evidence", "model", "provider", role, 0, 0)
+            return ModelCompletion(
+                message=ProviderMessage("assistant", "Evidence"),
+                model="model",
+                provider="provider",
+                role=role,
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
 
     service = Conversations(
         chat=chat,

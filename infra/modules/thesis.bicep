@@ -97,7 +97,7 @@ param thesisCosmosEndpoint string
 @minLength(1)
 param thesisCosmosDatabaseName string = 'thesis'
 
-@description('OpenRouter model name injected as THESIS_MODEL. Empty leaves the runtime default (deepseek/deepseek-v4.1-flash-1017).')
+@description('OpenRouter model name injected as THESIS_MODEL. Empty leaves the runtime default (deepseek/deepseek-v4.1-flash).')
 param thesisModel string = ''
 
 @description('Quant API HTTPS endpoint injected as HARNESS_MCP_URL. Empty disables the workflow runtime.')

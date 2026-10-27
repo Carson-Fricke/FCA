@@ -136,10 +136,14 @@ impl QueuedEvent {
 #[derive(Debug, Default)]
 pub struct EventBus {
     pub(super) heap: BinaryHeap<QueuedEvent>,
+    external: Option<QueuedEvent>,
     feed_ordinal: u64,
     hasher: Sha256,
     dispatched_count: u64,
     pub(super) frame_replay: bool,
+    identity: Vec<u8>,
+    timestamp_second: Option<i64>,
+    timestamp: [u8; 32],
 }
 
 impl EventBus {
@@ -162,17 +166,40 @@ impl EventBus {
         } else {
             0
         };
-        self.heap.push(QueuedEvent {
+        let external = matches!(&event, EngineEvent::Market(_) | EngineEvent::BarFrame(_));
+        let queued = QueuedEvent {
             event,
             feed_ordinal: self.feed_ordinal,
             phase,
-        });
+        };
+        if external && self.external.is_none() {
+            self.external = Some(queued);
+        } else {
+            self.heap.push(queued);
+        }
         self.feed_ordinal += 1;
+    }
+
+    /// Compare the single ordered-feed head with generated events and any
+    /// equal-key feed backlog, retaining the complete ordinal tie breaker.
+    pub(super) fn peek(&self) -> Option<&QueuedEvent> {
+        match (&self.external, self.heap.peek()) {
+            (Some(external), Some(queued)) if queued.key() < external.key() => Some(queued),
+            (Some(external), _) => Some(external),
+            (None, queued) => queued,
+        }
     }
 
     /// Pop and record the next event, or `None` when empty.
     pub fn dispatch_next(&mut self) -> Option<EngineEvent> {
-        let queued = self.heap.pop()?;
+        let use_external = self.external.as_ref().is_some_and(|external| {
+            self.heap.peek().is_none_or(|queued| external.key() < queued.key())
+        });
+        let queued = if use_external {
+            self.external.take().unwrap()
+        } else {
+            self.heap.pop()?
+        };
         self.record_dispatch(&queued.event);
         Some(queued.event)
     }
@@ -190,17 +217,43 @@ impl EventBus {
     }
 
     fn record_dispatch(&mut self, event: &EngineEvent) {
-        let identity = format!(
-            "{}\u{0}{}\u{0}{}\u{0}{}\u{0}{}",
-            event.qualname(),
-            event.event_type(),
-            crate::backtest::manifest::utc_timestamp(event.timestamp_ns(), false),
-            event.sequence(),
-            event.event_id(),
-        );
-        let bytes = identity.as_bytes();
-        self.hasher.update(&(bytes.len() as u64).to_be_bytes());
-        self.hasher.update(bytes);
+        let second = event.timestamp_ns().div_euclid(1_000_000_000);
+        if self.timestamp_second != Some(second) {
+            self.timestamp.copy_from_slice(
+                crate::backtest::manifest::utc_timestamp(event.timestamp_ns(), false).as_bytes(),
+            );
+            self.timestamp_second = Some(second);
+        }
+        let mut micros = event.timestamp_ns().rem_euclid(1_000_000_000) as u32 / 1000;
+        for digit in self.timestamp[20..26].iter_mut().rev() {
+            *digit = b'0' + (micros % 10) as u8;
+            micros /= 10;
+        }
+        self.identity.clear();
+        for field in [
+            event.qualname().as_bytes(),
+            event.event_type().as_bytes(),
+            &self.timestamp,
+        ] {
+            self.identity.extend_from_slice(field);
+            self.identity.push(0);
+        }
+        let mut digits = [0u8; 20];
+        let mut start = digits.len();
+        let mut sequence = event.sequence();
+        loop {
+            start -= 1;
+            digits[start] = b'0' + (sequence % 10) as u8;
+            sequence /= 10;
+            if sequence == 0 {
+                break;
+            }
+        }
+        self.identity.extend_from_slice(&digits[start..]);
+        self.identity.push(0);
+        self.identity.extend_from_slice(event.event_id().as_bytes());
+        self.hasher.update(&(self.identity.len() as u64).to_be_bytes());
+        self.hasher.update(&self.identity);
         if let EngineEvent::BarFrame(frame) = event {
             // Content evidence is independent of source row order and sequences.
             let payload = JsonValue::object([

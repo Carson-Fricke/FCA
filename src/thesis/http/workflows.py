@@ -11,7 +11,6 @@ from fastapi import APIRouter, HTTPException
 
 from thesis.extensions.workflows import build_workflow_registry
 from thesis.http.wire import WorkflowDefinitionWire
-from thesis_runtime.workflows.phase import SplitPhase
 from thesis_runtime.workflows.registry import UnknownWorkflowError, WorkflowRegistry
 from thesis_runtime.workflows.spec import WorkflowContext
 
@@ -62,14 +61,13 @@ def create_workflow_router(registry: WorkflowRegistry | None = None) -> APIRoute
             title=spec.title,
             phases=spec.phase_names,
             terminal_phases=spec.terminal_phases,
-            transitions={
-                phase: sorted(spec.transitions.get(phase, ()))
-                for phase in spec.phase_names
-            },
-            splits={
-                phase.phase: {"branches": dict(phase.branches), "join": phase.join}
-                for phase in spec.phases
-                if isinstance(phase, SplitPhase)
+            inputs={phase.phase: phase.inputs for phase in spec.phases},
+            routes={
+                source: {
+                    route: tuple(str(target) for target in targets)
+                    for route, targets in routes.items()
+                }
+                for source, routes in spec.routes.items()
             },
         )
 

@@ -16,10 +16,8 @@ from thesis.agent.harness_tools import HarnessToolProvider
 from thesis.extensions.tools.registry import build_session_registry
 from thesis.integrations.mcp import HarnessMcpClient, HarnessMcpTransportError
 from thesis_runtime.adapters.providers.invocations import (
-    ChatMessage as ProviderChatMessage,
-)
-from thesis_runtime.adapters.providers.invocations import (
     ModelCompletion,
+    ProviderMessage,
     ProviderUnreachableError,
     Role,
     ToolCall,
@@ -64,13 +62,20 @@ _CALL = ToolCall("study-call", "validate_study", '{"source":"study"}')
 
 
 def completion(text: str, *calls: ToolCall) -> ModelCompletion:
-    return ModelCompletion(text, "model", "provider", "primary", 0, 0, tool_calls=calls)
+    return ModelCompletion(
+        message=ProviderMessage("assistant", text, tool_calls=calls),
+        model="model",
+        provider="provider",
+        role="primary",
+        prompt_tokens=0,
+        completion_tokens=0,
+    )
 
 
 class Provider:
     def __init__(self, *responses: ModelCompletion | Exception) -> None:
         self.responses = iter(responses)
-        self.requests: list[tuple[ProviderChatMessage, ...]] = []
+        self.requests: list[tuple[ProviderMessage, ...]] = []
 
     def stream(self, *, message_id=None, **kwargs):
         from tests.thesis_runtime.provider_fakes import completion_frames
@@ -82,7 +87,7 @@ class Provider:
     def complete(
         self,
         *,
-        messages: Sequence[ProviderChatMessage],
+        messages: Sequence[ProviderMessage],
         role: Role = "primary",
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
@@ -149,7 +154,7 @@ def test_live_tool_transcript_survives_model_ssl_and_replays_on_retry(
         def complete(
             self,
             *,
-            messages: Sequence[ProviderChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,
@@ -436,7 +441,7 @@ def test_persisted_midtool_steering_replays_after_the_tool_result(
         "result": None,
         "correlation": None,
     }
-    assert live[-1] == ProviderChatMessage(
+    assert live[-1] == ProviderMessage(
         role="user", content=steering_content.as_content()
     )
     assert (
@@ -713,7 +718,7 @@ def test_cancellation_during_model_fault_does_not_overwrite_terminal_status(
         def complete(
             self,
             *,
-            messages: Sequence[ProviderChatMessage],
+            messages: Sequence[ProviderMessage],
             role: Role = "primary",
             tools: Sequence[Mapping[str, object]] | None = None,
             response_format: Mapping[str, object] | None = None,

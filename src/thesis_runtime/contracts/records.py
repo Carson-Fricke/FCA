@@ -464,7 +464,11 @@ class ChatThread(ConversationRecord):
 
 @dataclass(frozen=True, slots=True)
 class ChatMessage(ConversationRecord):
-    """One durable user, assistant, system, or tool message."""
+    """Storage/UI envelope; ``data.sessionMessage`` owns canonical session content.
+
+    Body, role and reasoning are presentation/index projections, never inputs to
+    live execution or transcript recovery. Provider messages live at the adapter.
+    """
 
     message_id: str
     chat_id: str

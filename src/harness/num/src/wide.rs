@@ -142,22 +142,57 @@ impl U256 {
 
     /// Divide `numerator` by `denominator`, returning the quotient and remainder.
     ///
-    /// Binary long division; `denominator` must be non-zero. Allocation-free.
+    /// Narrow hardware division or aligned long division; `denominator` must
+    /// be non-zero. The wide loop visits only possible quotient bits.
     pub(crate) fn div_rem(numerator: Self, denominator: Self) -> (Self, Self) {
         debug_assert!(!denominator.is_zero(), "division by zero");
+        if numerator < denominator {
+            return (Self::ZERO, numerator);
+        }
+        if numerator.high == 0 {
+            return (
+                Self::from_u128(numerator.low / denominator.low),
+                Self::from_u128(numerator.low % denominator.low),
+            );
+        }
+        let shift = denominator.leading_zeros() - numerator.leading_zeros();
+        let mut divisor = denominator.shift_left(shift);
         let mut quotient = Self::ZERO;
-        let mut remainder = Self::ZERO;
-        for index in (0u32..256).rev() {
-            remainder = remainder.shl1();
-            if numerator.bit(index) {
-                remainder = remainder.with_bit(0);
-            }
-            if remainder >= denominator {
-                remainder = remainder.wrapping_sub(denominator);
+        let mut remainder = numerator;
+        for index in (0..=shift).rev() {
+            if remainder >= divisor {
+                remainder = remainder.wrapping_sub(divisor);
                 quotient = quotient.with_bit(index);
             }
+            divisor = Self {
+                high: divisor.high >> 1,
+                low: (divisor.low >> 1) | (divisor.high << 127),
+            };
         }
         (quotient, remainder)
+    }
+
+    fn leading_zeros(self) -> u32 {
+        if self.high == 0 {
+            128 + self.low.leading_zeros()
+        } else {
+            self.high.leading_zeros()
+        }
+    }
+
+    /// The caller aligns a nonzero divisor without discarding significant bits.
+    fn shift_left(self, shift: u32) -> Self {
+        match shift {
+            0 => self,
+            1..=127 => Self {
+                high: (self.high << shift) | (self.low >> (128 - shift)),
+                low: self.low << shift,
+            },
+            _ => Self {
+                high: self.low << (shift - 128),
+                low: 0,
+            },
+        }
     }
 }
 
