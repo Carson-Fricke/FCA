@@ -1,10 +1,14 @@
 <script lang="ts">
+	import { setTranscriptDetails } from './transcript-details';
 	import { tick, untrack } from 'svelte';
 	import ChatComposer from './ChatComposer.svelte';
 	import ChatStarters from './ChatStarters.svelte';
 	import ChatTranscript from './ChatTranscript.svelte';
 	import PhaseRunView from './PhaseRunView.svelte';
 	import ScopeStack from './ScopeStack.svelte';
+	import TranscriptViewport from './TranscriptViewport.svelte';
+	import ConversationOutline from './ConversationOutline.svelte';
+	import { conversationOutline, type OutlineEntry } from '$lib/conversation-outline';
 	import ScopeTranscript from './ScopeTranscript.svelte';
 	import SubAgentComposer from './SubAgentComposer.svelte';
 	import WorkflowCard from './WorkflowCard.svelte';
@@ -53,7 +57,8 @@
 		hostId = 'conversation',
 		rootLabel = 'Conversation',
 		initialScope = null,
-		initialHash = null
+		initialHash = null,
+		showOutline = false
 	}: {
 		workspaceId: string;
 		chatId?: string | null;
@@ -77,6 +82,7 @@
 		rootLabel?: string;
 		initialScope?: string | null;
 		initialHash?: string | null;
+		showOutline?: boolean;
 	} = $props();
 
 	// The host id and workspace scope the controller's persisted navigation; they
@@ -90,14 +96,24 @@
 		timeline
 	);
 	const messages = $derived(timeline.messages);
+	setTranscriptDetails((sequence) => timeline.loadDetails(sequence));
 	let attachedChatId = $state('');
 	let surface = $state<HTMLDivElement>();
 	let nodeSendError = $state<string | null>(null);
 	let nodeDrafts = $state<Record<string, string>>({});
 	let queuedFeedback = $state<Record<string, string>>({});
+	let outlineOpen = $state(true);
+	let selectedOutlineId = $state('');
+	let viewport = $state<{ reveal: (messageId: string, executionId?: string | null) => boolean }>();
+	let outlineNavigation = 0;
+	const outlineAvailable = $derived(showOutline && !!chatId && !drafting);
+	$effect(() => {
+		if (outlineAvailable && chatId) { void chatId; untrack(() => timeline.enableOutline()); }
+	});
 
 	const workflows = $derived(withWorkflowNodes(timeline.workflows, controller.tree));
 	const anyActiveWorkflow = $derived(hasActiveWorkflow(workflows));
+	const outlineGroups = $derived(conversationOutline(timeline.outlineEntries, workflows, controller.knownNodes, chatId ?? ''));
 	$effect(() => controller.resolvePendingPhase());
 
 	// Scope belongs to the chat, never to whichever workflow launched most recently.
@@ -160,6 +176,8 @@
 	const isNodeScope = $derived(active?.kind === 'sub_agent');
 	const isPhaseScope = $derived(active?.kind === 'phase');
 	const historyThread = $derived(isNodeScope && active ? active.id : 'root');
+	const oldestVisible = $derived.by(() => isNodeScope ? scopeEntries[0]?.id ?? '' : timeline.messagesFor('root')[0]?.message_id ?? '');
+	const hasOlder = $derived(!isPhaseScope && !!timeline.history[historyThread]?.loaded && !timeline.history[historyThread]?.complete && !timeline.history[historyThread]?.error);
 	const unanchoredWorkflows = $derived([...workflows.values()].filter((live) => !live.anchored && !timeline.initialLoading && (live.execution.conversation_id ?? chatId) === (isNodeScope && active ? active.id : chatId)));
 
 	/**
@@ -231,32 +249,37 @@
 		});
 	});
 
-	let scrollScope = '';
-	let lastUserMessageId = '';
-	$effect(() => {
-		const scope = `${chatId ?? ''}:${active?.kind ?? 'root'}:${active?.id ?? ''}`;
-		const visibleMessages = isNodeScope
-			? scopeEntries.flatMap((entry) => entry.kind === 'message' ? [entry.message] : [])
-			: timeline.messagesFor('root');
-		const userMessageId = visibleMessages.findLast((message) => message.role === 'user')?.message_id ?? '';
-		if (scope !== scrollScope) {
-			scrollScope = scope;
-			lastUserMessageId = userMessageId;
-			return;
+
+	async function revealOutline(entry: OutlineEntry): Promise<void> {
+		const token = ++outlineNavigation;
+		const selectedChat = chatId;
+		selectedOutlineId = entry.id;
+		nodeSendError = null;
+		try {
+			await controller.ensureLoaded();
+			if (token !== outlineNavigation || chatId !== selectedChat) return;
+			if (entry.threadId === 'root' || entry.threadId === chatId) controller.navigateTo(0);
+			else {
+				const node = controller.subAgentById(entry.threadId);
+				if (!node) throw new Error('The conversation for this item is unavailable. Refresh the outline and try again.');
+				controller.enterSubAgent(node);
+			}
+			if (entry.kind === 'conversation') return;
+			if (!await timeline.revealOutlineEntry(entry) || token !== outlineNavigation || chatId !== selectedChat) return;
+			await tick();
+			await tick();
+			if (token !== outlineNavigation || chatId !== selectedChat) return;
+			const id = entry.datumIndex === null ? entry.messageId : `${entry.messageId}:datum:${entry.datumIndex}`;
+			if (!viewport?.reveal(id, entry.kind === 'workflow' ? entry.entityId : null)) {
+				throw new Error('This item has no available transcript anchor. Its retained metadata is still shown in the outline.');
+			}
+		} catch (error) {
+			if (token === outlineNavigation) nodeSendError = error instanceof Error ? error.message : 'Could not reveal this item.';
 		}
-		if (!userMessageId || userMessageId === lastUserMessageId) return;
-		lastUserMessageId = userMessageId;
-		// Wait for the sent message to render, without following agent/tool updates.
-		void tick().then(() => {
-			if (scrollScope !== scope) return;
-			const transcript = surface?.querySelector<HTMLElement>(
-				'[data-testid="transcript-scroll"], [data-testid="scope-transcript-scroll"]'
-			);
-			if (transcript) transcript.scrollTop = transcript.scrollHeight;
-		});
-	});
+	}
 
 	function enterPhase(executionId: string, phase: string, options: { readOnly: boolean }): void {
+		outlineNavigation += 1;
 		void controller.enterPhase(executionId, phase, options.readOnly || isTerminalWorkflow(workflows.get(executionId)?.execution));
 	}
 	setWorkflowLiveView((id) => {
@@ -265,11 +288,13 @@
 	});
 
 	function enterSubAgent(node: SubAgentNode): void {
+		outlineNavigation += 1;
 		controller.enterSubAgent(node);
 	}
 
 	/** Drill into a spawned sub-agent by id, awaiting the durable tree first. */
 	async function enterSpawnedSubAgent(subAgentId: string): Promise<void> {
+		outlineNavigation += 1;
 		if (!controller.subAgentById(subAgentId)) await controller.ensureLoaded();
 		const node = controller.subAgentById(subAgentId);
 		if (node) controller.enterSubAgent(node);
@@ -322,40 +347,27 @@
 </script>
 
 <div bind:this={surface} class="flex min-h-0 flex-1 flex-col" data-testid="chat-surface">
-	{#if scoped}
-		<ScopeStack
-			segments={controller.scope.segments}
-			title="Sub-agent"
-			onBack={() => controller.back()}
-			onNavigate={(index) => controller.navigateTo(index)}
-		>
-			{#if isPhaseScope}
-				<div class="min-h-0 flex-1 overflow-y-auto p-3" data-testid="phase-run-scroll">
-					<PhaseRunView
-						attempts={phaseAttempts}
-						selectedAttempt={selectedPhaseRun?.attempt ?? null}
-						onSelectAttempt={selectAttempt}
-					/>
-				</div>
-			{:else}
-				<ScopeTranscript
-					entries={scopeEntries}
-					{workspaceId}
-					busy={controller.busy}
-					readOnly={active?.readOnly === true}
-					pending={nodePending}
-					onEnterSubAgent={enterSubAgent}
-				/>
-				{#each unanchoredWorkflows as live (live.execution.execution_id)}
-					<WorkflowCard execution={live.execution} phases={live.phases} status={live.execution.state}
-						summary={live.execution.phase ? `Current phase ${live.execution.phase}` : 'Awaiting phase transitions'}
-						attentionPhases={live.attentionPhases}
-						onEnterPhase={(phase, options) => enterPhase(live.execution.execution_id, phase, options)} />
-				{/each}
-			{/if}
-		</ScopeStack>
-	{:else}
-		<div class="min-h-0 flex-1 overflow-y-auto p-3" data-testid="transcript-scroll">
+	<ScopeStack segments={controller.scope.segments} title={scoped ? 'Sub-agent' : 'Conversation'} showHeader={scoped || outlineAvailable}
+		onBack={() => { outlineNavigation += 1; controller.back(); }}
+		onNavigate={(index) => { outlineNavigation += 1; controller.navigateTo(index); }}>
+		{#snippet controls()}
+			{#if outlineAvailable}<button type="button" class="outline-toggle" onclick={() => outlineOpen = !outlineOpen} aria-label="Toggle conversation outline" aria-expanded={outlineOpen} title="Conversation outline" data-testid="outline-toggle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>{/if}
+		{/snippet}
+		<div class="chat-body">
+			<div class="chat-column">
+				<TranscriptViewport bind:this={viewport} scopeKey={`${chatId ?? ''}:${active?.kind ?? 'root'}:${active?.id ?? ''}`}
+					oldestKey={oldestVisible} {hasOlder} loadingOlder={timeline.history[historyThread]?.loading ?? false} onOlder={() => timeline.loadHistory(historyThread, true)}
+					testId={isPhaseScope ? 'phase-run-scroll' : scoped ? 'scope-transcript-scroll' : 'transcript-scroll'}>
+					{#if isPhaseScope}
+						<PhaseRunView attempts={phaseAttempts} selectedAttempt={selectedPhaseRun?.attempt ?? null} onSelectAttempt={selectAttempt}/>
+					{:else if isNodeScope}
+						<ScopeTranscript entries={scopeEntries} {workspaceId} busy={controller.busy} readOnly={active?.readOnly === true} pending={nodePending} onEnterSubAgent={enterSubAgent}/>
+						{#each unanchoredWorkflows as live (live.execution.execution_id)}
+							<WorkflowCard execution={live.execution} phases={live.phases} status={live.execution.state}
+								summary={live.execution.phase ? `Current phase ${live.execution.phase}` : 'Awaiting phase transitions'}
+								attentionPhases={live.attentionPhases} onEnterPhase={(phase, options) => enterPhase(live.execution.execution_id, phase, options)}/>
+						{/each}
+					{:else}
 			{#if drafting && !chatId && !messages.length}
 				<div class="mb-3">
 					<p class="mb-2 text-xs text-slate-500">Start with a suggestion, or ask anything.</p>
@@ -397,8 +409,8 @@
 					/>
 				</div>
 			{/each}
-		</div>
-	{/if}
+					{/if}
+				</TranscriptViewport>
 
 	{#if timeline.streamError}
 		<p class="px-3 py-2 text-xs text-warn" role="status" data-testid="timeline-stream-error">{timeline.streamError}</p>
@@ -420,10 +432,6 @@
 		<p class="px-3 py-2 text-xs text-warn" role="status">{timeline.metadataError}</p>
 		<button class="px-3 py-2 text-xs text-accent" onclick={() => timeline.refreshMetadata()}>Retry Workflow Metadata</button>
 	{/if}
-	{#if timeline.history[historyThread]?.loaded && !timeline.history[historyThread]?.complete && !timeline.history[historyThread]?.error}
-		<button class="px-3 py-2 text-xs text-accent" data-testid="history-older"
-			disabled={timeline.history[historyThread]?.loading} onclick={() => timeline.loadHistory(historyThread, true)}>Load older history</button>
-	{/if}
 	{#if timeline.history[historyThread]?.error}
 		<p class="px-3 py-2 text-xs text-warn" role="status">{timeline.history[historyThread].error}</p>
 			<button class="px-3 py-2 text-xs text-accent" data-testid="history-retry"
@@ -444,6 +452,7 @@
 				acceptsInput={true}
 				bind:draft={() => nodeDrafts[node.subAgentId] ?? '', (value) => { nodeDrafts[node.subAgentId] = value; }}
 				phase={node.phase ?? undefined}
+				agentLabel={node.role}
 				busy={controller.busy}
 				onSubmit={(body) => sendNode(node, body)}
 			/>
@@ -469,4 +478,18 @@
 			{busy}
 		/>
 	{/if}
+			</div>
+			{#if outlineAvailable && outlineOpen}
+				<ConversationOutline groups={outlineGroups} loading={timeline.outlineLoading} hasMore={timeline.outlineHasMore} error={timeline.outlineError}
+					selectedId={selectedOutlineId} onSelect={revealOutline} onRetry={() => { controller.refreshNodes(); void timeline.refreshOutline(); }}/>
+			{/if}
+		</div>
+	</ScopeStack>
 </div>
+
+<style>
+	.chat-body{display:flex;min-height:0;flex:1;min-width:0}.chat-column{display:flex;flex-direction:column;min-height:0;min-width:0;flex:1}
+	.outline-toggle{display:flex;align-items:center;justify-content:center;width:30px;height:30px;flex-shrink:0;border:1px solid var(--color-surface-600);border-radius:5px;color:var(--color-slate-300);cursor:pointer}.outline-toggle svg{width:14px;height:14px}
+	@media(max-width:480px){.chat-body{flex-direction:column}}
+	@media(pointer:coarse){.outline-toggle{min-height:44px;min-width:44px}}
+</style>

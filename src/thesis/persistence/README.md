@@ -11,3 +11,7 @@ FCA investigation storage and retained harness-submission identity. Generic runt
 - `journal.py`: Append-only workspace command journal with a rebuildable publication outbox.
 - `reconcile.py`: Reconciliation of accepted workspace state, Git history, and queue state.
 - `submissions.py`: Immutable submission references; this module neither dispatches nor polls.
+
+Retained agent submissions include the trusted conversation recipient before
+dispatch. Completion intake resolves a globally unique job ID through the selected
+submission adapter; ambiguous IDs fail closed. No submission reader polls jobs.

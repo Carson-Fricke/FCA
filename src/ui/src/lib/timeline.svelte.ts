@@ -1,5 +1,6 @@
 /** One chat data owner: live stream, history, identity and ordered thread selectors. */
-import { apiBaseUrl, fixtureMode, listTimelinePage, listWorkflowMetadata } from './api';
+import { apiBaseUrl, fixtureMode, getTimelineDetail, listConversationOutline, listTimelinePage, listWorkflowMetadata } from './api';
+import type { ConversationOutlineEntryWire } from './generated';
 import { untrack } from 'svelte';
 import { TimelineStream } from './sse';
 import { fixtureTimeline } from './fixture-timeline';
@@ -28,6 +29,18 @@ export class TimelineController {
 	#chatId = '';
 	#loads = new Map<string, AbortController>();
 	#generation = 0;
+	outlineEntries = $state.raw<ConversationOutlineEntryWire[]>([]);
+	outlineLoading = $state(false);
+	outlineHasMore = $state(false);
+	outlineError = $state('');
+	#outlineEnabled = false;
+	#outlineAfter = 0;
+	#outlineRequest: AbortController | null = null;
+	#outlinePending = false;
+	#anchorRequest: AbortController | null = null;
+	#details = new Map<number, { request: AbortController; promise: Promise<void> }>();
+	#outlineCache = new Map<string, { entries: ConversationOutlineEntryWire[]; after: number; more: boolean }>();
+	#cacheKey(): string { return JSON.stringify([apiBaseUrl, fixtureMode, this.#workspaceId, this.#chatId]); }
 
 	#index = $derived.by(() => {
 		const messages: ChatMessage[] = [];
@@ -113,6 +126,10 @@ export class TimelineController {
 	append(item: TimelineItem): void { this.merge([item]); }
 
 	merge(items: TimelineItem[]): void {
+		items = items.filter(item => {
+			const existing = this.#itemsById.get(item.id);
+			return !(item.kind === 'message' && 'receipt' in item.payload && existing?.kind === 'message' && !('receipt' in existing.payload));
+		});
 		let last = this.items.at(-1)?.seq ?? 0;
 		const appendOnly = items.every((item) => {
 			const append = !this.#itemsById.has(item.id) && item.seq > last;
@@ -125,9 +142,80 @@ export class TimelineController {
 		this.#outputs = this.#outputProjection.merge(items);
 		const messageIds = new Set(this.items.flatMap((item) => item.kind === 'message' ? [item.payload.message_id] : []));
 		this.#localMessages = this.#localMessages.filter((message) => !messageIds.has(message.message_id));
+		if (this.#outlineEnabled && !this.outlineHasMore && items.some((item) => item.kind === 'message')) void this.refreshOutline();
 	}
 
-	/** One selected-thread page per request; older pages are explicit operator navigation. */
+	/** Opt-in read model for the fullscreen host; no extra stream or transcript cache. */
+	enableOutline(): void {
+		this.#outlineEnabled = true;
+		const cached = this.#outlineCache.get(this.#cacheKey());
+		if (cached && !this.outlineEntries.length) {
+			this.outlineEntries = cached.entries;
+			this.#outlineAfter = cached.after;
+			this.outlineHasMore = cached.more;
+		}
+		void this.refreshOutline();
+	}
+
+	async refreshOutline(): Promise<void> {
+		if (!this.#chatId || !this.#outlineEnabled) return;
+		if (this.#outlineRequest) { this.#outlinePending = true; return; }
+		const request = new AbortController();
+		this.#outlineRequest = request;
+		this.outlineLoading = true;
+		this.outlineError = '';
+		try {
+			const page = await listConversationOutline(this.#workspaceId, this.#chatId, this.#outlineAfter, request.signal);
+			if (request.signal.aborted || this.#outlineRequest !== request) return;
+			if (page.nextAfter !== null && page.nextAfter <= this.#outlineAfter) throw new Error('Conversation outline cursor did not advance');
+			this.outlineEntries = [...new Map([...this.outlineEntries, ...page.items].map((item) => [item.id, item])).values()];
+			this.#outlineAfter = page.after;
+			this.outlineHasMore = page.nextAfter !== null;
+			const key = this.#cacheKey();
+			this.#outlineCache.delete(key);
+			this.#outlineCache.set(key, { entries: this.outlineEntries, after: this.#outlineAfter, more: this.outlineHasMore });
+			if (this.#outlineCache.size > 8) this.#outlineCache.delete(this.#outlineCache.keys().next().value!);
+		} catch (error) {
+			if (!request.signal.aborted) this.outlineError = error instanceof Error ? error.message : 'Conversation outline could not be loaded.';
+		} finally {
+			if (this.#outlineRequest === request) {
+				this.#outlineRequest = null;
+				this.outlineLoading = false;
+				if (this.#outlinePending) { this.#outlinePending = false; if (!this.outlineHasMore) void this.refreshOutline(); }
+			}
+		}
+	}
+
+	/** Detail reads join by canonical identity and never update the live cursor. */
+	loadDetails(sequence: number): Promise<void> {
+		const active = this.#details.get(sequence);
+		if (active) return active.promise;
+		const existing = this.items.find(item => item.seq === sequence);
+		if (existing?.kind === 'message' && !('receipt' in existing.payload)) return Promise.resolve();
+		const request = new AbortController();
+		const generation = this.#generation;
+		const promise = getTimelineDetail(this.#workspaceId, this.#chatId, sequence, request.signal).then(item => {
+			if (!request.signal.aborted && generation === this.#generation) this.merge([item]);
+		}).finally(() => { if (this.#details.get(sequence)?.request === request) this.#details.delete(sequence); });
+		this.#details.set(sequence, { request, promise });
+		return promise;
+	}
+
+	/** Load only the selected anchor's page; keep the ordinary older-history cursor. */
+	async revealOutlineEntry(entry: Pick<ConversationOutlineEntryWire, 'threadId' | 'messageId' | 'seq'>): Promise<boolean> {
+		this.#anchorRequest?.abort();
+		const request = new AbortController();
+		this.#anchorRequest = request;
+		const generation = this.#generation;
+		if (!this.messagesFor(entry.threadId).some((message) => message.message_id === entry.messageId)) {
+			const page = await listTimelinePage(this.#workspaceId, this.#chatId, entry.threadId, entry.seq + 1, request.signal);
+			if (request.signal.aborted || generation !== this.#generation) return false;
+			this.merge([...(page.outputPrefixes ?? []), ...page.items]);
+		}
+		return !request.signal.aborted && generation === this.#generation;
+	}
+
+	/** One selected-thread page per request; the viewport requests older pages near its top. */
 	async loadHistory(threadId = 'root', older = false): Promise<void> {
 		const previous = untrack(() => this.history[threadId]);
 		if (!this.#chatId || previous?.complete || (previous?.loaded && !older && !previous.error) || this.#loads.has(threadId)) return;
@@ -212,6 +300,14 @@ export class TimelineController {
 
 	stop(): void {
 		this.#generation += 1;
+		for (const { request } of this.#details.values()) request.abort();
+		this.#details.clear();
+		this.#outlineRequest?.abort();
+		this.#outlineRequest = null;
+		this.#anchorRequest?.abort();
+		this.#anchorRequest = null;
+		this.#outlineEnabled = false;
+		this.#outlinePending = false;
 		this.#metadataRequest?.abort();
 		this.#metadataRequest = null;
 		this.#unsubscribe?.();
@@ -235,6 +331,11 @@ export class TimelineController {
 		this.history = {};
 		this.#metadata = new Map();
 		this.metadataError = '';
+		this.outlineEntries = [];
+		this.outlineLoading = false;
+		this.outlineHasMore = false;
+		this.outlineError = '';
+		this.#outlineAfter = 0;
 		this.streamError = '';
 	}
 }

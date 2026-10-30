@@ -337,7 +337,9 @@ def test_runtime_tool_start_is_activity_and_result_is_incoming() -> None:
         actor_id="runtime",
     )
     execution = ToolExecution(
-        ok=False, text="Validation failed", failure={"kind": "validation"}
+        ok=False,
+        text="Validation failed",
+        failure={"kind": "validation", "message": "Validation failed"},
     )
     assert (
         service.execute_runtime_tool(

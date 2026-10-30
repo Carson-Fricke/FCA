@@ -172,7 +172,7 @@ def test_idea_only_launch_then_discovery_freezes_windows_before_empirical_work(
 
     bindings = service.resolve(context)
 
-    assert bindings.programs is None and bindings.data_window is None
+    assert bindings.programs is not None and bindings.resolve_data_window is not None
 
     registry = build_session_registry(context=context, workflow_tools=bindings.tools)
 
@@ -200,13 +200,14 @@ def test_idea_only_launch_then_discovery_freezes_windows_before_empirical_work(
 
     bindings = service.resolve(context)
 
-    assert bindings.programs is not None and bindings.data_window is not None
+    assert bindings.programs is not None and bindings.resolve_data_window is not None
+    window = bindings.resolve_data_window()
 
-    assert bindings.data_window.permits(
+    assert window.permits(
         rfc3339_ns("2026-01-01T00:00:00Z"), rfc3339_ns("2026-08-01T00:00:00Z")
     )
 
-    assert not bindings.data_window.permits(
+    assert not window.permits(
         rfc3339_ns("2026-07-31T00:00:00Z"), rfc3339_ns("2026-08-02T00:00:00Z")
     )
 
@@ -222,7 +223,8 @@ def test_idea_only_launch_then_discovery_freezes_windows_before_empirical_work(
         activity=lambda context, tool, arguments, execute: execute(),
     )
 
-    assert rebuilt.resolve(context).data_window == bindings.data_window
+    restored = rebuilt.resolve(context).resolve_data_window
+    assert restored is not None and restored() == window
 
     store.save_sub_agent(replace(record, phase_executor=False))
 
@@ -264,11 +266,13 @@ def test_forward_phase_receives_only_its_frozen_holdout_policy(tmp_path: Path) -
 
     bindings = service.resolve(context)
 
-    assert bindings.data_window is not None and bindings.data_window.override
+    assert bindings.resolve_data_window is not None
+    window = bindings.resolve_data_window()
+    assert window.override
 
-    assert bindings.data_window.start_ns == rfc3339_ns("2026-06-06T12:00:00Z")
+    assert window.start_ns == rfc3339_ns("2026-06-06T12:00:00Z")
 
-    assert bindings.data_window.end_ns == rfc3339_ns("2026-09-04T12:00:00Z")
+    assert window.end_ns == rfc3339_ns("2026-09-04T12:00:00Z")
 
     assert not bindings.tools
 

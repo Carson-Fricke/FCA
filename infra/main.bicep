@@ -376,6 +376,8 @@ module containerApps './modules/container-apps.bicep' = {
     rthScheduleEnd: rthScheduleEnd
     rthTraderReplicas: rthTraderReplicas
     backtestReplicaTimeoutSeconds: backtestReplicaTimeoutSeconds
+    completionAppName: deployThesis && !empty(thesisHarnessBearerTokenSecretName) ? thesisApiAppName : ''
+    completionExternalIngress: thesisEnableExternalIngress
   }
 }
 

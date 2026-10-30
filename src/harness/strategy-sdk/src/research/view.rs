@@ -73,14 +73,14 @@ impl ResearchView {
     /// Validate descriptors and references without executing any presentation code.
     pub fn validate(&self) -> Result<(), String> {
         if self.schema_version != 1 || self.title.trim().is_empty() {
-            return Err("research view requires schema_version 1 and a title".into());
+            return Err(format!("research_view: schema_version={}, title={:?}; require schema_version=1 and a nonempty title", self.schema_version, self.title));
         }
         if self.datasets.is_empty()
             || self.datasets.len() > 32
             || self.panels.is_empty()
             || self.panels.len() > 24
         {
-            return Err("research view requires 1..32 datasets and 1..24 panels".into());
+            return Err(format!("research_view: received {} datasets and {} panels; require 1..=32 datasets and 1..=24 panels", self.datasets.len(), self.panels.len()));
         }
         let mut datasets = BTreeMap::new();
         for dataset in &self.datasets {
@@ -89,7 +89,7 @@ impl ResearchView {
                 || datasets.insert(&dataset.id, dataset).is_some()
             {
                 return Err(
-                    "dataset identities and output references must be nonempty and unique".into(),
+                    format!("dataset id={:?}, output={:?}: identities and output references must be nonempty and IDs unique", dataset.id, dataset.output),
                 );
             }
             let fields: BTreeSet<_> = dataset.fields.iter().map(|field| &field.name).collect();
@@ -101,7 +101,7 @@ impl ResearchView {
                         || f.description.trim().is_empty()
                 })
             {
-                return Err("dataset fields require unique names and labels".into());
+                return Err(format!("dataset {:?}, output {:?}: fields must have unique nonempty names and nonempty labels/descriptions; received {:?}", dataset.id, dataset.output, dataset.fields));
             }
             for name in [
                 &dataset.identity,
@@ -112,11 +112,14 @@ impl ResearchView {
             .flatten()
             {
                 if !fields.contains(name) {
-                    return Err(format!("unknown dataset field {name}"));
+                    return Err(format!("dataset {:?}: identity/timing references unknown field {name:?}; declared fields {:?}", dataset.id, fields));
                 }
             }
             if dataset.selection_group.is_some() && dataset.identity.is_none() {
-                return Err("linked selections require explicit identity".into());
+                return Err(format!(
+                    "dataset {:?}: selection_group requires a declared identity field",
+                    dataset.id
+                ));
             }
         }
         let mut ids = BTreeSet::new();
@@ -126,14 +129,22 @@ impl ResearchView {
                 || panel.kind.trim().is_empty()
                 || !ids.insert(&panel.id)
             {
-                return Err("panels require unique identities, a kind and a title".into());
+                return Err(format!("panel id={:?}, kind={:?}, title={:?}: require a unique nonempty ID and nonempty kind/title", panel.id, panel.kind, panel.title));
             }
-            let dataset = datasets
-                .get(&panel.dataset)
-                .ok_or("panel references an unknown dataset")?;
+            let dataset = datasets.get(&panel.dataset).ok_or_else(|| {
+                format!(
+                    "panel {:?} references unknown dataset {:?}; available IDs {:?}",
+                    panel.id,
+                    panel.dataset,
+                    datasets.keys().collect::<Vec<_>>()
+                )
+            })?;
             for field in panel.encodings.values() {
                 if !dataset.fields.iter().any(|f| &f.name == field) {
-                    return Err(format!("unknown encoding field {field}"));
+                    return Err(format!(
+                        "panel {:?}, dataset {:?}: unknown encoding field {field:?}",
+                        panel.id, panel.dataset
+                    ));
                 }
             }
         }
@@ -170,7 +181,7 @@ pub struct DatasetSemantics {
 impl DatasetSemantics {
     pub fn validate(&self) -> Result<(), String> {
         if self.schema_version != 1 || self.row_meaning.trim().is_empty() || self.grain.is_empty() {
-            return Err("dataset semantics require schema 1, row meaning and grain".into());
+            return Err(format!("dataset {:?}: require schema_version=1, nonempty row_meaning and grain; received schema_version={}, row_meaning={:?}, grain={:?}", self.dataset.id, self.schema_version, self.row_meaning, self.grain));
         }
         let fields: BTreeMap<_, _> = self
             .dataset
@@ -188,13 +199,18 @@ impl DatasetSemantics {
                     || f.description.trim().is_empty()
             })
         {
-            return Err("dataset semantics require unique named fields and output identity".into());
+            return Err(format!("dataset id={:?}, output={:?}: require nonempty identity/output and unique fields with nonempty names, labels and descriptions; received {:?}", self.dataset.id, self.dataset.output, self.dataset.fields));
         }
-        for names in [&self.grain, &self.dimensions, &self.measures, &self.ordered] {
+        for (role, names) in [
+            ("grain", &self.grain),
+            ("dimensions", &self.dimensions),
+            ("measures", &self.measures),
+            ("ordered", &self.ordered),
+        ] {
             if names.iter().collect::<BTreeSet<_>>().len() != names.len()
                 || names.iter().any(|n| !fields.contains_key(n.as_str()))
             {
-                return Err("semantic roles require unique declared fields".into());
+                return Err(format!("dataset {:?}, {role}={names:?}: require unique references to declared fields {:?}", self.dataset.id, fields.keys().collect::<Vec<_>>()));
             }
         }
         if self.measures.iter().any(|n| {
@@ -214,8 +230,7 @@ impl DatasetSemantics {
             })
         {
             return Err(
-                "semantic measures, dimensions and ordered coordinates have incompatible roles"
-                    .into(),
+                format!("dataset {:?}: measures {:?} must be numeric and disjoint from identity/dimensions {:?}; ordered {:?} must reference numeric/timestamp dimensions", self.dataset.id, self.measures, self.dimensions, self.ordered),
             );
         }
         for name in [
@@ -227,11 +242,17 @@ impl DatasetSemantics {
         .flatten()
         {
             if !fields.contains_key(name.as_str()) {
-                return Err("unknown dataset identity or timing field".into());
+                return Err(format!(
+                    "dataset {:?}: unknown identity/timing field {name:?}",
+                    self.dataset.id
+                ));
             }
         }
         if self.dataset.selection_group.is_some() && self.dataset.identity.is_none() {
-            return Err("linked selections require explicit identity".into());
+            return Err(format!(
+                "dataset {:?}: selection_group requires a declared identity field",
+                self.dataset.id
+            ));
         }
         let mut ids = BTreeSet::new();
         for panel in &self.preferred_views {
@@ -246,8 +267,7 @@ impl DatasetSemantics {
                     .any(|name| !fields.contains_key(name.as_str()))
             {
                 return Err(
-                    "preferred views require unique identities and same-dataset field bindings"
-                        .into(),
+                    format!("dataset {:?}, preferred panel {:?}: require nonempty unique panel ID, kind/title and field encodings bound to dataset {:?}; received {panel:?}", self.dataset.id, panel.id, self.dataset.id),
                 );
             }
         }
@@ -270,6 +290,9 @@ fn validate_dataset_outputs(
     output.validate()?;
     let (columns, rows) = match output {
         StudyOutput::Table { columns, rows } => (columns.clone(), rows.clone()),
+        StudyOutput::CausalObservations { dataset } => {
+            (dataset.columns.clone(), dataset.rows.clone())
+        }
         StudyOutput::Series { points } => {
             let columns = [
                 "symbol",
@@ -329,8 +352,8 @@ fn validate_dataset_outputs(
         let index = columns
             .iter()
             .position(|c| c == &field.name)
-            .ok_or_else(|| format!("output lacks field {}", field.name))?;
-        for row in &rows {
+            .ok_or_else(|| format!("dataset {:?}, output {:?}: missing declared field {:?}; available columns {:?}", dataset.id, dataset.output, field.name, columns))?;
+        for (row_index, row) in rows.iter().enumerate() {
             let cell = &row[index];
             if cell.is_null() {
                 continue;
@@ -351,7 +374,7 @@ fn validate_dataset_outputs(
                 }
             };
             if !valid {
-                return Err(format!("invalid value for field {}", field.name));
+                return Err(format!("dataset {:?}, output {:?}, rows[{row_index}], field {:?}: received {cell}; expected {:?}", dataset.id, dataset.output, field.name, field.field_type));
             }
         }
     }
@@ -361,11 +384,10 @@ fn validate_dataset_outputs(
             .position(|c| c == identity)
             .ok_or("missing identity")?;
         let mut seen = BTreeSet::new();
-        if rows
-            .iter()
-            .any(|row| row[index].is_null() || !seen.insert(row[index].to_string()))
-        {
-            return Err("dataset identity must be nonnull and unique".into());
+        for (row_index, row) in rows.iter().enumerate() {
+            if row[index].is_null() || !seen.insert(row[index].to_string()) {
+                return Err(format!("dataset {:?}, rows[{row_index}].{identity}: identity {} must be nonnull and unique", dataset.id, row[index]));
+            }
         }
     }
     if let (Some(event), Some(available)) = (&dataset.event_time, &dataset.available_at) {
@@ -379,11 +401,10 @@ fn validate_dataset_outputs(
             .ok_or("missing availability time")?;
         let integer =
             |v: &serde_json::Value| v.as_i64().or_else(|| v.as_str()?.parse::<i64>().ok());
-        if rows
-            .iter()
-            .any(|r| !matches!((integer(&r[ei]), integer(&r[ai])), (Some(e), Some(a)) if e <= a))
-        {
-            return Err("dataset requires causal event and availability timestamps".into());
+        for (row_index, row) in rows.iter().enumerate() {
+            if !matches!((integer(&row[ei]), integer(&row[ai])), (Some(e), Some(a)) if e <= a) {
+                return Err(format!("dataset {:?}, rows[{row_index}]: require exact nanosecond {event} <= {available}; received {} and {}", dataset.id, row[ei], row[ai]));
+            }
         }
     }
     if !grain.is_empty() {
@@ -397,7 +418,7 @@ fn validate_dataset_outputs(
             })
             .collect::<Result<Vec<_>, _>>()?;
         let mut keys = BTreeSet::new();
-        for row in &rows {
+        for (row_index, row) in rows.iter().enumerate() {
             let values = indexes
                 .iter()
                 .map(|i| {
@@ -425,7 +446,7 @@ fn validate_dataset_outputs(
                 || !keys.insert(serde_json::to_string(&values).map_err(|e| e.to_string())?)
             {
                 return Err(
-                    "dataset grain must be nonnull and unique across the complete output".into(),
+                    format!("dataset {:?}, rows[{row_index}]: grain {:?} has null or duplicate key {:?}; keys must be nonnull and unique across the complete output", dataset.id, grain, values),
                 );
             }
         }

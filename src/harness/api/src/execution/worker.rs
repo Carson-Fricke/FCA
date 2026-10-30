@@ -99,6 +99,11 @@ fn run_jobs(store: ExecutionStore, ownership: super::renewal::Ownership) -> Resu
             owned.put_result(failed, Default::default())?;
         }
         ownership.clear(&id);
+        if let Some(event) = store.document(&id)?.and_then(|doc| doc.completion) {
+            if let Err(cause) = super::completions::deliver(&store, &event) {
+                eprintln!("{cause}");
+            }
+        }
     }
     Ok(())
 }
@@ -108,6 +113,9 @@ fn run_jobs(store: ExecutionStore, ownership: super::renewal::Ownership) -> Resu
 pub fn dispatch() -> Result<()> {
     let store = super::configured_store()?;
     store.recover_interrupted()?;
+    if let Err(cause) = super::completions::retry_pending(&store) {
+        eprintln!("{cause}");
+    }
     if !store.queued()?.is_empty() {
         super::dispatch::notify_pool().map_err(error)?;
     }

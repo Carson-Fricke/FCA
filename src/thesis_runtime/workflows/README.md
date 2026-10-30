@@ -7,7 +7,7 @@ The generic graph engine is isolated in `graph/`. This package also contains its
 - `delivery.py`: Node lifecycle.
 - `events.py`: Host frontier, pending-input and lifecycle event projections.
 - `execution_store.py`: The execution store: one durable document per workflow execution (REQ-B5).
-- `extensions.py`: Defines detached versioned JSON requests, trusted execution binding and structural state decoding for workflow extensions.
+- `extensions.py`: Defines detached versioned JSON requests, trusted execution binding, phase assignment/context values and structural state decoding for workflow extensions.
 - `graph/`: Agent-independent named-port topology and activation replay, shared by completion and recovery.
 - `phase.py`: Host activity bindings (conversation, one-shot and deterministic), named input metadata and terminal outcomes.
 - `registry.py`: Resolve each workflow ID to its single current registration and reject outdated versions.

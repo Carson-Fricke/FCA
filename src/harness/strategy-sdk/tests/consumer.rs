@@ -15,6 +15,7 @@ use harness_strategy_sdk::IndicatorSequence;
 use harness_strategy_sdk::MarketConsumer;
 use harness_strategy_sdk::ObservationContext;
 use harness_strategy_sdk::QuoteEvent;
+use harness_strategy_sdk::RoutingPlan;
 use harness_strategy_sdk::Subscription;
 use harness_strategy_sdk::TradeEvent;
 
@@ -119,9 +120,28 @@ fn nested_requirements_are_canonical_and_routing_is_dependency_first_and_own_onl
         harness_strategy_sdk::serde_json::to_string(&inputs).unwrap(),
         r#"[{"data_type":"bars","symbols":["AAA","MISSING"],"interval":"1d"},{"data_type":"quote","symbols":["AAA","BBB"]},{"data_type":"trade","symbols":["CCC"]}]"#
     );
-    route_quote(&mut parent, &quote("AAA"), &mut ObservationContext).unwrap();
-    route_quote(&mut parent, &quote("BBB"), &mut ObservationContext).unwrap();
-    route_quote(&mut parent, &quote("NOPE"), &mut ObservationContext).unwrap();
+    let mut parent_plan = RoutingPlan::new(&mut parent).unwrap();
+    route_quote(
+        &mut parent,
+        &quote("AAA"),
+        &mut ObservationContext,
+        &mut parent_plan,
+    )
+    .unwrap();
+    route_quote(
+        &mut parent,
+        &quote("BBB"),
+        &mut ObservationContext,
+        &mut parent_plan,
+    )
+    .unwrap();
+    route_quote(
+        &mut parent,
+        &quote("NOPE"),
+        &mut ObservationContext,
+        &mut parent_plan,
+    )
+    .unwrap();
     let trade = TradeEvent {
         event_id: "t",
         timestamp_ns: 1,
@@ -132,7 +152,13 @@ fn nested_requirements_are_canonical_and_routing_is_dependency_first_and_own_onl
         venue: "test",
         trade_id: "t",
     };
-    route_trade(&mut parent, &trade, &mut ObservationContext).unwrap();
+    route_trade(
+        &mut parent,
+        &trade,
+        &mut ObservationContext,
+        &mut parent_plan,
+    )
+    .unwrap();
     let bar = |symbol| BarEvent {
         event_id: "b",
         timestamp_ns: 0,
@@ -152,9 +178,21 @@ fn nested_requirements_are_canonical_and_routing_is_dependency_first_and_own_onl
         bars_by_symbol: [("AAA", bar("AAA")), ("BBB", bar("BBB"))].into(),
         missing_symbols: vec!["MISSING", "OTHER"],
     };
-    route_bar(&mut parent, &frame, &mut ObservationContext).unwrap();
+    route_bar(
+        &mut parent,
+        &frame,
+        &mut ObservationContext,
+        &mut parent_plan,
+    )
+    .unwrap();
     frame.interval = "1d";
-    route_bar(&mut parent, &frame, &mut ObservationContext).unwrap();
+    route_bar(
+        &mut parent,
+        &frame,
+        &mut ObservationContext,
+        &mut parent_plan,
+    )
+    .unwrap();
     assert_eq!(
         *log.borrow(),
         [
@@ -239,11 +277,10 @@ fn dependency_cycles_fail_without_recursing_forever() {
     assert!(effective_subscriptions(&mut cycle)
         .unwrap_err()
         .contains("cycle"));
-    assert!(
-        route_quote(&mut cycle, &quote("AAA"), &mut ObservationContext)
-            .unwrap_err()
-            .contains("cycle")
-    );
+    assert!(harness_strategy_sdk::RoutingPlan::new(&mut cycle)
+        .err()
+        .unwrap()
+        .contains("cycle"));
 }
 
 struct AliasNode {
@@ -303,8 +340,17 @@ fn repeated_dependency_identity_is_updated_once() {
         },
     };
     assert_eq!(effective_subscriptions(&mut shared).unwrap().len(), 1);
-    route_quote(&mut shared, &quote("AAA"), &mut ObservationContext).unwrap();
-    assert_eq!(*calls.borrow(), 1);
+    let mut shared_plan = RoutingPlan::new(&mut shared).unwrap();
+    for _ in 0..3 {
+        route_quote(
+            &mut shared,
+            &quote("AAA"),
+            &mut ObservationContext,
+            &mut shared_plan,
+        )
+        .unwrap();
+    }
+    assert_eq!(*calls.borrow(), 3);
 }
 
 #[test]
@@ -322,7 +368,14 @@ fn equal_addresses_of_parent_and_first_field_do_not_hide_dependencies() {
         },
     };
     assert_eq!(effective_subscriptions(&mut parent).unwrap().len(), 1);
-    route_quote(&mut parent, &quote("AAA"), &mut ObservationContext).unwrap();
+    let mut parent_plan = RoutingPlan::new(&mut parent).unwrap();
+    route_quote(
+        &mut parent,
+        &quote("AAA"),
+        &mut ObservationContext,
+        &mut parent_plan,
+    )
+    .unwrap();
     assert_eq!(log.borrow().len(), 1);
 }
 
@@ -367,11 +420,10 @@ fn distinct_zero_sized_indicators_are_rejected_not_silently_deduplicated() {
     assert!(effective_subscriptions(&mut root)
         .unwrap_err()
         .contains("zero-sized"));
-    assert!(
-        route_quote(&mut root, &quote("AAA"), &mut ObservationContext)
-            .unwrap_err()
-            .contains("zero-sized")
-    );
+    assert!(harness_strategy_sdk::RoutingPlan::new(&mut root)
+        .err()
+        .unwrap()
+        .contains("zero-sized"));
 }
 
 struct Mutating {
@@ -411,11 +463,15 @@ fn callback_mutation_fails_even_when_effective_union_is_unchanged() {
         },
     };
     let before = effective_subscriptions(&mut root).unwrap();
-    assert!(
-        route_quote(&mut root, &quote("AAA"), &mut ObservationContext)
-            .unwrap_err()
-            .contains("changed")
-    );
+    let mut root_plan = RoutingPlan::new(&mut root).unwrap();
+    assert!(route_quote(
+        &mut root,
+        &quote("AAA"),
+        &mut ObservationContext,
+        &mut root_plan
+    )
+    .unwrap_err()
+    .contains("changed"));
     assert_eq!(before, effective_subscriptions(&mut root).unwrap());
 }
 
@@ -475,11 +531,15 @@ fn dependency_mutation_fails_before_parent_dispatch_with_unchanged_union() {
         calls: 0,
     };
     let before = effective_subscriptions(&mut root).unwrap();
-    assert!(
-        route_quote(&mut root, &quote("AAA"), &mut ObservationContext)
-            .unwrap_err()
-            .contains("changed")
-    );
+    let mut root_plan = RoutingPlan::new(&mut root).unwrap();
+    assert!(route_quote(
+        &mut root,
+        &quote("AAA"),
+        &mut ObservationContext,
+        &mut root_plan
+    )
+    .unwrap_err()
+    .contains("changed"));
     assert_eq!(root.calls, 0);
     assert_eq!(before, effective_subscriptions(&mut root).unwrap());
 }

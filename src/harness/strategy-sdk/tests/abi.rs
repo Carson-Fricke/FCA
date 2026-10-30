@@ -76,7 +76,7 @@ fn frame(bars: &[CBarEvent], missing: &[CStr]) -> CBarFrame {
 
 #[test]
 fn frame_reconstruction_is_atomic_ordered_and_decimal_exact() {
-    assert_eq!(SDK_ABI_VERSION, 5);
+    assert_eq!(SDK_ABI_VERSION, 8);
     let bars = [bar("ZZZ"), bar("AAA")];
     let missing = [CStr::from_slice("BBB")];
     let raw = frame(&bars, &missing);

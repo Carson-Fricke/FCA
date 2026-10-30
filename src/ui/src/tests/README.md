@@ -12,7 +12,7 @@ statistics remain backend authority. External APIs are faked rather than execute
 - `capability-surface.test.ts` verifies capability-driven rendered controls.
 - `chat-host-render.test.ts` verifies the actual page host and transport integration.
 - `chat-host.test.ts` verifies workspace chat lifecycle and history.
-- `chat-scroll.test.ts` verifies transcript scrolling behavior.
+- Browser scroll behavior is covered by `e2e/conversation-navigation.spec.ts`; the superseded user-message-only scrolling test was removed when bottom-following replaced that policy.
 - `harness-execution-card.test.ts` verifies live execution state, phase progress,
   long-running backtest observation, transient read recovery and navigation cleanup.
 - `job-identity.test.ts` verifies one execution identity across API projections.
@@ -26,7 +26,7 @@ statistics remain backend authority. External APIs are faked rather than execute
 - `sse-client.test.ts` verifies stream framing, reconnect and cancellation.
 - `subagent-reentry.test.ts` verifies child conversation reentry.
 - `timeline-controller.test.ts` verifies ordered timeline acquisition and updates.
-- `timeline-fixture.ts` builds deterministic timeline fixtures.
+- `timeline-fixture.ts` builds deterministic canonical timeline fixtures and projects HTTP history display receipts through the shared adapter.
 - `variation-report.test.ts` verifies research comparisons and linked evidence.
 - `wire-contract.test.ts` verifies authoritative wire schemas and decode failures.
 - `wire-generation.test.ts` verifies committed generated contracts.

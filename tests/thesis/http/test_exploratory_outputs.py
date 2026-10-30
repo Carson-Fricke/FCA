@@ -18,6 +18,22 @@ HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 URL = "/v1/jobs/job-evidence/exploratory-outputs"
 
 
+def test_unknown_output_retains_dynamic_selectors_through_http() -> None:
+    client, _ = client_for(evidence())
+    response = client.get(
+        URL,
+        headers=HEADERS,
+        params={"instance_id": "study", "output_name": "missing"},
+    )
+    assert response.status_code == 404
+    error = response.json()["error"]
+    assert error["code"] == "missing_selection"
+    assert error["details"]["nextArguments"] == {"job_id": "job-evidence"}
+    assert {"instance_id": "study", "output_name": "dispersion"} in error["details"][
+        "availableSelections"
+    ]
+
+
 class OutputHarness:
     """External MCP boundary serving one immutable output artifact."""
 
@@ -364,6 +380,88 @@ def test_exploratory_inspector_rejects_identity_mismatch_and_bounds_records() ->
     assert client.get(URL).status_code == 401
 
 
+def test_host_sealed_observations_page_features_and_delayed_outcomes_exactly() -> None:
+    columns = [
+        "observation_id",
+        "symbol",
+        "interval",
+        "decision_at_ns",
+        "outcome_due_at_ns",
+        "outcome_available_at_ns",
+        "reference_close",
+        "outcome_close",
+        "outcome_return_bps",
+        "outcome_status",
+        "feature/close",
+    ]
+    start = 1_783_958_220_000_000_001
+    rows = [
+        [
+            "1",
+            "SPY",
+            "1min",
+            str(start),
+            str(start + 60_000_000_000),
+            str(start + 60_000_000_000),
+            "100",
+            "101",
+            100.0,
+            "observed",
+            100.0,
+        ],
+        [
+            "2",
+            "SPY",
+            "1min",
+            str(start + 60_000_000_000),
+            str(start + 120_000_000_000),
+            None,
+            "101",
+            None,
+            None,
+            "end_of_run",
+            101.0,
+        ],
+    ]
+    document: dict[str, object] = {
+        "job_id": "job-evidence",
+        "schema_version": 1,
+        "programs": {
+            "study": {
+                "causal/signal": {
+                    "kind": "causal_observations",
+                    "dataset": {
+                        "horizon_ns": "60000000000",
+                        "feature_columns": ["feature/close"],
+                        "columns": columns,
+                        "rows": rows,
+                    },
+                },
+                "retrospective": {
+                    "kind": "table",
+                    "columns": ["value"],
+                    "rows": [[999]],
+                },
+            }
+        },
+    }
+    client, _ = client_for(document)
+    catalog = client.get(URL, headers=HEADERS).json()["outputs"]
+    assert [(entry["authority"], entry["count"]) for entry in catalog] == [
+        ("harness_replay", 2),
+        ("authored", 1),
+    ]
+    selection = {"instance_id": "study", "output_name": "causal/signal", "limit": 1}
+    first = client.get(URL, headers=HEADERS, params=selection).json()
+    assert first["authority"] == "harness_replay"
+    assert first["output"]["dataset"]["rows"] == rows[:1]
+    assert first["output"]["dataset"]["columns"] == columns
+    assert first["nextOffset"] == 1
+    second = client.get(URL, headers=HEADERS, params={**selection, "offset": 1}).json()
+    assert second["output"]["dataset"]["rows"] == rows[1:]
+    assert second["nextOffset"] is None
+
+
 def test_inspector_byte_budget_advances_by_returned_records() -> None:
     document = evidence()
     programs = document["programs"]
@@ -415,6 +513,7 @@ def test_saved_research_view_and_exact_coordinates_cross_http_without_invention(
         "name": "research_view",
         "kind": "research_view",
         "count": None,
+        "authority": "authored",
     }
     view = client.get(
         URL,

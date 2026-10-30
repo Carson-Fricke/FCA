@@ -7,13 +7,16 @@ from tempfile import TemporaryDirectory
 from thesis.persistence.submissions import SqliteSubmissionStore
 from thesis.workspaces.local import LocalWorkspaceProvider
 from thesis.workspaces.programs import WorkspacePrograms
+from thesis.workspaces.sdk import SdkReferences
 
 with TemporaryDirectory() as directory:
+    sdk = SdkReferences()
     programs = WorkspacePrograms(
         LocalWorkspaceProvider(Path(directory)),
         submissions=SqliteSubmissionStore(Path(":memory:")),
+        sdk=sdk,
     )
-    pending = [programs.sdk_root]
+    pending = [sdk.root]
     crates = set()
     while pending:
         root = pending.pop().resolve()
@@ -38,9 +41,18 @@ with TemporaryDirectory() as directory:
         "num",
         "lake-contracts",
     }
-    for topic in ("study", "consumer", "research_views"):
+    index = programs.read_sdk_reference("index")
+    assert "strategy-sdk/src/building_blocks.rs" in index["topics"]
+    for topic in (
+        "study",
+        "consumer",
+        "research_views",
+        "strategy-sdk/src/building_blocks.rs",
+    ):
         reference = programs.read_sdk_reference(topic)
+        assert isinstance(reference["sdkAbiVersion"], int)
         assert reference["sdkAbiVersion"] > 0
+        assert isinstance(reference["sdkIdentity"], str)
         assert len(reference["sdkIdentity"]) == 64
         assert reference["source"]
 print(

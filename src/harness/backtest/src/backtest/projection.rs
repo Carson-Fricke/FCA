@@ -33,6 +33,13 @@ impl EventProjection {
             quantity_scale,
         } = *self;
         match event {
+            MarketEvent::Block(event) => {
+                if quote_scale == 18 && trade_scale == 18 && quantity_scale == 18 {
+                    Ok(EngineMarket::Block(event))
+                } else {
+                    self.project(MarketEvent::Block(event).to_owned_event())
+                }
+            }
             MarketEvent::Quote {
                 event_id,
                 timestamp_ns,

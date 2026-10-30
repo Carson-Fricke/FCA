@@ -40,6 +40,11 @@ export function decodeView(value: unknown): ResearchView {
 
 /** Preserve canonical cells, including exact timestamp strings and missing states. */
 export function decodeEvidence(output: Record<string, unknown>, total: number, partial: boolean): Evidence {
+ const canonicalOutput = output;
+ if (output.kind === 'causal_observations') {
+  require(record(output.dataset), 'Invalid causal observation dataset');
+  output = { ...output.dataset, kind: 'table' };
+ }
  let columns: string[] = []; let rows: Row[] = [];
  const scalar = (v: unknown): v is Cell => v === null || typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v));
  if (output.kind === 'table') {
@@ -57,7 +62,7 @@ export function decodeEvidence(output: Record<string, unknown>, total: number, p
   });
   columns = [...new Set([...(output.kind==='series'?['symbol','interval','event_time_ns','available_at_ns','value','undefined_reason']:['symbol','event_time_ns','available_at_ns']),...rows.flatMap((r) => Object.keys(r))])];
  }
- return { output, rows, columns, total, partial };
+ return { output: canonicalOutput, rows, columns, total, partial };
 }
 
 export function validateBinding(dataset: Dataset, evidence: Evidence): void {

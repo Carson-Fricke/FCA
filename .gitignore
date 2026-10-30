@@ -61,6 +61,7 @@ credentials.json
 /secrets/
 /.secrets/
 **/.local/market-data-cache/
+**/.local/prepared-replay/
 /config/**/*.local.yaml
 /config/**/*.local.yml
 /infra/parameters/**/*.local.bicepparam

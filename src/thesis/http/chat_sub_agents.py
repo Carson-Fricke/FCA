@@ -46,6 +46,7 @@ from thesis_runtime.conversations import (
 )
 from thesis_runtime.conversations.conversation import Conversations
 from thesis_runtime.conversations.delivery import (
+    Anchor,
     NodeInputNotAccepted,
     NodeInputNotFound,
 )
@@ -408,6 +409,17 @@ def create_chat_sub_agent_router(
                 record.workflow_execution_id,
                 actor_id=actor_id,
             )
+            conversations = _resolve_conversations(http_request)
+            if conversations is not None:
+                for node_id in cancelled:
+                    updated = conversations.store.get_sub_agent(workspace_id, node_id)
+                    if updated is not None:
+                        conversations.delivery.deliver_child_result(
+                            Anchor(
+                                workspace_id, chat_id, updated.returns_to_sub_agent_id
+                            ),
+                            updated,
+                        )
         except HTTPException:
             raise
         except Exception as error:

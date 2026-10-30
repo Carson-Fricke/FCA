@@ -76,10 +76,11 @@ def test_tree_serialization_preserves_durable_authority_and_generated_schema() -
     assert node["phaseExecutor"] is True
     assert node["returnsToSubAgentId"] == "workflow"
     assert node["allowedTools"] == ["validate"] and node["delegatedBudget"] == 7
-    assert node["result"] == {"summary": "evidence"} and node["resultRef"] == "result"
+    assert node["resultAvailable"] is True and node["resultRef"] == "result"
+    assert "result" not in node and "children" not in node and "roots" not in wire
     assert "context" not in node
     schema = chat_sub_agent_tree_schema()
-    fields = schema["$defs"]["SubAgentNodeWire"]["properties"]
+    fields = schema["$defs"]["SubAgentSummaryWire"]["properties"]
     assert set(node) == set(fields)
     assert "spec_version" not in fields
 

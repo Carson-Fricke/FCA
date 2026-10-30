@@ -18,6 +18,12 @@ local FCA extensions; Rust service and MCP tool hosting remain future deployment
 work. The package tree, protocols, invariants and executable verification paths
 are specified in [Runtime architecture](thesis-agent-workflow-runtime.md#runtime-and-fca-extension-boundary).
 
+Harness terminal publication now includes a durable completion event. The
+configured worker-to-Thesis POST resolves the retained conversation recipient and
+uses canonical inbox delivery; agents do not poll or hold a turn for a backtest.
+Long validation calls use the runtime's existing durable worker queue, with the
+same correlated receipts as inline tools and no automatic replay after interruption.
+
 Application-owned formats follow
 [Current contracts and data cutovers](repository.md#current-contracts-and-data-cutovers):
 one current contract, deletion of obsolete development data by default within
@@ -38,7 +44,7 @@ Unified inline study lifecycle cards and independently published dataset semanti
 are implemented. Returned-data mapping policies and preview coverage are shared
 by production chat and the study demonstration.
 
-Market-input authoring now uses SDK ABI v5: studies, strategies and authored
+Market-input authoring now uses SDK ABI v8: studies, strategies and authored
 indicators implement `MarketConsumer` with `on_quote`, `on_trade`, `on_bar`
 and explicit subscriptions. Studies can combine bars, quotes and trades;
 tick-only studies need no global interval. Owned indicator dependencies compose
@@ -49,9 +55,8 @@ any lake ensure/read. A study requesting quotes and bars fetches those two
 types only; the lake does not fetch trades on behalf of bars. Backtests always
 add quote/trade execution feeds for every declared input symbol, separately
 from consumer subscriptions, because `simple_touch` fills from ticks. Bar frames remain atomic
-and available at interval end. Only one bars interval per run is currently
-supported; conflicting intervals fail validation before lake acquisition rather
-than being mixed. The native built-in indicator registry has not migrated;
+and available at interval end. Multiple minute/hour and session-day bar intervals coexist in one run;
+frames preserve their own cadence and availability clock. The native built-in indicator registry has not migrated;
 the shared interface applies only to SDK-authored consumers and their owned
 indicator dependencies.
 
@@ -86,7 +91,45 @@ validation matching content and SDK identity. Completion carries artifact refere
 not inline Rust; completion-time checks verify stored validation without compiling
 or repairing source. The phase agent owns SDK lookup, validation, and repair.
 
-The shared minimal templates in `workspaces/programs.py` back `read_sdk_reference` (including the `decimal` kernel topic)
+Research construction `attempts` are narrative annotations of retained branch
+jobs, not an exhaustive execution ledger. Runtime job retention remains the
+authority for counts, budget, failed attempts and published job references.
+Completion checks reject duplicate or unretained annotations without requiring
+the model to repeat all job IDs.
+
+Replay configuration uses exact decimal wrappers internally. Research composition
+projects these recursively to arbitrary-precision JSON numbers before authored
+program construction. The SDK preserves numeric text on receipt; explicit
+`as_f64` remains an author-chosen numeric conversion. Strings and integer
+parameters retain their types; malformed numeric wrappers fail before dispatch.
+
+`WorkspacePrograms` consumes the `AuthoringSdk` port. Application composition
+constructs `workspaces/sdk/references.py::SdkReferences` with the existing harness
+metadata/reference client; the separate execution port supplies program calls.
+The SDK capability owns source discovery, identity agreement, reference response
+validation and template rendering without receiving the lifecycle service,
+repository, submission store or workflow context. Shared program configuration
+and failure rules live in `workspaces/program_contracts.py`.
+
+Expected tool failures carry `thesis_runtime.contracts.failures.ToolFailure`
+values through exceptions, dispatch, canonical delivery and provider projection.
+Failed `ToolExecution` values require a nonempty failure category and message;
+adapters preserve domain diagnostics, selectors and recovery guidance. HTTP
+translation retains the same evidence under error details. Unexpected exceptions
+remain explicit failures, with conservative outcome certainty after dispatch.
+Workspace publication waits at the existing OS lock for up to 30 seconds,
+checking execution ownership while waiting and before entering the transaction.
+Independent branches remain concurrent outside publication; content-version
+checks still reject conflicting edits.
+
+SDK reference aliases live in `strategy-sdk/reference-topics.json`, shipped and
+hashed with SDK sources. Both native and Python readers also accept discovered
+source paths without topic registration. The Python `index` reference lists
+aliases and paths; native metadata exposes the complete `sourceHashes` inventory.
+Tool schemas do not enumerate SDK elements. Compiler diagnostics own symbol and
+import resolution; adapters do not maintain per-symbol repair tables.
+
+The shared minimal templates in `workspaces/sdk/templates.py` back `read_sdk_reference` (including the `decimal` kernel topic)
 and `template=basic` authoring; they are SDK contracts, not substantive research
 implementations. Wheels and source distributions carry canonical `strategy-sdk`,
 `harness/contracts`, `harness/num`, and `lake/contracts` Cargo manifests/Rust sources with portable relative
@@ -1015,7 +1058,7 @@ Every request for operator input or direction is model-authored from a structure
    model's authored Rust study program runs once as a `study`-shell replay over
    the exact inputs it declares in `harnessConfiguration.subscriptions`
    (preserved as `data.subscriptions` in the study configuration). The compiled
-   ABI v4 JSON union of source and dependencies must canonically equal that
+   ABI v8 JSON union of source and dependencies must canonically equal that
    echo before any ensure/read; `validate_study` returns the union for author
    feedback. Interval-only configuration is rejected, and authored sources use
    the current SDK API. The study observes

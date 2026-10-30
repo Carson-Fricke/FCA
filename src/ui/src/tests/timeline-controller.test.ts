@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TimelineItem } from '$lib/types';
 import type { TimelinePage } from '$lib/api';
 import type { TimelineStreamOptions } from '$lib/sse';
-import { timelineFixture } from './timeline-fixture';
+import { timelineFixture, transcriptFixture } from './timeline-fixture';
 vi.mock('$lib/api', async (importOriginal) => ({
 	...await importOriginal<typeof import('$lib/api')>(), fixtureMode: false,
 	listWorkflowMetadata: vi.fn(async () => ({ items: [], after: 0 })),
@@ -27,6 +27,7 @@ const item = (seq: number, threadId = 'root'): TimelineMessageWire => ({ id: `it
 	kind: 'message', chatId: 'chat', workspaceId: 'ws', ts: '2026-01-01', payload: decodeWire('ChatMessageWire', {
         ...fixtures.chatMessages['chat-1'].items[0],
 		message_id: `message-${seq}`, role: 'user', body: `${seq}`, created_at: '2026-01-01', data: {} }, 'test/timeline') });
+const historyItem = (seq: number, threadId = 'root') => transcriptFixture([item(seq, threadId)])[0];
 beforeEach(() => { vi.clearAllMocks(); streams.length = 0; streamOptions.length = 0; });
 
 describe('one timeline authority', () => {
@@ -41,7 +42,7 @@ describe('one timeline authority', () => {
 		expect(vi.mocked(listTimelinePage).mock.calls[0].slice(0, 4)).toEqual(['ws', 'chat', 'root', null]);
 		expect(timeline.initialLoading).toBe(true);
 		expect(timeline.items).toEqual([]);
-		finish({ items: [item(2), item(3)], nextBefore: 2, after: 10 });
+		finish({ items: [historyItem(2), historyItem(3)], nextBefore: 2, after: 10 });
 		await vi.waitFor(() => expect(timeline.initialLoading).toBe(false));
 		expect(streamOptions[0].after).toBe(10);
 		expect(timeline.history.root.loading).toBe(false);
@@ -50,7 +51,7 @@ describe('one timeline authority', () => {
 		expect(timeline.connected).toBe(true);
 		streams[0](item(11));
 		const older = timeline.loadHistory('root', true);
-		finishOlder({ items: [item(1), item(2)], nextBefore: null, after: 11 });
+		finishOlder({ items: [historyItem(1), historyItem(2)], nextBefore: null, after: 11 });
 		await older;
 		expect(timeline.history.root.complete).toBe(true);
 		expect(timeline.items.map((entry) => entry.seq)).toEqual([1, 2, 3, 11]);
@@ -73,9 +74,9 @@ describe('one timeline authority', () => {
 		timeline.stop();
 	});
 	it('loads older pages only on demand while preserving live identities and seq', async () => {
-		vi.mocked(listTimelinePage).mockResolvedValueOnce({ items: Array.from({ length: 1000 }, (_, i) => item(i + 1201)), nextBefore: 1201, after: 2200 })
-			.mockResolvedValueOnce({ items: Array.from({ length: 1000 }, (_, i) => item(i + 201)), nextBefore: 201, after: 2200 })
-			.mockResolvedValueOnce({ items: Array.from({ length: 200 }, (_, i) => item(i + 1)), nextBefore: 1, after: 2200 })
+		vi.mocked(listTimelinePage).mockResolvedValueOnce({ items: Array.from({ length: 1000 }, (_, i) => historyItem(i + 1201)), nextBefore: 1201, after: 2200 })
+			.mockResolvedValueOnce({ items: Array.from({ length: 1000 }, (_, i) => historyItem(i + 201)), nextBefore: 201, after: 2200 })
+			.mockResolvedValueOnce({ items: Array.from({ length: 200 }, (_, i) => historyItem(i + 1)), nextBefore: 1, after: 2200 })
 			.mockResolvedValueOnce({ items: [], nextBefore: null, after: 2200 });
 		const timeline = new TimelineController(); timeline.start('ws', 'chat');
 		await vi.waitFor(() => expect(streams).toHaveLength(1));
@@ -91,8 +92,8 @@ describe('one timeline authority', () => {
 		timeline.stop();
 	});
 	it('rejects stalled pagination, retains partial pages and retries', async () => {
-		vi.mocked(listTimelinePage).mockResolvedValueOnce({ items: [item(2)], nextBefore: 2, after: 2 })
-			.mockResolvedValueOnce({ items: [item(2)], nextBefore: 2, after: 3 });
+		vi.mocked(listTimelinePage).mockResolvedValueOnce({ items: [historyItem(2)], nextBefore: 2, after: 2 })
+			.mockResolvedValueOnce({ items: [historyItem(2)], nextBefore: 2, after: 3 });
 		const timeline = new TimelineController(); timeline.start('ws', 'chat');
 		await vi.waitFor(() => expect(timeline.history.root?.loaded).toBe(true));
 		await timeline.loadHistory('root', true);
@@ -112,7 +113,7 @@ describe('one timeline authority', () => {
 		vi.mocked(listTimelinePage).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
 		timeline.start('ws', 'old');
 		timeline.start('ws', 'new');
-		oldStream(item(1)); finish({ items: [item(2)], nextBefore: null, after: 2 });
+		oldStream(item(1)); finish({ items: [historyItem(2)], nextBefore: null, after: 2 });
 		await Promise.resolve();
 		expect(timeline.items).toEqual([]);
 		timeline.stop();
@@ -120,7 +121,7 @@ describe('one timeline authority', () => {
 	it('keeps scoped history filtered without opening a second stream', async () => {
 		const timeline = new TimelineController(); timeline.start('ws', 'chat');
 		await vi.waitFor(() => expect(timeline.history.root.complete).toBe(true));
-		vi.mocked(listTimelinePage).mockResolvedValueOnce({ items: [item(5, 'node')], nextBefore: null, after: 20 });
+		vi.mocked(listTimelinePage).mockResolvedValueOnce({ items: [historyItem(5, 'node')], nextBefore: null, after: 20 });
 		await timeline.loadHistory('node');
 		expect(vi.mocked(listTimelinePage).mock.calls[1].slice(0, 4)).toEqual(['ws', 'chat', 'node', null]);
 		expect(timeline.messagesFor('node').map((message) => message.seq)).toEqual([5]);
@@ -136,7 +137,7 @@ describe('one timeline authority', () => {
 		expect(signal?.aborted).toBe(true);
 		expect(timeline.initialLoading).toBe(false);
 		await timeline.loadHistory();
-		finish({ items: [item(99)], nextBefore: null, after: 99 });
+		finish({ items: [historyItem(99)], nextBefore: null, after: 99 });
 		await Promise.resolve();
 		expect(timeline.items).toEqual([]);
 		expect(streamOptions).toHaveLength(1);
@@ -147,7 +148,7 @@ describe('one timeline authority', () => {
 		const page = fixtureTimeline.page('alpha-lab', 'chat-1', null, null);
 		expect(page.items.some((entry) => entry.kind === 'event')).toBe(true);
 		expect(page.items.some((entry) => entry.kind === 'execution')).toBe(true);
-		vi.mocked(listTimelinePage).mockResolvedValueOnce(page);
+		vi.mocked(listTimelinePage).mockResolvedValueOnce({ ...page, items: transcriptFixture(page.items) });
 		const timeline = new TimelineController(); timeline.start('alpha-lab', 'chat-1');
 		await vi.waitFor(() => expect(timeline.history.root.complete).toBe(true));
 		expect(timeline.events).toHaveLength(page.items.filter((entry) => entry.kind === 'event').length);

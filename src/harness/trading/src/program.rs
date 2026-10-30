@@ -62,6 +62,8 @@ pub struct EngineBarFrame {
 /// One reconstructed market event carrying Python-scale decimals.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EngineMarket {
+    /// A borrowed observation backed by an immutable historical tick block.
+    Block(crate::market::BlockEvent),
     /// A top-of-book quote.
     Quote {
         /// Event identifier.
@@ -110,10 +112,72 @@ pub enum EngineMarket {
 }
 
 impl EngineMarket {
+    #[inline]
+    pub fn view(&self) -> crate::market::MarketView<'_> {
+        use crate::market::MarketView;
+        match self {
+            Self::Block(event) => event.view(),
+            Self::Quote {
+                event_id,
+                timestamp_ns,
+                sequence,
+                symbol,
+                bid,
+                ask,
+                bid_quantity,
+                ask_quantity,
+                venue,
+            } => MarketView::Quote {
+                event_id,
+                timestamp_ns: *timestamp_ns,
+                sequence: *sequence,
+                symbol,
+                bid: *bid,
+                ask: *ask,
+                bid_quantity: *bid_quantity,
+                ask_quantity: *ask_quantity,
+                venue,
+            },
+            Self::Trade {
+                event_id,
+                timestamp_ns,
+                sequence,
+                symbol,
+                price,
+                quantity,
+                venue,
+                trade_id,
+            } => MarketView::Trade {
+                event_id,
+                timestamp_ns: *timestamp_ns,
+                sequence: *sequence,
+                symbol,
+                price: *price,
+                quantity: *quantity,
+                venue,
+                trade_id,
+            },
+            Self::Bar(bar) => MarketView::Bar(bar),
+        }
+    }
+    #[inline]
+    pub fn data_type(&self) -> &'static str {
+        match self {
+            Self::Quote { .. } => "quote",
+            Self::Trade { .. } => "trade",
+            Self::Bar(_) => "bars",
+            Self::Block(event) => match event.kind() {
+                crate::market::TickKind::Quote => "quote",
+                crate::market::TickKind::Trade => "trade",
+            },
+        }
+    }
     /// Event time in epoch nanoseconds.
     #[must_use]
-    pub const fn timestamp_ns(&self) -> i64 {
+    #[inline]
+    pub fn timestamp_ns(&self) -> i64 {
         match self {
+            Self::Block(event) => event.row().timestamp_ns,
             Self::Quote { timestamp_ns, .. }
             | Self::Trade { timestamp_ns, .. }
             | Self::Bar(EngineBar { timestamp_ns, .. }) => *timestamp_ns,
@@ -122,8 +186,10 @@ impl EngineMarket {
 
     /// The instrument symbol.
     #[must_use]
+    #[inline]
     pub fn symbol(&self) -> &str {
         match self {
+            Self::Block(event) => event.symbol(),
             Self::Quote { symbol, .. }
             | Self::Trade { symbol, .. }
             | Self::Bar(EngineBar { symbol, .. }) => symbol,
@@ -132,8 +198,10 @@ impl EngineMarket {
 
     /// The event identifier.
     #[must_use]
+    #[inline]
     pub fn event_id(&self) -> &str {
         match self {
+            Self::Block(event) => event.event_id(),
             Self::Quote { event_id, .. }
             | Self::Trade { event_id, .. }
             | Self::Bar(EngineBar { event_id, .. }) => event_id,
@@ -142,8 +210,10 @@ impl EngineMarket {
 
     /// The source sequence.
     #[must_use]
-    pub const fn sequence(&self) -> u64 {
+    #[inline]
+    pub fn sequence(&self) -> u64 {
         match self {
+            Self::Block(event) => event.row().sequence,
             Self::Quote { sequence, .. }
             | Self::Trade { sequence, .. }
             | Self::Bar(EngineBar { sequence, .. }) => *sequence,
@@ -152,14 +222,15 @@ impl EngineMarket {
 
     /// The exact price the engine records for this market event.
     #[must_use]
+    #[inline]
     pub fn mark_price(&self) -> Decimal {
-        match self {
-            Self::Quote { bid, ask, .. } => bid
-                .checked_add(*ask)
+        match self.view() {
+            crate::market::MarketView::Quote { bid, ask, .. } => bid
+                .checked_add(ask)
                 .and_then(|sum| sum.checked_div(Decimal::from_i128(2)))
-                .unwrap_or(*bid),
-            Self::Trade { price, .. } => *price,
-            Self::Bar(EngineBar { close, .. }) => *close,
+                .unwrap_or(bid),
+            crate::market::MarketView::Trade { price, .. } => price,
+            crate::market::MarketView::Bar(EngineBar { close, .. }) => *close,
         }
     }
 }
@@ -270,12 +341,135 @@ pub struct StrategyStart {
     pub start_ns: i64,
 }
 
+/// One strategy's booked execution state at the current causal boundary.
+/// The engine supplies this view; authored programs never reconstruct it from fills.
+#[derive(Clone, Debug)]
+pub struct ExecutionSnapshot {
+    pub timestamp_ns: i64,
+    pub initial_cash: Decimal,
+    pub cash: Decimal,
+    pub fees: Decimal,
+    pub equity: Option<Decimal>,
+    pub realized_pnl: Decimal,
+    pub unrealized_pnl: Option<Decimal>,
+    pub gross_exposure: Option<Decimal>,
+    pub positions: Vec<ExecutionPosition>,
+    pub orders: std::sync::Arc<Vec<ExecutionOrder>>,
+    /// Canonical FIFO slices, using the same kernel as metrics.json.
+    pub closed_trades: std::sync::Arc<Vec<crate::fills::trades::ClosedTrade>>,
+}
+
+/// Average-cost position accounting, including immediately recognized fill fees.
+#[derive(Clone, Debug)]
+pub struct ExecutionPosition {
+    pub symbol: String,
+    pub quantity: Decimal,
+    pub average_price: Decimal,
+    pub realized_pnl: Decimal,
+    pub unrealized_pnl: Option<Decimal>,
+    pub market_value: Option<Decimal>,
+}
+
+/// An owned order's actual lifecycle. Filled quantity includes booked fills only.
+#[derive(Clone, Debug)]
+pub struct ExecutionOrder {
+    pub order_id: String,
+    pub symbol: String,
+    pub side: String,
+    pub quantity: Decimal,
+    pub filled_quantity: Decimal,
+    pub remaining_quantity: Decimal,
+    pub status: String,
+    pub reason: Option<String>,
+}
+
+impl ExecutionSnapshot {
+    /// Exact strings are the SDK wire representation; no decimal crosses as a float.
+    pub fn account_json(&self) -> serde_json::Value {
+        let optional = |value: Option<Decimal>| value.map(|v| v.to_string());
+        serde_json::json!({
+            "timestamp_ns": self.timestamp_ns,
+            "initial_cash": self.initial_cash.to_string(), "cash": self.cash.to_string(),
+            "fees": self.fees.to_string(), "equity": optional(self.equity),
+            "realized_pnl": self.realized_pnl.to_string(),
+            "unrealized_pnl": optional(self.unrealized_pnl),
+            "gross_exposure": optional(self.gross_exposure),
+            "positions": self.positions.iter().map(|p| serde_json::json!({
+                "symbol": p.symbol, "quantity": p.quantity.to_string(),
+                "average_price": p.average_price.to_string(),
+                "realized_pnl": p.realized_pnl.to_string(),
+                "unrealized_pnl": optional(p.unrealized_pnl),
+                "market_value": optional(p.market_value),
+            })).collect::<Vec<_>>(),
+        })
+    }
+
+    /// Order history is independent of the frequently changing account marks.
+    pub fn orders_json(&self) -> serde_json::Value {
+        serde_json::Value::Array(self.orders.iter().map(|o| serde_json::json!({
+                "order_id": o.order_id, "symbol": o.symbol, "side": o.side,
+                "quantity": o.quantity.to_string(), "filled_quantity": o.filled_quantity.to_string(),
+                "remaining_quantity": o.remaining_quantity.to_string(),
+                "status": o.status, "reason": o.reason,
+            })).collect())
+    }
+
+    /// Closed trades are projected only when the immutable history changes.
+    pub fn closed_trades_json(&self) -> serde_json::Value {
+        serde_json::Value::Array(self.closed_trades.iter().map(|t| serde_json::json!({
+                "trade_id": t.trade_id, "symbol": t.symbol, "side": t.side,
+                "quantity": t.quantity.to_string(), "entry_price": t.entry_price.to_string(),
+                "exit_price": t.exit_price.to_string(), "gross_pnl": t.gross_pnl.to_string(),
+                "fees": t.fees.to_string(), "net_pnl": t.net_pnl.to_string(),
+                "entry_timestamp_ns": t.entry_timestamp_ns, "exit_timestamp_ns": t.exit_timestamp_ns,
+                "gross_return_bps": t.return_bps(false).expect("validated closed-trade return").map(|n| n.to_string()),
+                "net_return_bps": t.return_bps(true).expect("validated closed-trade return").map(|n| n.to_string()),
+            })).collect())
+    }
+}
+
+/// Execution instructions, in callback order. Targets are reconciled by the engine.
+#[derive(Clone, Debug)]
+pub enum OrderAction {
+    Submit(EngineOrder),
+    Cancel { order_id: String },
+    TargetPosition { symbol: String, quantity: Decimal },
+}
+
 /// The typed failure every non-bar runtime raises for a bar event.
 pub const RUNTIME_BARS_UNSUPPORTED: &str =
     "this runtime does not consume bars: bars are only dispatched to study runtimes";
 
 /// The Python plugin seam the engine drives.
 pub trait StrategyRuntime {
+    /// Opt in to the engine-owned state view. Observation-only studies never opt in.
+    fn wants_execution_state(&self) -> bool {
+        false
+    }
+
+    fn update_execution_state(&mut self, _state: &ExecutionSnapshot) -> Result<(), BacktestError> {
+        Ok(())
+    }
+
+    /// Native order-only runtimes use the same execution path as authored actions.
+    fn on_frame_actions(
+        &mut self,
+        frame: &EngineBarFrame,
+    ) -> Result<Vec<OrderAction>, BacktestError> {
+        self.on_frame_orders(frame)
+            .map(|orders| orders.into_iter().map(OrderAction::Submit).collect())
+    }
+
+    fn on_market_actions(
+        &mut self,
+        event: &EngineMarket,
+    ) -> Result<Vec<OrderAction>, BacktestError> {
+        let orders = match event {
+            EngineMarket::Bar(bar) => self.on_bar(bar)?,
+            _ => self.on_market(event)?,
+        };
+        Ok(orders.into_iter().map(OrderAction::Submit).collect())
+    }
     /// Exact own and indicator requirements. `None` is for legacy native mocks.
     fn subscriptions(&self) -> Option<Vec<MarketSubscription>> {
         None

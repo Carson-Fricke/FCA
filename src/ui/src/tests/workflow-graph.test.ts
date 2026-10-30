@@ -16,12 +16,12 @@ describe('backend-owned workflow topology', () => {
 		expect(model.nodes).toHaveLength(2);
 		expect(model.edges).toEqual([]);
 	});
-	it('renders newly declared phases, legal back edges and terminal nodes', () => {
+	it('lays out working phases and back edges without terminal nodes or their transitions', () => {
 		const model = computeWorkflowGraph([{ name: 'new_phase', status: 'active', attempts: 2 },
 			{ name: 'model_creation', status: 'done' }], definition);
-		expect(model.nodes.map((node) => node.name)).toEqual(definition.phases);
+		expect(model.nodes.map((node) => node.name)).toEqual(['new_phase', 'model_creation']);
 		expect(model.edges.map((edge) => [edge.from, edge.to])).toEqual([
-			['new_phase', 'model_creation'], ['model_creation', 'new_phase'], ['model_creation', 'completed']
+			['new_phase', 'model_creation'], ['model_creation', 'new_phase']
 		]);
 		expect(model.edges[1].kind).toBe('loopback');
 		expect(model.edges[1].traversed).toBe(true);

@@ -4,13 +4,20 @@
 
 ## Status
 
+SDK ABI 8 implements replay-sealed features through root `on_decision` callbacks
+and a borrowed `DecisionContext`. The host owns observation identity, clocks,
+immutable rows and exact elapsed forward-return labels. `causal/` publications
+cannot be authored or backdated. Raw post-run evidence remains exploratory.
+See the Program Authoring Contract in `repository.md` and the current authoring
+guide for missing/end-of-run semantics and the native-code trust boundary.
+
 `harness-contracts` is now a workspace member under `src/harness/contracts/`.
 It owns dependency-light tagged subscriptions, data-type/interval vocabulary,
 canonical subscription normalization, and configuration hashing. The SDK depends
 on contracts and `num`, not `backtest`; configuration and engine adapters depend
 toward those contracts. Canonical interval vocabulary accepts positive
-`s`/`min`/`h`/`d` units; the engine's supported `1min`/`1d` intervals and
-single-bars-interval restriction remain separate execution policy.
+`s`/`min`/`h`/`d` units; replay supports positive minute/hour intervals and `1d`, including multiple
+bar cadences in one run; finite windows do not cross sessions.
 
 The shared `config` crate owns YAML/JSON syntax, shell/replay schema validation,
 and typed normalization reused by API, MCP, CLI, and engine projection. There is
@@ -21,7 +28,7 @@ Submitted-document hashes omit resolved defaults and remain distinct from resolv
 engine hashes. Unicode encoding, committed configurations, and nanosecond-bound
 identity have golden/regression coverage; persisted hashes are not re-pinned.
 
-The authoring SDK now uses ABI v4 and a shared `MarketConsumer` interface for
+The authoring SDK now uses ABI v8 and a shared `MarketConsumer` interface for
 studies, strategies and program-owned indicators. Subscriptions declare exact
 symbols and `bars`/`quote`/`trade` inputs; only bars require an interval. The
 compiled union includes recursive indicator dependencies and drives study
@@ -144,7 +151,7 @@ source digest) that implement `MarketConsumer` and declare exact
 `harnessConfiguration.subscriptions`, emitted as `data.subscriptions` and
 checked against the compiled dependency union. Bars declare `1min` or `1d`;
 tick-only studies require no interval. Interval-only configuration is rejected,
-and authored sources use `MarketConsumer` for ABI v4. Studies publish their
+and authored sources use `MarketConsumer` for ABI v8. Studies publish their
 Layer A observables as metrics — the Python `model_source`/`fit`/`observe` plumbing
 and the indicator-binding schema are deleted. Strategy bundles persist Rust
 sources and hash those. Screener filters are Rust-authored `ScreeningProgram`
@@ -248,14 +255,14 @@ zero-sized indicator dependencies are rejected. Routing updates dependencies
 before their parent and delivers only each consumer's own types and symbols.
 
 Subscriptions are `Bars { symbols, interval }` (`1min` or `1d`),
-`Quote { symbols }`, or `Trade { symbols }`. ABI v4 exports the constructed
+`Quote { symbols }`, or `Trade { symbols }`. ABI v8 exports the constructed
 source-and-dependency union as tagged JSON before acquisition. Thesis preserves
 `harnessConfiguration.subscriptions` as `data.subscriptions`, which must
 canonically equal that union; `validate_study` returns the compiled union.
 Only one distinct bars interval is supported per run, including dependencies
 and program instances; conflicts fail before lake ensure/read. Tick-only inputs
 need no interval. Interval-only documents are rejected; authored sources use
-the current SDK API and ABI v4.
+the current SDK API and ABI v8.
 
 Studies ensure/read exactly their effective requirements through lake routes.
 Bars are provider-first, with derivation from already stored trades otherwise;

@@ -86,9 +86,10 @@ def datasets(job_id: str, content: str) -> list[dict[str, Any]]:
                 descriptions[name] = semantics
         for name, output in outputs.items():
             kind = output.get("kind")
-            if kind == "table":
-                columns = output["columns"]
-                rows = [dict(zip(columns, row, strict=True)) for row in output["rows"]]
+            if kind in {"table", "causal_observations"}:
+                table = output["dataset"] if kind == "causal_observations" else output
+                columns = table["columns"]
+                rows = [dict(zip(columns, row, strict=True)) for row in table["rows"]]
             elif kind in {"series", "events"}:
                 rows = [
                     {
@@ -116,10 +117,22 @@ def datasets(job_id: str, content: str) -> list[dict[str, Any]]:
                 fields = []
                 for column in columns:
                     present = [r[column] for r in rows if r.get(column) is not None]
-                    typed_time = kind in {"series", "events"} and column in {
-                        "event_time_ns",
-                        "available_at_ns",
-                    }
+                    typed_time = (
+                        kind in {"series", "events"}
+                        and column
+                        in {
+                            "event_time_ns",
+                            "available_at_ns",
+                        }
+                    ) or (
+                        kind == "causal_observations"
+                        and column
+                        in {
+                            "decision_at_ns",
+                            "outcome_due_at_ns",
+                            "outcome_available_at_ns",
+                        }
+                    )
                     field_type = (
                         "timestamp_ns"
                         if typed_time

@@ -46,10 +46,10 @@
 
 <svelte:window onpointerdown={onWindowPointerDown} />
 
-<header class="flex h-14 shrink-0 items-center gap-3 border-b border-surface-700 bg-surface-900 px-4">
-	<nav class="flex min-w-0 items-center gap-1.5 text-sm text-slate-500" aria-label="Breadcrumb">
-		<a href="/w" class="hover:text-slate-700">Workspace</a>
-		<span aria-hidden="true">›</span>
+<header class="shell-topbar flex h-12 shrink-0 items-center gap-3 border-b border-surface-700 bg-surface-900 px-4">
+	<nav class="shell-breadcrumb flex min-w-0 flex-1 items-center gap-1.5 text-xs text-slate-500" aria-label="Breadcrumb">
+		<a href="/w" class="workspace-index hover:text-slate-700">Workspace</a>
+		<span class="workspace-index" aria-hidden="true">›</span>
 		<a href="/w/{workspaceId}/overview" class="truncate hover:text-slate-700">{workspaceName}</a>
 		{#if page !== 'overview'}
 			<span aria-hidden="true">›</span>
@@ -57,7 +57,7 @@
 		{/if}
 	</nav>
 
-	<div class="ml-auto flex items-center gap-2">
+	<div class="shell-actions ml-auto flex shrink-0 items-center gap-2">
 		{#if fixtureMode || uiEnvironment === 'dev'}
 			<span
 				class="rounded-full border border-warn/40 bg-warn/10 px-2.5 py-1 text-[11px] font-medium text-warn"
@@ -65,7 +65,7 @@
 				title="This workspace runs against simulated surfaces"
 			>
 				<span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-warn" aria-hidden="true"></span>
-				Simulation environment
+				<span class="environment-full">Simulation environment</span><span class="environment-short">Simulation</span>
 			</span>
 		{/if}
 		<a
@@ -96,7 +96,7 @@
 			</button>
 			{#if notificationsOpen}
 				<div
-					class="absolute top-full right-0 z-40 mt-1 w-80 rounded-xl border border-surface-600 bg-surface-850 p-2 shadow-2xl"
+					class="notifications-popover absolute top-full right-0 z-40 mt-1 w-80 rounded-xl border border-surface-600 bg-surface-850 p-2 shadow-2xl"
 					data-testid="notifications-popover"
 				>
 					<div class="mb-1 flex items-center justify-between px-1">
@@ -140,3 +140,8 @@
 		{/if}
 	</div>
 </header>
+
+<style>
+	.environment-short{display:none}.notifications-popover{max-width:calc(100vw - 80px)}.shell-breadcrumb>a{min-width:0}
+	@media(max-width:700px){.shell-topbar{gap:8px;padding-left:10px;padding-right:10px}.workspace-index,.environment-full{display:none}.environment-short{display:inline}.shell-breadcrumb{gap:4px}.shell-actions{gap:5px}}
+</style>

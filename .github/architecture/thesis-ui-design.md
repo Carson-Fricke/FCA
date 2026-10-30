@@ -103,7 +103,64 @@ Expandable details show stage durations and the transfer inactivity limit. It
 makes no ETA or trial-completion estimate from data acquisition counters. Old
 records without observations show their existing lifecycle and error fields.
 
+## Implemented Workspace Shell
+
+The workspace shell defaults to a 56px icon rail, with labeled, current-page
+links and native hover titles. Expanding the rail exposes navigation labels,
+counts and pinned widgets; the browser remembers that preference. Workspace
+selection, creation, deletion, search and backend settings remain available
+from the compact rail through their existing owners. On narrow screens,
+expanded navigation overlays the page and can close with Escape or its backdrop.
+
+The fullscreen conversation route fills the shell's content area without outer
+cards, gutters or rounded pane borders. A 192px conversation list shares one
+divider with the transcript canvas. Its toggle preserves the mounted chat,
+draft, selected scope and viewport. On narrow screens it opens as a drawer,
+closing on selection, starting a draft, Escape or its backdrop. Other workspace
+pages retain their existing content spacing and optional copilot pane.
+
 ## Implemented Chat Boundary
+
+The fullscreen conversation host keeps conversation selection on the left and
+an optional outline on the right, initially 260px wide. Its divider supports
+pointer and keyboard resizing, with the preferred width retained locally.
+Outline rows are 24px high on fine
+pointers and retain touch-sized targets on coarse pointers. Workflows, study
+executions, and artifact receipts group by their originating operator request
+using canonical request correlations and durable workflow ownership; completion
+arrival time does not move older work under a later request. Evidence without
+an attributable request remains under Other activity. Rows deduplicate by entity
+while retaining an original receipt anchor and latest observed status.
+Workflow and conversation rows use one native disclosure: the row background
+expands or collapses its children, while the name navigates to its location.
+
+The read-only `/chats/{chat}/outline` endpoint pages lightweight metadata from
+the same catalog timeline. Storage selects root turns/requests and relevant
+result headers before paging, projecting only caller-selected structured metadata.
+PostgreSQL uses message and receipt-type/kind indexes; Cosmos selects inline
+headers and explicitly hydrates current chunk manifests. There is no second
+persisted read model, delivery path or SSE subscription. Full bodies and reasoning
+are excluded. The initial request loads one page of up to 500 eligible receipts;
+further pages load explicitly. Eight scoped outline snapshots retain their cursor
+on revisits.
+`TimelineController` owns this optional metadata alongside current execution
+metadata. Selecting a receipt loads only its owning thread's anchor page into
+the existing timeline, preserving that thread's ordinary older-history cursor.
+
+`ScopeStack` places an arrow-only parent control beside a wrapping breadcrumb
+above both transcript and outline. The root label is Conversation; the full
+conversation title remains in the host header. Parent names remain readable,
+hidden workflow record anchors are excluded from conversation paths, and a
+parent click selects that exact conversation and its capability-gated composer.
+The sub-agent composer names the current receiving agent.
+
+Root, agent and phase transcripts share `TranscriptViewport`. Reaching the
+bottom follows new messages, provisional output, and resizing result cards.
+Scrolling upward suspends following; an arrow-only jump control appears above
+the composer and disappears at the bottom. Returning to a scope restores its
+reading position and following state. These are presentation effects only.
+Earlier history loads automatically near the top, retaining the first visible
+message's position when records prepend. A failed page retains a retry action.
 
 An unresolved phase scope shows starting/unavailable activity and retained recovery
 errors. Absence of a phase agent never establishes deterministic execution or
@@ -138,9 +195,17 @@ live timeline subscription, backward history loading, ID deduplication, ascendin
 that same owner. History preserves partial pages on failure, checks cursor
 progress, and rejects aborted or previous-chat replies. Scope navigation does
 not create another message/event cache or an execution SSE subscription.
-The first history page fetches at most 200 records for the root thread and returns an `after`
-watermark. Child history loads when that child opens; older history loads only
-through the explicit Load older history action. Current chat workflow metadata
+The first history page requests up to 40 display entries for the root thread and returns an `after`
+watermark. `TranscriptPageWire` bounds material pages to 256 KiB and explicitly
+marks shortened evidence. `/timeline/items/{sequence}` returns its canonical
+item on demand. Display receipts omit provider continuation and duplicate session
+context. Routine result bodies mount on expansion; rich results hydrate when
+visible. Canonical SSE and detail reads replace previews by identity; later
+history cannot overwrite complete evidence. Open output prefixes retain complete
+UTF-8 evidence independently of the material-page budget. Hierarchy lists return
+flat parent-linked summaries with result availability; the existing node detail
+endpoint retains full results. Child history loads when that child opens; older history loads when
+the selected viewport approaches its top. Current chat workflow metadata
 and the durable node tree load independently of transcript history. Nested
 workflow fallback cards remain in their owning conversation scope. SSE starts only afterward and reads strictly greater sequences, with
 `Last-Event-ID` reconnect resume; it never independently backfills old history.
@@ -170,7 +235,9 @@ metadata updates workflow cards and scoped phase views;
 `workflow.phase`, tool lifecycle events and other execution metadata do not
 produce standalone root transcript rows, in history or live streaming.
 `sse.ts` retains only the `TimelineStream` client and its framing, URL, and cursor
-helpers.
+helpers. Its callbacks expose canonical `TimelineItemWire` evidence; HTTP history
+uses `TranscriptPageWire` display receipts. Offline history and test fixtures
+project canonical messages through the shared `toTranscriptMessage` adapter.
 
 Conversation-owned records carry `conversation_id`, `root_conversation_id`,
 `parent_conversation_id`, and authorization `workspace_id`. `chat_id` remains the
@@ -229,7 +296,34 @@ after completion. It shares topology, not mutable execution state.
 The card renders declared transitions only when that definition matches
 the execution's recorded version. A missing or mismatched definition shows
 topology unavailable, retaining observed activity rather than inventing edges
-or claiming the endpoint serves historical versions.
+or claiming the endpoint serves historical versions. The displayed graph omits
+the definition's terminal phases and every connector to or from those states.
+Completed working phases remain visible for read-only navigation.
+Multi-destination routes use one noninteractive dot before the destination phases.
+Routes with the exact same set of destination input ports share the dot and its
+outgoing branches; each source has one incoming connector, including loopbacks.
+Different destination sets remain separate. Junctions are presentation geometry,
+never declared phases, agents, execution state or navigation targets. Their visible
+markers use the same pan/zoom transform as the canvas and phase controls. Level
+forward connectors are straight. Vertically displaced connectors use smooth
+S-curves in column gaps and straight runs along clear lanes. Connectors skipping
+an occupied column first shift into the gap between phase rows. Column gaps and
+junction offsets grow with the vertical rise so tall branches have room to curve.
+Loopbacks leave the box's right output edge and enter the destination's left
+input edge, including self-loops and shared junctions. Upward returns use the gap
+above their source row; other returns use the gap below it. Return rails share
+bounded lanes 8–32 pixels past the preceding row, with curved departures and
+smooth approaches in the destination column gap. They add at most 32 pixels
+below the phase rows. Stacked phases such as optimization and strategy RCA
+connect over the source without a downward detour or lateral overshoot.
+Connector shafts stop at the back of their arrowheads; tips retain their input
+anchors. Graph projection and canvas rendering share the arrowhead dimensions.
+Each vertical shift or return turn uses one cubic Bézier span with horizontal
+endpoint tangents. The bend spans the full rise rather than joining rounded
+shoulders to an almost straight vertical middle; level runs remain straight.
+The graph refits when its matching definition arrives after the observed frontier;
+automatic fitting and manual zoom share a 15% minimum so the full topology can fit
+in a narrow conversation pane without losing the fork or its destinations.
 Canvas `requestAnimationFrame` animation runs only for active or attention
 nodes while the card intersects the viewport and the document is visible.
 Offscreen cards and hidden tabs pause the animation loop; visibility changes
@@ -377,7 +471,8 @@ executor-free terminal nodes.
 
 ### Application shell (from the structure mockup)
 
-- **Left sidebar (persistent):** brand mark; **workspace switcher** popover
+- **Left sidebar (persistent):** compact icon rail, expandable to labels,
+  live counts and pinned widgets; brand mark; **workspace switcher** popover
   listing accessible workspaces with avatar/initials plus "Create workspace";
   global search trigger (`⌘K` command palette); primary navigation with live
   counts; a **Pinned** section (pinned widgets and a pinned strategy);

@@ -17,6 +17,7 @@ from pydantic import TypeAdapter
 
 from thesis.http.application import create_app
 from thesis.http.schema import export_schema, main
+from thesis.http.transcript import project_message
 from thesis.http.wire import (
     ChatMessageListWire,
     ChatMessageWire,
@@ -25,13 +26,15 @@ from thesis.http.wire import (
     NodeInputReceiptWire,
     SteeringPercolationWire,
     TimelineItemWire,
-    TimelinePageWire,
+    TranscriptPageWire,
     WorkflowDefinitionWire,
 )
 from thesis_runtime.adapters.cosmos.timeline import CosmosTimeline
 from thesis_runtime.contracts.activity import ExternalInput, activity_data
+from thesis_runtime.contracts.codec import record_from_payload
 from thesis_runtime.contracts.datum import ToolResultWire, tool_result_payload
 from thesis_runtime.contracts.records import (
+    ChatMessage,
     SubAgentKind,
     SubAgentRecord,
     SubAgentStatus,
@@ -58,7 +61,7 @@ def validate(schema: dict[str, Any], name: str, payload: object) -> None:
         "ChatMessageListWire": ChatMessageListWire,
         "ChatSubAgentTreeWire": ChatSubAgentTreeWire,
         "SubAgentNodeWire": SubAgentNodeWire,
-        "TimelinePageWire": TimelinePageWire,
+        "TranscriptPageWire": TranscriptPageWire,
         "TimelineItemWire": TimelineItemWire,
         "ToolResultWire": ToolResultWire,
         "WorkflowDefinitionWire": WorkflowDefinitionWire,
@@ -90,7 +93,7 @@ def test_export_is_deterministic_complete_and_has_no_dangling_refs(
         "DatumWire",
         "ToolResultWire",
         "TimelineItemWire",
-        "TimelinePageWire",
+        "TranscriptPageWire",
         "WorkflowDefinitionWire",
         "CreateMessageResponseWire",
         "ChatThreadWire",
@@ -119,7 +122,7 @@ def test_export_is_deterministic_complete_and_has_no_dangling_refs(
             ("/sub_agents", "ChatSubAgentTreeWire"),
             ("/sub_agents/{sub_agent_id}", "SubAgentNodeWire"),
             ("/sub_agents/{sub_agent_id}/sub_agents", "SubAgentNodeListWire"),
-            ("/timeline", "TimelinePageWire"),
+            ("/timeline", "TranscriptPageWire"),
             ("/messages", "ChatMessageListWire"),
         ):
             response = schema["paths"][path + suffix]["get"]["responses"]["200"]
@@ -387,10 +390,22 @@ def test_real_tree_and_all_timeline_variants_match_export(
     for prefix in ("", "/api"):
         response = client.get(prefix + path + "/timeline", headers=HEADERS)
         assert response.status_code == 200
-        validate(schema, "TimelinePageWire", response.json())
-        assert response.json()["items"] == list(stored.values())
+        validate(schema, "TranscriptPageWire", response.json())
+        expected = [
+            {
+                **item,
+                "payload": project_message(
+                    cast(ChatMessage, record_from_payload(ChatMessage, item["payload"]))
+                ),
+            }
+            if item["kind"] == "message"
+            else item
+            for item in stored.values()
+        ]
+        assert response.json()["items"] == expected
         for item in response.json()["items"]:
-            validate(schema, "TimelineItemWire", item)
+            if item["kind"] != "message":
+                validate(schema, "TimelineItemWire", item)
         stream = client.get(prefix + path + "/timeline/stream", headers=HEADERS)
         assert stream.status_code == 200
         frames = [

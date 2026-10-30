@@ -76,7 +76,11 @@ impl FrameWriter {
     fn new() -> io::Result<Self> {
         let mut compressor = zstd::bulk::Compressor::new(1)?;
         compressor.set_parameter(zstd::zstd_safe::CParameter::ChecksumFlag(true))?;
-        Ok(Self { raw: Vec::new(), compressed: Vec::new(), compressor })
+        Ok(Self {
+            raw: Vec::new(),
+            compressed: Vec::new(),
+            compressor,
+        })
     }
 }
 impl<T: Record> Clone for History<T> {
@@ -132,8 +136,12 @@ impl<T: Record> History<T> {
                 return Err(io::Error::other("replay history frame exceeds capacity"));
             }
             writer.compressed.clear();
-            writer.compressed.reserve(zstd::zstd_safe::compress_bound(writer.raw.len()));
-            writer.compressor.compress_to_buffer(&writer.raw, &mut writer.compressed)?;
+            writer
+                .compressed
+                .reserve(zstd::zstd_safe::compress_bound(writer.raw.len()));
+            writer
+                .compressor
+                .compress_to_buffer(&writer.raw, &mut writer.compressed)?;
             let bytes = self.bytes + writer.compressed.len() as u64 + 16;
             if bytes > self.resources.max_bytes {
                 return Err(io::Error::other(
@@ -153,7 +161,9 @@ impl<T: Record> History<T> {
                 }
                 self.file = Some(Arc::new(replacement));
             }
-            let file = Arc::get_mut(self.file.as_mut().unwrap()).unwrap().as_file_mut();
+            let file = Arc::get_mut(self.file.as_mut().unwrap())
+                .unwrap()
+                .as_file_mut();
             file.write_all(&(writer.compressed.len() as u64).to_le_bytes())?;
             file.write_all(&(writer.raw.len() as u64).to_le_bytes())?;
             file.write_all(&writer.compressed)?;
@@ -227,7 +237,10 @@ impl<T: Record> Iterator for HistoryReader<T> {
             if self.decompressor.is_none() {
                 self.decompressor = Some(zstd::bulk::Decompressor::new()?);
             }
-            let decoded = self.decompressor.as_mut().unwrap()
+            let decoded = self
+                .decompressor
+                .as_mut()
+                .unwrap()
                 .decompress_to_buffer(&self.compressed, &mut self.raw)?;
             if decoded != size {
                 return Err(io::Error::other("invalid replay history frame size"));

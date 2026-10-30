@@ -96,20 +96,23 @@ def continuation_message(
 
 
 def supervisor_anchor(store: SubAgentStore, anchor: Anchor) -> Anchor | None:
-    """Skip record-only containers; suppress malformed cyclic return chains."""
+    """Notify the explicit conversational return target, never across a workflow."""
     if anchor.sub_agent_id is None:
         return None
     child = store.get_sub_agent(anchor.workspace_id, anchor.sub_agent_id)
-    target = None if child is None else child.returns_to_sub_agent_id
-    visited = {anchor.sub_agent_id}
-    while target:
-        if target in visited:
-            return None
-        visited.add(target)
+    if child is None or child.chat_id != anchor.chat_id:
+        return None
+    target = child.returns_to_sub_agent_id
+    if target == anchor.sub_agent_id:
+        return None
+    if target is not None:
         parent = store.get_sub_agent(anchor.workspace_id, target)
-        if parent is None or parent.role not in RECORD_ANCHOR_ROLES:
-            break
-        target = parent.parent_sub_agent_id
+        if (
+            parent is None
+            or parent.chat_id != anchor.chat_id
+            or parent.role in RECORD_ANCHOR_ROLES
+        ):
+            return None
     return Anchor(anchor.workspace_id, anchor.chat_id, target)
 
 

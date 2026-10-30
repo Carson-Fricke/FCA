@@ -1,5 +1,6 @@
 //! Dependency-light market declarations and persisted configuration hashing.
 
+pub mod causal;
 pub mod progress;
 pub use lake_contracts::{OptionRight, OptionSelector, ResolvedOption};
 
@@ -121,7 +122,7 @@ pub fn validate_bar_interval(value: &str) -> Result<(), String> {
     let digits = value.bytes().take_while(u8::is_ascii_digit).count();
     if digits == 0 || value.starts_with('0') || !matches!(&value[digits..], "s" | "min" | "h" | "d")
     {
-        return Err(format!("invalid bar interval {value:?}"));
+        return Err(format!("invalid bar interval {value:?}; expected a positive integer followed by s, min, h or d, without leading zeros"));
     }
     Ok(())
 }
@@ -138,7 +139,9 @@ pub fn completed_bar_interval_ns(interval: &str) -> Result<Option<i64>, String> 
     } else if let Some(n) = interval.strip_suffix('h') {
         (n, 3_600_000_000_000_i64)
     } else {
-        return Err("replay bars require minute/hour intervals or 1d".into());
+        return Err(format!(
+            "replay bar interval {interval:?}: require minute/hour intervals or 1d"
+        ));
     };
     number
         .parse::<i64>()
@@ -146,7 +149,7 @@ pub fn completed_bar_interval_ns(interval: &str) -> Result<Option<i64>, String> 
         .and_then(|n| n.checked_mul(scale))
         .filter(|n| *n > 0)
         .map(Some)
-        .ok_or_else(|| "bar interval overflow".into())
+        .ok_or_else(|| format!("bar interval {interval:?} overflows positive i64 nanoseconds"))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -190,7 +193,7 @@ pub fn canonical_subscriptions(inputs: Vec<Subscription>) -> Result<Vec<Subscrip
                 .iter()
                 .any(|s| s.trim().is_empty() || s.trim() != s)
         {
-            return Err("subscriptions require nonempty, unpadded symbols".into());
+            return Err(format!("subscription {input:?}: require nonempty symbol lists with nonempty, unpadded symbol strings"));
         }
         groups
             .entry(key)

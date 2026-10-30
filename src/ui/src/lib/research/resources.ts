@@ -50,11 +50,17 @@ export function researchResources(job: string, reader: PageReader = getExplorato
    while (!signal.aborted) {
     const p = check(await page(reader, job, instance, name, offset)); if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
     if (!p.output) throw new Error('Missing output evidence');
-    const key = ['rows', 'points', 'events'].find((k) => Array.isArray(p.output![k]));
+    const sealed = p.output.kind === 'causal_observations';
+    const records = sealed ? p.output.dataset as Record<string, unknown> : p.output;
+    if (!records || typeof records !== 'object') throw new Error('Invalid causal observation dataset');
+    const key = ['rows', 'points', 'events'].find((k) => Array.isArray(records[k]));
     bytes += JSON.stringify(p.output).length;
     total = p.total ?? 0;
-    if (!combined) combined = { ...p.output, ...(key ? { [key]: [] } : {}) };
-    if (key) (combined[key] as unknown[]).push(...p.output[key] as unknown[]);
+    if (!combined) combined = sealed
+     ? { ...p.output, dataset: { ...records, ...(key ? { [key]: [] } : {}) } }
+     : { ...p.output, ...(key ? { [key]: [] } : {}) };
+    const combinedRecords = sealed ? combined.dataset as Record<string, unknown> : combined;
+    if (key) (combinedRecords[key] as unknown[]).push(...records[key] as unknown[]);
     if (p.nextOffset == null) return decodeEvidence(combined, key ? total : 0, false);
     if (p.nextOffset <= offset) throw new Error('Evidence cursor did not advance');
     if (p.nextOffset >= MAX_RECORDS || bytes >= MAX_BYTES) return decodeEvidence(combined, total, true);

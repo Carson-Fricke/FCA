@@ -43,6 +43,14 @@ CREATE INDEX IF NOT EXISTS thesis_timeline ON thesis_documents
  (workspace_id,chat_id,seq) WHERE seq IS NOT NULL;
 CREATE INDEX IF NOT EXISTS thesis_thread_timeline ON thesis_documents
  (workspace_id,chat_id,thread_id,seq) WHERE seq IS NOT NULL;
+CREATE INDEX IF NOT EXISTS thesis_message_timeline ON thesis_documents
+ (workspace_id,chat_id,seq) WHERE kind='message';
+CREATE INDEX IF NOT EXISTS thesis_receipt_types ON thesis_documents USING gin
+ ((jsonb_path_query_array(body,'$.payload.data.sessionMessage.content.result.**.datumType')))
+ WHERE kind='message';
+CREATE INDEX IF NOT EXISTS thesis_receipt_kinds ON thesis_documents USING gin
+ ((jsonb_path_query_array(body,'$.payload.data.sessionMessage.content.result.**.structured.kind')))
+ WHERE kind='message';
 CREATE INDEX IF NOT EXISTS thesis_inbox ON thesis_documents
  (workspace_id,root_conversation_id,conversation_id,input_position)
  WHERE record_type='ChatMessage';

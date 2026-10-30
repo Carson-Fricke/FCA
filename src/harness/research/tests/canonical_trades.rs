@@ -59,7 +59,7 @@ impl StrategyRuntime for ScriptedTrader {
     }
 
     fn on_market(&mut self, event: &EngineMarket) -> Result<Vec<EngineOrder>, BacktestError> {
-        let EngineMarket::Quote { timestamp_ns, .. } = event else {
+        let harness_trading::market::MarketView::Quote { timestamp_ns, .. } = event.view() else {
             return Ok(Vec::new());
         };
         let Some((side, quantity)) = self.script.pop_front() else {
@@ -76,7 +76,7 @@ impl StrategyRuntime for ScriptedTrader {
             time_in_force: "day".into(),
             limit_price: None,
             stop_price: None,
-            timestamp_ns: *timestamp_ns,
+            timestamp_ns,
             sequence: 0,
             event_id: format!("event-{order_id}"),
         }])

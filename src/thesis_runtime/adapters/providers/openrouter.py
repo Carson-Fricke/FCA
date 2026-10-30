@@ -27,6 +27,7 @@ from thesis_runtime.adapters.providers.invocations import (
     messages_payload,
 )
 from thesis_runtime.adapters.providers.streaming import parse_completion_stream
+from thesis_runtime.contracts.completion import CompletionOptions
 from thesis_runtime.contracts.output import OutputDelta
 
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
@@ -74,6 +75,7 @@ class OpenRouterProfile:
     app_referer: str = "https://thesis.local/fca"
     app_title: str = "fca-thesis"
     enabled: bool = True
+    max_output_tokens: int = 32768
 
     @property
     def provider_name(self) -> str:
@@ -84,6 +86,12 @@ class OpenRouterProfile:
             value = getattr(self, name)
             if not isinstance(value, str) or _IDENTIFIER.fullmatch(value) is None:
                 raise ValueError(f"{name} must be a portable identifier")
+        if (
+            isinstance(self.max_output_tokens, bool)
+            or not isinstance(self.max_output_tokens, int)
+            or self.max_output_tokens < 1
+        ):
+            raise ValueError("max_output_tokens must be a positive integer")
         parsed = urlsplit(self.base_url)
         if (
             parsed.scheme != "https"
@@ -167,13 +175,19 @@ class OpenRouterProvider:
         role: Role = "primary",
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
+        options: CompletionOptions | None = None,
     ) -> Generator[OutputDelta | ModelCompletion, None, None]:
         key = self._resolve_key()
         payload: dict[str, object] = {
             "model": self._profile.model,
             "messages": list(messages_payload(messages)),
             "stream": True,
+            "max_tokens": options.max_output_tokens
+            if options
+            else self._profile.max_output_tokens,
         }
+        if options and not options.allow_tool_calls:
+            payload["tool_choice"] = "none"
         if tools:
             payload["tools"] = [dict(tool) for tool in tools]
         if response_format is not None:

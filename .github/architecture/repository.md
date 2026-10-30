@@ -21,6 +21,18 @@ columns once per batch and maps directly into the research cursor's event
 representation. The event bus reuses canonical identity buffers and timestamp
 prefixes while retaining the dispatch digest bytes. Venue matching scans stable
 per-symbol active-order indexes; completed orders remain historical evidence.
+`trading::market` owns immutable bounded tick blocks and borrowed market views,
+shared by owned observations and prepared historical inputs. `research` owns
+checksummed prepared storage, keyed by source pins, symbol alias, exact window
+and decoder identity. Cold streams publish only after verified completion; warm
+workers reuse blocks without decoding Parquet or allocating row strings. Disk
+retention defaults to 32 GiB and is configurable; zero disables retention.
+Contended cold writers bypass retention rather than waiting while holding source
+heads. The backtest engine owns no cache paths or acquisition policy. It retains
+block ownership through ordered dispatch and uses exact scale-18 observations.
+Venue expiration uses scheduled deadlines, and managed targets inspect live and
+pending-fill indexes rather than historical orders. The SDK/JIT execution source
+serializes only requested views and preserves each immutable callback snapshot.
 Ordered lake cursors merge through a fixed, bounded tournament. The event bus
 keeps a dedicated feed head beside generated-event/backlog ordering, preserving
 all ordinal ties. Exact numeric kernels cancel factors and use narrow arithmetic
@@ -138,7 +150,9 @@ are not supplied by this interface.
 
 SDK `strategy-sdk/src/research/` owns declarative exhibit contracts, typed
 publication helpers and reusable compositions. JIT validates complete output
-bindings at stop. UI `lib/research/` owns bounded immutable evidence loading and
+bindings at stop. SDK ABI 8 also seals replay feature rows through a borrowed
+`DecisionContext`; the host alone publishes exact-horizon outcomes under
+`causal/`. Authored post-run outputs remain exploratory. UI `lib/research/` owns bounded immutable evidence loading and
 registered panel rendering shared by chat cards and workspace inspection.
 The synthetic gallery is generated from SDK output through the production
 Python paging projection; it is not a second research execution path.
@@ -159,7 +173,8 @@ status queries distinguish an active worker from work awaiting dispatch.
 
 Studies, strategies and SDK-authored indicators share `MarketConsumer` market
 callbacks (`on_quote`, `on_trade`, `on_bar`) and exact `Subscription` declarations.
-SDK ABI v5 exposes compiled subscription unions before acquisition. Nested
+SDK ABI v8 exposes compiled subscription unions before acquisition and adds
+strategy-scoped execution views and managed order actions. Nested
 program-owned indicators contribute requirements and update dependency-first;
 each consumer receives only its subscribed symbols/types. Studies/indicators
 use observation-only contexts; strategies receive an order sink. Bars retain
@@ -454,7 +469,8 @@ src/harness/
   metadata; MCP never inspects compiler files or runs identity probes.
 - `contracts` (`harness-contracts`) owns tagged market subscriptions, data-type
   and interval vocabulary, canonical subscription normalization, and the shared
-  configuration hasher. It depends on serialization/hash libraries, not the
+  configuration hasher, plus neutral sealed-observation wire contracts. It
+  depends on serialization/hash libraries, not the
   engine. The SDK, configuration, and engine consumers depend toward it.
 - `strategy-sdk` depends on `harness-contracts` and `num`, not `backtest`, and
   exposes the authoring traits (strategy, indicator, study,
@@ -464,7 +480,24 @@ src/harness/
   receive an order sink, and a screening program sees only its `ScreenContext`
   (universe, bars, facts, and precomputed indicators). Its versioned C ABI is
   the only contract that crosses a dylib boundary, and the loader rejects
-  artifacts whose ABI version differs.
+  artifacts whose ABI version differs. OrderSink exposes the engine's booked
+  virtual book, owned order lifecycle and canonical FIFO trade returns; the
+  basic authoring template implements no fill ledger. Typed constructors cover
+  market, limit, stop and stop-limit orders. Managed signed targets and close
+  requests are reconciled by backtest execution, including partial fills,
+  cancellation races and risk rejection. Day orders use acquired session closes;
+  IOC cancels the unfilled remainder, and GTC remains working.
+  `trading::fills::trades` owns the checked FIFO matching kernel shared by
+  execution views and research publication. Virtual-book average-cost accounting
+  remains the authority for current inventory/equity and immediately recognized
+  fees; FIFO slices remain the authority for closed-trade attribution. Final
+  results expose initial capital, final cash/equity and full-stream peak gross
+  exposure. Strategy custom metrics cannot overwrite canonical financial values
+  or their undefined-reason fields. The API artifact reader and JIT metric sink
+  use the SDK's shared reservation contract.
+  Immutable order and FIFO histories are shared across native snapshots and
+  projected only when changed; SDK contexts decode histories on demand, separately
+  from frequently read position/account state.
 - `strategy-jit` writes authored sources into isolated managed crate/build
   generations, compiles them with the pinned toolchain, caches with source and
   compiler provenance, loads the cdylib through `libloading`,
@@ -559,6 +592,28 @@ oracles load it. The workspace is gated by `cargo fmt --all --check`,
 
 ## Program Authoring Contract
 
+Replay-sealed observation capture is shared by studies and strategies in SDK
+ABI 8. `contracts/src/causal.rs` owns the request/publication wire shape;
+`trading/src/causal.rs` owns immutable feature rows and indexed pending horizons.
+`strategy-sdk/src/causal.rs` exposes a callback-local `DecisionContext` through
+root `MarketConsumer::on_decision`, after ordinary dependency-first bar routing.
+The JIT runtime injects the host frame, clock and capture port and checks every
+rejection. Authored code chooses feature values and a positive exact elapsed
+horizon, never row IDs or timestamps. Capture is unavailable during `on_stop`.
+The host resolves close-to-close bps only against the exact same-symbol/cadence
+future availability. Missing and end-of-run horizons retain null outcomes.
+The `causal/` output namespace and `causal_observations` variant are host-only;
+ordinary authored evidence remains exploratory. Publication merges host outputs
+before resolving research-view references. Thesis and UI page the canonical
+table without rounding timestamp strings. Native code, external knowledge,
+source timestamp quality and research selection are outside this API guarantee.
+Older compiled ABI layouts are rejected and rebuilt through existing compiler
+identity checks; no compatibility reader or data deletion occurs during reads.
+Behavior verification: `research/tests/causal_observations.rs` uses real JIT
+programs and replay for truncation/future perturbation, immutable features,
+delayed/missing outcomes and host-publication rejection. HTTP and UI tests verify
+bounded inspection of the resulting contract.
+
 A program is Rust source authored against `harness-strategy-sdk`, carried by
 a configuration, JIT compiled on submit, and driven through the versioned C
 ABI by the native engine or, for screening, by the one-shot screening runner.
@@ -584,6 +639,14 @@ The implemented contract is:
   indicators expose `samples()`, `advance()` and `in_progress()` with the same
   causal distinction; no forced flush promotes a partial window. Requirements and dependency topology remain stable
   after construction; cycles and zero-sized indicator dependencies are rejected.
+  Each boxed exported consumer captures one `RoutingPlan`; direct SDK routing
+  callers construct a plan after final placement and pass it to subsequent
+  quote/trade/bar calls. The plan caches canonical requirements and traversal
+  slots. Runtime guards compare live declarations, identities, dependency order
+  and cadence without rebuilding a graph per event; declaration-order changes
+  that preserve the canonical requirements remain valid. Market routing owns
+  its checks, while start/fill/stop retain lifecycle checks and a failed exported
+  state rejects further callbacks.
   Dependencies update before their parent, and each consumer receives only its
   own subscribed types, symbols, and interval. Bars are atomic frames, not raw
   single-bar study callbacks, with exact `Decimal` OHLCV. The native built-in
@@ -605,12 +668,12 @@ The implemented contract is:
   workspace, compiles it with the pinned toolchain (cached by source digest,
   program kind, SDK version, toolchain digest, and SDK ABI version; a
   stale-ABI entry is a cache miss and is rebuilt), loads the cdylib through
-  `libloading`, checks the exported SDK ABI version (4) against the host's
+  `libloading`, checks the exported SDK ABI version (6) against the host's
   and rejects an artifact built against an older version, constructs the
   program state from the configured `parameters`, and drives it through the
   engine's `StrategyRuntime` trait. A panic or failure inside authored code
   is contained and reported as a strategy-execution error.
-- Market acquisition and replay. ABI v4 exposes the constructed program's
+- Market acquisition and replay. ABI v8 exposes the constructed program's
   canonical effective subscription union as JSON, including recursive indicator
   requirements, before acquisition. Thesis passes
   `harnessConfiguration.subscriptions` unchanged into `data.subscriptions`;
@@ -626,7 +689,7 @@ The implemented contract is:
   a run, including dependencies and instances; conflicts fail before lake
    ensure/read. Tick-only inputs need no interval. Interval-only configuration
    documents are rejected before any acquisition; authored source uses
-   `MarketConsumer` and rebuilds for ABI v4. Mixed replay uses one causal
+   `MarketConsumer` and rebuilds for ABI v8. Mixed replay uses one causal
   availability-ordered queue: at equal time, ticks precede completed frames,
   then generated execution events. Frames become available at interval end,
   never at bar start. Study artifacts remain `study.json` and `metrics.json`.
@@ -674,6 +737,19 @@ The implemented contract is:
   migration is specified in `.github/architecture/screener-rust-migration.md`;
   the remaining reference port and re-pinned parity expectations are the next
   phases.
+
+### Authoring read budgets and diagnostics
+
+Agent document/source readers share `thesis_runtime.tools.reading` for complete
+reads and cl100k_base token continuation. The serving SDK reader uses the same
+fixed tokenizer in Rust, with explicit identity and completeness metadata. This
+read-budget tokenizer does not claim to be the provider's tokenizer. Docker
+builds include the tokenizer cache; runtime reads need no tokenizer download.
+SDK/host validation owns precise input diagnostics; Thesis wrappers preserve
+those causes and retained execution identity through canonical tool outcomes and
+asynchronous completion. SDK ABI layout and the single job-ID contract remain
+unchanged. See `docs/sdk-reference-and-diagnostics.md` for the authoring contract.
+
 
 ## Decommission Status
 
@@ -791,11 +867,17 @@ with a remote harness. Wheels and source distributions package canonical
 `harness/strategy-sdk`, `harness/contracts`, `harness/num`, and `lake/contracts` Cargo manifests and
 Rust sources with portable relative path dependencies. SDK version/ABI metadata
 comes from the packaged SDK; SDK identity hashes all four crates' manifests
-and source files after CRLF-to-LF normalization. `workspaces/sdk.py` owns the
+and source files after CRLF-to-LF normalization. `workspaces/sdk/identity.py` owns the
 local source inventory, and JIT `sdk_reference.rs` owns serving inventory and
 bounded reads; compiler provenance remains host-specific. Every other source
 byte and filename remains significant, and genuine SDK drift still fails closed.
-Shared minimal templates in `workspaces/programs.py` back both
+`WorkspacePrograms` consumes the `AuthoringSdk` port. Application composition
+injects `SdkReferences`, which owns identity agreement, source response validation
+and reference reads through the existing metadata/source client. The execution
+port remains separate; the SDK owner cannot access workspace repositories,
+submissions or workflow control. Pure shared program value and failure contracts
+live in `workspaces/program_contracts.py`.
+Shared minimal templates in `workspaces/sdk/templates.py` back both
 reference reads and basic authoring, not completed research implementations.
 Shared workflow prompt guidance owns targeted repair and
 asking after three unsuccessful compiler repairs, not a runtime repair cap.
@@ -823,7 +905,9 @@ The implemented runtime modules and facades are:
 | `thesis.extensions.workflows.hypothesis_development` | Concrete workflow facade over spec/doctrine, phases, contracts, prompts, services, artifacts, piping, and state/rebuild; exports `fold_transition` and `rebuild_state`. |
 | `hypothesis_development/session_services.py` | Role policy, scoped schema/knowledge/authoring bindings, completion validation/application, and workflow failure callback. |
 | `hypothesis_development/exposure.py`, `design.py`, `provenance.py` | Submission-time exposure ledger (one durable record per job, before dispatch), the frozen research design derived from accepted development evidence, and completion provenance checks that bind each reported job to its executing run. |
-| `thesis.workspaces.programs` | Committed program source/manifests, content/dependency versions, harness validation receipts, ID-based execution, pinned loads, and matching SDK references/templates. The workspace facade exports `WorkspacePrograms`, `ProgramArtifactError`, and `ProgramPublicationError`. |
+| `thesis.workspaces.programs` | Committed program source/manifests, content/dependency versions, harness validation receipts, ID-based execution and pinned loads; consumes `AuthoringSdk` for identity and guidance. The workspace facade exports `WorkspacePrograms`, `ProgramArtifactError`, and `ProgramPublicationError`. |
+| `thesis.workspaces.program_contracts` | Program kinds, failure receipts, canonical JSON and configuration validation shared by lifecycle and SDK operations. |
+| `thesis.workspaces.sdk` | Packaged/serving SDK agreement, source inventory, token reference validation and minimal templates behind lifecycle and source ports; no repository, execution or workflow ownership. |
 | `thesis.extensions.tools.program` | Trusted-context program author/update/read/validate/run and SDK-reference bindings on the existing session registry. |
 | `thesis.workflows.research_models` | `ProgramSnapshots` port and accepted study-reference resolution for deterministic research execution. |
 | `thesis.knowledge` | Read/search facade; `service.py` owns source isolation and hybrid operations, `embeddings.py` owns pinned/checksummed semantic loading and coherent operation-level fallback, `library/` contains shipped data. |
@@ -1033,6 +1117,12 @@ See [the execution contract](thesis-fixed-workflow-graph-plan.md).
 
 ## Build and verification execution
 
+Python verification uses two isolated pytest-xdist workers with file-level
+scheduling by default, retaining every behavior test within the three-minute
+wall-clock budget. File-level scheduling keeps module-scoped external fixtures
+together; tests retain order independence and per-test workspace isolation.
+Use `-n 0` for a focused serial diagnosis. This changes test execution only.
+
 Actions classify changed paths into Python, harness Rust, lake Rust, UI, Bicep,
 and image/deployment inputs. Cross-workspace edges trigger both Rust jobs;
 mandated architecture and behavior suites remain in their owning jobs. UI-only
@@ -1053,3 +1143,11 @@ contents. The JIT uses a compiler/SDK/configuration identity-specific Cargo targ
 under an exclusive lock, then copies the final library to an immutable generation;
 loaded libraries are never replaced by subsequent program compilation. Tests
 retain real compilation, ABI rejection, concurrency and provenance assertions.
+
+### Agent execution returns
+
+FCA retains a conversation recipient in each agent submission; harness result publication
+commits a compact completion event atomically. Finite workers deliver events to
+Thesis's authenticated internal POST, and existing control recovery retries
+unacknowledged delivery. This changes no admission identity or replay authority
+and introduces no job-status polling loop or workflow wait phase.

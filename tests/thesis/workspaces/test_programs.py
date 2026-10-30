@@ -20,17 +20,19 @@ from thesis.experiments.mandate import (
 from thesis.integrations.mcp import HarnessMcpTransportError, McpToolResult
 from thesis.workspaces.local import LocalWorkspaceProvider
 from thesis.workspaces.manifest import WorkspaceManifest, load_workspace_manifest
-from thesis.workspaces.programs import (
-    INDICATOR_TEMPLATE,
-    MAX_NULL_BLOCK_SIZE,
-    PROGRAM_TEMPLATES,
-    STUDY_TEMPLATE,
+from thesis.workspaces.program_contracts import (
     ProgramArtifactError,
     ProgramKind,
     ProgramPublicationError,
-    WorkspacePrograms,
 )
-from thesis.workspaces.sdk import source_hashes
+from thesis.workspaces.programs import MAX_NULL_BLOCK_SIZE, WorkspacePrograms
+from thesis.workspaces.sdk import SdkReferences, source_hashes
+from thesis.workspaces.sdk.identity import PACKAGED_SDK_ROOT
+from thesis.workspaces.sdk.templates import (
+    INDICATOR_TEMPLATE,
+    PROGRAM_TEMPLATES,
+    STUDY_TEMPLATE,
+)
 
 CONFIG: dict[str, object] = {
     "start": "2024-01-01T00:00:00Z",
@@ -56,6 +58,39 @@ DEFAULTS: dict[str, object] = {
     "enabled": True,
     "mode": "fast",
 }
+
+
+def test_concurrent_program_publications_wait_and_preserve_both_programs(git_programs):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    service, _, _ = git_programs
+    ready = Barrier(2)
+
+    def author(identity):
+        ready.wait(timeout=5)
+        return _author_strategy(service, identity)
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        receipts = list(workers.map(author, ["concurrent_a", "concurrent_b"]))
+    for receipt in receipts:
+        loaded = service.load("workspace-one", "strategy", receipt["programId"])
+        assert loaded["version"] == receipt["version"]
+
+
+def test_sdk_new_source_file_is_readable_without_topic_registration(tmp_path):
+    root = tmp_path / "harness" / "strategy-sdk"
+    root.parent.mkdir(parents=True)
+    shutil.copytree(PACKAGED_SDK_ROOT, root)
+    for name in ("contracts", "num"):
+        shutil.copytree(PACKAGED_SDK_ROOT.parent / name, root.parent / name)
+    lake_root = root.parent.parent / "lake" / "contracts"
+    shutil.copytree(PACKAGED_SDK_ROOT.parent.parent / "lake" / "contracts", lake_root)
+    (root / "src" / "new_element.rs").write_text(
+        "//! New SDK element.\n", encoding="utf-8"
+    )
+    result = SdkReferences(root=root).read_reference("strategy-sdk/src/new_element.rs")
+    assert result["source"] == "//! New SDK element.\n"
 
 
 def _author_strategy(
@@ -91,14 +126,42 @@ def _point_parameters(
 def packaged_sdk_info() -> tuple[object, object, object]:
     """One immutable deployed SDK identity for the external harness double."""
     local = WorkspacePrograms(
-        cast(LocalWorkspaceProvider, None), submissions=MemorySubmissions()
+        cast(LocalWorkspaceProvider, None),
+        submissions=MemorySubmissions(),
+        sdk=SdkReferences(),
     )
-    reference = local.read_sdk_reference("consumer", max_chars=1)
+    reference = local.read_sdk_reference("consumer", max_tokens=32)
     return (
         reference["sdkIdentity"],
         reference["sdkVersion"],
         reference["sdkAbiVersion"],
     )
+
+
+@pytest.mark.parametrize("serving", [False, True])
+def test_sdk_continuations_reconstruct_exact_source_without_the_old_line_limit(
+    programs, serving
+):
+    service, _, _ = programs
+    if not serving:
+        service.harness = None
+        service.sdk = SdkReferences(service.harness)
+    text = (PACKAGED_SDK_ROOT / "src/program.rs").read_text(encoding="utf-8")
+    assert len(text.splitlines()) > 400
+    assert service.read_sdk_reference("program")["complete"]
+    arguments = {"topic": "program", "max_tokens": 2048}
+    pieces = []
+    while arguments is not None:
+        page = service.read_sdk_reference(**arguments)
+        pieces.append(page["source"])
+        assert page["totalTokens"] > 0
+        assert page["tokenCount"] <= 16000
+        if page["nextArguments"] is not None:
+            assert page["truncated"] is True
+            assert page["nextArguments"] != arguments
+        arguments = page["nextArguments"]
+    assert "".join(pieces) == text
+    assert service.read_sdk_reference("program", end_line=401)["totalLines"] > 400
 
 
 class Harness:
@@ -124,20 +187,19 @@ class Harness:
         metadata = dict(
             cast(Mapping[str, object], self.current_server_info()["serverInfo"])
         )
-        metadata["sourceHashes"] = source_hashes(
-            WorkspacePrograms(
-                cast(LocalWorkspaceProvider, None), submissions=MemorySubmissions()
-            ).sdk_root
-        )
+        metadata["sourceHashes"] = source_hashes(PACKAGED_SDK_ROOT)
         if "topic" in arguments:
             local = WorkspacePrograms(
-                cast(LocalWorkspaceProvider, None), submissions=MemorySubmissions()
+                cast(LocalWorkspaceProvider, None),
+                submissions=MemorySubmissions(),
+                sdk=SdkReferences(),
             )
             reference = local.read_sdk_reference(
                 cast(str, arguments["topic"]),
                 start_line=cast(int, arguments.get("start_line", 1)),
                 end_line=cast(int | None, arguments.get("end_line")),
-                max_chars=cast(int, arguments.get("max_chars", 16000)),
+                token_offset=cast(int, arguments.get("token_offset", 0)),
+                max_tokens=cast(int, arguments.get("max_tokens", 16000)),
             )
             metadata.update(reference)
             metadata["content"] = metadata.pop("source")
@@ -176,7 +238,13 @@ def programs(
     factory = MemoryGitFactory()
     provider = Repositories(tmp_path / "workspaces", factory)
     harness = Harness()
-    return WorkspacePrograms(provider, harness, git_factory=factory), provider, harness
+    return (
+        WorkspacePrograms(
+            provider, harness, git_factory=factory, sdk=SdkReferences(harness)
+        ),
+        provider,
+        harness,
+    )
 
 
 @pytest.fixture
@@ -199,7 +267,11 @@ def git_programs(
         }
         provider.create(WorkspaceManifest.model_validate(data))
     harness = Harness()
-    return WorkspacePrograms(provider, harness), provider, harness
+    return (
+        WorkspacePrograms(provider, harness, sdk=SdkReferences(harness)),
+        provider,
+        harness,
+    )
 
 
 @pytest.mark.parametrize(
@@ -449,7 +521,9 @@ def test_missing_harness_fails_closed(
     programs: Programs,
 ) -> None:
     _, provider, _ = programs
-    service = WorkspacePrograms(provider, git_factory=provider.git_factory)
+    service = WorkspacePrograms(
+        provider, git_factory=provider.git_factory, sdk=SdkReferences()
+    )
     service.author(
         "workspace-one", "study", "alpha", STUDY_TEMPLATE, configuration=CONFIG
     )
@@ -523,8 +597,10 @@ def test_missing_validation_and_nonaccepting_compiler_fail_closed(
             return McpToolResult(tool=name, is_error=False)
 
     service.harness = EmptyHarness()
+    service.sdk = SdkReferences(service.harness)
     assert service.validate("workspace-one", "study", "alpha")["accepted"] is False
     service.harness = harness
+    service.sdk = SdkReferences(service.harness)
 
 
 def test_basic_template_defaults_follow_declared_inputs(
@@ -632,14 +708,16 @@ def test_sdk_root_deployment_and_version_mismatch(
     programs: Programs,
 ) -> None:
     service, provider, harness = programs
-    assert service.sdk_root.resolve() == Path("src/harness/strategy-sdk").resolve()
+    assert PACKAGED_SDK_ROOT.resolve() == Path("src/harness/strategy-sdk").resolve()
     missing = WorkspacePrograms(
         provider,
         harness,
-        sdk_root=tmp_path / "not-deployed",
         git_factory=provider.git_factory,
+        sdk=SdkReferences(harness, root=tmp_path / "not-deployed"),
     )
-    with pytest.raises(ProgramArtifactError, match="supply sdk_root"):
+    with pytest.raises(
+        ProgramArtifactError, match="SDK reference sources are unavailable"
+    ):
         missing.read_sdk_reference("study")
     # A remote transport is still injected independently of local reference assets.
     service.author(
@@ -651,18 +729,18 @@ def test_sdk_root_deployment_and_version_mismatch(
         missing.validate("workspace-one", "study", "alpha")
     assert not harness.calls
     deployed = tmp_path / "harness" / "strategy-sdk"
-    shutil.copytree(service.sdk_root, deployed)
+    shutil.copytree(PACKAGED_SDK_ROOT, deployed)
     for crate in ("contracts", "num"):
-        shutil.copytree(service.sdk_root.parent / crate, tmp_path / "harness" / crate)
+        shutil.copytree(PACKAGED_SDK_ROOT.parent / crate, tmp_path / "harness" / crate)
     shutil.copytree(
-        service.sdk_root.parent.parent / "lake" / "contracts",
+        PACKAGED_SDK_ROOT.parent.parent / "lake" / "contracts",
         tmp_path / "lake" / "contracts",
     )
     matched = WorkspacePrograms(
         provider,
         harness,
-        sdk_root=deployed,
         git_factory=provider.git_factory,
+        sdk=SdkReferences(harness, root=deployed),
     )
     assert (
         matched.read_sdk_reference("consumer")["sdkIdentity"]
@@ -690,16 +768,16 @@ def test_sdk_root_deployment_and_version_mismatch(
         matched.read_sdk_reference("study")
 
 
-def test_reads_bound_characters_not_only_lines(
+def test_reads_bound_tokens_without_the_old_line_limit(
     programs: Programs,
 ) -> None:
     service, _, _ = programs
     source = "// " + "x" * 20000 + "\n"
     service.author("workspace-one", "study", "long", source, configuration=CONFIG)
-    result = service.read("workspace-one", "study", "long", max_chars=100)
-    assert result["source"] == source[:100] and result["truncated"] is True
-    reference = service.read_sdk_reference("program", max_chars=100)
-    assert len(cast(str, reference["source"])) == 100 and reference["truncated"] is True
+    result = service.read("workspace-one", "study", "long", max_tokens=100)
+    assert cast(int, result["tokenCount"]) <= 100 and result["truncated"] is True
+    reference = service.read_sdk_reference("program", max_tokens=100)
+    assert cast(int, reference["tokenCount"]) <= 100 and reference["truncated"] is True
     for topic in ("research_views", "research_publishing", "research_recipes"):
         research = service.read_sdk_reference(topic, start_line=1, end_line=3)
         assert research["sdkIdentity"] == reference["sdkIdentity"]
@@ -722,6 +800,7 @@ def test_configuration_diagnostics_are_actionable(
             )
 
     service.harness = Reject()
+    service.sdk = SdkReferences(service.harness)
     service.author(
         "workspace-one", "study", "alpha", STUDY_TEMPLATE, configuration=CONFIG
     )
@@ -779,16 +858,16 @@ def test_sdk_dependency_change_invalidates_validation(
 ) -> None:
     service, provider, harness = programs
     for crate in ("strategy-sdk", "contracts", "num"):
-        shutil.copytree(service.sdk_root.parent / crate, tmp_path / "harness" / crate)
+        shutil.copytree(PACKAGED_SDK_ROOT.parent / crate, tmp_path / "harness" / crate)
     shutil.copytree(
-        service.sdk_root.parent.parent / "lake" / "contracts",
+        PACKAGED_SDK_ROOT.parent.parent / "lake" / "contracts",
         tmp_path / "lake" / "contracts",
     )
     deployed = WorkspacePrograms(
         provider,
         harness,
-        sdk_root=tmp_path / "harness" / "strategy-sdk",
         git_factory=provider.git_factory,
+        sdk=SdkReferences(harness, root=tmp_path / "harness" / "strategy-sdk"),
     )
     deployed.author("workspace-one", "study", "alpha", configuration=CONFIG)
     deployed.validate("workspace-one", "study", "alpha")
@@ -1015,9 +1094,11 @@ def test_existing_provider_and_raw_client_injection(
     provider = HarnessToolProvider(client)
     assert provider.client is client
     service.harness = client
+    service.sdk = SdkReferences(service.harness)
     service.author("workspace-one", "study", "alpha", configuration=CONFIG)
     assert service.validate("workspace-one", "study", "alpha")["accepted"] is True
     service.harness = provider
+    service.sdk = SdkReferences(service.harness)
     assert service.validate("workspace-one", "study", "alpha")["accepted"] is True
     assert service.run("workspace-one", "study", "alpha")["ok"] is True
     transport.fail = True
@@ -1072,6 +1153,7 @@ def test_authored_run_id_fails_harness_validation_instead_of_being_stripped(
 
     harness = StrictHarness()
     service.harness = harness
+    service.sdk = SdkReferences(service.harness)
     service.author(
         "workspace-one",
         "study",
@@ -1135,6 +1217,7 @@ def test_raw_transport_unknown_run_outcome_retains_submitted_id(
     service, _, _ = programs
     harness = LostRun()
     service.harness = harness
+    service.sdk = SdkReferences(service.harness)
     service.author("workspace-one", "study", "alpha", configuration=CONFIG)
     service.validate("workspace-one", "study", "alpha")
     receipt = service.run("workspace-one", "study", "alpha")
@@ -1194,6 +1277,7 @@ def test_fresh_public_facade_identity_blocks_remote_changes(
     service, _, _ = programs
     transport = Transport()
     service.harness = HarnessToolProvider(HarnessMcpClient(transport))
+    service.sdk = SdkReferences(service.harness)
     service.author("workspace-one", "study", "alpha", configuration=CONFIG)
     assert service.validate("workspace-one", "study", "alpha")["accepted"] is True
     for identity in ("compiler-two", None):
@@ -1275,6 +1359,7 @@ def test_compact_diagnostics_keep_repair_spans_and_children_without_excerpts(
             )
 
     service.harness = Diagnostics()
+    service.sdk = SdkReferences(service.harness)
     service.author("workspace-one", "study", "alpha", configuration=CONFIG)
     receipt = service.validate("workspace-one", "study", "alpha")
     detail = cast(list[dict[str, object]], receipt["diagnostics"])[0]
@@ -1313,6 +1398,7 @@ def test_serving_sdk_mismatch_blocks_templates_validation_run_and_completion(
 
     changed = Changed()
     service.harness = changed
+    service.sdk = SdkReferences(service.harness)
     for operation in (
         lambda: service.template_source("study", CONFIG),
         lambda: service.read_sdk_reference("study"),
@@ -1355,9 +1441,16 @@ def test_sdk_reference_uses_exact_remote_source_and_metadata_fallback(
                     topic=arguments["topic"],
                     content="remote exact source",
                     startLine=2,
+                    tokenOffset=0,
                     endLine=3,
                     totalLines=10,
+                    totalTokens=3,
+                    tokenizer="cl100k_base",
+                    tokenCount=5,
+                    nextTokenOffset=None,
+                    complete=True,
                     truncated=False,
+                    nextArguments=None,
                 )
             return McpToolResult(
                 tool="read_sdk_reference", is_error=False, structured=metadata
@@ -1365,12 +1458,13 @@ def test_sdk_reference_uses_exact_remote_source_and_metadata_fallback(
 
     remote = Remote()
     service.harness = remote
+    service.sdk = SdkReferences(service.harness)
     reference = service.read_sdk_reference("consumer", start_line=2, end_line=3)
     assert reference["source"] == "remote exact source"
     assert reference["sdkIdentity"] == "f" * 64
     assert remote.reads == [
         {},
-        {"topic": "consumer", "start_line": 2, "end_line": 3, "max_chars": 16000},
+        {"topic": "consumer", "start_line": 2, "end_line": 3, "max_tokens": 16384},
     ]
     with pytest.raises(ProgramArtifactError, match="SDK identities"):
         service.read_sdk_reference("study")
@@ -1391,6 +1485,7 @@ def test_serving_sdk_reference_change_during_read_fails_closed(
             )
 
     service.harness = ChangedRead()
+    service.sdk = SdkReferences(service.harness)
     with pytest.raises(ProgramArtifactError, match="unavailable or changed"):
         service.read_sdk_reference("consumer")
 
@@ -1413,7 +1508,9 @@ def test_local_sdk_guidance_and_artifact_reads_work_without_harness(
     programs: Programs,
 ) -> None:
     _, provider, _ = programs
-    local = WorkspacePrograms(provider, git_factory=provider.git_factory)
+    local = WorkspacePrograms(
+        provider, git_factory=provider.git_factory, sdk=SdkReferences()
+    )
     authored = local.author("workspace-one", "study", "alpha", configuration=CONFIG)
     assert local.read_sdk_reference("study")["source"] == STUDY_TEMPLATE
     assert (
@@ -1421,7 +1518,7 @@ def test_local_sdk_guidance_and_artifact_reads_work_without_harness(
     )
     assert (
         local.load("workspace-one", "study", "alpha")["sdkIdentity"]
-        == local._sdk_identity()
+        == local.sdk.local_identity()
     )
     with pytest.raises(ProgramArtifactError, match="not configured"):
         local.validate("workspace-one", "study", "alpha")
@@ -1536,8 +1633,8 @@ def test_parameter_declaration_update_clear_and_unchanged(
         "strategy",
         "alpha",
         expected_version=cast(str, first["version"]),
-        expected="struct AuthoredStrategy {",
-        replacement="struct AuthoredStrategy /* revised */ {",
+        expected="struct AuthoredStrategy;",
+        replacement="struct AuthoredStrategy /* revised */;",
     )
     assert (
         service.load("workspace-one", "strategy", "alpha")["parameters"] == DECLARATION
@@ -1722,8 +1819,8 @@ def test_run_batch_pins_one_snapshot_for_every_point(
             "strategy",
             "alpha",
             expected_version=cast(str, latest["version"]),
-            expected="struct AuthoredStrategy {",
-            replacement="struct AuthoredStrategy /* changed mid-batch */ {",
+            expected="struct AuthoredStrategy;",
+            replacement="struct AuthoredStrategy /* changed mid-batch */;",
         )
 
     harness.during = mutate
@@ -1859,6 +1956,7 @@ def test_dispatch_refused_before_admission_settles_the_job_as_not_started(
 ) -> None:
     service, _, _ = programs
     service.harness = _Refused()
+    service.sdk = SdkReferences(service.harness)
     service.author("workspace-one", "study", "alpha", configuration=CONFIG)
     service.validate("workspace-one", "study", "alpha")
     settled: list[tuple[str, str | None]] = []
@@ -1879,6 +1977,7 @@ def test_failure_after_dispatch_settles_as_unknown_never_not_started(
 ) -> None:
     service, _, _ = programs
     service.harness = _Refused()
+    service.sdk = SdkReferences(service.harness)
     service.author("workspace-one", "study", "alpha", configuration=CONFIG)
     service.validate("workspace-one", "study", "alpha")
 
@@ -1912,6 +2011,7 @@ def test_missing_job_acknowledgement_is_unknown_outcome(
 
     harness = Silent()
     service.harness = harness
+    service.sdk = SdkReferences(service.harness)
     service.author("workspace-one", "study", "alpha", configuration=CONFIG)
     service.validate("workspace-one", "study", "alpha")
     receipt = service.run("workspace-one", "study", "alpha")
@@ -1942,6 +2042,7 @@ def test_mismatched_job_acknowledgement_is_unknown_outcome(
 
     harness = Wrong()
     service.harness = harness
+    service.sdk = SdkReferences(service.harness)
     service.author("workspace-one", "study", "alpha", configuration=CONFIG)
     service.validate("workspace-one", "study", "alpha")
     receipt = service.run("workspace-one", "study", "alpha")
@@ -2007,6 +2108,7 @@ def test_run_batch_records_unknown_points_without_replay(
 
     harness = Flaky()
     service.harness = harness
+    service.sdk = SdkReferences(service.harness)
     _author_strategy(service)
     service.validate("workspace-one", "strategy", "alpha")
     result = service.run_batch(
@@ -2400,6 +2502,7 @@ def test_run_null_batch_records_unknown_points_without_replay(
 
     harness = Flaky()
     service.harness = harness
+    service.sdk = SdkReferences(service.harness)
     _author_strategy(service)
     service.validate("workspace-one", "strategy", "alpha")
     result = service.run_null_batch(
@@ -2550,3 +2653,30 @@ def test_content_updates_reject_ambiguous_match_and_stale_version(
             replacement="self.frames += 3",
         )
     assert provider.store("workspace-one").head == before
+
+
+def test_program_token_continuation_is_complete_and_rejects_changed_source(programs):
+    service, _, _ = programs
+    source = STUDY_TEMPLATE + "\n" + "// bounded \u2028 continuation example\n" * 100
+    authored = service.author(
+        "workspace-one", "study", "paged", source, configuration=CONFIG
+    )
+    page = service.read("workspace-one", "study", "paged", max_tokens=128)
+    assert page["totalLines"] == source.count("\n")
+    first = page["nextArguments"]
+    parts = [page["source"]]
+    assert first is not None
+    while page["nextArguments"] is not None:
+        page = service.read("workspace-one", "study", **page["nextArguments"])
+        parts.append(page["source"])
+    assert "".join(parts) == source
+    service.update(
+        "workspace-one",
+        "study",
+        "paged",
+        expected_version=authored["version"],
+        expected="self.frames += 1",
+        replacement="self.frames += 2",
+    )
+    with pytest.raises(ProgramArtifactError, match="source changed"):
+        service.read("workspace-one", "study", **first)

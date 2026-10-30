@@ -40,7 +40,30 @@ pub const RESERVED_METRIC_NAMES: &[&str] = &[
     "slippage_total",
     "strategy_id",
     "total_return",
+    "net_pnl",
+    "gross_pnl",
+    "fees",
+    "open_fees",
+    "profit_factor",
+    "trade_count",
+    "net_profit",
+    "net_loss",
+    "gross_profit",
+    "gross_loss",
+    "sharpe_per_sample",
+    "closed_trade_net_pnl",
+    "closed_trade_gross_pnl",
+    "initial_cash",
+    "final_cash",
+    "final_equity",
+    "peak_gross_exposure",
+    "peak_gross_exposure_fraction",
 ];
+
+/// Canonical values and their undefined-reason fields belong to the harness.
+pub fn is_reserved_metric_name(name: &str) -> bool {
+    RESERVED_METRIC_NAMES.contains(&name.strip_suffix("_reason").unwrap_or(name))
+}
 
 /// A study program: fit and observe history, publish metrics, no execution.
 ///
@@ -66,9 +89,9 @@ pub trait StrategyProgram: MarketConsumer<Context = OrderSink> {
     /// Run once before the first market event.
     fn on_start(&mut self, _start: &ProgramStart) {}
 
-    /// Fold one booked fill owned by this program. Orders may produce multiple
-    /// partial fills: update inventory on every fill and remain open until actual
-    /// quantity reaches zero. `building_blocks::FillLedger` provides exact accounting.
+    /// Observe one booked fill owned by this program, optionally for signal state.
+    /// The harness already accounts for it; read `OrderSink::execution()` instead
+    /// of maintaining inventory, cash, fees or pending-order quantities here.
     fn on_fill(&mut self, _fill: &Fill) {}
 
     /// Publish final metrics once after the replay.
@@ -194,7 +217,7 @@ pub enum PublishError {
     ReservedName,
     /// The value is not finite.
     NotFinite,
-    /// The host sink rejected the publish.
+    /// The host sink rejected the publish; the job failure retains output/field details.
     Rejected,
 }
 
@@ -222,6 +245,9 @@ impl std::error::Error for PublishError {}
 /// recorded there, so an ignored [`PublishError`] still fails the run.
 pub struct MetricPublisher {
     sink: CMetricSink,
+    execution: std::cell::OnceCell<crate::ExecutionSnapshot>,
+    orders: std::cell::OnceCell<Vec<crate::OrderState>>,
+    closed_trades: std::cell::OnceCell<Vec<crate::ClosedTrade>>,
 }
 
 impl MetricPublisher {
@@ -233,7 +259,35 @@ impl MetricPublisher {
     /// `sink.publish` must be a valid host function.
     #[must_use]
     pub const unsafe fn from_sink(sink: CMetricSink) -> Self {
-        Self { sink }
+        Self {
+            sink,
+            execution: std::cell::OnceCell::new(),
+            orders: std::cell::OnceCell::new(),
+            closed_trades: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// Final booked strategy state. Studies and screening have no execution account.
+    pub fn execution(&self) -> Option<&crate::ExecutionSnapshot> {
+        let json = execution_json(&self.sink.execution, 0);
+        if json.is_empty() {
+            return None;
+        }
+        Some(
+            self.execution
+                .get_or_init(|| serde_json::from_str(json).expect("host execution snapshot")),
+        )
+    }
+
+    /// Final owned orders; empty for observation-only programs. Parsed on demand.
+    pub fn orders(&self) -> &[crate::OrderState] {
+        self.orders.get_or_init(|| history(self.sink.execution, 1))
+    }
+
+    /// Final canonical FIFO trade slices. Parsed on demand, independently of marks.
+    pub fn closed_trades(&self) -> &[crate::ClosedTrade] {
+        self.closed_trades
+            .get_or_init(|| history(self.sink.execution, 2))
     }
 
     /// Publish one finite numeric run metric under one validated name.
@@ -247,7 +301,13 @@ impl MetricPublisher {
         PublishError::from_code(code).map_or(Ok(()), Err)
     }
 
-    /// Publish a sequence, event collection, or typed table for job inspection.
+    /// Publish an output once under a unique name for job inspection.
+    /// Names follow the metric-name grammar; `causal/` is host-reserved. Tables
+    /// require unique nonempty columns and rectangular scalar/null rows; series
+    /// require finite values or explicit undefined reasons. Cross-output view
+    /// bindings are checked after all outputs are published.
+    /// A host rejection fails the run even if this result is ignored. The job
+    /// failure retains the output name and exact invalid row/field.
     ///
     /// # Errors
     /// Returns an error if serialization or host validation rejects the output.
@@ -331,6 +391,9 @@ impl std::error::Error for SubmitError {}
 /// which records ownership exactly as the Python `orders` handle does.
 pub struct OrderSink {
     sink: COrderSink,
+    execution: std::cell::OnceCell<crate::ExecutionSnapshot>,
+    orders: std::cell::OnceCell<Vec<crate::OrderState>>,
+    closed_trades: std::cell::OnceCell<Vec<crate::ClosedTrade>>,
 }
 
 impl OrderSink {
@@ -342,7 +405,102 @@ impl OrderSink {
     /// `sink.submit` must be a valid host function.
     #[must_use]
     pub const unsafe fn from_sink(sink: COrderSink) -> Self {
-        Self { sink }
+        Self {
+            sink,
+            execution: std::cell::OnceCell::new(),
+            orders: std::cell::OnceCell::new(),
+            closed_trades: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// Booked positions, fees, equity and exposure, independent of history size.
+    /// Submission never changes this immutable callback snapshot.
+    pub fn execution(&self) -> &crate::ExecutionSnapshot {
+        self.execution.get_or_init(|| {
+            let json = execution_json(&self.sink.execution, 0);
+            serde_json::from_str(json).expect("host execution snapshot")
+        })
+    }
+
+    /// Owned order states at this callback boundary, parsed only if requested.
+    pub fn orders(&self) -> &[crate::OrderState] {
+        self.orders.get_or_init(|| history(self.sink.execution, 1))
+    }
+
+    pub fn order(&self, order_id: &str) -> Option<&crate::OrderState> {
+        self.orders()
+            .iter()
+            .find(|order| order.order_id == order_id)
+    }
+
+    /// Canonical FIFO trade slices, separate from the frequently read account view.
+    pub fn closed_trades(&self) -> &[crate::ClosedTrade] {
+        self.closed_trades
+            .get_or_init(|| history(self.sink.execution, 2))
+    }
+
+    /// Queue a typed order; the platform allocates identity and stamps causal time.
+    /// Success acknowledges queuing, not a fill or risk acceptance. Inspect
+    /// `orders()` at a later callback for status/rejection and `execution()` for
+    /// booked inventory. Quantity is positive units; side supplies direction.
+    /// `limit_price`/`stop_price` use instrument price units, never ticks or bps.
+    /// # Errors
+    /// Returns `SubmitError` if the host cannot queue the intent; see the job
+    /// failure for malformed input and order state for execution/risk rejection.
+    pub fn place(&mut self, order: crate::Order) -> Result<String, SubmitError> {
+        let order_id = unsafe { (self.sink.next_order_id)(self.sink.ctx).as_str() }
+            .ok_or(SubmitError::Rejected)?
+            .to_string();
+        self.submit(SubmittedOrder {
+            event_id: order_id.clone(),
+            order_id: order_id.clone(),
+            symbol: order.symbol,
+            side: order.side,
+            quantity: order.quantity,
+            order_type: order.order_type,
+            time_in_force: order.time_in_force,
+            limit_price: order.limit_price,
+            stop_price: order.stop_price,
+            sequence: 0,
+        })?;
+        Ok(order_id)
+    }
+
+    pub fn cancel(&mut self, order_id: &str) -> Result<(), SubmitError> {
+        let code = unsafe { (self.sink.cancel)(self.sink.ctx, CStr::from_slice(order_id)) };
+        if code == SDK_OK {
+            Ok(())
+        } else {
+            Err(SubmitError::Rejected)
+        }
+    }
+
+    /// Maintain signed filled inventory at this target. Repeated requests are
+    /// idempotent while fills are pending; changing it replaces working exposure.
+    /// The engine handles partial fills, cancellation races and risk rejection.
+    /// Quantity is signed units (negative means short). Success queues a target;
+    /// it does not change this callback's immutable execution snapshot.
+    /// # Errors
+    /// Returns `SubmitError` for an invalid host request. Inspect subsequent
+    /// owned order states for risk/execution rejection; do not infer a fill.
+    pub fn target_position(&mut self, symbol: &str, quantity: Decimal) -> Result<(), SubmitError> {
+        let code = unsafe {
+            (self.sink.target_position)(
+                self.sink.ctx,
+                CStr::from_slice(symbol),
+                CDecimal::from_decimal(quantity),
+            )
+        };
+        if code == SDK_OK {
+            Ok(())
+        } else {
+            Err(SubmitError::Rejected)
+        }
+    }
+
+    /// Cancel working exposure and flatten actual inventory, without guessing an exit size.
+    pub fn close_position(&mut self, symbol: &str) -> Result<(), SubmitError> {
+        self.target_position(symbol, Decimal::ZERO)
     }
 
     /// Record one submitted order without synchronously producing an outcome.
@@ -443,6 +601,15 @@ impl TimeInForce {
             Self::Ioc => "ioc",
         }
     }
+}
+
+fn execution_json(source: &crate::CExecutionSource, view: u32) -> &str {
+    unsafe { (source.read)(source.ctx, view).as_str() }.expect("host execution UTF-8")
+}
+
+fn history<T: serde::de::DeserializeOwned>(source: crate::CExecutionSource, view: u32) -> Vec<T> {
+    let json = execution_json(&source, view);
+    serde_json::from_str(json).expect("host execution history")
 }
 
 fn optional_decimal(value: Option<Decimal>) -> (bool, CDecimal) {

@@ -13,12 +13,15 @@ pub struct EvidenceTable {
 }
 
 impl EvidenceTable {
+    /// Declare nonempty unique columns. Row insertion and host publication
+    /// validate these names; cells must be scalar JSON values or null.
     pub fn new(columns: &[&str]) -> Self {
         Self {
             columns: columns.iter().map(|s| (*s).into()).collect(),
             rows: Vec::new(),
         }
     }
+    /// Append one rectangular scalar/null row; failure leaves the table intact.
     pub fn push(&mut self, row: Vec<Value>) -> Result<(), String> {
         let output = StudyOutput::Table {
             columns: self.columns.clone(),
@@ -96,11 +99,19 @@ impl WaveletHistory {
         values: &[f64],
     ) -> Result<(), String> {
         if session_id.is_empty() || symbol.is_empty() || event_time_ns > available_at_ns {
-            return Err("wavelet history requires identity and causal timestamps".into());
+            return Err(format!("WaveletHistory::observe session_id={session_id:?}, symbol={symbol:?}, event_time_ns={event_time_ns}, available_at_ns={available_at_ns}: require nonempty identities and event_time_ns <= available_at_ns"));
         }
-        for level in trailing_haar(values)? {
-            let energy =
-                level.details.iter().map(|v| v * v).sum::<f64>() / level.details.len() as f64;
+        let levels = trailing_haar(values)?;
+        let energies: Vec<f64> = levels
+            .iter()
+            .map(|level| {
+                level.details.iter().map(|v| v * v).sum::<f64>() / level.details.len() as f64
+            })
+            .collect();
+        if let Some(index) = energies.iter().position(|energy| !energy.is_finite()) {
+            return Err(format!("WaveletHistory::observe session={session_id:?}, symbol={symbol:?}, support={}: nonfinite energy; rescale inputs", levels[index].support));
+        }
+        for (level, energy) in levels.into_iter().zip(energies) {
             self.energy.push(vec![
                 json!(format!(
                     "{session_id}/{symbol}/{event_time_ns}/{}",

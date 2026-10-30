@@ -12,6 +12,10 @@ belong to backend services.
 - `DeleteWorkspaceDialog.svelte`: Confirms the full deletion scope, submits the
   API request, presents retryable failures, and clears browser state on acceptance.
 - `Dialog.svelte`: Shared modal presentation and close affordances.
-- `Sidebar.svelte`: Workspace navigation, counts, pinned widgets, and shell actions.
-- `TopBar.svelte`: Current page, workspace context, activity, and copilot controls.
-- `WorkspaceSwitcher.svelte`: Selects workspaces and exposes creation and deletion.
+- `Sidebar.svelte`: Compact icon navigation with accessible names, expandable labels,
+  counts and pinned widgets, plus workspace search, health and settings actions.
+  Mobile expansion overlays the page instead of reducing the content width.
+- `TopBar.svelte`: Compact workspace breadcrumbs, responsive environment display,
+  activity and copilot controls.
+- `WorkspaceSwitcher.svelte`: Compact or labeled workspace trigger, a bounded
+  selection popover, creation and deletion; closes on outside interaction or Escape.

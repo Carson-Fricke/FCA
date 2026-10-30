@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import replace
@@ -15,6 +16,7 @@ from thesis.workflows.research_models import ProgramSnapshots
 from thesis.workspaces.programs import JobSettlement
 from thesis_runtime.contracts.context import ToolContext
 from thesis_runtime.contracts.datum import DatumType, datum_from_result
+from thesis_runtime.contracts.messages import from_record
 from thesis_runtime.contracts.records import (
     RecordNotFound,
     SubAgentRecord,
@@ -25,6 +27,7 @@ from thesis_runtime.conversations.conversation import Conversations
 from thesis_runtime.conversations.delivery import Anchor
 from thesis_runtime.conversations.service import ChatService
 from thesis_runtime.subagents.control import PhaseCompletionRejected
+from thesis_runtime.tools.reading import DEFAULT_READ_TOKENS, MAX_READ_TOKENS, text_page
 from thesis_runtime.tools.registry import RegisteredTool, ToolExecution
 from thesis_runtime.tools.workflows import workflow_registered_tools
 from thesis_runtime.workflows.execution_store import ExecutionIdentity, ExecutionStore
@@ -33,10 +36,54 @@ from thesis_runtime.workflows.registry import WorkflowRegistration, WorkflowRegi
 from thesis_runtime.workflows.spec import WorkflowContext
 from thesis_runtime.workflows.workflow import WorkflowPorts
 
-from .contracts import CRITIC_PHASES, LAUNCH_SCHEMA, WORKFLOW_ID
+from .contracts import (
+    CONSTRUCTION_PHASES,
+    CRITIC_PHASES,
+    LAUNCH_SCHEMA,
+    SETTLED_ISSUE_STATUSES,
+    WORKFLOW_ID,
+)
 from .definition import accepted_state, build_research_investigation_workflow
 
 SubmissionObserver = Callable[[Mapping[str, Any], str, str, Mapping[str, object]], None]
+
+
+def _product_read(
+    product: Mapping[str, object],
+    execution_id: str | None,
+    arguments: Mapping[str, object],
+) -> ToolExecution:
+    handoff = arguments["handoff"]
+    content = json.dumps(product, ensure_ascii=False, separators=(",", ":"))
+    digest = hashlib.sha256(content.encode()).hexdigest()
+    if arguments.get("expected_sha256") not in (None, digest):
+        raise ValueError(
+            "accepted state changed since the previous page; restart the read or select an immutable handoff"
+        )
+    page = text_page(
+        content,
+        token_offset=cast(int, arguments.get("token_offset", 0)),
+        max_tokens=cast(int, arguments.get("max_tokens", DEFAULT_READ_TOKENS)),
+    )
+    next_offset = page["nextTokenOffset"]
+    return ToolExecution(
+        ok=True,
+        structured={
+            "executionId": execution_id,
+            "handoff": handoff,
+            "contentSha256": digest,
+            **page,
+            "nextArguments": {
+                "execution_id": execution_id,
+                "handoff": handoff,
+                "token_offset": next_offset,
+                "expected_sha256": digest,
+                "max_tokens": arguments.get("max_tokens", DEFAULT_READ_TOKENS),
+            }
+            if next_offset is not None
+            else None,
+        },
+    )
 
 
 class ResearchInvestigationRuntime:
@@ -85,27 +132,17 @@ class ResearchInvestigationRuntime:
                 descriptor={
                     "name": "read_research_investigations",
                     "description": (
-                        "Read accepted research products, never agent transcripts. "
-                        "Discovery may inspect only its child branches; a research phase "
-                        "may read only its own branch. Choose the product in the actual "
-                        "tool arguments: handoff=0 reads the original brief; "
-                        "handoff=5 reads accepted handoff 5 from the seed's index. "
-                        "handoff=null reads the full accepted state for a phase, "
-                        "or lists branches for discovery (execution_id selects one). "
-                        "For a known proposal, critique or adjudication, use its handoff "
-                        "instead of paging through the full state. Paged reads return "
-                        "content and nextArguments: copy that object unchanged into "
-                        "the next call until it is null. Supply all four arguments: "
-                        "execution_id=null selects the phase's own branch (or discovery's "
-                        "branch list), handoff=null selects state, offset=0 starts at "
-                        "the first page, and max_chars=6000 is a normal page size. Repeating "
-                        "the same arguments rereads the same page and never advances "
-                        "automatically. No searches or mutations."
+                        "Read accepted research products, never transcripts. Use handoff=0 for "
+                        "the brief, a positive handoff index for an accepted product, or null "
+                        "for current state. execution_id=null selects this phase's own branch; "
+                        "discovery supplies a child execution_id. Ordinary products are returned "
+                        "whole. Large products use cl100k_base token budgets; copy nextArguments "
+                        "exactly to continue. Omit token_offset/max_tokens for a normal read."
                     ),
                     "parameters": {
                         "type": "object",
                         "additionalProperties": False,
-                        "required": ["execution_id", "handoff", "offset", "max_chars"],
+                        "required": ["execution_id", "handoff"],
                         "properties": {
                             "execution_id": {
                                 "type": ["string", "null"],
@@ -117,16 +154,20 @@ class ResearchInvestigationRuntime:
                                 "minimum": 0,
                                 "description": "Product selector: 0 is the original brief; a positive integer is the exact accepted handoff index from the seed. Use null for current accepted state (phase) or branch inspection (discovery). Preserve it when paging.",
                             },
-                            "offset": {
+                            "expected_sha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$",
+                            },
+                            "token_offset": {
                                 "type": "integer",
                                 "minimum": 0,
-                                "description": "Character offset into the selected product. Use 0 for the first page. For another page, use the returned nextArguments object (its offset equals nextOffset). Repeating offset 0 returns page zero again.",
+                                "description": "Token cursor into the original selected product; use nextArguments unchanged.",
                             },
-                            "max_chars": {
+                            "max_tokens": {
                                 "type": "integer",
-                                "minimum": 1,
-                                "maximum": 8000,
-                                "description": "Maximum content characters per page; use 6000 for a normal page or at most 8000. Preserved in nextArguments.",
+                                "minimum": 32,
+                                "maximum": MAX_READ_TOKENS,
+                                "description": "Read budget in cl100k_base tokens; normally omit to read the complete product.",
                             },
                         },
                     },
@@ -164,7 +205,9 @@ class ResearchInvestigationRuntime:
             requests = self._read_requests(context, selected)
         if handoff is not None or own_branch:
             if len(requests) != 1:
-                raise ValueError("a paged research read requires one execution_id")
+                raise ValueError(
+                    "select exactly one execution_id when reading a handoff"
+                )
             request = requests[0]
             if handoff == 0:
                 product = {
@@ -190,32 +233,9 @@ class ResearchInvestigationRuntime:
                     request,
                     phase=caller.phase if own_branch and caller is not None else None,
                 )
-            content = json.dumps(product, ensure_ascii=False, separators=(",", ":"))
-            offset = cast(int, arguments["offset"])
-            max_chars = cast(int, arguments["max_chars"])
-            end = min(len(content), offset + max_chars)
-            continuation: dict[str, object] | None = None
-            if end < len(content):
-                continuation = {
-                    "execution_id": request.execution_id,
-                    "handoff": handoff,
-                    "offset": end,
-                    "max_chars": max_chars,
-                }
-            return ToolExecution(
-                ok=True,
-                structured={
-                    "executionId": request.execution_id,
-                    "handoff": handoff,
-                    "offset": offset,
-                    "nextOffset": end if end < len(content) else None,
-                    "nextArguments": continuation,
-                    "totalChars": len(content),
-                    "content": content[offset:end],
-                },
-            )
+            return _product_read(product, request.execution_id, arguments)
         results = []
-        for request in requests[:20]:
+        for request in requests:
             if selected is not None:
                 results.append(self.result(request))
                 continue
@@ -233,13 +253,10 @@ class ResearchInvestigationRuntime:
                     "jobIds": list(execution.job_ids),
                 }
             )
-        return ToolExecution(
-            ok=True,
-            structured={
-                "branches": results,
-                "count": len(requests),
-                "truncated": len(requests) > 20,
-            },
+        return _product_read(
+            {"branches": results, "count": len(requests)},
+            cast(str | None, selected),
+            arguments,
         )
 
     def _read_requests(
@@ -299,10 +316,13 @@ class ResearchInvestigationRuntime:
             workspace_id=context.workspace_id,
             execution_id=parent.workflow_execution_id,
         )
-        if mandate is None or self.programs is None:
+        if mandate is None:
             raise ValueError(
-                "discovery must declare research windows and have workspace programs before delegation"
+                "Call set_research_window to declare development and forward "
+                "windows first, then retry start_workflow."
             )
+        if self.programs is None:
+            raise ValueError("workspace programs must be configured before delegation")
         self.programs.verify_strategy_sketch(
             context.workspace_id, inputs["sketchReference"]
         )
@@ -319,7 +339,7 @@ class ResearchInvestigationRuntime:
                 "brief": dict(inputs),
                 "operatorRequest": {
                     "messageId": operator_request.message_id,
-                    "text": operator_request.body,
+                    "text": from_record(operator_request).content.text,
                 },
                 "mandate": mandate.as_dict(),
                 "parent": {
@@ -385,7 +405,7 @@ class ResearchInvestigationRuntime:
         )
 
     def state(self, request: RunRequest, phase: str | None = None) -> dict[str, Any]:
-        return accepted_state(
+        state = accepted_state(
             [
                 item.as_dict()
                 for item in (
@@ -395,6 +415,10 @@ class ResearchInvestigationRuntime:
                 )
             ]
         )
+        state["executions"] = len(
+            self.chat.get_execution(request.workspace_id, request.execution_id).job_ids
+        )
+        return state
 
     def resume(
         self,
@@ -463,8 +487,10 @@ class ResearchInvestigationRuntime:
                 "validation",
             ),
             programs=self.programs,
-            data_window=mandate.default_window,
-            job_retention=self.retain_job if record.phase == "investigation" else None,
+            resolve_data_window=lambda: mandate.default_window,
+            job_retention=self.retain_job
+            if record.phase in CONSTRUCTION_PHASES
+            else None,
         )
 
     def retain_job(
@@ -476,11 +502,17 @@ class ResearchInvestigationRuntime:
     ) -> JobSettlement:
         """Retain immutable child attribution and parent exposure before dispatch."""
         if context.workflow_execution_id is None or context.sub_agent_id is None:
-            raise ValueError("study retention requires the investigation executor")
+            raise ValueError("job retention requires a construction executor")
         request = self.request(context.workspace_id, context.workflow_execution_id)
-        self.workflow.check_phase_executor(
-            request, context.sub_agent_id, "investigation"
+        record = self.conversations.store.get_sub_agent(
+            context.workspace_id, context.sub_agent_id
         )
+        phase = record.phase if record is not None else None
+        if phase not in CONSTRUCTION_PHASES:
+            raise ValueError(
+                "only proposal, investigation and adjudicate executors may submit jobs"
+            )
+        self.workflow.check_phase_executor(request, context.sub_agent_id, phase)
         parent = cast(Mapping[str, Any], request.payload["parent"])
         brief = cast(Mapping[str, Any], request.payload["brief"])
         execution = self.chat.get_execution(context.workspace_id, request.execution_id)
@@ -490,7 +522,7 @@ class ResearchInvestigationRuntime:
             )
         scoped = {
             **attribution,
-            "phase": "investigation",
+            "phase": phase,
             "phaseAttemptId": context.phase_attempt_id,
             "parentExecutionId": parent["executionId"],
             "parentSubAgentId": parent["subAgentId"],
@@ -559,13 +591,15 @@ class ResearchInvestigationRuntime:
         except PhaseCompletionRejected as error:
             return str(error)
         state = self.state(request, record.phase)
-        if record.phase == "proposal":
-            proposal = completion.get("proposal", {})
+        if record.phase in ("proposal", "adjudicate"):
+            product = completion.get(
+                "adjudication" if record.phase == "adjudicate" else "proposal", {}
+            )
             if any(
                 item["issueId"] not in state["issues"]
-                for item in proposal.get("repairs", [])
+                for item in product.get("repairs", [])
             ):
-                return "proposal repair references an unknown issueId"
+                return f"{record.phase} repair references an unknown issueId"
         if record.phase in CRITIC_PHASES:
             critique = completion.get("critique", {})
             if any(
@@ -574,6 +608,17 @@ class ResearchInvestigationRuntime:
             ):
                 return "verified repair references an unknown issueId"
             for issue in critique.get("issues", []):
+                previous = state["issues"].get(issue["issueId"])
+                if (
+                    previous is not None
+                    and previous["status"] in SETTLED_ISSUE_STATUSES
+                    and not issue.get("reopenReason")
+                ):
+                    return (
+                        f"issue {issue['issueId']} is {previous['status']}; "
+                        "supply reopenReason with new contradictory evidence or "
+                        "preserve the settled finding"
+                    )
                 prefix = record.phase.removesuffix("_critique") + ":"
                 if issue["issueId"] not in state["issues"] and not issue[
                     "issueId"
@@ -581,11 +626,31 @@ class ResearchInvestigationRuntime:
                     return f"new issueId must start with {prefix}"
         brief = cast(Mapping[str, Any], request.payload["brief"])
         if record.phase == "adjudicate":
+            adjudication = completion.get("adjudication", {})
             if any(
                 item["issueId"] not in state["issues"]
-                for item in completion.get("adjudication", {}).get("resolutions", [])
+                for item in adjudication.get("resolutions", [])
             ):
                 return "adjudication references an unknown issueId"
+            review = adjudication.get("review")
+            target = completion.get("target")
+            if target == "completed":
+                if review is not None:
+                    return "completed adjudication requires review=null; there is no next review"
+            elif not isinstance(review, Mapping):
+                return "adjudication.review must assign the next review target, scope and issueIds, including after delegated repair"
+            else:
+                if any(
+                    issue_id not in state["issues"] for issue_id in review["issueIds"]
+                ):
+                    return "adjudication.review references an unknown issueId"
+                if (
+                    target in ("critique", "focused_critique")
+                    and review["target"] != target
+                ):
+                    return (
+                        "adjudication.review.target must match the direct review route"
+                    )
             if (
                 completion.get("target") == "proposal"
                 and state["revisions"] >= brief["revisionBudget"]
@@ -597,32 +662,46 @@ class ResearchInvestigationRuntime:
                 or len(state["investigations"]) >= brief["executionBudget"]
             ):
                 return "execution budget exhausted; return remaining uncertainty"
-        if record.phase != "investigation":
+        if record.phase not in CONSTRUCTION_PHASES:
             return None
-        investigation = completion.get("investigation")
+        investigation = completion.get(
+            "adjudication" if record.phase == "adjudicate" else record.phase
+        )
         if not isinstance(investigation, Mapping):
-            return "investigation completion requires its findings"
+            return "construction completion requires its findings"
         attempts = investigation.get("attempts")
         if not isinstance(attempts, list):
-            return "investigation requires attempts"
+            return "construction completion requires attempts"
         reported = [item.get("jobId") for item in attempts if isinstance(item, Mapping)]
         execution = self.chat.get_execution(workspace_id, request.execution_id)
         jobs = [
             self.chat.find_tool_job(workspace_id, job_id)
             for job_id in execution.job_ids
         ]
-        expected = {
+        retained = {
             job.job_id
             for job in jobs
-            if job is not None
-            and job.attribution.get("phaseAttemptId") == record.phase_attempt_id
-            and job.submission_certainty != "not_started"
+            if job is not None and job.submission_certainty != "not_started"
         }
-        if len(reported) != len(set(reported)) or set(reported) != expected:
-            return "investigation must report exactly its retained dispatched jobs, including failed attempts"
+        duplicates = sorted(
+            {job_id for job_id in reported if reported.count(job_id) > 1}
+        )
+        unknown = sorted(set(reported) - retained)
+        if duplicates or unknown:
+            return f"invalid attempt references: duplicateJobIds={duplicates}, unknownOrNotDispatchedJobIds={unknown}; annotate retained branch jobs only. The runtime retains the complete ledger."
         if self.programs is None:
             return "workspace programs are unavailable"
-        for job_id in reported:
+        evidence = investigation.get("evidence", [])
+        supplied = brief["evidence"]
+        if any(
+            item.get("jobId") not in retained and item not in supplied
+            for item in evidence
+        ):
+            return "construction evidence must reference a retained branch job or exact evidence supplied in the brief"
+        verified_jobs = set(reported) | {
+            item["jobId"] for item in evidence if item["jobId"] in retained
+        }
+        for job_id in verified_jobs:
             job = self.chat.find_tool_job(workspace_id, str(job_id))
             try:
                 result = self.programs.job_result(str(job_id))
@@ -636,9 +715,6 @@ class ResearchInvestigationRuntime:
                 != job.attribution.get("submittedInputSha256")
             ):
                 return f"job {job_id} does not match its immutable retained submission"
-        evidence = investigation.get("evidence", [])
-        if any(item.get("jobId") not in expected for item in evidence):
-            return "investigation evidence names a job outside its executed attempts"
         return None
 
     def apply_completion(
@@ -707,6 +783,11 @@ class ResearchInvestigationRuntime:
             "brief": request.payload["brief"],
             "summary": adjudication.get("reason"),
             "remainingUncertainty": adjudication.get("remainingUncertainty"),
+            "escalations": [
+                {"issueId": issue_id, "reason": issue["resolution"]}
+                for issue_id, issue in state["issues"].items()
+                if issue["status"] == "escalate"
+            ],
             "jobIds": list(execution.job_ids),
             "handoffs": {
                 transition.from_phase: index

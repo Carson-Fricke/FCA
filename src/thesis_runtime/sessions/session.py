@@ -5,8 +5,9 @@ sub-agent, and a workflow phase sub-agent.  It sends the merged tool catalog
 (harness tools plus Thesis control tools) with every completion, persists each
 model invocation and each tool call as a first-class durable record, threads
 tool results back to the model as canonical incoming messages, and repeats until the model
-answers in text, a terminal control tool is accepted, or the execution slice
-yields for automatic continuation.
+answers in text with all calls settled, a terminal control tool is accepted,
+or the execution slice yields for automatic continuation. Unreturned calls
+leave the turn waiting for canonical incoming delivery, without model wait tools.
 
 The session never decides a workflow transition: a terminal control tool returns
 a constructed completion, and the owning deterministic state machine evaluates
@@ -27,6 +28,7 @@ from time import monotonic
 from types import MappingProxyType
 from typing import Literal
 
+from thesis_runtime.contracts.compaction import ContextPolicy, EvidenceRanker
 from thesis_runtime.contracts.context import ToolContext
 from thesis_runtime.contracts.datum import Datum, normalize_datums
 from thesis_runtime.contracts.errors import (
@@ -38,6 +40,8 @@ from thesis_runtime.contracts.messages import (
     SessionMessage,
     ToolCorrelation,
     ToolRequest,
+    pending_job_returns,
+    unreturned_requests,
 )
 from thesis_runtime.contracts.records import (
     AgentInvocation,
@@ -47,6 +51,12 @@ from thesis_runtime.contracts.records import (
 from thesis_runtime.contracts.reply import ToolResultChunk
 from thesis_runtime.conversations.inbox import SessionInbox
 from thesis_runtime.conversations.timeline import TimelineWriter
+from thesis_runtime.sessions.compaction import (
+    COMPACT_TOOL_NAME,
+    CompactionSummaryError,
+    ContextCapacityError,
+)
+from thesis_runtime.sessions.context_manager import SessionCompaction
 from thesis_runtime.sessions.model_invocation import (
     CompletionProvider,
     InvocationPersistence,
@@ -72,7 +82,10 @@ AGENT_SYSTEM_PROMPT = (
     "Use the registered tools to carry out the operator's request. "
     "Use structured results as evidence and report failures truthfully. "
     "A started workflow owns its phases and operator interaction. "
-    "Await asynchronous helpers or end the turn to receive their results."
+    "Helper results arrive automatically. When no useful work is ready, end "
+    "your response; unreturned calls and helper results keep the turn open "
+    "and resume you on arrival. Follow each tool's result contract: a returned "
+    "job handle acknowledges submission and does not establish job completion."
 )
 
 
@@ -204,6 +217,8 @@ class AgentSession:
         id_factory: Callable[[str], str] | None = None,
         intent_epoch: int = 0,
         timeline: TimelineWriter | None = None,
+        context_policy: ContextPolicy | None = None,
+        evidence_ranker: EvidenceRanker | None = None,
     ) -> None:
         if max_tool_iterations < 1:
             raise ValueError("max_tool_iterations must be positive")
@@ -233,6 +248,19 @@ class AgentSession:
         self._max_tool_iterations = max_tool_iterations
         self._clock = clock
         self._id_factory = id_factory or (lambda prefix: f"{prefix}-{uuid.uuid4().hex}")
+        self._compaction = SessionCompaction(
+            provider=provider,
+            store=store,
+            policy=context_policy or ContextPolicy(),
+            ranker=evidence_ranker,
+            context=self._tool_context,
+            role=role,
+            clock=self._clock,
+            id_factory=self._id_factory,
+        )
+        self._runtime_tools = {
+            COMPACT_TOOL_NAME: self._compaction.tools,
+        }
 
     def run(
         self,
@@ -249,8 +277,11 @@ class AgentSession:
         is_steered: Callable[[], bool] | None = None,
         admit_dispatch: Callable[[], bool] | None = None,
         refresh_registry: Callable[[], tuple[SessionToolRegistry, int]] | None = None,
+        on_checkpoint: Callable[[str, SessionMessage, Sequence[SessionMessage]], None]
+        | None = None,
+        has_pending_returns: Callable[[], bool] | None = None,
     ) -> SessionResult:
-        """Run to text completion, terminal control tool, or the iteration cap.
+        """Run to settled text completion, terminal control, or the slice cap.
 
         ``is_steered`` stops an active model stream for new operator input.
         Received output is sealed through the same outgoing persistence boundary,
@@ -293,6 +324,10 @@ class AgentSession:
         After a terminal tool is accepted, remaining calls receive paired
         ``skipped``/``not_started`` results without dispatch; the accepted
         completion is preserved, even if cancellation arrives while pairing.
+        A text response leaves the turn ``waiting`` while transcript requests
+        lack results. ``has_pending_returns`` checks the full durable scope,
+        including child handles whose completion arrives separately. No waiting
+        tool, polling, additional persistence or automatic continuation is used.
         """
         if inbox is not None and (messages or deliver is not None):
             raise ValueError("supply either an inbox or history and a delivery writer")
@@ -327,7 +362,19 @@ class AgentSession:
                 fresh or reconciled_inputs or (iteration > 0 and inbox.pending())
             ):
                 self._registry, self._intent_epoch = refresh_registry()
-            catalog = self._registry.catalog()
+            application_catalog = self._registry.catalog()
+            if any(tool["name"] in self._runtime_tools for tool in application_catalog):
+                raise ValueError(
+                    "session control tool names are reserved for the runtime"
+                )
+            catalog = (
+                *application_catalog,
+                *(
+                    tool
+                    for registry in self._runtime_tools.values()
+                    for tool in registry.catalog()
+                ),
+            )
             if is_cancelled is not None and is_cancelled():
                 return SessionResult(
                     status="cancelled",
@@ -335,6 +382,62 @@ class AgentSession:
                     turns=tuple(turns),
                 )
             working, pending = inbox.snapshot()
+
+            def emit_summary(
+                message: SessionMessage, invocation: ModelInvocation
+            ) -> None:
+                turn = SessionTurn(
+                    message,
+                    invocation_id=invocation.invocation.invocation_id,
+                    started_at=invocation.started_at,
+                    duration_ms=invocation.duration_ms,
+                )
+                if on_turn is not None:
+                    on_turn(turn)
+                inbox.record_output(message)
+                turns.append(turn)
+
+            try:
+                ready = self._compaction.prepare(
+                    inbox,
+                    context=replace(
+                        self._tool_context, intent_epoch=self._intent_epoch
+                    ),
+                    catalog=catalog,
+                    on_output=emit_summary,
+                    on_checkpoint=on_checkpoint,
+                    is_cancelled=is_cancelled,
+                    is_steered=is_steered,
+                    admit_dispatch=admit_dispatch,
+                )
+                if not ready:
+                    continue
+                working, pending = inbox.snapshot()
+            except CancelledError:
+                return SessionResult(
+                    status="cancelled",
+                    content="".join(reasoning_parts),
+                    turns=tuple(turns),
+                )
+            except (
+                ContextCapacityError,
+                CompactionSummaryError,
+                ProviderRejectedError,
+                ProviderUnreachableError,
+            ) as error:
+                return SessionResult(
+                    status="interrupted",
+                    content="".join(reasoning_parts),
+                    turns=tuple(turns),
+                    failure={
+                        "kind": "context_capacity"
+                        if isinstance(error, ContextCapacityError)
+                        else "compaction_failed",
+                        "message": str(error),
+                        "certainty": "observed_failure",
+                        "retry_safe": False,
+                    },
+                )
             operator_inputs = {
                 message.message_id
                 for message in pending
@@ -502,10 +605,19 @@ class AgentSession:
                 on_consumed(pending)
             inbox.acknowledge(pending)
             if not completion.content.requests:
+                if inbox.pending():
+                    continue
+                waiting = (
+                    bool(unreturned_requests(inbox.transcript()))
+                    or bool(pending_job_returns(inbox.transcript()))
+                    or (has_pending_returns is not None and has_pending_returns())
+                )
                 return SessionResult(
                     status=(
                         "cancelled"
                         if is_cancelled is not None and is_cancelled()
+                        else "waiting"
+                        if waiting
                         else "completed"
                     ),
                     content=completion.content.text,
@@ -577,7 +689,8 @@ class AgentSession:
                     )
                 else:
                     try:
-                        execution = self._registry.dispatch(
+                        registry = self._runtime_tools.get(call.name, self._registry)
+                        execution = registry.dispatch(
                             call.name,
                             arguments,
                             context=replace(
@@ -586,6 +699,9 @@ class AgentSession:
                                 model_invocation_id=model_invocation_id,
                                 tool_invocation_id=tool_invocation_id,
                                 idempotency_key=tool_invocation_id,
+                                allowed_tools=None
+                                if call.name in self._runtime_tools
+                                else self._tool_context.allowed_tools,
                             ),
                         )
                     except CancelledError:
@@ -706,13 +822,17 @@ class AgentSession:
                 ):
                     payload["structured"] = dict(execution.structured)
                 payload.update(
-                    operation=self._registry.operation(call.name),
+                    operation=self._runtime_tools.get(
+                        call.name, self._registry
+                    ).operation(call.name),
                     datums=[datum.as_dict() for datum in datums],
                     invocationId=tool_invocation_id,
                     startedAt=tool_started_at.isoformat(),
                     durationMs=tool_duration_ms,
                     arguments=None if arguments is None else dict(arguments),
                 )
+                if execution.pending_jobs:
+                    payload["pendingJobs"] = list(execution.pending_jobs)
                 delivered = inbox.deliver(
                     SessionMessage(
                         message_id=self._id_factory("message"),

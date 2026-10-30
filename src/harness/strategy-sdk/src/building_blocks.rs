@@ -44,8 +44,7 @@ impl FillLedger {
             || fill.price <= Decimal::ZERO
         {
             return Err(
-                "fill requires matching symbol, identity, buy/sell, positive quantity and price"
-                    .into(),
+                format!("FillLedger::apply fill_id={:?}, order_id={:?}, symbol={:?} (expected {:?}), side={:?}, quantity={}, price={}: require identity, matching symbol, buy/sell, positive quantity and price", fill.fill_id, fill.order_id, fill.symbol, self.symbol, fill.side, fill.quantity, fill.price),
             );
         }
         let record = (
@@ -59,7 +58,7 @@ impl FillLedger {
             return if previous == &record {
                 Ok(false)
             } else {
-                Err("conflicting fill identity".into())
+                Err(format!("FillLedger fill_id={:?}: conflicting fill identity; previous={previous:?}, received={record:?}", fill.fill_id))
             };
         }
         // Prepare every checked change before committing any state. An invalid
@@ -120,9 +119,15 @@ impl FillLedger {
     /// Reject a nonpositive mark.
     pub fn net_pnl(&self, mark: Decimal) -> Result<Decimal, String> {
         if mark <= Decimal::ZERO {
-            return Err("mark must be positive".into());
+            return Err(format!(
+                "FillLedger::net_pnl mark={mark}: expected a positive price"
+            ));
         }
-        Ok(self.cash + self.quantity * mark - self.fees)
+        self.quantity
+            .checked_mul(mark)
+            .and_then(|value| self.cash.checked_add(value))
+            .and_then(|value| value.checked_sub(self.fees))
+            .map_err(|error| format!("fill accounting arithmetic: {error}"))
     }
 }
 
@@ -138,7 +143,7 @@ impl PendingOrder {
     /// Capture an accepted submission, never a guessed first-fill quantity.
     pub fn new(order_id: &str, quantity: Decimal) -> Result<Self, String> {
         if order_id.is_empty() || quantity <= Decimal::ZERO {
-            return Err("pending order requires identity and positive requested quantity".into());
+            return Err(format!("PendingOrder::new order_id={order_id:?}, quantity={quantity}: require a nonempty ID and positive requested quantity"));
         }
         Ok(Self {
             order_id: order_id.into(),
@@ -155,10 +160,17 @@ impl PendingOrder {
             .checked_sub(ledger.filled_quantity(&self.order_id))
             .map_err(|error| error.to_string())?;
         if remaining < Decimal::ZERO {
-            return Err("filled quantity exceeds requested order quantity".into());
+            return Err(format!(
+                "PendingOrder {:?}: filled quantity {} exceeds requested {}",
+                self.order_id,
+                ledger.filled_quantity(&self.order_id),
+                self.quantity
+            ));
         }
         Ok(remaining)
     }
+    /// False also covers an inconsistent ledger. Use `remaining` when the
+    /// caller needs to distinguish outstanding fills from an accounting error.
     pub fn is_filled(&self, ledger: &FillLedger) -> bool {
         self.remaining(ledger)
             .is_ok_and(|quantity| quantity.is_zero())
@@ -175,9 +187,16 @@ pub fn cash_return_bps(
     entry_price: Decimal,
 ) -> Result<f64, String> {
     if entry_quantity == Decimal::ZERO || entry_price <= Decimal::ZERO {
-        return Err("return requires nonzero filled quantity and positive entry price".into());
+        return Err(format!("cash_return_bps entry_quantity={entry_quantity}, entry_price={entry_price}: require nonzero filled quantity and positive entry price"));
     }
-    Ok((pnl / (entry_quantity.abs() * entry_price)).to_f64() * 10_000.0)
+    let notional = entry_quantity
+        .abs()
+        .checked_mul(entry_price)
+        .map_err(|error| error.to_string())?;
+    pnl.checked_div(notional)
+        .and_then(|value| value.checked_mul(Decimal::from_i128(10_000)))
+        .and_then(Decimal::to_f64_checked)
+        .map_err(|error| error.to_string())
 }
 
 /// Nearest-rank empirical quantile: rank ceil(q*n), clamped to 1..n.
@@ -191,7 +210,7 @@ pub fn empirical_quantile(values: &[f64], q: f64) -> Result<f64, String> {
         || !q.is_finite()
         || !(0.0..=1.0).contains(&q)
     {
-        return Err("quantile requires finite observations and probability in [0,1]".into());
+        return Err(format!("empirical_quantile sample_count={}, first_nonfinite={:?}, q={q:?}: require nonempty finite observations and probability in [0,1]", values.len(), values.iter().position(|v| !v.is_finite())));
     }
     let mut sorted = values.to_vec();
     sorted.sort_by(f64::total_cmp);
@@ -205,7 +224,7 @@ pub fn empirical_quantile(values: &[f64], q: f64) -> Result<f64, String> {
 /// Reject fewer than two finite positive prices.
 pub fn log_price_slope_bps(prices: &[f64]) -> Result<f64, String> {
     if prices.len() < 2 || prices.iter().any(|p| !p.is_finite() || *p <= 0.0) {
-        return Err("slope requires at least two finite positive prices".into());
+        return Err(format!("log_price_slope_bps sample_count={}, first_invalid={:?}: require at least two finite positive prices", prices.len(), prices.iter().position(|v| !v.is_finite() || *v <= 0.0)));
     }
     let center = (prices.len() - 1) as f64 / 2.0;
     let mut numerator = 0.0;
@@ -215,7 +234,14 @@ pub fn log_price_slope_bps(prices: &[f64]) -> Result<f64, String> {
         numerator += x * price.ln();
         denominator += x * x;
     }
-    Ok(10_000.0 * numerator / denominator)
+    let result = 10_000.0 * numerator / denominator;
+    if !result.is_finite() {
+        return Err(
+            "log_price_slope_bps: arithmetic produced a nonfinite slope; rescale the observations"
+                .into(),
+        );
+    }
+    Ok(result)
 }
 
 /// Ratio of expected orthonormal Haar detail energies for an iid-increment
@@ -231,7 +257,7 @@ pub fn haar_random_walk_energy_share(window: usize, coarse_support: usize) -> Re
         || coarse_support > window
     {
         return Err(
-            "Haar anchor requires power-of-two window and support, 2 <= support <= window".into(),
+            format!("haar_random_walk_energy_share window={window}, coarse_support={coarse_support}: require powers of two with 2 <= support <= window"),
         );
     }
     let mut total = 0.0;
@@ -263,7 +289,9 @@ impl Ema {
     /// Rejects a zero period.
     pub fn new(period: usize) -> Result<Self, String> {
         if period == 0 {
-            return Err("EMA period must be positive".into());
+            return Err(format!(
+                "Ema::new period={period}: expected a positive observation count"
+            ));
         }
         Ok(Self {
             alpha: 2.0 / (period as f64 + 1.0),
@@ -275,11 +303,18 @@ impl Ema {
     /// Rejects nonfinite input.
     pub fn observe(&mut self, value: f64) -> Result<f64, String> {
         if !value.is_finite() {
-            return Err("EMA value must be finite".into());
+            return Err(format!(
+                "Ema::observe value={value:?}: expected a finite value"
+            ));
         }
         let result = self.value.map_or(value, |prior| {
             self.alpha * value + (1.0 - self.alpha) * prior
         });
+        if !result.is_finite() {
+            return Err(format!(
+                "Ema::observe value={value:?}: arithmetic produced a nonfinite result"
+            ));
+        }
         self.value = Some(result);
         Ok(result)
     }
@@ -297,7 +332,9 @@ impl Rsi {
     /// Rejects a zero period.
     pub fn new(period: usize) -> Result<Self, String> {
         if period == 0 {
-            return Err("RSI period must be positive".into());
+            return Err(format!(
+                "Rsi::new period={period}: expected a positive change count"
+            ));
         }
         Ok(Self {
             period,
@@ -310,9 +347,16 @@ impl Rsi {
     /// Rejects nonfinite input.
     pub fn observe(&mut self, price: f64) -> Result<Option<f64>, String> {
         if !price.is_finite() {
-            return Err("RSI price must be finite".into());
+            return Err(format!(
+                "Rsi::observe price={price:?}: expected a finite value"
+            ));
         }
         if let Some(previous) = self.previous {
+            if !(price - previous).is_finite() {
+                return Err(format!(
+                    "Rsi::observe price={price:?}, previous={previous:?}: nonfinite change"
+                ));
+            }
             self.changes.push_back(price - previous);
         }
         self.previous = Some(price);
@@ -322,8 +366,20 @@ impl Rsi {
         if self.changes.len() < self.period {
             return Ok(None);
         }
-        let gains = self.changes.iter().map(|x| x.max(0.0)).sum::<f64>();
-        let losses = self.changes.iter().map(|x| (-x).max(0.0)).sum::<f64>();
+        let largest = self.changes.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+        if largest == 0.0 {
+            return Ok(None);
+        }
+        let gains = self
+            .changes
+            .iter()
+            .map(|x| (x / largest).max(0.0))
+            .sum::<f64>();
+        let losses = self
+            .changes
+            .iter()
+            .map(|x| (-x / largest).max(0.0))
+            .sum::<f64>();
         Ok(if gains + losses == 0.0 {
             None
         } else {
@@ -358,7 +414,7 @@ impl Atr {
             || close < low
             || close > high
         {
-            return Err("ATR requires finite consistent OHLC".into());
+            return Err(format!("Atr::observe high={high:?}, low={low:?}, close={close:?}: require finite values and low <= close <= high"));
         }
         let range = self.previous_close.map_or(high - low, |previous| {
             (high - low)
@@ -382,7 +438,9 @@ impl Vwap {
     /// Rejects zero length.
     pub fn new(period: usize) -> Result<Self, String> {
         if period == 0 {
-            return Err("VWAP period must be positive".into());
+            return Err(format!(
+                "Vwap::new period={period}: expected a positive observation count"
+            ));
         }
         Ok(Self {
             period,
@@ -394,28 +452,28 @@ impl Vwap {
     /// Rejects nonfinite values and negative volumes.
     pub fn observe(&mut self, price: f64, volume: f64) -> Result<Option<f64>, String> {
         if !price.is_finite() || !volume.is_finite() || volume < 0.0 {
-            return Err("VWAP requires finite prices and nonnegative volumes".into());
+            return Err(format!("Vwap::observe price={price:?}, volume={volume:?}: require finite prices and finite nonnegative volume"));
         }
-        self.observations.push_back((price, volume));
-        if self.observations.len() > self.period {
-            self.observations.pop_front();
+        let mut observations = self.observations.clone();
+        observations.push_back((price, volume));
+        if observations.len() > self.period {
+            observations.pop_front();
         }
-        let volume = self
-            .observations
-            .iter()
-            .map(|(_, volume)| volume)
-            .sum::<f64>();
-        Ok(if self.observations.len() < self.period || volume == 0.0 {
+        let volume_sum = observations.iter().map(|(_, v)| v).sum::<f64>();
+        let notional = observations.iter().map(|(p, v)| p * v).sum::<f64>();
+        if !volume_sum.is_finite() || !notional.is_finite() {
+            return Err(format!("Vwap::observe price={price:?}, volume={volume:?}: rolling volume/notional overflow; rescale the inputs"));
+        }
+        let result = if observations.len() < self.period || volume_sum == 0.0 {
             None
         } else {
-            Some(
-                self.observations
-                    .iter()
-                    .map(|(price, volume)| price * volume)
-                    .sum::<f64>()
-                    / volume,
-            )
-        })
+            Some(notional / volume_sum)
+        };
+        if result.is_some_and(|v| !v.is_finite()) {
+            return Err("Vwap::observe: nonfinite weighted mean; rescale the inputs".into());
+        }
+        self.observations = observations;
+        Ok(result)
     }
 }
 
@@ -437,9 +495,8 @@ impl CrossoverAge {
         slow: f64,
     ) -> Result<(i8, Option<i64>, bool), String> {
         if !fast.is_finite() || !slow.is_finite() || self.last_time.is_some_and(|t| time_ns < t) {
-            return Err("crossover requires finite time-ordered values".into());
+            return Err(format!("CrossoverAge::observe time_ns={time_ns}, previous_time={:?}, fast={fast:?}, slow={slow:?}: require finite values and nondecreasing nanosecond timestamps", self.last_time));
         }
-        self.last_time = Some(time_ns);
         let direction = if fast > slow {
             1
         } else if fast < slow {
@@ -447,12 +504,24 @@ impl CrossoverAge {
         } else {
             self.direction
         };
+        let age = if direction != self.direction {
+            Some(0)
+        } else {
+            self.changed_at
+                .map(|t| {
+                    time_ns.checked_sub(t).ok_or_else(|| {
+                        format!("CrossoverAge duration overflow: {time_ns} - {t} nanoseconds")
+                    })
+                })
+                .transpose()?
+        };
+        self.last_time = Some(time_ns);
         let crossed = self.direction != 0 && direction != self.direction;
         if direction != self.direction {
             self.changed_at = Some(time_ns);
             self.direction = direction;
         }
-        Ok((direction, self.changed_at.map(|t| time_ns - t), crossed))
+        Ok((direction, age, crossed))
     }
 }
 
@@ -470,13 +539,13 @@ impl FittedNormalization {
     /// Rejects fewer than two values, nonfinite data, and constant training data.
     pub fn fit(values: &[f64]) -> Result<Self, String> {
         if values.len() < 2 || values.iter().any(|x| !x.is_finite()) {
-            return Err("normalization requires at least two finite training values".into());
+            return Err(format!("FittedNormalization::fit sample_count={}, first_nonfinite={:?}: require at least two finite training values", values.len(), values.iter().position(|v| !v.is_finite())));
         }
         let mean = values.iter().sum::<f64>() / values.len() as f64;
         let scale =
             (values.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / values.len() as f64).sqrt();
         if !mean.is_finite() || !scale.is_finite() || scale == 0.0 {
-            return Err("normalization requires finite nonzero training dispersion".into());
+            return Err(format!("FittedNormalization::fit mean={mean:?}, scale={scale:?}: require finite mean and finite nonzero dispersion"));
         }
         Ok(Self { mean, scale })
     }
@@ -489,9 +558,13 @@ impl FittedNormalization {
             || !self.scale.is_finite()
             || self.scale <= 0.0
         {
-            return Err("normalization requires finite input and valid frozen weights".into());
+            return Err(format!("FittedNormalization::transform value={value:?}, mean={:?}, scale={:?}: require finite input/mean and positive finite scale", self.mean, self.scale));
         }
-        Ok((value - self.mean) / self.scale)
+        let result = (value - self.mean) / self.scale;
+        if !result.is_finite() {
+            return Err(format!("FittedNormalization::transform value={value:?}, mean={:?}, scale={:?}: arithmetic produced a nonfinite result", self.mean, self.scale));
+        }
+        Ok(result)
     }
 }
 
@@ -529,7 +602,7 @@ impl DirectionalChange {
     /// Rejects nonfinite or nonpositive thresholds.
     pub fn new(threshold: f64) -> Result<Self, String> {
         if !threshold.is_finite() || threshold <= 0.0 {
-            return Err("directional change threshold must be positive and finite".into());
+            return Err(format!("DirectionalChange::new threshold={threshold:?}: expected a positive finite absolute price distance"));
         }
         Ok(Self {
             threshold,
@@ -551,8 +624,16 @@ impl DirectionalChange {
         price: f64,
     ) -> Result<Option<DirectionalEvent>, String> {
         if !price.is_finite() || self.last_time.is_some_and(|last| time_ns < last) {
-            return Err("directional change requires finite time-ordered prices".into());
+            return Err(format!("DirectionalChange::observe time_ns={time_ns}, previous_time={:?}, price={price:?}: require finite prices and nondecreasing nanosecond timestamps", self.last_time));
         }
+        let duration = self
+            .confirmation
+            .map(|last| {
+                time_ns.checked_sub(last).ok_or_else(|| {
+                    format!("DirectionalChange duration overflow: {time_ns} - {last} nanoseconds")
+                })
+            })
+            .transpose()?;
         self.last_time = Some(time_ns);
         if self.high.is_none_or(|(_, high)| price > high) {
             self.high = Some((time_ns, price));
@@ -576,7 +657,7 @@ impl DirectionalChange {
                 available_at_ns: time_ns,
                 extreme,
                 price,
-                duration_ns: self.confirmation.map(|last| time_ns - last),
+                duration_ns: duration,
             };
             self.direction = direction;
             self.confirmation = Some(time_ns);
@@ -600,7 +681,9 @@ impl RollingMoments {
     /// Rejects zero length.
     pub fn new(capacity: usize) -> Result<Self, String> {
         if capacity == 0 {
-            return Err("rolling window must be positive".into());
+            return Err(format!(
+                "RollingMoments::new capacity={capacity}: expected a positive observation count"
+            ));
         }
         Ok(Self {
             capacity,
@@ -614,12 +697,16 @@ impl RollingMoments {
     /// Rejects nonfinite values without modifying state.
     pub fn observe(&mut self, value: f64) -> Result<Option<(f64, f64)>, String> {
         if !value.is_finite() {
-            return Err("rolling value must be finite".into());
+            return Err(format!(
+                "RollingMoments::observe value={value:?}: expected a finite value"
+            ));
         }
         self.values.push_back(value);
-        if self.values.len() > self.capacity {
-            self.values.pop_front();
-        }
+        let expired = if self.values.len() > self.capacity {
+            self.values.pop_front()
+        } else {
+            None
+        };
         if self.values.len() < self.capacity {
             return Ok(None);
         }
@@ -630,6 +717,13 @@ impl RollingMoments {
             .map(|value| (value - mean).powi(2))
             .sum::<f64>()
             / self.capacity as f64;
+        if !mean.is_finite() || !variance.is_finite() {
+            self.values.pop_back();
+            if let Some(previous) = expired {
+                self.values.push_front(previous);
+            }
+            return Err(format!("RollingMoments::observe value={value:?}, capacity={}: arithmetic produced nonfinite moments; rescale the inputs", self.capacity));
+        }
         Ok(Some((mean, variance.sqrt())))
     }
 }
@@ -642,7 +736,7 @@ impl RollingMoments {
 /// the supplied trailing window; they are never historical trading triggers.
 pub fn perceptually_important_points(values: &[f64], count: usize) -> Result<Vec<usize>, String> {
     if count < 2 || count > values.len() || values.iter().any(|value| !value.is_finite()) {
-        return Err("PIP requires finite values and 2..=window length points".into());
+        return Err(format!("perceptually_important_points count={count}, sample_count={}, first_nonfinite={:?}: require finite values and 2 <= count <= sample_count", values.len(), values.iter().position(|v| !v.is_finite())));
     }
     let mut selected = vec![0, values.len() - 1];
     while selected.len() < count {
@@ -653,6 +747,9 @@ pub fn perceptually_important_points(values: &[f64], count: usize) -> Result<Vec
                 let fraction = (index - left) as f64 / (right - left) as f64;
                 let reference = values[left] + fraction * (values[right] - values[left]);
                 let distance = (values[index] - reference).abs();
+                if !distance.is_finite() {
+                    return Err(format!("perceptually_important_points values[{index}]: nonfinite interpolated distance; rescale the inputs"));
+                }
                 if best.is_none_or(|(_, prior)| distance > prior) {
                     best = Some((index, distance));
                 }
@@ -684,7 +781,7 @@ pub(crate) fn trailing_haar(values: &[f64]) -> Result<Vec<HaarLevel>, String> {
         || !values.len().is_power_of_two()
         || values.iter().any(|value| !value.is_finite())
     {
-        return Err("Haar requires a finite power-of-two trailing window".into());
+        return Err(format!("trailing_haar sample_count={}, first_nonfinite={:?}: require a power-of-two window of at least two finite observations", values.len(), values.iter().position(|v| !v.is_finite())));
     }
     let mut current = values.to_vec();
     let mut levels = Vec::new();
@@ -693,8 +790,13 @@ pub(crate) fn trailing_haar(values: &[f64]) -> Result<Vec<HaarLevel>, String> {
         let mut averages = Vec::with_capacity(current.len() / 2);
         let mut details = Vec::with_capacity(current.len() / 2);
         for pair in current.as_chunks::<2>().0 {
-            averages.push((pair[0] + pair[1]) / std::f64::consts::SQRT_2);
-            details.push((pair[0] - pair[1]) / std::f64::consts::SQRT_2);
+            let average = (pair[0] + pair[1]) / std::f64::consts::SQRT_2;
+            let detail = (pair[0] - pair[1]) / std::f64::consts::SQRT_2;
+            if !average.is_finite() || !detail.is_finite() {
+                return Err(format!("trailing_haar support={support}: nonfinite coefficient from {:?}; rescale the inputs", pair));
+            }
+            averages.push(average);
+            details.push(detail);
         }
         levels.push(HaarLevel { support, details });
         current = averages;

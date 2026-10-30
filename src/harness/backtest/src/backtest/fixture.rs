@@ -151,6 +151,8 @@ impl ExchangeSession {
 /// One deterministic market event.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MarketEvent {
+    /// Exact source ticks retained in an immutable compact block.
+    Block(harness_trading::market::BlockEvent),
     /// A top-of-book quote.
     Quote {
         /// Event identifier.
@@ -218,10 +220,54 @@ pub enum MarketEvent {
 }
 
 impl MarketEvent {
+    pub fn kind(&self) -> usize {
+        match self {
+            Self::Quote { .. } => 0,
+            Self::Trade { .. } => 1,
+            Self::Bar { .. } => 2,
+            Self::Block(event) => match event.kind() {
+                harness_trading::market::TickKind::Quote => 0,
+                harness_trading::market::TickKind::Trade => 1,
+            },
+        }
+    }
+
+    /// Materialize only for transformations or source-row evidence, never for
+    /// ordinary native replay. The block retains the original scale-18 values.
+    pub fn to_owned_event(&self) -> Self {
+        let Self::Block(event) = self else {
+            return self.clone();
+        };
+        let r = event.row();
+        match event.kind() {
+            harness_trading::market::TickKind::Quote => Self::Quote {
+                event_id: event.event_id().into(),
+                timestamp_ns: r.timestamp_ns,
+                sequence: r.sequence,
+                symbol: event.symbol().into(),
+                bid: r.values[0],
+                ask: r.values[1],
+                bid_quantity: r.values[2],
+                ask_quantity: r.values[3],
+                venue: event.venue().into(),
+            },
+            harness_trading::market::TickKind::Trade => Self::Trade {
+                event_id: event.event_id().into(),
+                timestamp_ns: r.timestamp_ns,
+                sequence: r.sequence,
+                symbol: event.symbol().into(),
+                price: r.values[0],
+                quantity: r.values[1],
+                venue: event.venue().into(),
+                trade_id: event.trade_id().into(),
+            },
+        }
+    }
     /// Event time in epoch nanoseconds.
     #[must_use]
-    pub const fn timestamp_ns(&self) -> i64 {
+    pub fn timestamp_ns(&self) -> i64 {
         match self {
+            Self::Block(event) => event.row().timestamp_ns,
             Self::Quote { timestamp_ns, .. }
             | Self::Trade { timestamp_ns, .. }
             | Self::Bar { timestamp_ns, .. } => *timestamp_ns,
@@ -232,6 +278,7 @@ impl MarketEvent {
     #[must_use]
     pub fn symbol(&self) -> &str {
         match self {
+            Self::Block(event) => event.symbol(),
             Self::Quote { symbol, .. } | Self::Trade { symbol, .. } | Self::Bar { symbol, .. } => {
                 symbol
             }
@@ -240,8 +287,9 @@ impl MarketEvent {
 
     /// The event's source-local sequence number.
     #[must_use]
-    pub const fn sequence(&self) -> u64 {
+    pub fn sequence(&self) -> u64 {
         match self {
+            Self::Block(event) => event.row().sequence,
             Self::Quote { sequence, .. }
             | Self::Trade { sequence, .. }
             | Self::Bar { sequence, .. } => *sequence,
@@ -251,6 +299,7 @@ impl MarketEvent {
     /// Canonical JSON for fingerprinting.
     pub(super) fn to_json(&self) -> JsonValue {
         match self {
+            Self::Block(_) => self.to_owned_event().to_json(),
             Self::Quote {
                 event_id,
                 timestamp_ns,
@@ -453,6 +502,9 @@ fn event_framed_fields(
     trade_scale: u32,
 ) -> Vec<u8> {
     match event {
+        MarketEvent::Block(_) => {
+            event_framed_fields(&event.to_owned_event(), options, quote_scale, trade_scale)
+        }
         MarketEvent::Quote {
             event_id,
             timestamp_ns,

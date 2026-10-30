@@ -63,13 +63,5 @@ impl StreamedReplay {
 
 /// Total causal ordering used by in-memory and streamed inputs.
 pub fn key(event: &MarketEvent) -> (i64, u64, u8) {
-    (
-        event.timestamp_ns(),
-        event.sequence(),
-        match event {
-            MarketEvent::Quote { .. } => 0,
-            MarketEvent::Trade { .. } => 1,
-            MarketEvent::Bar { .. } => 2,
-        },
-    )
+    (event.timestamp_ns(), event.sequence(), event.kind() as u8)
 }

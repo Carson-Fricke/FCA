@@ -175,8 +175,7 @@ class FileChatPersistence:
         conversation_id: str,
         *,
         after_position: int | None,
-        consumed_position: int,
-        limit: int,
+        after_message_id: str | None,
     ) -> tuple[ChatMessage, ...]:
         from thesis_runtime.conversations.admission import select_message_window
 
@@ -185,8 +184,7 @@ class FileChatPersistence:
                 ChatMessage, workspace_id, chat_id, conversation_id=conversation_id
             ),
             after_position=after_position,
-            consumed_position=consumed_position,
-            limit=limit,
+            after_message_id=after_message_id,
         )
 
     def _save(self, record: RecordT) -> RecordT:

@@ -114,7 +114,7 @@ impl WaveletIndicator {
             || coarse_support > window
             || !coarse_support.is_power_of_two()
         {
-            return Err("wavelet window must be a power of two in 2..4096; coarse support must be a power of two in 2..window".into());
+            return Err(format!("WaveletIndicator::new window={window}, coarse_support={coarse_support}: window must be a power of two in 2..=4096; coarse_support must be a power of two in 2..=window"));
         }
         let subscriptions =
             canonical_subscriptions(vec![Subscription::Bars { symbols, interval }])?;

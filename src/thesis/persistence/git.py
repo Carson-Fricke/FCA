@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import re
 import subprocess
 import tempfile
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from thesis.persistence.journal import JournalEntry, content_hash
+from thesis_runtime.storage.ownership import assert_owned
 
 _OBJECT_ID_PATTERN = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
@@ -25,6 +28,21 @@ def _git_blob_oid(payload: bytes) -> str:
 
 class GitPublicationError(RuntimeError):
     """Base class for safe Git publication failures."""
+
+
+class GitBusyError(GitPublicationError):
+    """Publication did not start before the bounded lock deadline."""
+
+    execution_certainty = "not_started"
+
+    @property
+    def failure(self) -> Mapping[str, object]:
+        return {
+            "kind": "publication_busy",
+            "message": str(self),
+            "retry_safe": True,
+            "retryGuidance": "Retry the same operation; publication did not start.",
+        }
 
 
 class GitFenceError(GitPublicationError):
@@ -682,12 +700,30 @@ class GitCoordinator:
                 os.write(descriptor, b"\0")
                 os.fsync(descriptor)
             try:
-                _lock_descriptor(descriptor)
-                locked = True
+                deadline = time.monotonic() + 30.0
+                while True:
+                    assert_owned()
+                    try:
+                        _lock_descriptor(descriptor)
+                        locked = True
+                        break
+                    except OSError as contention:
+                        if contention.errno not in (
+                            errno.EACCES,
+                            errno.EAGAIN,
+                            errno.EDEADLK,
+                        ):
+                            raise
+                        if time.monotonic() >= deadline:
+                            raise GitBusyError(
+                                "Workspace publication remained busy for 30 seconds; no publication started. Retry the same operation."
+                            ) from contention
+                        time.sleep(0.025)
             except OSError as error:
-                raise GitFenceError(
-                    "another Git publication holds the workspace lock"
+                raise GitPublicationError(
+                    f"Unable to acquire the workspace publication lock: {error}"
                 ) from error
+            assert_owned()
             yield
         finally:
             try:

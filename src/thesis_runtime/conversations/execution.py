@@ -7,8 +7,10 @@ import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from thesis_runtime.contracts.compaction import ContextPolicy, EvidenceRanker
 from thesis_runtime.contracts.context import ToolContext
 from thesis_runtime.contracts.errors import ToolCatalogError
 from thesis_runtime.contracts.messages import (
@@ -16,17 +18,21 @@ from thesis_runtime.contracts.messages import (
     SessionMessage,
     decode_transcript,
     from_record,
+    pending_job_returns,
+    unreturned_requests,
 )
 from thesis_runtime.contracts.records import (
     RECORD_ANCHOR_ROLES,
     ChatMessage,
+    CompletionMode,
+    ContextCheckpoint,
     MessageRole,
     RecordNotFound,
     SubAgentRecord,
     SubAgentStatus,
     WorkflowExecutionState,
 )
-from thesis_runtime.conversations.admission import ordered_messages
+from thesis_runtime.conversations.admission import message_order_key, ordered_messages
 from thesis_runtime.conversations.delivery import ROOT_ANCHOR_ID, Anchor
 from thesis_runtime.conversations.inbox import SessionInbox
 from thesis_runtime.conversations.recovery import continuation_delay
@@ -40,6 +46,7 @@ from thesis_runtime.sessions.session import (
     SessionTurn,
 )
 from thesis_runtime.storage.ownership import OwnershipLost
+from thesis_runtime.subagents.child import has_pending_child_returns
 from thesis_runtime.subagents.lifecycle import SubAgentLifecycle
 from thesis_runtime.subagents.store import SubAgentStore
 from thesis_runtime.tools.registry import SessionToolRegistry
@@ -111,7 +118,22 @@ def _node_context(
 
 
 def _child_system_prompt(child: SubAgentRecord) -> str:
-    return f"You are the '{child.role}' sub-agent. Complete the assigned task using the tools available to you. When the task is complete, respond with a concise final answer."
+    completion = (
+        "Complete this conversation through its advertised completion tool. "
+        "A text answer alone ends a turn and does not fulfill its explicit completion contract."
+        if child.completion_mode is CompletionMode.EXPLICIT_COMPLETION
+        else "When the task is complete, respond with a concise final answer."
+    )
+    return (
+        f"You are the '{child.role}' sub-agent. Complete the assigned task using "
+        "the tools available to you. Helper results arrive automatically. When "
+        "no useful work is ready, end your response; unreturned calls and helper "
+        "results keep the turn open and resume you on arrival. Follow each tool's "
+        "result contract: a returned job handle acknowledges submission and does "
+        "not establish job completion. Queued jobs require no operator action. "
+        "Request operator input only for a needed human decision or fact; it pauses "
+        f"until the operator replies, even if jobs finish. {completion}"
+    )
 
 
 class ConversationTurn:
@@ -134,7 +156,8 @@ class ConversationTurn:
         root_actor_id: str,
         root_allowed_tools: tuple[str, ...] | None,
         root_system_prompt: str,
-        max_history: int,
+        context_policy: ContextPolicy,
+        evidence_ranker: EvidenceRanker | None,
         max_tool_iterations: int,
     ) -> None:
         self._chat = chat
@@ -151,7 +174,8 @@ class ConversationTurn:
         self._root_actor_id = root_actor_id
         self._root_allowed_tools = root_allowed_tools
         self._root_system_prompt = root_system_prompt
-        self._max_history = max_history
+        self._context_policy = context_policy
+        self._evidence_ranker = evidence_ranker
         self._max_tool_iterations = max_tool_iterations
 
     def run(self, workspace_id: str, chat_id: str, sub_agent_id: str) -> SessionResult:
@@ -191,19 +215,14 @@ class ConversationTurn:
         self._read_epoch = (
             0 if self._record is None else _execution_epoch(self._chat, self._record)
         )
+        self._checkpoint = self._chat.read_context_checkpoint(
+            self._workspace_id, self._chat_id, self._context_id(root)
+        )
         generation, transcript = self._workers.snapshot(
             self._workspace_id,
             self._chat_id,
             self._sub_agent_id,
-            lambda: ordered_messages(
-                self._chat.read_message_window(
-                    self._workspace_id,
-                    self._chat_id,
-                    self._anchor.sub_agent_id or self._chat_id,
-                    consumed_position=durable_consumed,
-                    limit=self._max_history,
-                )
-            ),
+            lambda: self._read_context(root),
             observe=lambda messages: [
                 message.message_id for message in messages if is_external_input(message)
             ],
@@ -281,16 +300,18 @@ class ConversationTurn:
             max_tool_iterations=self._max_tool_iterations,
             intent_epoch=self._context.intent_epoch,
             timeline=self._chat.timeline,
+            context_policy=self._context_policy,
+            evidence_ranker=self._evidence_ranker,
+        )
+        system_prompt = (
+            self._root_system_prompt
+            if self._record is None
+            else _child_system_prompt(self._record)
         )
         instruction = SessionMessage(
             f"instruction-{uuid.uuid4().hex}",
             "instruction",
-            MessageContent(
-                self._root_system_prompt
-                if self._record is None
-                else _child_system_prompt(self._record),
-                "instruction",
-            ),
+            MessageContent(system_prompt, "instruction"),
         )
         decoded = decode_transcript(selected)
         inbox = SessionInbox(
@@ -314,6 +335,8 @@ class ConversationTurn:
                 admit_dispatch=self._admit_dispatch,
                 refresh_registry=self._refresh_registry,
                 reconcile=self._reconcile,
+                on_checkpoint=self._save_checkpoint,
+                has_pending_returns=self._has_pending_returns,
             )
         except OwnershipLost:
             raise
@@ -352,15 +375,128 @@ class ConversationTurn:
                 self._on_fault(failed or self._record, error)
             return SessionResult(status="failed", content=message, turns=())
         if result.status == "interrupted":
-            self._interrupted(result.failure or {})
+            self._interrupted(
+                result.failure or {},
+                resume=(result.failure or {}).get("kind")
+                not in {"context_capacity", "compaction_failed"},
+            )
             return result
         if result.status == "yielded":
             if not self._cancelled():
                 self._continue_turn(self._anchor, None)
             return result
+        if result.status == "waiting":
+            return result
         if result.status != "cancelled" and self._record is not None:
             self._on_complete(self._record, result)
         return result
+
+    def _context_id(self, root: bool) -> str:
+        return self._chat_id if root else self._sub_agent_id
+
+    def _has_pending_returns(self) -> bool:
+        """Read existing scoped messages, including calls predating compaction."""
+        self._pull()
+        messages = decode_transcript(
+            ordered_messages(tuple(self._retained.values()))
+            if self._checkpoint is None
+            else self._chat.read_message_window(
+                self._workspace_id, self._chat_id, self._context.conversation_id
+            )
+        )
+        consumed = self._chat.read_consumed_input(
+            self._workspace_id, self._chat_id, self._sub_agent_id
+        )
+        return (
+            any(message.position > consumed for message in messages)
+            or bool(unreturned_requests(messages))
+            or bool(pending_job_returns(messages))
+            or has_pending_child_returns(messages)
+        )
+
+    def _read_context(self, root: bool) -> tuple[ChatMessage, ...]:
+        checkpoint = self._checkpoint
+        rows = ordered_messages(
+            self._chat.read_message_window(
+                self._workspace_id,
+                self._chat_id,
+                self._context_id(root),
+                after_message_id=None
+                if checkpoint is None
+                else checkpoint.through_message_id,
+            )
+        )
+        if checkpoint is None:
+            return rows
+        identities = (checkpoint.summary_message_id, *checkpoint.retained_message_ids)
+        prefix = tuple(
+            self._chat.get_message(self._workspace_id, identity)
+            for identity in identities
+        )
+        if any(
+            (row.chat_id, row.conversation_id)
+            != (self._chat_id, self._context_id(root))
+            for row in prefix
+        ):
+            raise NodeTurnError("context checkpoint contains foreign evidence")
+        return (
+            *prefix,
+            *(
+                row
+                for row in rows
+                if row.message_id not in identities
+                and not (
+                    isinstance((row.data or {}).get("sessionMessage"), Mapping)
+                    and (from_record(row).content.result or {}).get(
+                        "context_compaction"
+                    )
+                )
+            ),
+        )
+
+    def _save_checkpoint(
+        self,
+        through_id: str,
+        summary: SessionMessage,
+        replacement: Sequence[SessionMessage],
+    ) -> None:
+        if self._checkpoint is not None:
+            previous = self._retained.get(
+                self._checkpoint.through_message_id
+            ) or self._chat.get_message(
+                self._workspace_id, self._checkpoint.through_message_id
+            )
+            current = self._retained[through_id]
+            if message_order_key(previous) > message_order_key(current):
+                through_id = previous.message_id
+        boundary = self._retained.get(through_id) or self._chat.get_message(
+            self._workspace_id, through_id
+        )
+        boundary_key = message_order_key(boundary)
+        retained_ids = tuple(
+            row.message_id
+            for row in replacement
+            if row.direction != "instruction"
+            and row.message_id != summary.message_id
+            and message_order_key(self._retained[row.message_id]) <= boundary_key
+        )
+        checkpoint = ContextCheckpoint(
+            workspace_id=self._workspace_id,
+            chat_id=self._chat_id,
+            conversation_id=self._context.conversation_id,
+            root_conversation_id=self._chat_id,
+            parent_conversation_id=None
+            if self._record is None
+            else self._record.parent_sub_agent_id or self._chat_id,
+            created_at=datetime.now(UTC),
+            created_by=self._context.actor_id,
+            checkpoint_id=self._context.conversation_id,
+            summary_message_id=summary.message_id,
+            through_message_id=through_id,
+            retained_message_ids=retained_ids,
+        )
+        self._chat.save_context_checkpoint(checkpoint)
+        self._checkpoint = checkpoint
 
     def _interrupted(
         self, failure: Mapping[str, object], *, resume: bool = True
@@ -500,6 +636,15 @@ class ConversationTurn:
                 if row.message_id in known
             ]
         )
+        if self._checkpoint is not None:
+            ids = (
+                self._checkpoint.summary_message_id,
+                *self._checkpoint.retained_message_ids,
+            )
+            by_id = {row.message_id: row for row in durable}
+            durable = tuple(
+                by_id[identity] for identity in ids if identity in by_id
+            ) + tuple(row for row in durable if row.message_id not in ids)
         return durable
 
     def _incoming(self, message: SessionMessage) -> SessionMessage:

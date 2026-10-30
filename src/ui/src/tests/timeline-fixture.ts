@@ -1,9 +1,18 @@
 import { TimelineController } from '$lib/timeline.svelte';
 import type { ChatMessage, ExecutionEvent, TimelineItem } from '$lib/types';
-import type { DatumWire } from '$lib/generated';
+import type { DatumWire, TranscriptItemWire } from '$lib/generated';
 import backendMessage from './backend-message.json';
 import { fixtures } from '$lib/fixtures';
 import { decodeWire } from '$lib/wire';
+import { toTranscriptMessage } from '$lib/transcript';
+
+/** HTTP history fixtures project canonical live evidence through the display contract. */
+export function transcriptFixture(items: TimelineItem[]): TranscriptItemWire[] {
+    return items.map((raw) => {
+        const item = decodeWire('TimelineItemWire', raw, 'test/canonical-timeline');
+        return item.kind === 'message' ? { ...item, payload: toTranscriptMessage(item.payload) } : item;
+    });
+}
 
 export function eventFixture(overrides: Partial<ExecutionEvent>): ExecutionEvent {
     const {seq, threadId, ...wire} = overrides;

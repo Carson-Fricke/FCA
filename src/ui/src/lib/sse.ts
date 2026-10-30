@@ -1,5 +1,5 @@
 /** Fetch-based SSE consumption of the unified chat timeline. */
-import type { TimelineItem } from './types';
+import type { TimelineItemWire } from './generated';
 import { decodeWire, WireDecodeError } from './wire';
 import { ThesisApiError } from './transport';
 
@@ -99,7 +99,7 @@ export class TimelineStream {
 		void this.activeReader?.cancel().catch(() => undefined);
 	}
 
-	async start(onItem: (item: TimelineItem) => void): Promise<void> {
+	async start(onItem: (item: TimelineItemWire) => void): Promise<void> {
 		const url = chatTimelineStreamUrl(
 			this.options.baseUrl,
 			this.options.workspaceId,
@@ -134,7 +134,7 @@ export class TimelineStream {
 		}
 	}
 
-	private async pump(body: ReadableStream<Uint8Array>, onItem: (item: TimelineItem) => void): Promise<void> {
+	private async pump(body: ReadableStream<Uint8Array>, onItem: (item: TimelineItemWire) => void): Promise<void> {
 		const reader = body.getReader();
 		this.activeReader = reader;
 		const decoder = new TextDecoder();

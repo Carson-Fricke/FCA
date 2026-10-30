@@ -46,6 +46,8 @@ export type OperatorActorKind = 'human_operator' | 'parent_agent' | 'agent';
 export type RuntimeActivityWire = ExternalInput | ModelOutput | RuntimeTool | Delivery;
 export type WorkflowExecutionState = 'queued' | 'running' | 'stopped' | 'cancelled' | 'completed' | 'failed';
 export type TimelineItemWire = TimelineMessageWire | TimelineEventWire | TimelineExecutionWire | TimelineOutputWire;
+export type TranscriptItemWire =
+	TranscriptMessageItemWire | TimelineEventWire | TimelineExecutionWire | TimelineOutputWire;
 
 export interface WireTypes {
 	ActorRequest: ActorRequest;
@@ -58,6 +60,8 @@ export interface WireTypes {
 	ChatThreadListWire: ChatThreadListWire;
 	ChatThreadWire: ChatThreadWire;
 	CompletionMode: CompletionMode;
+	ConversationOutlineEntryWire: ConversationOutlineEntryWire;
+	ConversationOutlinePageWire: ConversationOutlinePageWire;
 	CreateAttachmentRequest: CreateAttachmentRequest;
 	CreateChatRequest: CreateChatRequest;
 	CreateInvestigationRequest: CreateInvestigationRequest;
@@ -74,6 +78,7 @@ export interface WireTypes {
 	ExecutionEventType: ExecutionEventType;
 	ExecutionEventWire: ExecutionEventWire;
 	ExternalInput: ExternalInput;
+	JobCompletion: JobCompletion;
 	LaunchBacktestRequest: LaunchBacktestRequest;
 	LaunchHarnessBacktestRequest: LaunchHarnessBacktestRequest;
 	MessageContent: MessageContent;
@@ -101,19 +106,24 @@ export interface WireTypes {
 	SubAgentNodeListWire: SubAgentNodeListWire;
 	SubAgentNodeWire: SubAgentNodeWire;
 	SubAgentStatus: SubAgentStatus;
+	SubAgentSummaryWire: SubAgentSummaryWire;
 	SubmitToolJobRequest: SubmitToolJobRequest;
 	TimelineEventWire: TimelineEventWire;
 	TimelineExecutionWire: TimelineExecutionWire;
 	TimelineItemWire: TimelineItemWire;
 	TimelineMessageWire: TimelineMessageWire;
 	TimelineOutputWire: TimelineOutputWire;
-	TimelinePageWire: TimelinePageWire;
 	ToolCorrelation: ToolCorrelation;
 	ToolOperation: ToolOperation;
 	ToolRequest: ToolRequest;
 	ToolResultRequest: ToolResultRequest;
 	ToolResultWire: ToolResultWire;
 	TranscriptItemKind: TranscriptItemKind;
+	TranscriptItemWire: TranscriptItemWire;
+	TranscriptMessageItemWire: TranscriptMessageItemWire;
+	TranscriptMessageWire: TranscriptMessageWire;
+	TranscriptPageWire: TranscriptPageWire;
+	TranscriptReceiptWire: TranscriptReceiptWire;
 	UploadAttachmentRequest: UploadAttachmentRequest;
 	WorkflowDefinitionWire: WorkflowDefinitionWire;
 	WorkflowExecutionState: WorkflowExecutionState;
@@ -286,21 +296,19 @@ export interface ChatSubAgentMessageRequest {
 	message_id?: string | null;
 }
 /**
- * Canonical tree response used by the projection and HTTP schema export.
+ * Flat node summaries; parent identities reconstruct the hierarchy once.
  */
 export interface ChatSubAgentTreeWire {
 	chatId: string;
-	items: SubAgentNodeWire[];
-	roots: SubAgentNodeWire[];
+	items: SubAgentSummaryWire[];
 }
 /**
- * One chat-scoped sub-agent node and its direct children.
+ * A flat hierarchy row; the node detail endpoint owns retained results.
  */
-export interface SubAgentNodeWire {
+export interface SubAgentSummaryWire {
 	acceptsInput: boolean;
 	allowedTools: string[];
 	chatId: string;
-	children?: SubAgentNodeWire[];
 	completionContractRef: string | null;
 	completionMode: CompletionMode;
 	createdAt: string | null;
@@ -311,9 +319,7 @@ export interface SubAgentNodeWire {
 	phase: string | null;
 	phaseAttemptId: string | null;
 	phaseExecutor: boolean;
-	result: {
-		[k: string]: unknown;
-	} | null;
+	resultAvailable?: boolean;
 	resultRef: string | null;
 	returnsToSubAgentId: string | null;
 	role: string;
@@ -358,6 +364,27 @@ export interface ChatThreadWire {
 	title: string;
 	updated_at: string | null;
 	workspace_id: string;
+}
+/**
+ * Navigation metadata; the canonical receipt remains in the timeline.
+ */
+export interface ConversationOutlineEntryWire {
+	datumIndex: number | null;
+	entityId: string | null;
+	executionId: string | null;
+	id: string;
+	kind: 'turn' | 'request' | 'workflow' | 'study' | 'artifact';
+	messageId: string;
+	requestMessageId: string | null;
+	seq: number;
+	status: string | null;
+	threadId: string;
+	title: string;
+}
+export interface ConversationOutlinePageWire {
+	after: number;
+	items: ConversationOutlineEntryWire[];
+	nextAfter: number | null;
 }
 export interface CreateAttachmentRequest {
 	actor_id: string;
@@ -499,6 +526,16 @@ export interface ExecutionEventWire {
 		[k: string]: unknown;
 	};
 	workspaceId: string;
+}
+export interface JobCompletion {
+	artifact_count: number;
+	error_message: string | null;
+	job_id: string;
+	kind: 'backtest' | 'study' | 'screen';
+	metrics: {
+		[k: string]: string;
+	};
+	state: 'succeeded' | 'failed' | 'cancelled';
 }
 /**
  * Request boundary mirroring the harness activation request contract.
@@ -653,6 +690,36 @@ export interface SteerWorkflowRequest {
 export interface SubAgentNodeListWire {
 	items: SubAgentNodeWire[];
 }
+/**
+ * One chat-scoped sub-agent node and its direct children.
+ */
+export interface SubAgentNodeWire {
+	acceptsInput: boolean;
+	allowedTools: string[];
+	chatId: string;
+	children?: SubAgentNodeWire[];
+	completionContractRef: string | null;
+	completionMode: CompletionMode;
+	createdAt: string | null;
+	delegatedBudget: number;
+	inputContractRef: string | null;
+	kind: SubAgentKind;
+	parentSubAgentId: string | null;
+	phase: string | null;
+	phaseAttemptId: string | null;
+	phaseExecutor: boolean;
+	result: {
+		[k: string]: unknown;
+	} | null;
+	resultRef: string | null;
+	returnsToSubAgentId: string | null;
+	role: string;
+	specVersion: string;
+	status: SubAgentStatus;
+	subAgentId: string;
+	updatedAt: string | null;
+	workflowExecutionId: string | null;
+}
 export interface SubmitToolJobRequest {
 	actor_id: string;
 	experiment_ids?: string[];
@@ -735,12 +802,6 @@ export interface TimelineOutputWire {
 	ts: string;
 	workspaceId: string;
 }
-export interface TimelinePageWire {
-	after: number;
-	items: TimelineItemWire[];
-	nextBefore: number | null;
-	outputPrefixes?: TimelineOutputWire[];
-}
 export interface ToolResultRequest {
 	actor_id?: string | null;
 	error_message?: string | null;
@@ -749,6 +810,72 @@ export interface ToolResultRequest {
 		[k: string]: unknown;
 	} | null;
 	success?: boolean;
+}
+export interface TranscriptMessageItemWire {
+	chatId: string;
+	executionId?: string | null;
+	id: string;
+	kind: 'message';
+	payload: TranscriptMessageWire;
+	seq: number;
+	threadId?: string | null;
+	ts: string;
+	workspaceId: string;
+}
+/**
+ * Bounded display projection, with explicit canonical detail availability.
+ */
+export interface TranscriptMessageWire {
+	actor_id: string;
+	attachment_ids: string[];
+	body: string;
+	chat_id: string;
+	conversation_id: string;
+	created_at: string;
+	created_by: string;
+	data: {
+		[k: string]: unknown;
+	} | null;
+	detailsAvailable: boolean;
+	execution_id: string | null;
+	input_position: number;
+	intent_epoch: number;
+	kind: TranscriptItemKind;
+	message_id: string;
+	parent_conversation_id: string | null;
+	reasoning: string | null;
+	receipt: TranscriptReceiptWire;
+	references: {
+		[k: string]: string[];
+	};
+	role: MessageRole;
+	root_conversation_id: string;
+	schema_version: number;
+	state: MessageState;
+	tool_result: {
+		[k: string]: unknown;
+	} | null;
+	updated_at: string | null;
+	workspace_id: string;
+}
+/**
+ * Presentation facts from one canonical receipt; never provider context.
+ */
+export interface TranscriptReceiptWire {
+	correlation?: ToolCorrelation | null;
+	requests?: ToolRequest[];
+	result?: {
+		[k: string]: unknown;
+	} | null;
+}
+/**
+ * Byte-bounded history with the same canonical sequence and resume watermark.
+ */
+export interface TranscriptPageWire {
+	after: number;
+	items: TranscriptItemWire[];
+	nextBefore: number | null;
+	outputPrefixes?: TimelineOutputWire[];
 }
 export interface UploadAttachmentRequest {
 	content_uri: string;

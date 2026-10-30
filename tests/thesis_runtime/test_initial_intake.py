@@ -25,16 +25,100 @@ from thesis_runtime.contracts.messages import (
     ToolRequest,
     decode_transcript,
 )
-from thesis_runtime.contracts.records import MessageRole
+from thesis_runtime.contracts.records import ChatMessage, MessageRole, SubAgentKind
 from thesis_runtime.conversations import ChatService
 from thesis_runtime.conversations.conversation import Conversations
 from thesis_runtime.conversations.delivery import Anchor
 from thesis_runtime.conversations.incoming import write_incoming
-from thesis_runtime.subagents.specs import SubAgentSpec
+from thesis_runtime.subagents.specs import InitialContext, SubAgentSpec
+
+
+@pytest.mark.parametrize("interrupt_startup", [False, True])
+def test_initial_context_is_durable_before_wake_and_not_repeated_on_revisit(
+    tmp_path, interrupt_startup
+):
+    assignment = "Investigate the assigned construction."
+    original = "  Original request with exact spacing.\nSecond line.  "
+    wakes = []
+    requests = []
+
+    class Persistence(FileChatPersistence):
+        fail = interrupt_startup
+
+        def admit_message(self, message):
+            if self.fail and message.body == assignment:
+                self.fail = False
+                raise OSError("assignment persistence interrupted")
+            return super().admit_message(message)
+
+    class Provider:
+        streaming = True
+
+        def stream(self, **kwargs):
+            requests.append(kwargs["messages"])
+            yield ModelCompletion(
+                message=ProviderMessage("assistant", "Observed"),
+                model="test",
+                provider="test",
+                role=kwargs["role"],
+                prompt_tokens=0,
+                completion_tokens=0,
+            )
+
+    persistence = Persistence(tmp_path)
+    chat = ChatService(persistence=persistence)
+    thread = chat.create_chat("workspace", title="Startup", owner_actor_id="operator")
+    service = Conversations(
+        chat=chat, provider=NativeSessionAdapter(Provider()), spawn_thread=wakes.append
+    )
+    context = InitialContext(original, "original-message", thread.chat_id)
+
+    def spawn(prompt=assignment, key="assignment-one"):
+        return service.spawn(
+            Anchor("workspace", thread.chat_id),
+            SubAgentSpec(role="helper"),
+            prompt,
+            SubAgentKind.CONVERSATION,
+            sub_agent_id="startup-child",
+            prompt_key=key,
+            initial_context=(context,),
+        )
+
+    if interrupt_startup:
+        with pytest.raises(OSError, match="assignment persistence"):
+            spawn()
+        assert not wakes
+        rows = persistence.list(ChatMessage, "workspace")
+        contexts = [row for row in rows if row.body == original]
+        assert len(contexts) == 1 and contexts[0].data is not None
+        assert contexts[0].data["runTurn"] is False
+        chat = ChatService(persistence=FileChatPersistence(tmp_path))
+        service = Conversations(
+            chat=chat,
+            provider=NativeSessionAdapter(Provider()),
+            spawn_thread=wakes.append,
+        )
+    child = spawn()
+    assert len(wakes) == 1
+    transcript = child.transcript()
+    assert [row.body for row in transcript] == [original, assignment]
+    assert transcript[0].message_id != context.source_message_id
+    assert [row.input_position for row in transcript] == [1, 2]
+    wakes.pop(0)()
+    assert [
+        json.loads(message.content)["text"]
+        for message in requests[0]
+        if message.role == "user"
+    ] == [original, assignment]
+    spawn()
+    assert not wakes
+    spawn("Review the new evidence.", "assignment-two")
+    assert len(wakes) == 1
+    assert [row.body for row in child.transcript()].count(original) == 1
 
 
 @pytest.mark.parametrize("delivery", [False, True])
-def test_all_sixty_pending_inputs_are_consumed_then_restart_history_is_bounded(
+def test_all_sixty_inputs_and_outputs_remain_in_context_after_restart(
     tmp_path: Path, delivery: bool
 ) -> None:
     chat = ChatService(persistence=FileChatPersistence(tmp_path))
@@ -74,7 +158,6 @@ def test_all_sixty_pending_inputs_are_consumed_then_restart_history_is_bounded(
     service = Conversations(
         chat=chat,
         provider=NativeSessionAdapter(Provider()),
-        max_history=40,
         spawn_thread=workers.append,
         read_consumed_input=chat.read_consumed_input,
         acknowledge_input=chat.acknowledge_input,
@@ -107,12 +190,11 @@ def test_all_sixty_pending_inputs_are_consumed_then_restart_history_is_bounded(
     restarted = Conversations(
         chat=chat,
         provider=NativeSessionAdapter(Provider()),
-        max_history=40,
         read_consumed_input=chat.read_consumed_input,
         acknowledge_input=chat.acknowledge_input,
     )
     restarted.root("workspace", thread.chat_id).run_turn()
-    assert len(requests[1]) == 41
+    assert len(requests[1]) >= 62
     assert chat.read_consumed_input("workspace", thread.chat_id, "") == 60
 
 

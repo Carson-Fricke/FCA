@@ -8,12 +8,14 @@
 	let {
 		acceptsInput,
 		phase = '',
+		agentLabel = '',
 		busy = false,
 		draft = $bindable(''),
 		onSubmit = () => {}
 	}: {
 		acceptsInput: boolean;
 		phase?: string;
+		agentLabel?: string;
 		busy?: boolean;
 		draft?: string;
 		onSubmit?: (body: string) => void | Promise<void>;
@@ -42,10 +44,12 @@
 
 {#if acceptsInput}
 	<div class="border-t border-surface-700 bg-surface-900 p-2.5" data-testid="sub-agent-composer">
+		{#if agentLabel}<p class="mb-1.5 text-[11px] text-slate-400">Message {agentLabel.replace(/_/g, ' ')}</p>{/if}
 		<div class="flex items-end gap-2">
 			<textarea
 				class="max-h-28 min-h-9 flex-1 resize-y rounded-lg border border-surface-600/60 bg-surface-950 px-3 py-1.5 text-sm text-slate-800 outline-none placeholder:text-slate-500 focus:border-accent/50"
 				{placeholder}
+				aria-label={agentLabel ? `Message ${agentLabel}` : placeholder}
 				bind:value={draft}
 				data-testid="sub-agent-composer-input"
 				onkeydown={(e) => {

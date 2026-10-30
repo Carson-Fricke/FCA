@@ -374,6 +374,30 @@ class ConversationRecord(WorkspaceRecord):
 
 
 @dataclass(frozen=True, slots=True)
+class ContextCheckpoint(ConversationRecord):
+    """Atomic context selector; summary and evidence remain canonical messages.
+
+    The covered boundary is a durable message identity, never a count or an
+    input acknowledgement. Updating this record cannot consume pending input.
+    """
+
+    checkpoint_id: str
+    summary_message_id: str
+    through_message_id: str
+    retained_message_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        for name in ("checkpoint_id", "summary_message_id", "through_message_id"):
+            _validate_id(getattr(self, name), name)
+        object.__setattr__(
+            self,
+            "retained_message_ids",
+            _normalise_ids(self.retained_message_ids, "retained_message_ids"),
+        )
+        ConversationRecord.__post_init__(self)
+
+
+@dataclass(frozen=True, slots=True)
 class RecordLinks:
     """Explicit links shared by conversation and execution records."""
 
@@ -999,6 +1023,7 @@ __all__ = [
     "ChatThread",
     "CompletionMode",
     "ConversationRecord",
+    "ContextCheckpoint",
     "CrossWorkspaceLinkError",
     "InvalidLifecycleTransition",
     "MessageRole",

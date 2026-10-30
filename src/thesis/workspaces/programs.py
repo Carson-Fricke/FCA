@@ -1,4 +1,10 @@
-"""Committed, workspace-scoped Rust programs and exact-input validation receipts."""
+"""Coordinate committed programs, exact validation and retained submissions.
+
+Own content/dependency snapshots and Git fencing across program lifecycle
+operations. SDK identity, guidance and templates come from AuthoringSdk;
+configuration value rules live in program_contracts. This coordinator does not
+parse SDK wire responses or discover packaged SDK sources.
+"""
 
 from __future__ import annotations
 
@@ -6,11 +12,9 @@ import hashlib
 import json
 import math
 import re
-import tomllib
 from collections.abc import Callable, Mapping, Sequence
-from datetime import datetime
 from pathlib import Path
-from typing import Literal, Protocol, cast
+from typing import Protocol, cast
 from uuid import uuid4
 
 from thesis.experiments.mandate import DataWindowPolicy, datetime_ns, rfc3339
@@ -22,24 +26,27 @@ from thesis.persistence.git import (
 )
 from thesis.persistence.submissions import SqliteSubmissionStore, SubmissionStore
 from thesis.research.evidence import parameter_digest
-from thesis.research.models import (
-    MARKET_SUBSCRIPTIONS_SCHEMA,
-    ResearchModelError,
-    validate_market_configuration,
-    validate_market_subscriptions,
-)
 from thesis.workspaces.exploration import output_page
 from thesis.workspaces.local import WorkspaceRepositoryError
+from thesis.workspaces.program_contracts import (
+    ProgramArtifactError,
+    ProgramHarnessResult,
+    ProgramKind,
+    ProgramPublicationError,
+    canonical_bytes,
+    check_configuration,
+    configuration_window,
+)
 from thesis.workspaces.repository import WorkspaceGit, WorkspaceRepositoryProvider
-from thesis.workspaces.sdk import source_hashes as sdk_source_hashes
+from thesis.workspaces.sdk.ports import AuthoringSdk
+from thesis.workspaces.sdk.reading import source_page
 from thesis.workspaces.sketches import WorkspaceSketches
 from thesis_runtime.storage.ownership import assert_owned
+from thesis_runtime.tools.reading import (
+    DEFAULT_READ_TOKENS,
+    MAX_READ_TOKENS,
+)
 from thesis_runtime.tools.schema import render_violations, validate_arguments
-
-ProgramKind = Literal["study", "strategy", "indicator"]
-
-# Source and wheel installations share the same thesis/harness sibling layout.
-_PACKAGED_SDK_ROOT = Path(__file__).resolve().parents[2] / "harness" / "strategy-sdk"
 
 #: Settle one dispatched execution's definitive non-success outcome, given the
 #: execution certainty and an optional message.
@@ -58,7 +65,6 @@ _RESERVED_IDS = {"con", "prn", "aux", "nul"} | {
 }
 PROGRAM_ID_PATTERN = r"^[a-z][a-z0-9_-]{0,63}$"
 INDICATOR_ID_PATTERN = r"^(?!(?:self|super|crate)$)[a-z][a-z0-9_]{0,63}$"
-MAX_READ_CHARS = 16000
 MAX_LIST_RESULTS = 200
 MAX_NULL_BLOCK_SIZE = 10_000
 NULL_TRANSFORM_MODES = ("permutation", "block_permutation")
@@ -120,138 +126,6 @@ PARAMETER_DECLARATION_SCHEMA: dict[str, object] = {
         ],
     },
 }
-_DATE_PATTERN = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
-PROGRAM_CONFIGURATION_SCHEMA: dict[str, object] = {
-    "type": "object",
-    "required": ["start", "end", "subscriptions"],
-    "properties": {
-        "start": {"type": "string", "pattern": _DATE_PATTERN},
-        "end": {"type": "string", "pattern": _DATE_PATTERN},
-        "subscriptions": MARKET_SUBSCRIPTIONS_SCHEMA,
-    },
-}
-
-STUDY_TEMPLATE = """use harness_strategy_sdk::{export_study_program, BarFrame, MarketConsumer,
-    MetricPublisher, ObservationContext, StudyProgram, Subscription};
-use harness_strategy_sdk::serde_json::Value;
-#[derive(Default)]
-struct AuthoredStudy { frames: u64 }
-impl MarketConsumer for AuthoredStudy {
-    type Context = ObservationContext;
-    fn subscriptions(&self) -> Vec<Subscription> {
-        vec![Subscription::Bars { symbols: vec!["SPY".into()], interval: "1min".into() }]
-    }
-    fn on_bar(&mut self, _: &BarFrame, _: &mut ObservationContext) { self.frames += 1; }
-}
-impl StudyProgram for AuthoredStudy {
-    fn new(_: Value) -> Self { Self::default() }
-    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
-        let _ = metrics.publish("study_frames", self.frames as f64);
-    }
-}
-export_study_program!(AuthoredStudy);
-"""
-STRATEGY_TEMPLATE = """use harness_strategy_sdk::{export_strategy_program, Fill, MarketConsumer,
-    OrderSink, StrategyProgram, Subscription};
-use harness_strategy_sdk::building_blocks::FillLedger;
-use harness_strategy_sdk::serde_json::Value;
-use std::collections::BTreeMap;
-struct AuthoredStrategy { fills: BTreeMap<String, FillLedger> }
-impl MarketConsumer for AuthoredStrategy {
-    type Context = OrderSink;
-    fn subscriptions(&self) -> Vec<Subscription> {
-        vec![Subscription::Bars { symbols: vec!["SPY".into()], interval: "1min".into() }]
-    }
-}
-impl StrategyProgram for AuthoredStrategy {
-    fn new(_: Value) -> Self { Self { fills: BTreeMap::new() } }
-    fn on_fill(&mut self, fill: &Fill) {
-        // Every partial fill changes inventory. Entry/exit decisions must use
-        // actual quantity, not assume the first fill completed the order.
-        self.fills.entry(fill.symbol.into())
-            .or_insert_with(|| FillLedger::new(fill.symbol))
-            .apply(fill).expect("invalid booked fill");
-    }
-}
-export_strategy_program!(AuthoredStrategy);
-"""
-INDICATOR_TEMPLATE = """use std::collections::BTreeMap;
-use harness_strategy_sdk::{BarFrame, Decimal, Indicator, IndicatorSequence, MarketConsumer,
-    ObservationContext, QuoteEvent, Subscription, TradeEvent};
-#[derive(Default)]
-pub struct AuthoredIndicator {
-    last: BTreeMap<String, Option<Decimal>>, sequence: IndicatorSequence
-}
-impl MarketConsumer for AuthoredIndicator {
-    type Context = ObservationContext;
-    fn subscriptions(&self) -> Vec<Subscription> {
-        vec![Subscription::Bars { symbols: vec!["SPY".into()], interval: "1min".into() }]
-    }
-    fn on_bar(&mut self, frame: &BarFrame, _: &mut ObservationContext) {
-        for (symbol, bar) in &frame.bars_by_symbol {
-            self.last.insert((*symbol).into(), Some(bar.close));
-        }
-        for symbol in &frame.missing_symbols { self.last.insert((*symbol).into(), None); }
-    }
-    fn on_trade(&mut self, event: &TradeEvent, _: &mut ObservationContext) {
-        self.last.insert(event.symbol.into(), Some(event.price));
-    }
-    fn on_quote(&mut self, event: &QuoteEvent, _: &mut ObservationContext) {
-        self.last.insert(event.symbol.into(), Some(event.mid()));
-    }
-}
-impl Indicator for AuthoredIndicator {
-    fn value(&self, symbol: &str) -> Option<Decimal> { self.last.get(symbol).copied().flatten() }
-    fn sequence(&self) -> &IndicatorSequence { &self.sequence }
-    fn sequence_mut(&mut self) -> &mut IndicatorSequence { &mut self.sequence }
-}
-"""
-PROGRAM_TEMPLATES = {
-    "study": STUDY_TEMPLATE,
-    "strategy": STRATEGY_TEMPLATE,
-    "indicator": INDICATOR_TEMPLATE,
-}
-_SDK_TOPICS = {
-    "consumer": "strategy-sdk/src/consumer.rs",
-    "program": "strategy-sdk/src/program.rs",
-    "indicator_api": "strategy-sdk/src/indicator.rs",
-    "wavelet": "strategy-sdk/src/wavelet.rs",
-    "events": "strategy-sdk/src/events.rs",
-    "exports": "strategy-sdk/src/export.rs",
-    "decimal": "num/src/decimal.rs",
-    "building_blocks": "strategy-sdk/src/building_blocks.rs",
-    "outputs": "strategy-sdk/src/outputs.rs",
-    "research_views": "strategy-sdk/src/research/view.rs",
-    "research_publishing": "strategy-sdk/src/research/publishing.rs",
-    "research_recipes": "strategy-sdk/src/research/recipes.rs",
-}
-
-
-class ProgramArtifactError(ValueError):
-    """Invalid identity, stale edit/validation, or an unavailable program capability."""
-
-
-class ProgramPublicationError(ProgramArtifactError):
-    """A local commit exists but provider publication needs explicit reconciliation."""
-
-    def __init__(self, receipt: Mapping[str, object]) -> None:
-        super().__init__(
-            "Program is committed locally; publication or checkout materialization failed. Inspect the pinned receipt. Use the matching publish tool only to retry repository publication; it never repairs checkout/index state. Ask the operator to reconcile checkout failures; do not re-author or replay execution."
-        )
-        self.receipt = dict(receipt)
-
-
-class ProgramHarnessResult(Protocol):
-    """Common result surface of the MCP client and HarnessToolProvider."""
-
-    @property
-    def is_error(self) -> bool: ...
-
-    @property
-    def structured(self) -> Mapping[str, object]: ...
-
-    @property
-    def text(self) -> str: ...
 
 
 class ProgramHarness(Protocol):
@@ -260,19 +134,6 @@ class ProgramHarness(Protocol):
     def call_tool(
         self, name: str, arguments: Mapping[str, object] | None = None
     ) -> ProgramHarnessResult: ...
-
-    def current_server_info(self) -> Mapping[str, object]: ...
-
-    def read_sdk_reference(self, **arguments: object) -> ProgramHarnessResult: ...
-
-
-def _bytes(value: object) -> bytes:
-    try:
-        return json.dumps(
-            value, sort_keys=True, separators=(",", ":"), allow_nan=False
-        ).encode()
-    except (TypeError, ValueError) as error:
-        raise ProgramArtifactError("program values must be JSON-shaped") from error
 
 
 def _hash(value: bytes) -> str:
@@ -386,7 +247,7 @@ class WorkspacePrograms:
         repositories: WorkspaceRepositoryProvider,
         harness: ProgramHarness | None = None,
         *,
-        sdk_root: Path | None = None,
+        sdk: AuthoringSdk,
         submissions: SubmissionStore | None = None,
         git_factory: Callable[[Path], WorkspaceGit] = _default_git_factory,
     ) -> None:
@@ -398,7 +259,7 @@ class WorkspacePrograms:
         self.repositories = repositories
         self.sketches = WorkspaceSketches(repositories, git_factory=git_factory)
         self.harness = harness
-        self.sdk_root = sdk_root or _PACKAGED_SDK_ROOT
+        self.sdk = sdk
         self._git_factory = git_factory
         self._catalog_cache: dict[
             tuple[str, str], tuple[str, tuple[dict[str, object], ...]]
@@ -529,7 +390,7 @@ class WorkspacePrograms:
             payload = self._source_bytes(source)
             files = {
                 f"{relative}/program.rs": payload,
-                f"{relative}/manifest.json": _bytes(manifest),
+                f"{relative}/manifest.json": canonical_bytes(manifest),
             }
             commit = self._commit(workspace_id, git, head, files, "author " + kind)
             return self._receipt(workspace_id, kind, program_id, commit)
@@ -584,7 +445,7 @@ class WorkspacePrograms:
             self._check_manifest(workspace_id, manifest)
             files = {
                 f"{relative}/program.rs": self._source_bytes(updated),
-                f"{relative}/manifest.json": _bytes(manifest),
+                f"{relative}/manifest.json": canonical_bytes(manifest),
             }
             if all(
                 git.file_matches(head, path, payload) for path, payload in files.items()
@@ -648,7 +509,7 @@ class WorkspacePrograms:
                 raise ProgramArtifactError(
                     "stored program validation must be an object"
                 )
-        serving = self._matched_sdk()
+        serving = self.sdk.matched_metadata()
         return {
             **self._receipt(workspace_id, kind, program_id, selected),
             "source": self._assembled_source(snapshot, kind)
@@ -742,9 +603,26 @@ class WorkspacePrograms:
         *,
         start_line: int = 1,
         end_line: int | None = None,
-        max_chars: int = MAX_READ_CHARS,
+        max_tokens: int = DEFAULT_READ_TOKENS,
+        token_offset: int = 0,
         job_id: str | None = None,
+        expected_source_sha256: str | None = None,
     ) -> dict[str, object]:
+        def page_source(source: str) -> dict[str, object]:
+            digest = _hash(source.encode())
+            if expected_source_sha256 is not None and digest != expected_source_sha256:
+                raise ProgramArtifactError(
+                    "program source changed since the previous page; restart the read or select immutable job_id source"
+                )
+            page = self._range(source, start_line, end_line, max_tokens, token_offset)
+            cursor = page.get("nextArguments")
+            if isinstance(cursor, dict):
+                cursor.pop("topic", None)
+                cursor.update(program_id=program_id, expected_source_sha256=digest)
+                if job_id is not None:
+                    cursor["job_id"] = job_id
+            return page
+
         if job_id is not None:
             result = self.job_result(job_id)
             accepted = result.get("accepted_input")
@@ -779,15 +657,13 @@ class WorkspacePrograms:
                 "jobId": job_id,
                 "bundleHash": matches[0].get("bundle_hash"),
                 "sourceSha256": _hash(source.encode()),
-                **self._range(source, start_line, end_line, max_chars),
+                **page_source(source),
             }
         git = self._git(self.repositories.open(workspace_id).root)
         head = self._head(git)
         snapshot = self._snapshot(workspace_id, kind, program_id, head)
         result = self._receipt(workspace_id, kind, program_id, head)
-        result.update(
-            self._range(cast(str, snapshot["source"]), start_line, end_line, max_chars)
-        )
+        result.update(page_source(cast(str, snapshot["source"])))
         result["configuration"] = cast(dict[str, object], snapshot["manifest"])[
             "configuration"
         ]
@@ -930,7 +806,7 @@ class WorkspacePrograms:
             ):
                 continue
             try:
-                self._check_configuration(manifest.get("configuration"))
+                check_configuration(manifest.get("configuration"))
             except ProgramArtifactError:
                 continue
             declared = manifest.get("indicatorIds")
@@ -1045,7 +921,7 @@ class WorkspacePrograms:
             "digests": {
                 "source_sha256": _hash(cast(str, snapshot["source"]).encode()),
                 "bundle_sha256": snapshot["version"],
-                "manifest_sha256": _hash(_bytes(manifest)),
+                "manifest_sha256": _hash(canonical_bytes(manifest)),
             },
             "inputs": _program_inputs(configuration),
             "files": files,
@@ -1078,7 +954,7 @@ class WorkspacePrograms:
         head = self._head(git)
         snapshot = self._snapshot(workspace_id, kind, program_id, head)
         source = self._assembled_source(snapshot, kind)
-        serving = self._matched_sdk()
+        serving = self.sdk.matched_metadata()
         sdk_identity = serving["sdkIdentity"]
         manifest = cast(dict[str, object], snapshot["manifest"])
         result = self._call(
@@ -1094,7 +970,7 @@ class WorkspacePrograms:
         validation_identity = result.structured.get("validationIdentity")
         if not isinstance(validation_identity, str) or not validation_identity:
             validation_identity = serving.get("validationIdentity")
-        current_serving = self._matched_sdk()
+        current_serving = self.sdk.matched_metadata()
         if current_serving["sdkIdentity"] != sdk_identity:
             raise ProgramArtifactError("serving SDK changed during validation")
         if validation_identity != current_serving.get("validationIdentity"):
@@ -1121,7 +997,7 @@ class WorkspacePrograms:
         relative = self._path(workspace_id, kind, program_id)
         with git.publication_lock():
             current = self._head(git)
-            if self._sdk_identity() != sdk_identity:
+            if self.sdk.local_identity() != sdk_identity:
                 raise ProgramArtifactError(
                     "SDK changed during validation; validate again"
                 )
@@ -1136,7 +1012,7 @@ class WorkspacePrograms:
                 workspace_id,
                 git,
                 current,
-                {f"{relative}/validation.json": _bytes(receipt)},
+                {f"{relative}/validation.json": canonical_bytes(receipt)},
                 "validate " + kind,
             )
         return receipt
@@ -1160,7 +1036,7 @@ class WorkspacePrograms:
             raise ProgramArtifactError(
                 "program requires validation before running"
             ) from error
-        serving = self._matched_sdk()
+        serving = self.sdk.matched_metadata()
         if not isinstance(validation, dict) or (
             validation.get("accepted") is not True
             or validation.get("version") != snapshot["version"]
@@ -1194,6 +1070,7 @@ class WorkspacePrograms:
         null_transform: Mapping[str, object] | None = None,
         job_id: str | None = None,
         retain: JobRetention | None = None,
+        recipient: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         if kind == "indicator":
             raise ProgramArtifactError(
@@ -1210,6 +1087,7 @@ class WorkspacePrograms:
             null_transform=null_transform,
             job_id=f"job-{uuid4().hex}" if job_id is None else job_id,
             retain=retain,
+            recipient=recipient,
         )
 
     def _execute_prepared(
@@ -1227,6 +1105,7 @@ class WorkspacePrograms:
         batch_id: str | None = None,
         batch_kind: str | None = None,
         null_plan: Mapping[str, object] | None = None,
+        recipient: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         """Execute one point against a prepared pinned bundle.
 
@@ -1246,7 +1125,7 @@ class WorkspacePrograms:
                 configuration["start"] = rfc3339(data_window.start_ns)
                 configuration["end"] = rfc3339(data_window.end_ns)
             else:
-                start, end = self._configuration_window(configuration)
+                start, end = configuration_window(configuration)
                 violation = data_window.window_violation(
                     datetime_ns(start), datetime_ns(end)
                 )
@@ -1318,7 +1197,11 @@ class WorkspacePrograms:
                 workspace_id,
                 job_id,
                 tool,
-                {"config": configuration, "attribution": attribution},
+                {
+                    "config": configuration,
+                    "attribution": attribution,
+                    **({"recipient": dict(recipient)} if recipient is not None else {}),
+                },
             )
             if retain is not None:
                 settle = retain(job_id, tool, attribution)
@@ -1362,7 +1245,13 @@ class WorkspacePrograms:
                     "parameterAssignment": assignment,
                     "result": {
                         key: result.structured[key]
-                        for key in ("state", "status", "metrics", "artifacts")
+                        for key in (
+                            "state",
+                            "status",
+                            "metrics",
+                            "artifacts",
+                            "error_message",
+                        )
                         if key in result.structured
                     },
                     **outcome,
@@ -1438,7 +1327,7 @@ class WorkspacePrograms:
             "version": cast(str, snapshot["version"]),
             "gitCommit": commit,
             "parameterAssignmentSha256": parameter_assignment_sha256(assignment),
-            "submittedInputSha256": _hash(_bytes(configuration)),
+            "submittedInputSha256": _hash(canonical_bytes(configuration)),
         }
         if batch_id is not None:
             attribution["batchId"] = batch_id
@@ -1471,6 +1360,7 @@ class WorkspacePrograms:
         *,
         data_window: DataWindowPolicy | None = None,
         retain: JobRetention | None = None,
+        recipient: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         if kind == "indicator":
             raise ProgramArtifactError(
@@ -1490,7 +1380,7 @@ class WorkspacePrograms:
         manifest = cast(dict[str, object], prepared["manifest"])
         configuration = cast(Mapping[str, object], manifest["configuration"])
         if data_window is not None and not data_window.override:
-            start, end = self._configuration_window(configuration)
+            start, end = configuration_window(configuration)
             violation = data_window.window_violation(
                 datetime_ns(start), datetime_ns(end)
             )
@@ -1506,7 +1396,7 @@ class WorkspacePrograms:
                     f"assignments[{index}] must be a parameter assignment object"
                 )
             resolved = self._resolve_parameters(declaration, assignment)
-            key = _hash(_bytes(resolved))
+            key = _hash(canonical_bytes(resolved))
             if key in seen:
                 raise ProgramArtifactError(
                     f"assignments[{index}] duplicates an earlier parameter assignment"
@@ -1534,6 +1424,7 @@ class WorkspacePrograms:
                     null_transform=None,
                     job_id=f"job-{uuid4().hex}",
                     retain=retain,
+                    recipient=recipient,
                     batch_id=batch_id,
                     batch_kind="batch",
                 )
@@ -1586,6 +1477,7 @@ class WorkspacePrograms:
         label: str | None = None,
         data_window: DataWindowPolicy | None = None,
         retain: JobRetention | None = None,
+        recipient: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         """Submit declared permutation nulls in bounded chunks through the run boundary.
 
@@ -1633,7 +1525,7 @@ class WorkspacePrograms:
         manifest = cast(dict[str, object], prepared["manifest"])
         configuration = cast(Mapping[str, object], manifest["configuration"])
         if data_window is not None and not data_window.override:
-            start, end = self._configuration_window(configuration)
+            start, end = configuration_window(configuration)
             violation = data_window.window_violation(
                 datetime_ns(start), datetime_ns(end)
             )
@@ -1668,6 +1560,7 @@ class WorkspacePrograms:
                     },
                     job_id=f"job-{uuid4().hex}",
                     retain=retain,
+                    recipient=recipient,
                     batch_id=batch_id,
                     batch_kind="null",
                     null_plan={
@@ -1739,7 +1632,25 @@ class WorkspacePrograms:
         )
         content = result.structured.get("content")
         if result.is_error or not isinstance(content, str):
-            raise ProgramArtifactError("exploratory output artifact is unavailable")
+            status = self._call("get_job_status", {"job_id": job_id})
+            state = status.structured.get("state")
+            if not status.is_error and state in {"queued", "running"}:
+                raise ProgramArtifactError(
+                    "Exploratory outputs are not ready; job completion will arrive automatically. Continue useful work or end this turn.",
+                    kind="not_ready",
+                    job_id=job_id,
+                    state=state,
+                    certainty="not_started",
+                    retry_safe=False,
+                    retryGuidance="Wait for the delivered completion; do not poll or request operator input.",
+                )
+            raise ProgramArtifactError(
+                "Exploratory output artifact is unavailable.",
+                kind="artifact_unavailable",
+                job_id=job_id,
+                state=state,
+                diagnostics=dict(result.structured),
+            )
         return output_page(
             job_id,
             content,
@@ -1749,246 +1660,29 @@ class WorkspacePrograms:
             limit=limit,
         )
 
-    def _serving_sdk(self) -> dict[str, object]:
-        """Read fresh SDK/compiler metadata through the public harness ports."""
-        if self.harness is None:
-            raise ProgramArtifactError("harness is not configured")
-        try:
-            read_info = getattr(self.harness, "current_server_info", None)
-            metadata = read_info() if callable(read_info) else {}
-            if isinstance(metadata, Mapping):
-                metadata = metadata.get("serverInfo", metadata)
-            if not isinstance(metadata, Mapping) or "sdkIdentity" not in metadata:
-                result = self.harness.read_sdk_reference()
-                if result.is_error:
-                    raise ProgramArtifactError("serving SDK metadata is unavailable")
-                metadata = result.structured
-        except (HarnessMcpError, OSError, AttributeError) as error:
-            raise ProgramArtifactError("serving SDK metadata is unavailable") from error
-        if (
-            not isinstance(metadata, Mapping)
-            or not isinstance(metadata.get("sdkIdentity"), str)
-            or re.fullmatch(r"[0-9a-f]{64}", cast(str, metadata["sdkIdentity"])) is None
-            or not isinstance(metadata.get("sdkVersion"), str)
-            or type(metadata.get("sdkAbiVersion")) is not int
-        ):
-            raise ProgramArtifactError("serving SDK metadata is invalid")
-        result = {
-            key: metadata[key]
-            for key in (
-                "sdkIdentity",
-                "sdkVersion",
-                "sdkAbiVersion",
-                "validationIdentity",
-            )
-            if key in metadata
-        }
-        compiler = result.get("validationIdentity")
-        if not isinstance(compiler, str) or not compiler:
-            result["validationIdentity"] = None
-        return result
-
-    def _matched_sdk(self) -> dict[str, object]:
-        """Fence local guidance and execution against the actual serving SDK."""
-        identity = self._sdk_identity()
-        version, abi = self._sdk_metadata(self.sdk_root)
-        if self.harness is None:
-            return {
-                "sdkIdentity": identity,
-                "sdkVersion": version,
-                "sdkAbiVersion": abi,
-            }
-        serving = self._serving_sdk()
-        if (
-            serving["sdkIdentity"],
-            serving["sdkVersion"],
-            serving["sdkAbiVersion"],
-        ) != (identity, version, abi):
-            detail = (
-                f"local {identity[:12]}, serving {str(serving['sdkIdentity'])[:12]}"
-            )
-            try:
-                reference = self.harness.read_sdk_reference()
-                hashes = reference.structured.get("sourceHashes")
-                if (
-                    not reference.is_error
-                    and reference.structured.get("sdkIdentity")
-                    == serving["sdkIdentity"]
-                    and isinstance(hashes, Mapping)
-                    and all(isinstance(name, str) for name in hashes)
-                ):
-                    local_hashes = sdk_source_hashes(self.sdk_root)
-                    changed = sorted(
-                        name
-                        for name in set(local_hashes) | set(hashes)
-                        if local_hashes.get(name) != hashes.get(name)
-                    )
-                    if changed:
-                        names = ", ".join(name[:200] for name in changed[:5])
-                        suffix = (
-                            f" (+{len(changed) - 5} more)" if len(changed) > 5 else ""
-                        )
-                        detail += f"; differing sources: {names}{suffix}"
-            except (HarnessMcpError, OSError, ValueError):
-                # Diagnostics must not hide the original mismatch or permit execution.
-                pass
-            raise ProgramArtifactError(
-                f"local and serving SDK identities do not match ({detail}). "
-                "SDK line endings are normalized; align the local SDK sources and "
-                "serving harness deployment before retrying."
-            )
-        return serving
-
     def read_sdk_reference(
         self,
         topic: str,
         *,
         start_line: int = 1,
         end_line: int | None = None,
-        max_chars: int = MAX_READ_CHARS,
+        token_offset: int = 0,
+        max_tokens: int = DEFAULT_READ_TOKENS,
     ) -> dict[str, object]:
-        if topic in PROGRAM_TEMPLATES:
-            metadata = self._matched_sdk()
-            text = PROGRAM_TEMPLATES[topic]
-        elif topic in _SDK_TOPICS:
-            if self.harness is not None:
-                metadata = self._serving_sdk()
-                # Validate bounds locally, but preserve the serving source range
-                # rather than substituting packaged reference text.
-                if (
-                    type(start_line) is not int
-                    or start_line < 1
-                    or type(max_chars) is not int
-                    or not 1 <= max_chars <= MAX_READ_CHARS
-                ):
-                    raise ProgramArtifactError("invalid SDK read range")
-                if end_line is not None and (
-                    type(end_line) is not int
-                    or end_line < start_line
-                    or end_line - start_line >= 400
-                ):
-                    raise ProgramArtifactError("invalid SDK read range")
-                arguments: dict[str, object] = {
-                    "topic": topic,
-                    "start_line": start_line,
-                    "max_chars": max_chars,
-                }
-                if end_line is not None:
-                    arguments["end_line"] = end_line
-                try:
-                    result = self.harness.read_sdk_reference(**arguments)
-                except (HarnessMcpError, OSError) as error:
-                    raise ProgramArtifactError(
-                        "serving SDK reference is unavailable"
-                    ) from error
-                document = result.structured
-                if result.is_error or any(
-                    document.get(key) != metadata[key]
-                    for key in ("sdkIdentity", "sdkVersion", "sdkAbiVersion")
-                ):
-                    raise ProgramArtifactError(
-                        "serving SDK reference is unavailable or changed"
-                    )
-                content = document.get("content")
-                if not isinstance(content, str):
-                    raise ProgramArtifactError("serving SDK reference is invalid")
-                return {
-                    **metadata,
-                    "topic": topic,
-                    "source": content[:max_chars],
-                    **{
-                        key: document[key]
-                        for key in ("startLine", "endLine", "totalLines", "truncated")
-                        if key in document
-                    },
-                    "truncated": len(content) > max_chars
-                    or document.get("truncated") is True,
-                    "totalChars": len(content),
-                }
-            metadata = self._matched_sdk()
-            text = (self.sdk_root.parent / _SDK_TOPICS[topic]).read_text(
-                encoding="utf-8"
-            )
-        else:
-            raise ProgramArtifactError("unknown SDK reference topic")
-        return {
-            "topic": topic,
-            **metadata,
-            **self._range(text, start_line, end_line, max_chars),
-        }
+        """Read SDK guidance through the composed reference capability."""
+        return self.sdk.read_reference(
+            topic,
+            start_line=start_line,
+            end_line=end_line,
+            token_offset=token_offset,
+            max_tokens=max_tokens,
+        )
 
     def template_source(
         self, kind: ProgramKind, configuration: object, *, template: str = "basic"
     ) -> str:
-        """Render the version-matched basic consumer for the exact declared inputs."""
-        self._matched_sdk()
-        if kind not in PROGRAM_TEMPLATES or template != "basic":
-            raise ProgramArtifactError("unknown program template; use basic")
-        self._check_configuration(configuration)
-        subscriptions = cast(
-            list[dict[str, object]],
-            cast(Mapping[str, object], configuration)["subscriptions"],
-        )
-        declarations = []
-        for item in subscriptions:
-            variant = {"bars": "Bars", "quote": "Quote", "trade": "Trade"}[
-                cast(str, item["data_type"])
-            ]
-            symbols = ", ".join(
-                json.dumps(symbol) + ".into()"
-                for symbol in cast(list[str], item["symbols"])
-            )
-            interval = (
-                f", interval: {json.dumps(item['interval'])}.into()"
-                if variant == "Bars"
-                else ""
-            )
-            declarations.append(
-                f"Subscription::{variant} {{ symbols: vec![{symbols}]{interval} }}"
-            )
-        source = PROGRAM_TEMPLATES[kind].replace(
-            'vec![Subscription::Bars { symbols: vec!["SPY".into()], interval: "1min".into() }]',
-            "vec![" + ", ".join(declarations) + "]",
-        )
-        if kind == "indicator" and any(
-            item["data_type"] in {"trade", "quote"} for item in subscriptions
-        ):
-            source = source.replace("#[derive(Default)]\n", "")
-            source += """
-impl Default for AuthoredIndicator {
-    fn default() -> Self {
-        Self { last: BTreeMap::new(), sequence: IndicatorSequence::ticks(60_000_000_000).unwrap() }
-    }
-}
-"""
-        return source
-
-    def _sdk_identity(self) -> str:
-        try:
-            metadata = self._sdk_metadata(self.sdk_root)
-            if metadata != self._sdk_metadata(_PACKAGED_SDK_ROOT):
-                raise ProgramArtifactError(
-                    "SDK reference/templates do not match the packaged SDK"
-                )
-            sources = sdk_source_hashes(self.sdk_root)
-        except ProgramArtifactError:
-            raise
-        except (OSError, ValueError, KeyError, TypeError) as error:
-            raise ProgramArtifactError(
-                "SDK reference sources are unavailable; deploy the matching harness-strategy-sdk sources and supply sdk_root. Remote harness access does not supply local SDK references."
-            ) from error
-        return _hash(_bytes(sources))
-
-    @staticmethod
-    def _sdk_metadata(root: Path) -> tuple[str, int]:
-        package = tomllib.loads((root / "Cargo.toml").read_text(encoding="utf-8"))[
-            "package"
-        ]
-        abi = (root / "src" / "abi.rs").read_text(encoding="utf-8")
-        matched = re.search(r"\bSDK_ABI_VERSION\s*:\s*u32\s*=\s*(\d+)\s*;", abi)
-        if not isinstance(package["version"], str) or matched is None:
-            raise ValueError("SDK version metadata is malformed")
-        return package["version"], int(matched[1])
+        """Render a template fenced against the composed SDK identity."""
+        return self.sdk.template_source(kind, configuration, template=template)
 
     def _snapshot(
         self,
@@ -2029,7 +1723,7 @@ impl Default for AuthoredIndicator {
                     revision = git.read_blobs(commit, [source_key, manifest_key])
                 except GitPublicationError as error:
                     raise ProgramArtifactError(
-                        "committed program does not exist"
+                        f"committed {kind} program {program_id!r} does not exist"
                     ) from error
                 source_bytes = revision[source_key]
                 manifest_bytes = revision[manifest_key]
@@ -2049,7 +1743,7 @@ impl Default for AuthoredIndicator {
             files[f"{relative}/manifest.json"] = _hash(manifest_bytes)
             sizes[f"{relative}/program.rs"] = len(source_bytes)
             sizes[f"{relative}/manifest.json"] = len(manifest_bytes)
-            self._check_configuration(manifest.get("configuration"))
+            check_configuration(manifest.get("configuration"))
             declared = manifest.get("indicatorIds")
             if not isinstance(declared, list) or any(
                 not isinstance(item, str) for item in declared
@@ -2070,7 +1764,7 @@ impl Default for AuthoredIndicator {
             "dependencies": dependencies,
             "files": files,
             "sizes": sizes,
-            "version": _hash(_bytes(files)),
+            "version": _hash(canonical_bytes(files)),
         }
 
     def _receipt(
@@ -2412,7 +2106,7 @@ impl Default for AuthoredIndicator {
             )
             for point in points
         )
-        material = _bytes(
+        material = canonical_bytes(
             {
                 "points": canonical,
                 "version": version,
@@ -2433,7 +2127,7 @@ impl Default for AuthoredIndicator {
         mode: str = "block_permutation",
     ) -> str:
         """Return the deterministic provenance identity of one null batch."""
-        material = _bytes(
+        material = canonical_bytes(
             {
                 "parameters": dict(parameters),
                 "block_size": block_size,
@@ -2453,7 +2147,7 @@ impl Default for AuthoredIndicator {
         """Return the RFC3339 window one batch actually executes against."""
         if data_window is not None and data_window.override:
             return rfc3339(data_window.start_ns), rfc3339(data_window.end_ns)
-        WorkspacePrograms._configuration_window(configuration)
+        configuration_window(configuration)
         return cast(str, configuration["start"]), cast(str, configuration["end"])
 
     @staticmethod
@@ -2506,9 +2200,9 @@ impl Default for AuthoredIndicator {
         WorkspacePrograms._validate_parameter_declaration(
             cast(str, manifest["kind"]), manifest.get("parameters")
         )
-        _bytes(manifest)
+        canonical_bytes(manifest)
 
-        def check_configuration(value: object) -> None:
+        def reject_source_overrides(value: object) -> None:
             if isinstance(value, Mapping):
                 if any(
                     key in value
@@ -2533,48 +2227,13 @@ impl Default for AuthoredIndicator {
                         "configuration cannot override committed program source or paths"
                     )
                 for item in value.values():
-                    check_configuration(item)
+                    reject_source_overrides(item)
             elif isinstance(value, list):
                 for item in value:
-                    check_configuration(item)
+                    reject_source_overrides(item)
 
+        reject_source_overrides(manifest["configuration"])
         check_configuration(manifest["configuration"])
-        self._check_configuration(manifest["configuration"])
-
-    @staticmethod
-    def _configuration_window(
-        value: Mapping[str, object],
-    ) -> tuple[datetime, datetime]:
-        dates: list[datetime] = []
-        for key in ("start", "end"):
-            bound = value.get(key)
-            if not isinstance(bound, str) or re.fullmatch(_DATE_PATTERN, bound) is None:
-                raise ProgramArtifactError(
-                    f"configuration.{key} requires an RFC 3339 date with UTC offset"
-                )
-            try:
-                dates.append(datetime.fromisoformat(bound.replace("Z", "+00:00")))
-            except ValueError as error:
-                raise ProgramArtifactError(
-                    f"configuration.{key} is not a valid date"
-                ) from error
-        if dates[0] >= dates[1]:
-            raise ProgramArtifactError("configuration.start must be before end")
-        return dates[0], dates[1]
-
-    @staticmethod
-    def _check_configuration(value: object) -> None:
-        if not isinstance(value, Mapping):
-            raise ProgramArtifactError("configuration must be an object")
-        if any(not isinstance(key, str) for key in value):
-            raise ProgramArtifactError("configuration must have string keys")
-        _bytes(value)
-        WorkspacePrograms._configuration_window(value)
-        try:
-            validate_market_subscriptions(value.get("subscriptions"))
-            validate_market_configuration(value)
-        except ResearchModelError as error:
-            raise ProgramArtifactError(str(error)) from error
 
     @staticmethod
     def _source_bytes(source: str) -> bytes:
@@ -2598,31 +2257,20 @@ impl Default for AuthoredIndicator {
         text: str,
         start_line: int,
         end_line: int | None,
-        max_chars: int = MAX_READ_CHARS,
+        max_tokens: int = DEFAULT_READ_TOKENS,
+        token_offset: int = 0,
     ) -> dict[str, object]:
-        lines = text.splitlines(keepends=True)
-        end = min(start_line + 199, len(lines)) if end_line is None else end_line
-        if (
-            isinstance(start_line, bool)
-            or isinstance(end, bool)
-            or start_line < 1
-            or end < start_line
-            or end - start_line >= 400
-            or start_line > len(lines)
-            or isinstance(max_chars, bool)
-            or not 1 <= max_chars <= MAX_READ_CHARS
-        ):
-            raise ProgramArtifactError("read range must select 1 to 400 existing lines")
-        end = min(end, len(lines))
-        selected = "".join(lines[start_line - 1 : end])
-        return {
-            "source": selected[:max_chars],
-            "startLine": start_line,
-            "endLine": end,
-            "totalLines": len(lines),
-            "truncated": len(selected) > max_chars,
-            "totalChars": len(selected),
-        }
+        try:
+            return source_page(
+                text,
+                "program",
+                start_line=start_line,
+                end_line=end_line,
+                token_offset=token_offset,
+                max_tokens=max_tokens,
+            )
+        except ValueError as error:
+            raise ProgramArtifactError(str(error)) from error
 
     @staticmethod
     def _assembled_source(snapshot: Mapping[str, object], kind: ProgramKind) -> str:
@@ -2667,6 +2315,8 @@ export_study_program!(IndicatorValidation);
         # the provider's client or composing a second execution path.
         failure = getattr(result, "failure", None)
         if failure is not None:
+            for key, value in failure.payload.items():
+                structured.setdefault(key, value)
             structured.setdefault("executionCertainty", failure.execution_certainty)
             structured.setdefault("retryGuidance", failure.retry_guidance)
             structured.setdefault("error", failure.message)
@@ -2745,6 +2395,10 @@ export_study_program!(IndicatorValidation);
         certainty = result.structured.get(
             "executionCertainty", "observed_failure" if rejected else "observed_success"
         )
+        if validation and result.structured.get("valid") is False:
+            # A validator's explicit rejection is observed evidence, even if a
+            # transport wrapper supplied conservative mutation defaults.
+            certainty = "observed_failure"
         return {
             "diagnostics": diagnostics,
             "message": message,
@@ -2810,19 +2464,13 @@ export_study_program!(IndicatorValidation);
 
 
 __all__ = [
-    "ProgramArtifactError",
-    "ProgramPublicationError",
     "ProgramHarness",
-    "ProgramHarnessResult",
-    "ProgramKind",
     "JobRetention",
     "JobSettlement",
     "parameter_assignment_sha256",
     "WorkspacePrograms",
-    "PROGRAM_TEMPLATES",
     "PROGRAM_ID_PATTERN",
-    "PROGRAM_CONFIGURATION_SCHEMA",
-    "MAX_READ_CHARS",
+    "MAX_READ_TOKENS",
     "MAX_LIST_RESULTS",
     "MAX_NULL_BLOCK_SIZE",
 ]

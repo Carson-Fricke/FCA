@@ -21,6 +21,7 @@ from pydantic import (
 )
 from pydantic.alias_generators import to_camel
 
+from thesis_runtime.contracts.messages import ToolCorrelation, ToolRequest
 from thesis_runtime.contracts.records import (
     ChatMessage,
     ChatThread,
@@ -48,10 +49,13 @@ def _record_model(
     | type[ExecutionEvent],
     *,
     camel: bool = False,
+    exclude: tuple[str, ...] = (),
 ) -> Any:
     hints = get_type_hints(record)
     definitions: dict[str, Any] = {}
     for field in fields(record):
+        if field.name in exclude:
+            continue
         annotation = hints[field.name]
         if annotation is RecordLinks:
             annotation = Annotated[
@@ -82,6 +86,32 @@ def _record_model(
 
 class ChatMessageWire(_record_model("ChatMessageFields", ChatMessage)):
     """Complete serialized chat record, including persisted hash and timestamps."""
+
+
+class TranscriptReceiptWire(BaseModel):
+    """Presentation facts from one canonical receipt; never provider context."""
+
+    model_config = ConfigDict(extra="forbid")
+    requests: tuple[ToolRequest, ...] = ()
+    correlation: ToolCorrelation | None = None
+    result: dict[str, Any] | None = None
+
+
+class TranscriptMessageWire(
+    _record_model(
+        "TranscriptMessageFields",
+        ChatMessage,
+        exclude=("body", "reasoning", "data", "tool_result", "content_hash"),
+    )
+):
+    """Bounded display projection, with explicit canonical detail availability."""
+
+    body: str
+    reasoning: str | None
+    data: dict[str, Any] | None
+    tool_result: dict[str, Any] | None
+    receipt: TranscriptReceiptWire
+    details_available: bool = Field(alias="detailsAvailable")
 
 
 class ChatThreadWire(_record_model("ChatThreadFields", ChatThread)):
@@ -245,17 +275,58 @@ type TimelineItemWire = Annotated[
 ]
 
 
-class TimelinePageWire(BaseModel):
+class TranscriptMessageItemWire(TimelineEnvelopeWire):
+    kind: Literal["message"]
+    payload: TranscriptMessageWire
+
+
+type TranscriptItemWire = Annotated[
+    TranscriptMessageItemWire
+    | TimelineEventWire
+    | TimelineExecutionWire
+    | TimelineOutputWire,
+    Field(discriminator="kind"),
+]
+
+
+class TranscriptPageWire(BaseModel):
+    """Byte-bounded history with the same canonical sequence and resume watermark."""
+
     model_config = ConfigDict(
         extra="forbid", alias_generator=to_camel, populate_by_name=True
     )
-
-    items: tuple[TimelineItemWire, ...]
+    items: tuple[TranscriptItemWire, ...]
     next_before: int | None
     after: int = Field(ge=0)
     output_prefixes: tuple[TimelineOutputWire, ...] = Field(
         default=(), alias="outputPrefixes"
     )
+
+
+class ConversationOutlineEntryWire(BaseModel):
+    """Navigation metadata; the canonical receipt remains in the timeline."""
+
+    model_config = ConfigDict(extra="forbid", alias_generator=to_camel)
+
+    id: str
+    kind: Literal["turn", "request", "workflow", "study", "artifact"]
+    title: str
+    seq: int
+    thread_id: str
+    message_id: str
+    datum_index: int | None
+    entity_id: str | None
+    execution_id: str | None
+    request_message_id: str | None
+    status: str | None
+
+
+class ConversationOutlinePageWire(BaseModel):
+    model_config = ConfigDict(extra="forbid", alias_generator=to_camel)
+
+    items: tuple[ConversationOutlineEntryWire, ...]
+    after: int = Field(ge=0)
+    next_after: int | None
 
 
 class WorkflowDefinitionWire(BaseModel):

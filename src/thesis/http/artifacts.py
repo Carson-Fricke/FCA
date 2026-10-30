@@ -20,7 +20,8 @@ from fastapi.concurrency import run_in_threadpool
 from thesis.http.errors import require_service, service_error
 from thesis.strategies.artifacts import WorkspaceStrategyArtifacts
 from thesis.workspaces.local import WorkspaceNotFoundError
-from thesis.workspaces.programs import ProgramKind, WorkspacePrograms
+from thesis.workspaces.program_contracts import ProgramKind
+from thesis.workspaces.programs import WorkspacePrograms
 
 MAX_ARTIFACT_FILE_BYTES = 262_144
 _ARTIFACT_KINDS: tuple[ProgramKind, ...] = ("strategy", "study", "indicator")

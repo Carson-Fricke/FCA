@@ -5,7 +5,7 @@
 `store.py` owns the pool, indexed JSONB catalog, workspace transactions and
 ownership fences. `records.py` admits canonical messages, updates root metadata,
 advances inbox positions and publishes runnable work in one transaction.
-`timeline.py` sequences the single log; `events.py` exposes execution replay.
+`timeline.py` sequences the single log and projects selected receipt headers; `events.py` exposes execution replay.
 `execution_store.py` retains workflow revision CAS and reads recovery identities
 in keyset pages without hydrating launches or phase results. `ownership.py`
 implements renewable leases. `work.py` selects bounded runnable references;

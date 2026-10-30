@@ -125,7 +125,7 @@ def test_construction_questions_retrieve_readable_discovery_cards(
             "alpha",
             cast(str, selected["reference"]),
             allowed_scope="shared",
-            max_chars=6000,
+            max_tokens=6000,
             allowed_collections=("discovery",),
         )
         assert read["page_id"] == page_id

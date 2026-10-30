@@ -1,18 +1,14 @@
-"""Spawn an agent and give it its first prompt in one durable operation.
+"""Spawn with ordered, durable context and one runnable assignment.
 
-A caller never creates an agent and then separately remembers to hand it a
-prompt: :meth:`SubAgentSpawner.spawn` creates the durable record and delivers
-the first message through the one delivery path, so the delivery both persists
-the prompt and wakes the agent's own turn.  "Prompted" and "started" are the
-same act; there is no window in which an agent exists with nothing to do.
-
-The delivery is idempotent under its key, so a retried spawn resolves to the
-same agent and the same first message instead of duplicating either.
+Context and assignment share canonical delivery. Context source identities
+deduplicate copies across retries/revisits; only the final assignment admits a
+turn. Lifecycle owns records and guards, while the conversation service owns
+canonical intake, scheduling and provider projection.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -24,7 +20,7 @@ from thesis_runtime.conversations.delivery import (
     DeliveryService,
 )
 from thesis_runtime.subagents.lifecycle import SubAgentLifecycle
-from thesis_runtime.subagents.specs import SubAgentSpec
+from thesis_runtime.subagents.specs import InitialContext, SubAgentSpec
 
 __all__ = ["SpawnedAgent", "SubAgentSpawner"]
 
@@ -78,6 +74,7 @@ class SubAgentSpawner:
         completion_mode: CompletionMode | None = None,
         returns_to_sub_agent_id: str | None = None,
         phase_executor: bool = False,
+        initial_context: Sequence[InitialContext] = (),
     ) -> SpawnedAgent:
         """Create the agent and deliver its first prompt, waking its own turn.
 
@@ -108,6 +105,7 @@ class SubAgentSpawner:
             prompt,
             key=prompt_key,
             data=prompt_data,
+            initial_context=initial_context,
         )
         return SpawnedAgent(record=record, delivery=delivery)
 
@@ -120,11 +118,34 @@ class SubAgentSpawner:
         *,
         key: str | None = None,
         data: Mapping[str, object] | None = None,
+        initial_context: Sequence[InitialContext] = (),
     ) -> DeliveryReceipt:
         """Deliver one agent's prompt at its own anchor and wake its turn."""
         body = prompt.strip()
         if not body:
             raise ValueError("a spawned agent requires a non-empty prompt")
+        # Context deliveries cannot admit a runnable turn. Only the final
+        # assignment does so, after all context is durable. Stable source keys
+        # also repair an interrupted startup without copying context on revisit.
+        for context in initial_context:
+            self._delivery.deliver(
+                Anchor(workspace_id, chat_id, sub_agent_id=record.sub_agent_id),
+                Datum(
+                    "agent_context",
+                    ok=True,
+                    structured={
+                        "sourceMessageId": context.source_message_id,
+                        "sourceConversationId": context.source_conversation_id,
+                    },
+                    summary="Original request delivered.",
+                ),
+                body=context.text,
+                role=MessageRole.USER,
+                actor_id=record.created_by,
+                execution_id=record.workflow_execution_id,
+                idempotency_key=f"initial-context:{context.source_conversation_id}:{context.source_message_id}",
+                schedule=False,
+            )
         payload: dict[str, object] = {
             "subAgentId": record.sub_agent_id,
             "kind": "agent_prompt",

@@ -14,17 +14,18 @@ claims don't belong here.
 | `types.ts` | UI projections derived from generated chat, execution, timeline, tool, and node types; unrelated product mirrors remain scoped separately. |
 | `chat-host.svelte.ts` | Shared conversation lifecycle, immediate send projections, stable failed-send retry identities, and percolation used by both hosts. |
 | `chat-navigation.ts` | Conversation URL adapter; clears scope and hash on conversation changes. |
+| `conversation-outline.ts` | Pure grouping of navigation metadata by originating operator request and workflow ownership, stable entity deduplication and nesting; unattributed evidence remains explicit Other activity. |
 | `model-output.ts` | Provisional output projection with UTF-8 offsets, gap handling, scoped identities and canonical-completion suppression. |
-| `timeline.svelte.ts` | One ordered timeline owner: selected-thread recent history then cursor-only SSE, explicit older-page loading, current workflow metadata, indexes, and local pending messages reconciled with POST/SSE by identity without advancing cursors. |
+| `timeline.svelte.ts` | One ordered timeline owner: selected-thread history then cursor-only SSE, older and selected-anchor page loading, paged outline metadata, current workflow metadata, and local pending messages reconciled with POST/SSE by identity without advancing cursors. |
 | `fixture-timeline.ts` | In-memory offline timeline seeded from messages, events, and execution fixtures; mutations publish to subscribers. |
-| `sse.ts` | Sole `TimelineStream` SSE client, with frame parsing, timeline URL construction, and reconnect cursors. |
+| `sse.ts` | Sole `TimelineStream` SSE client, with canonical `TimelineItemWire` callbacks, frame parsing, timeline URL construction, and reconnect cursors. |
 | `workflow-live.ts` | Pure execution-indexed live workflow map; sequence-ordered active frontiers, pending input ports, explicit phase-executor projection, attention, and active/terminal selectors. |
 | `workflow-scope.svelte.ts` | Execution-scoped phase navigation, node capability snapshots, history selection, and immediate node sends with stable explicit-retry identities. |
 | `scope.svelte.ts` | Scope path serialization, storage, and navigation stack. |
 | `subagent.ts` | Workflow and sub-agent event projections, including attempt freshness and phase recovery diagnostics. |
 | `transcript.ts` | UI transcript ordering, tool call/result matching, pending state, neutral wire-delivery presentation, rail-entry classification, and accepted research report decoding. Standalone child cards show helpers; workflow phase executors remain accessible through their workflow card. |
-| `workflow-graph.ts` | Backend-declared topology display, including nested fixed parallel branch layout. |
-| `workspace.svelte.ts` | Workspace-scoped view state, browser cleanup after workspace deletion, and toasts. |
+| `workflow-graph.ts` | Backend-declared working-phase geometry with terminal states omitted, shared junctions for identical simultaneous destination sets, straight level arrows, cubic Bézier vertical shifts with space proportional to their rise, and compact loopbacks from right outputs to left inputs; upward returns use the gap above their source and junctions never become phases. |
+| `workspace.svelte.ts` | Workspace-scoped view state, persisted navigation expansion and copilot width preferences, browser cleanup after workspace deletion, and toasts. |
 | `workspace-context.svelte.ts` | Workspace shell context: render-gate summary plus snapshot detail loaded after render. |
 | `markdown.ts` | Sanitized Markdown rendering. |
 | `format.ts` | Display formatting. |
@@ -40,11 +41,24 @@ cards select their own execution ID from the workflow map, not a singleton
 are removed. REST execution and
 sub-agent event replay remains available without creating another subscription.
 
-History initially loads one 200-record selected-thread page. Opening a child loads
-its recent page; the older-history action advances only that thread's cursor.
+History initially requests up to 40 selected-thread display entries, bounded by
+a 256 KiB material-page budget. Previews explicitly advertise detail availability.
+Canonical `/timeline/items/{seq}` reads hydrate evidence on demand without moving
+the stream or older-history cursors; complete evidence replaces previews. Opening a child loads
+its recent page; approaching the viewport's top loads earlier history and advances
+only that thread's cursor while preserving the visible reading position.
 Current execution metadata and node lists populate workflow cards/tree without
 child transcripts. Canonical completed messages replace historical streaming
 fragments in PostgreSQL history; open output prefixes do not advance page cursors.
+
+The fullscreen host enables lightweight `/outline` reads across all scopes.
+Each request selects up to 500 eligible receipt headers directly in storage;
+full text and streaming fragments are excluded. Further pages load explicitly.
+Eight workspace/backend/chat-scoped snapshots retain entries and cursor on revisits.
+Incremental metadata refreshes follow committed messages on the existing stream;
+they do not prefetch child transcripts or create another subscription. Selecting
+an unloaded outline item reads its owning thread's page at the receipt sequence
+and merges it into this same timeline without changing the older-history cursor.
 
 Execution snapshots preserve first-save state and may arrive after lifecycle
 events; their timeline sequence does not suppress earlier event replay. Phase
@@ -84,7 +98,9 @@ wire records. Nullable message metadata remains nullable in the backend schema
 and the generated UI types; optional canonical fields are checked on object
 metadata only.
 
-Tree records retain kind, completion mode, phase executor, return anchor, tools,
+Flat hierarchy summaries omit recursive children and inline results. Parent IDs
+reconstruct the tree; `resultAvailable` and node detail reads retain evidence
+access. Tree records retain kind, completion mode, phase executor, return anchor, tools,
 budget, contracts, results, attempt ID, spec version, and timestamps. Context
 isn't stored: only explicit event context can populate the UI projection, and a
 durable node starts with `context: null`.

@@ -15,12 +15,16 @@
 		onBack = () => {},
 		onNavigate = () => {},
 		title = 'Scope',
+		showHeader = true,
+		controls,
 		children
 	}: {
 		segments?: ScopeSegment[];
 		onBack?: () => void;
 		onNavigate?: (index: number) => void;
 		title?: string;
+		showHeader?: boolean;
+		controls?: import('svelte').Snippet;
 		children?: import('svelte').Snippet;
 	} = $props();
 
@@ -28,50 +32,61 @@
 </script>
 
 <section
-	class="flex min-h-0 flex-col rounded-xl border border-surface-700 bg-surface-900"
+	class="flex min-h-0 flex-1 flex-col"
 	data-testid="scope-stack"
 	data-depth={segments.length}
 >
-	<header class="flex items-center gap-2 border-b border-surface-700 px-3 py-2">
+	{#if showHeader}
+	<header class="scope-header">
+		<span class="scope-kind">{title}</span>
+		<div class="scope-navigation">
 		<button
 			type="button"
-			class="rounded-md border border-surface-600 px-2 py-0.5 text-xs text-slate-600 transition hover:border-accent/40 hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+			class="scope-back"
 			disabled={segments.length <= 1}
 			onclick={onBack}
 			data-testid="scope-back"
 			title="Back one scope level"
+			aria-label="Back one scope level"
 		>
-			← Back
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M19 12H5m6-6-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
 		</button>
-		<span class="text-[10px] font-semibold tracking-wider text-slate-500 uppercase">{title}</span>
-		<nav class="ml-auto min-w-0 overflow-x-auto" aria-label="Scope breadcrumb" data-testid="scope-breadcrumb">
-			<ol class="flex items-center gap-1 whitespace-nowrap">
+		<nav class="scope-breadcrumb" aria-label="Scope breadcrumb" data-testid="scope-breadcrumb">
+			<ol>
 				{#each segments as segment, index (segment.kind + ':' + segment.id)}
-					<li class="flex items-center gap-1">
+					<li>
 						{#if index > 0}
-							<span class="text-slate-600" aria-hidden="true">/</span>
+							<span class="scope-separator" aria-hidden="true">›</span>
 						{/if}
 						<button
 							type="button"
-							class="max-w-40 truncate rounded px-1.5 py-0.5 font-mono text-[10px] transition {index ===
-							activeIndex
-								? 'bg-accent/10 text-accent'
-								: 'text-slate-500 hover:text-accent'}"
+							class:current={index === activeIndex}
 							onclick={() => onNavigate(index)}
 							aria-current={index === activeIndex ? 'page' : undefined}
 							data-testid="scope-crumb"
 							data-scope-index={index}
 							title={segment.label}
 						>
-							{segment.label}
+							{segment.kind === 'conversation' ? 'Conversation' : segment.label.replace(/_/g, ' ')}
 						</button>
 					</li>
 				{/each}
 			</ol>
 		</nav>
+		{@render controls?.()}
+		</div>
 	</header>
+	{/if}
 
-	<div class="min-h-0 flex-1 overflow-y-auto p-3" data-testid="scope-transcript-scroll">
-		{@render children?.()}
-	</div>
+	{@render children?.()}
 </section>
+
+<style>
+	.scope-header{padding:8px 12px;border-bottom:1px solid var(--color-surface-700)}
+	.scope-kind{display:block;margin-left:39px;margin-bottom:2px;font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--color-slate-400)}
+	.scope-navigation{display:flex;align-items:flex-start;gap:9px;min-width:0}
+	.scope-back{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:30px;height:30px;border:1px solid var(--color-surface-600);border-radius:5px;color:var(--color-slate-300);cursor:pointer}.scope-back:disabled{opacity:.4;cursor:default}.scope-back svg{width:14px;height:14px}
+	.scope-breadcrumb{flex:1;min-width:0;padding-top:2px;font-size:12px;line-height:1.7}.scope-breadcrumb ol{display:flex;align-items:center;flex-wrap:wrap;gap:3px 0;margin:0;padding:0;list-style:none}.scope-breadcrumb li{display:flex;align-items:baseline;gap:7px;max-width:100%;padding-right:7px;min-width:0}
+	.scope-breadcrumb button{padding:1px 3px;border-radius:4px;text-align:left;overflow-wrap:anywhere;color:var(--color-slate-200);cursor:pointer}.scope-breadcrumb button:hover{text-decoration:underline;text-underline-offset:3px;color:var(--color-accent)}.scope-breadcrumb button.current{color:var(--color-accent);background:color-mix(in srgb,var(--color-accent) 9%,var(--color-surface-900));padding:1px 6px}.scope-separator{color:var(--color-slate-400)}
+	@media(pointer:coarse){.scope-back,.scope-breadcrumb button{min-height:44px}}
+</style>

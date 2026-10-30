@@ -6,6 +6,8 @@ Tests exercise the public application and acquisition boundaries; fake transport
 - `canonical_trades.rs` — Canonical `metrics.json` trade and equity publication from the job ledger.
 - `capital_fraction.rs` — A strategy instance's starting cash comes from its configured capital
 - `configuration_identity.rs` — Behavior checks for configuration identity.
+- `execution_api.rs` — Engine-owned account views, managed long/short partial
+  fills, in-flight target changes, rejection and day/IOC/GTC lifecycle.
 - `equity_metrics.rs` — Equity-curve metric rules at the public metrics boundary.
 - `fee_arithmetic_failures.rs` — Fee arithmetic that leaves the exact decimal range fails by name.
 - `indicator_sequences.rs` — Native indicator outputs preserve warm-up and final partial windows.

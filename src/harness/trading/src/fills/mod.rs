@@ -20,3 +20,5 @@ pub use latency_size::{LatencySize, RemainderPolicy};
 pub use mid_touch::MidTouch;
 pub use simple_touch::SimpleTouch;
 pub use trade_through::TradeThrough;
+
+pub mod trades;

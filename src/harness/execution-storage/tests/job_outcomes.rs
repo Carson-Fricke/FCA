@@ -36,6 +36,46 @@ fn temp_root(tag: &str) -> PathBuf {
 }
 
 #[test]
+fn terminal_completion_outbox_survives_restart_and_only_clears_after_matching_ack() {
+    let root = tempfile::tempdir().unwrap();
+    let store = harness_execution_storage::filesystem_store(root.path());
+    for (id, state) in [
+        ("job-success", JobState::Succeeded),
+        ("job-failure", JobState::Failed),
+        ("job-cancel", JobState::Cancelled),
+    ] {
+        let accepted = record(id, JobState::Queued);
+        store.admit(accepted.clone()).unwrap();
+        // A duplicate admission joins and does not enqueue work or a return.
+        store.admit(accepted).unwrap();
+        assert!(store.pending_completions().unwrap().is_empty());
+        let artifacts = if state == JobState::Succeeded {
+            BTreeMap::from([("metrics.json".into(), b"{}".to_vec())])
+        } else {
+            BTreeMap::new()
+        };
+        store.put_result(record(id, state), artifacts).unwrap();
+        let restarted = harness_execution_storage::filesystem_store(root.path());
+        let events = restarted.pending_completions().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].job_id, id);
+        assert_eq!(events[0].state, state);
+        let mut mismatch = events[0].clone();
+        mismatch.metrics.insert("net_pnl".into(), "forged".into());
+        assert!(restarted.acknowledge_completion(&mismatch).is_err());
+        assert_eq!(restarted.pending_completions().unwrap(), events);
+        restarted.acknowledge_completion(&events[0]).unwrap();
+        restarted.acknowledge_completion(&events[0]).unwrap();
+        assert!(store.pending_completions().unwrap().is_empty());
+        assert_eq!(store.get(id).unwrap().state, state);
+        assert!(store
+            .put_result(record(id, state), BTreeMap::new())
+            .is_err());
+        assert!(store.pending_completions().unwrap().is_empty());
+    }
+}
+
+#[test]
 fn in_memory_failure_and_cancellation_accept_an_empty_artifact_set() {
     let store = harness_execution_storage::memory_store();
     store.admit(record("job-failed", JobState::Queued)).unwrap();

@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
-from thesis.experiments.mandate import DataWindowPolicy
+from thesis.experiments.mandate import DataWindowResolver
 from thesis.extensions.tools.program import ContextJobRetention
 from thesis.knowledge.service import KnowledgeScope
 from thesis.strategies import WorkspaceStrategyArtifacts
@@ -38,7 +38,7 @@ class WorkflowSessionBindings:
     knowledge_collections: tuple[str, ...] | None = None
     strategy_authoring: WorkspaceStrategyArtifacts | None = None
     programs: ProgramSnapshots | None = None
-    data_window: DataWindowPolicy | None = None
+    resolve_data_window: DataWindowResolver | None = None
     job_retention: ContextJobRetention | None = None
 
 

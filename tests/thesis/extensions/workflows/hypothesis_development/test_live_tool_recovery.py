@@ -190,7 +190,9 @@ def test_live_tool_transcript_survives_model_ssl_and_replays_on_retry(
                 assert canonical.content.correlation == ToolCorrelation(
                     result_request.message_id, _CALL.id, _CALL.name
                 )
-                assert tool_message.content == canonical.content.as_content()
+                expected = json.loads(canonical.content.as_content())
+                assert expected["result"].pop("arguments") == {"source": "study"}
+                assert json.loads(tool_message.content) == expected
             return super().complete(
                 messages=messages,
                 role=role,
@@ -558,7 +560,9 @@ def test_multiple_typed_datums_persist_at_node_and_replay_as_one_tool_result(
     assert canonical.content.correlation == ToolCorrelation(
         request_message.message_id, _CALL.id, _CALL.name
     )
-    assert provider.requests[1][-1].content == canonical.content.as_content()
+    expected = json.loads(canonical.content.as_content())
+    assert expected["result"].pop("arguments") == {"source": "study"}
+    assert json.loads(provider.requests[1][-1].content) == expected
 
     replay_provider = Provider(completion("Using both validation outputs."))
     replay_runner = Conversations(
@@ -578,7 +582,7 @@ def test_multiple_typed_datums_persist_at_node_and_replay_as_one_tool_result(
     assert len(results) == 1
     assert replay[index + 1] == results[0]
     assert results[0].tool_call_id == _CALL.id
-    assert json.loads(results[0].content) == outcome
+    assert json.loads(results[0].content) == expected
     assert results[0] == provider.requests[1][-1]
     assert dispatched == [{"source": "study"}]
 
@@ -677,7 +681,9 @@ def test_tool_ssl_is_durable_and_delivered_to_model_without_failing_workflow(
     assert tool.tool_result["failure"] == failure
     canonical = from_record(tool)
     assert canonical.direction == "incoming"
-    assert model_result.content == canonical.content.as_content()
+    expected = json.loads(canonical.content.as_content())
+    assert expected["result"].pop("arguments") == {"source": "study"}
+    assert json.loads(model_result.content) == expected
     request_message = next(
         message
         for message in decode_transcript(

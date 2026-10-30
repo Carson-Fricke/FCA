@@ -371,10 +371,14 @@ impl Decimal {
         // Exact integer quotients already have their canonical coefficient
         // and exponent. Avoid allocating significant-digit vectors and text.
         let integer = self.coefficient / rhs.coefficient;
-        if self.coefficient % rhs.coefficient == 0
+        if self.coefficient.is_multiple_of(rhs.coefficient)
             && decimal_digits_u128(integer) as usize <= precision
         {
-            return finish(negative, integer, i64::from(self.scale) - i64::from(rhs.scale));
+            return finish(
+                negative,
+                integer,
+                i64::from(self.scale) - i64::from(rhs.scale),
+            );
         }
         let (digits, adjusted_ratio, more, exact) =
             significant_digits(self.coefficient, rhs.coefficient, precision + 1)?;
@@ -567,7 +571,11 @@ fn round_significant(
     }
     let precision = context.precision.max(1) as usize;
     if magnitude.high == 0 && decimal_digits_u128(magnitude.low) as usize <= precision {
-        return Ok(Decimal { negative, coefficient: magnitude.low, scale });
+        return Ok(Decimal {
+            negative,
+            coefficient: magnitude.low,
+            scale,
+        });
     }
     let digits = u256_to_digits(magnitude);
     if digits.len() <= precision {

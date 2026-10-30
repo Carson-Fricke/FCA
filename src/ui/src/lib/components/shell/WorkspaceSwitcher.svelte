@@ -7,13 +7,15 @@
 		currentId,
 		onSwitch,
 		onCreate,
-		onDelete
+		onDelete,
+		compact = false
 	}: {
 		workspaces: WorkspaceSummary[];
 		currentId: string;
 		onSwitch: (id: string) => void;
 		onCreate: () => void;
 		onDelete?: (workspace: WorkspaceSummary) => void;
+		compact?: boolean;
 	} = $props();
 
 	let open = $state(false);
@@ -26,13 +28,16 @@
 	}
 </script>
 
-<svelte:window onpointerdown={onWindowPointerDown} />
+<svelte:window onpointerdown={onWindowPointerDown} onkeydown={(event) => { if (event.key === 'Escape') open = false; }} />
 
 <div class="relative" bind:this={holder} data-testid="workspace-switcher">
 	<button
 		type="button"
 		class="flex w-full items-center gap-2 rounded-lg border border-surface-700 bg-surface-850/70 px-2.5 py-2 text-left transition hover:border-surface-600"
+		class:compact
 		aria-expanded={open}
+		aria-label={compact ? `${current?.name ?? 'Workspace'} · Switch workspace` : undefined}
+		title={compact ? `${current?.name ?? 'Workspace'} · Switch workspace` : undefined}
 		onclick={() => (open = !open)}
 		data-testid="workspace-switcher-button"
 	>
@@ -41,16 +46,17 @@
 		>
 			{current?.initials}
 		</span>
-		<span class="min-w-0 flex-1">
+		{#if !compact}<span class="min-w-0 flex-1">
 			<span class="block truncate text-sm font-semibold text-slate-800">{current?.name}</span>
 			<span class="block truncate text-[11px] text-slate-500">{current?.description}</span>
 		</span>
-		<span class="text-slate-500" aria-hidden="true">⇅</span>
+		<span class="text-slate-500" aria-hidden="true">⇅</span>{/if}
 	</button>
 
 	{#if open}
 		<div
 			class="absolute top-full right-0 left-0 z-40 mt-1 rounded-xl border border-surface-600 bg-surface-850 p-1 shadow-2xl"
+			class:compact-menu={compact}
 			data-testid="workspace-menu"
 		>
 			<div class="px-2 py-1.5 text-[10px] font-semibold tracking-wider text-slate-500 uppercase">
@@ -108,3 +114,8 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	button.compact{padding:0;justify-content:center;width:38px;min-height:36px;border-color:transparent;background:transparent}.compact-menu{inset:0 auto auto calc(100% + 10px);margin:0;width:280px;max-width:calc(100vw - 76px)}
+	@media(pointer:coarse){button.compact{min-height:44px}}
+</style>

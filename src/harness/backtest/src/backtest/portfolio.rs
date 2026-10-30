@@ -173,6 +173,7 @@ pub struct VirtualBook {
     pub book_id: String,
     initial_cash: Decimal,
     cash: Decimal,
+    fees: Decimal,
     positions: BTreeMap<String, PositionLedger>,
     markers: BTreeMap<String, Decimal>,
     fill_ids: Vec<String>,
@@ -186,6 +187,7 @@ impl VirtualBook {
             book_id: book_id.into(),
             initial_cash,
             cash: initial_cash,
+            fees: Decimal::ZERO,
             positions: BTreeMap::new(),
             markers: BTreeMap::new(),
             fill_ids: Vec::new(),
@@ -263,6 +265,9 @@ impl VirtualBook {
         .map_err(|error| {
             harness_trading::replay_errors::BacktestError::Arithmetic(error.to_string())
         })?;
+        let next_fees = self.fees.checked_add(fill.fee).map_err(|error| {
+            harness_trading::replay_errors::BacktestError::Arithmetic(error.to_string())
+        })?;
         let harness_trading::ledger::Position {
             quantity: next_quantity,
             cost_basis,
@@ -279,8 +284,16 @@ impl VirtualBook {
             },
         );
         self.cash = next_cash;
+        self.fees = next_fees;
         self.fill_ids.push(fill.fill_id.clone());
         Ok(())
+    }
+
+    /// Read booked inventory without constructing an account or order history.
+    pub(super) fn position_quantity(&self, symbol: &str) -> Decimal {
+        self.positions
+            .get(symbol)
+            .map_or(Decimal::ZERO, |ledger| ledger.quantity)
     }
 
     /// Apply one explicit mark.
@@ -301,6 +314,102 @@ impl VirtualBook {
             realized_pnl: ledger.realized_pnl,
             mark_price: self.markers.get(symbol).copied(),
         }
+    }
+
+    /// The strategy view uses the same booked ledger, with checked projection.
+    /// Average-cost realized P&L recognizes fees immediately; FIFO result slices
+    /// remain the reporting authority for individual closed trades.
+    pub fn execution_snapshot(
+        &self,
+        timestamp_ns: i64,
+    ) -> Result<
+        harness_trading::program::ExecutionSnapshot,
+        harness_trading::replay_errors::BacktestError,
+    > {
+        use harness_trading::program::{ExecutionPosition, ExecutionSnapshot};
+        let arithmetic = |e: num::DecimalError| {
+            harness_trading::replay_errors::BacktestError::Arithmetic(format!(
+                "execution snapshot: {e}"
+            ))
+        };
+        let mut positions = Vec::with_capacity(self.positions.len());
+        let mut realized_pnl = Decimal::ZERO;
+        let mut market_value = Some(Decimal::ZERO);
+        let mut gross_exposure = Some(Decimal::ZERO);
+        for (symbol, ledger) in &self.positions {
+            let value = if ledger.quantity.is_zero() {
+                Some(Decimal::ZERO)
+            } else {
+                self.markers
+                    .get(symbol)
+                    .map(|mark| ledger.quantity.checked_mul(*mark))
+                    .transpose()
+                    .map_err(arithmetic)?
+            };
+            let unrealized = value
+                .map(|value| {
+                    ledger
+                        .cash_flow
+                        .checked_add(value)
+                        .and_then(|total| total.checked_sub(ledger.realized_pnl))
+                })
+                .transpose()
+                .map_err(arithmetic)?;
+            let average_price = if ledger.quantity.is_zero() {
+                Decimal::ZERO
+            } else {
+                ledger
+                    .cost_basis
+                    .checked_div(ledger.quantity)
+                    .map_err(arithmetic)?
+            };
+            realized_pnl = realized_pnl
+                .checked_add(ledger.realized_pnl)
+                .map_err(arithmetic)?;
+            market_value = match (market_value, value) {
+                (Some(total), Some(value)) => Some(total.checked_add(value).map_err(arithmetic)?),
+                _ => None,
+            };
+            gross_exposure = match (gross_exposure, value) {
+                (Some(total), Some(value)) => {
+                    Some(total.checked_add(value.abs()).map_err(arithmetic)?)
+                }
+                _ => None,
+            };
+            positions.push(ExecutionPosition {
+                symbol: symbol.clone(),
+                quantity: ledger.quantity,
+                average_price,
+                realized_pnl: ledger.realized_pnl,
+                unrealized_pnl: unrealized,
+                market_value: value,
+            });
+        }
+        let equity = market_value
+            .map(|value| self.cash.checked_add(value))
+            .transpose()
+            .map_err(arithmetic)?;
+        let unrealized_pnl = equity
+            .map(|equity| {
+                equity
+                    .checked_sub(self.initial_cash)
+                    .and_then(|total| total.checked_sub(realized_pnl))
+            })
+            .transpose()
+            .map_err(arithmetic)?;
+        Ok(ExecutionSnapshot {
+            timestamp_ns,
+            initial_cash: self.initial_cash,
+            cash: self.cash,
+            fees: self.fees,
+            equity,
+            realized_pnl,
+            unrealized_pnl,
+            gross_exposure,
+            positions,
+            orders: Default::default(),
+            closed_trades: Default::default(),
+        })
     }
 }
 

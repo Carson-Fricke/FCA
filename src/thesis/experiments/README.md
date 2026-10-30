@@ -11,7 +11,7 @@ choose trading strategies or schedule agents.
 | `grades.py` | Evidence grades and one-way exposure downgrades. |
 | `intervals.py` | Declared dependency windows and deterministic overlap audits. |
 | `ledger.py` | Durable experiment exposure records. |
-| `mandate.py` | Explicit workflow-owned dataset windows and enforcement of phase data access. |
+| `mandate.py` | Explicit workflow-owned dataset windows, their execution-time resolver contract, and enforcement of phase data access. |
 
 Hypothesis-development starts from the operator's idea. Discovery declares
 explicit development and sealed forward windows before empirical work. The

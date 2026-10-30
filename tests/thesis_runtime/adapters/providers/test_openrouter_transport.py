@@ -23,6 +23,7 @@ from thesis_runtime.adapters.providers.openrouter import (
     OpenRouterProvider,
 )
 from thesis_runtime.adapters.providers.transports import HttpOpenRouterTransport
+from thesis_runtime.contracts.completion import CompletionOptions
 
 _OK_BODY = '{"choices":[{"message":{"role":"assistant","content":"ok"}}]}'
 _MESSAGES = [ProviderMessage(role="user", content="hi")]
@@ -283,3 +284,23 @@ def test_foundry_http_rejection_is_unchanged(status: int) -> None:
         _foundry(transport).complete(messages=_MESSAGES)
     assert raised.value.status == status
     assert transport.calls == 1
+
+
+def test_foundry_checkpoint_options_reach_the_deployment_request() -> None:
+    class Transport(_FoundryTransport):
+        def post(self, url, headers, payload):
+            self.payload = dict(payload)
+            return super().post(url, headers, payload)
+
+    transport = Transport([(200, _OK_BODY)])
+    frames = list(
+        _foundry(transport).stream(
+            messages=_MESSAGES,
+            options=CompletionOptions(
+                512, allow_tool_calls=False, input_mode="transcript"
+            ),
+        )
+    )
+    assert frames[-1].message.content == "ok"
+    assert transport.payload["max_tokens"] == 512
+    assert transport.payload["tool_choice"] == "none"

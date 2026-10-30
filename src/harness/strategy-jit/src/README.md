@@ -37,6 +37,16 @@ subscription filtering, including direct runtime calls in tests.
   frames, metrics, and strategy orders. Frame orders are returned by
   `on_frame_orders` and stamped at frame availability. The observation-only
   strategy `on_bar_frame` entrypoint rejects dispatch rather than dropping orders.
+  It carries engine-owned execution snapshots, allocates scoped order identities
+  and preserves submit/cancel/target action order. Observation-only callbacks have
+  no execution account. Order-only direct dispatch rejects managed actions.
+  Each frame also supplies a borrowed causal capture port after ordinary routing.
+  The host owns its observation ledger, rejects forged causal publications and
+  merges sealed outputs before validating saved views.
+  ABI execution queries serialize only the requested account or history view.
+  Account serialization is scoped to one immutable callback snapshot; history
+  serialization is retained until its backing immutable array changes. Updating
+  state never eagerly serializes account, orders or closed trades.
 
 
 
@@ -66,3 +76,5 @@ Managed workspaces embed the harness `rust-toolchain.toml`; authored builds use 
 
 Configuration, acquisition, ranking and job publication are owned by sibling `research`.
 Raw vtable/state access is crate-private and borrows loaded-library ownership.
+
+The SDK reader defaults to complete topics using a 16,384-token cl100k_base read budget, with 65,536 maximum. Large source ranges preserve UTF-8 through original-range token cursors and explicit completeness metadata. Capture parsing retains field paths; capture, metric and publication rejections retain the offending dataset/name/row and constraint through job failure.

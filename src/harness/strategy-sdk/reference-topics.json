@@ -1,0 +1,16 @@
+{
+  "consumer": "strategy-sdk/src/consumer.rs",
+  "program": "strategy-sdk/src/program.rs",
+  "execution": "strategy-sdk/src/execution.rs",
+  "indicator_api": "strategy-sdk/src/indicator.rs",
+  "wavelet": "strategy-sdk/src/wavelet.rs",
+  "events": "strategy-sdk/src/events.rs",
+  "exports": "strategy-sdk/src/export.rs",
+  "decimal": "num/src/decimal.rs",
+  "building_blocks": "strategy-sdk/src/building_blocks.rs",
+  "outputs": "strategy-sdk/src/outputs.rs",
+  "causal": "strategy-sdk/src/causal.rs",
+  "research_views": "strategy-sdk/src/research/view.rs",
+  "research_publishing": "strategy-sdk/src/research/publishing.rs",
+  "research_recipes": "strategy-sdk/src/research/recipes.rs"
+}

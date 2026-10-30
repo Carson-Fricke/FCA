@@ -25,6 +25,21 @@ pub(crate) fn reference(
     sdk: &Path,
     arguments: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<serde_json::Value, JitError> {
+    let root = sdk.canonicalize()?;
+    let sdk = root.as_path();
+    for key in arguments.keys() {
+        if ![
+            "topic",
+            "start_line",
+            "end_line",
+            "token_offset",
+            "max_tokens",
+        ]
+        .contains(&key.as_str())
+        {
+            return Err(JitError::Invalid(format!("unknown SDK reference argument {key:?}; use topic, line ranges, token_offset and max_tokens")));
+        }
+    }
     let mut hashes = BTreeMap::new();
     for (name, root) in [
         ("strategy-sdk", sdk.to_path_buf()),
@@ -69,6 +84,18 @@ pub(crate) fn reference(
             )));
         }
     }
+    let alias_bytes = std::fs::read(sdk.join("reference-topics.json"))?;
+    let aliases: BTreeMap<String, String> = serde_json::from_slice(&alias_bytes)
+        .map_err(|error| JitError::Invalid(error.to_string()))?;
+    if aliases.values().any(|path| !hashes.contains_key(path)) {
+        return Err(JitError::Invalid(
+            "SDK reference aliases do not match source inventory".into(),
+        ));
+    }
+    hashes.insert(
+        "strategy-sdk/reference-topics.json".into(),
+        source_digest(&alias_bytes),
+    );
     let identity =
         digest_hex(&serde_json::to_vec(&hashes).map_err(|error| JitError::Io(error.to_string()))?);
     let manifest = std::fs::read_to_string(sdk.join("Cargo.toml"))?;
@@ -100,29 +127,20 @@ pub(crate) fn reference(
         let topic = topic
             .as_str()
             .ok_or_else(|| JitError::Invalid("topic must be a string".into()))?;
-        let (file, hash_key) = match topic {
-            "consumer" => ("src/consumer.rs", "strategy-sdk/src/consumer.rs"),
-            "program" => ("src/program.rs", "strategy-sdk/src/program.rs"),
-            "outputs" => ("src/outputs.rs", "strategy-sdk/src/outputs.rs"),
-            "research_views" => ("src/research/view.rs", "strategy-sdk/src/research/view.rs"),
-            "research_publishing" => (
-                "src/research/publishing.rs",
-                "strategy-sdk/src/research/publishing.rs",
-            ),
-            "research_recipes" => (
-                "src/research/recipes.rs",
-                "strategy-sdk/src/research/recipes.rs",
-            ),
-            "building_blocks" => (
-                "src/building_blocks.rs",
-                "strategy-sdk/src/building_blocks.rs",
-            ),
-            "indicator_api" => ("src/indicator.rs", "strategy-sdk/src/indicator.rs"),
-            "wavelet" => ("src/wavelet.rs", "strategy-sdk/src/wavelet.rs"),
-            "events" => ("src/events.rs", "strategy-sdk/src/events.rs"),
-            "exports" => ("src/export.rs", "strategy-sdk/src/export.rs"),
-            "decimal" => ("../num/src/decimal.rs", "num/src/decimal.rs"),
-            _ => return Err(JitError::Invalid("unknown SDK reference topic".into())),
+        let hash_key = aliases.get(topic).map_or(topic, String::as_str);
+        if !hashes.contains_key(hash_key) || !hash_key.ends_with(".rs") {
+            return Err(JitError::Invalid(format!(
+                "unknown SDK reference {topic:?}; select a sourceHashes path or an SDK topic"
+            )));
+        }
+        let file = if let Some(relative) = hash_key.strip_prefix("lake-contracts/") {
+            sdk.parent()
+                .and_then(Path::parent)
+                .expect("SDK root")
+                .join("lake/contracts")
+                .join(relative)
+        } else {
+            sdk.parent().expect("SDK root").join(hash_key)
         };
         let number = |key: &str, default: u64| -> Result<usize, JitError> {
             let value = match arguments.get(key) {
@@ -137,31 +155,95 @@ pub(crate) fn reference(
                 .ok_or_else(|| JitError::Invalid(format!("{key} must be a positive integer")))
         };
         let start = number("start_line", 1)?;
-        let max = number("max_chars", 16000)?;
-        if max > 16000 {
-            return Err(JitError::Invalid("max_chars must be at most 16000".into()));
+        let max = number("max_tokens", 16384)?;
+        if !(32..=65536).contains(&max) {
+            return Err(JitError::Invalid(
+                "max_tokens must be between 32 and 65536".into(),
+            ));
         }
-        let text = std::fs::read_to_string(sdk.join(file))?;
+        let text = std::fs::read_to_string(sdk.join(file))?.replace("\r\n", "\n");
         if source_digest(text.as_bytes()) != hashes[hash_key] {
             return Err(JitError::Invalid(
                 "SDK reference changed while reading; request again".into(),
             ));
         }
-        let lines: Vec<_> = text.lines().collect();
+        let lines: Vec<_> = text.split_inclusive('\n').collect();
         let end = number("end_line", lines.len() as u64)?;
         if start > end || end > lines.len() {
-            return Err(JitError::Invalid(
-                "SDK line range is outside the source".into(),
-            ));
+            return Err(JitError::Invalid(format!("SDK range must satisfy 1 <= start_line <= end_line <= {}; omit end_line to read to the end", lines.len())));
         }
-        let selected = lines[start - 1..end].join("\n");
-        let content: String = selected.chars().take(max).collect();
+        let offset = match arguments.get("token_offset") {
+            None => 0,
+            Some(value) => value
+                .as_u64()
+                .and_then(|v| usize::try_from(v).ok())
+                .ok_or_else(|| {
+                    JitError::Invalid("token_offset must be a non-negative integer".into())
+                })?,
+        };
+        let selected = lines[start - 1..end].concat();
+        let codec = tiktoken_rs::cl100k_base_singleton();
+        let tokens = codec.encode_ordinary(&selected);
+        if offset > tokens.len() || codec.decode(&tokens[..offset]).is_err() {
+            return Err(JitError::Invalid(format!(
+                "token_offset must address a UTF-8 boundary within 0..={}; use nextArguments",
+                tokens.len()
+            )));
+        }
+        let cost = |value: &str| {
+            codec
+                .encode_ordinary(&serde_json::to_string(value).expect("string serialization"))
+                .len()
+        };
+        let mut stop = tokens.len();
+        let mut content = codec
+            .decode(&tokens[offset..])
+            .map_err(|e| JitError::Invalid(e.to_string()))?;
+        let mut token_count = cost(&content);
+        if token_count > max {
+            stop = stop.min(offset + max * 3 / 4);
+            loop {
+                if stop <= offset {
+                    return Err(JitError::Invalid(
+                        "max_tokens cannot fit the next character; increase the budget".into(),
+                    ));
+                }
+                if let Ok(value) = codec.decode(&tokens[offset..stop]) {
+                    token_count = cost(&value);
+                    if token_count <= max {
+                        content = value;
+                        break;
+                    }
+                    stop -= ((stop - offset) / 2)
+                        .max(1)
+                        .min(((token_count - max) / 2).max(1));
+                } else {
+                    stop -= 1;
+                }
+            }
+        }
         result["topic"] = json!(topic);
         result["content"] = json!(content);
         result["startLine"] = json!(start);
         result["endLine"] = json!(end);
         result["totalLines"] = json!(lines.len());
-        result["truncated"] = json!(selected.chars().count() > max);
+        result["tokenizer"] = json!("cl100k_base");
+        result["tokenOffset"] = json!(offset);
+        result["totalTokens"] = json!(tokens.len());
+        result["tokenCount"] = json!(token_count);
+        result["complete"] = json!(offset == 0 && stop == tokens.len());
+        result["truncated"] = json!(offset != 0 || stop != tokens.len());
+        result["nextTokenOffset"] = if stop < tokens.len() {
+            json!(stop)
+        } else {
+            serde_json::Value::Null
+        };
+        result["nextArguments"] = if stop < tokens.len() {
+            json!({"topic": topic, "start_line": start, "end_line": end,
+                   "token_offset": stop, "max_tokens": max})
+        } else {
+            serde_json::Value::Null
+        };
     }
     Ok(result)
 }

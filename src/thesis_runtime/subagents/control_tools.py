@@ -1,4 +1,4 @@
-"""Thesis-owned chat control tools: spawn, await, and operator input.
+"""Thesis-owned chat control tools: spawn, completion and operator input.
 
 Each handler closes over the immutable
 :class:`~thesis_runtime.contracts.context.ToolContext` built by the runtime, so
@@ -20,13 +20,11 @@ from thesis_runtime.contracts.datum import DatumType, datum_from_result
 from thesis_runtime.contracts.records import SubAgentKind, SubAgentRecord
 from thesis_runtime.subagents.control import (
     CONTROL_TOOL_SPECS,
-    TOOL_AWAIT_SUB_AGENT,
     TOOL_REQUEST_OPERATOR_INPUT,
     TOOL_REQUEST_PHASE_COMPLETION,
     TOOL_REQUEST_SUB_AGENT_COMPLETION,
     TOOL_REQUEST_WORKFLOW_INPUT,
     TOOL_SPAWN_SUB_AGENT,
-    AwaitResult,
     ControlToolSpec,
     OperatorInputRequest,
     PhaseCompletionRejected,
@@ -43,7 +41,6 @@ SpawnObserver = Callable[[SubAgentRecord, str], None]
 #: Control tools the top-level chat conversation may call.
 CONTROL_CHAT_TOOL_NAMES: tuple[str, ...] = (
     TOOL_SPAWN_SUB_AGENT,
-    TOOL_AWAIT_SUB_AGENT,
     TOOL_REQUEST_OPERATOR_INPUT,
 )
 
@@ -83,14 +80,6 @@ class ControlToolRuntime(Protocol):
         phase_attempt_id: str | None = None,
         idempotency_key: str | None = None,
     ) -> SpawnResult: ...
-
-    def await_sub_agent(
-        self,
-        workspace_id: str,
-        sub_agent_id: str,
-        *,
-        timeout_seconds: float | None = None,
-    ) -> AwaitResult: ...
 
     def request_operator_input(
         self,
@@ -257,60 +246,6 @@ def control_registered_tools(
             ),
         )
 
-    def handle_await(
-        arguments: Mapping[str, object], context: ToolContext
-    ) -> ToolExecution:
-        sub_agent_id = arguments.get("sub_agent_id")
-        if not isinstance(sub_agent_id, str) or not sub_agent_id.strip():
-            return _failure(TOOL_AWAIT_SUB_AGENT, "sub_agent_id must be non-empty")
-        timeout = arguments.get("timeout_seconds")
-        if timeout is not None and (
-            isinstance(timeout, bool)
-            or not isinstance(timeout, (int, float))
-            or timeout < 0
-        ):
-            return _failure(
-                TOOL_AWAIT_SUB_AGENT, "timeout_seconds must be a non-negative number"
-            )
-        if timeout is None:
-            result = runtime.await_sub_agent(context.workspace_id, sub_agent_id.strip())
-        else:
-            result = runtime.await_sub_agent(
-                context.workspace_id,
-                sub_agent_id.strip(),
-                timeout_seconds=float(timeout),
-            )
-        structured = dict(result.as_dict())
-        summary = (
-            result.result.get("summary") if isinstance(result.result, Mapping) else None
-        )
-        if result.terminal and isinstance(summary, str) and summary.strip():
-            text = (
-                f"Sub-agent {result.sub_agent_id} ended {result.status}: "
-                f"{summary.strip()}"
-            )
-        elif result.terminal:
-            text = f"Sub-agent {result.sub_agent_id} ended {result.status}."
-        else:
-            text = (
-                f"Sub-agent {result.sub_agent_id} is {result.status}; it has not "
-                "finished. End your turn and its result will be delivered here "
-                "when it does."
-            )
-        return ToolExecution(
-            ok=True,
-            structured=structured,
-            text=text,
-            datums=(
-                datum_from_result(
-                    DatumType.SUB_AGENT_STATUS.value,
-                    ok=True,
-                    structured=structured,
-                    text=text,
-                ),
-            ),
-        )
-
     def handle_operator_input(
         arguments: Mapping[str, object], context: ToolContext
     ) -> ToolExecution:
@@ -435,11 +370,6 @@ def control_registered_tools(
         RegisteredTool(
             descriptor=_function_tool(_SPECS[TOOL_SPAWN_SUB_AGENT]),
             handler=handle_spawn,
-        ),
-        RegisteredTool(
-            descriptor=_function_tool(_SPECS[TOOL_AWAIT_SUB_AGENT]),
-            handler=handle_await,
-            operation="read",
         ),
         RegisteredTool(
             descriptor=_function_tool(operator_tool),

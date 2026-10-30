@@ -475,11 +475,8 @@ impl StrategyRuntime for RoutedObserver {
         Ok(())
     }
     fn on_market(&mut self, event: &EngineMarket) -> Result<Vec<EngineOrder>, BacktestError> {
-        let kind = match event {
-            EngineMarket::Quote { .. } => "quote",
-            EngineMarket::Trade { .. } => "trade",
-            _ => panic!("raw bar"),
-        };
+        let kind = event.data_type();
+        assert_ne!(kind, "bars");
         self.seen.lock().unwrap().push(format!(
             "{kind}:{}:{}",
             event.symbol(),

@@ -16,9 +16,9 @@ use num::Decimal;
 
 /// The ABI version the host and every artifact must agree on.
 ///
-/// Version 5 adds structured exploratory output publication and multi-timeframe
-/// screening contexts. Artifacts must be rebuilt against the matching SDK.
-pub const SDK_ABI_VERSION: u32 = 5;
+/// Version 8 adds callback-local, host-sealed causal observation capture.
+/// Artifacts must be rebuilt against the matching SDK; older layouts are rejected.
+pub const SDK_ABI_VERSION: u32 = 8;
 
 /// Callback result: the author code completed.
 pub const SDK_OK: i32 = 0;
@@ -314,6 +314,8 @@ pub struct CMetricSink {
     pub publish: MetricPublishFn,
     /// Publish a typed exploratory output as validated JSON.
     pub publish_output: OutputPublishFn,
+    /// Exact strategy execution snapshot; empty for observation-only programs.
+    pub execution: CExecutionSource,
 }
 
 /// Publish one finite metric value under one validated name.
@@ -321,6 +323,19 @@ pub type MetricPublishFn = unsafe extern "C" fn(ctx: *mut c_void, name: CStr, va
 
 /// Publish one structured output; the host copies JSON during the callback.
 pub type OutputPublishFn = unsafe extern "C" fn(ctx: *mut c_void, name: CStr, json: CStr) -> i32;
+
+/// Host-owned capture port. Storage and strings live only for one callback.
+#[repr(C)]
+#[derive(Debug)]
+pub struct CDecisionSink {
+    pub ctx: *mut c_void,
+    pub decision_at_ns: i64,
+    pub interval: CStr,
+    pub capture: unsafe extern "C" fn(ctx: *mut c_void, request_json: CStr) -> i32,
+}
+
+/// Seal features after this frame's ordinary consumer callbacks complete.
+pub type DecisionFn = unsafe extern "C" fn(state: *mut c_void, sink: *const CDecisionSink) -> i32;
 
 /// The host-owned order sink handed to strategy callbacks.
 #[repr(C)]
@@ -330,6 +345,25 @@ pub struct COrderSink {
     pub ctx: *mut c_void,
     /// Submit callback.
     pub submit: OrderSubmitFn,
+    /// Exact engine-owned execution snapshot at this callback boundary.
+    pub execution: CExecutionSource,
+    /// Allocate an instance-owned order identity, valid until the next allocation.
+    pub next_order_id: unsafe extern "C" fn(ctx: *mut c_void) -> CStr,
+    /// Cancel an owned order; cancellation is an asynchronous execution action.
+    pub cancel: unsafe extern "C" fn(ctx: *mut c_void, order_id: CStr) -> i32,
+    /// Set an engine-managed signed target, including zero to close a position.
+    pub target_position:
+        unsafe extern "C" fn(ctx: *mut c_void, symbol: CStr, quantity: CDecimal) -> i32,
+}
+
+/// Borrowed callback-boundary state. The host materializes only requested views.
+/// `read` returns account (0), orders (1), or closed trades (2); returned bytes
+/// remain valid until this authored callback returns, including after actions.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct CExecutionSource {
+    pub ctx: *const c_void,
+    pub read: unsafe extern "C" fn(ctx: *const c_void, view: u32) -> CStr,
 }
 
 /// Submit one order intent to the host.
@@ -360,6 +394,8 @@ pub struct StudyProgramVTable {
     pub on_trade: StudyTradeFn,
     /// Borrow effective subscription JSON after construction.
     pub subscriptions: SubscriptionsFn,
+    /// Host-clocked feature capture, never available during final publication.
+    pub on_decision: DecisionFn,
 }
 
 /// Construct a study program state from a JSON parameters document.
@@ -411,6 +447,8 @@ pub struct StrategyProgramVTable {
     pub on_bar_frame: StrategyBarFrameFn,
     /// Borrow effective subscription JSON after construction.
     pub subscriptions: SubscriptionsFn,
+    /// Host-clocked feature capture, never available during final publication.
+    pub on_decision: DecisionFn,
 }
 
 /// Construct a strategy program state from a JSON parameters document.

@@ -16,6 +16,8 @@ import type {
 	ExecutionEventWire,
 	SubAgentNodeWire,
 	TimelineItemWire,
+	TranscriptPageWire,
+	TranscriptReceiptWire,
 	WorkflowDefinitionWire,
 	WorkflowExecutionWire,
 	ToolResultWire
@@ -137,6 +139,8 @@ export type ChatMessage = Pick<ChatMessageWire,
 	outputState?: 'streaming' | 'interrupted';
 	outputFailure?: string;
 	tool_result?: ToolResult | null;
+	receipt?: TranscriptReceiptWire;
+	detailsAvailable?: boolean;
 };
 
 /** Thread kind and flattened links are presentation projections of the durable record. */
@@ -171,7 +175,7 @@ export type ExecutionEvent = ExecutionEventWire & {
  * events, and execution state changes all share one ordered log; `threadId`
  * routes an item to the root agent or one sub-agent.
  */
-export type TimelineItem = TimelineItemWire;
+export type TimelineItem = TimelineItemWire | TranscriptPageWire['items'][number];
 
 /** Cards can project handles before the complete execution record is loaded. */
 export type WorkflowExecutionRecord = Pick<WorkflowExecutionWire,
@@ -236,6 +240,8 @@ export interface ExecutionNodeRef {
 export type ToolResultFailure = NonNullable<ToolResultWire['failure']>;
 
 export type ToolResult = ToolResultWire & {
+	detailsAvailable?: boolean;
+	detailsSeq?: number;
 	/** Read-only presentation group; never persisted as another result. */
 	observations?: ToolResult[];
 	/** Previous displayed sketch revision in this scope, for a local visual diff. */

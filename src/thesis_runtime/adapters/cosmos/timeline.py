@@ -9,8 +9,9 @@ and item creation share one transactional batch in the workspace partition, so
 no sequence is ever reserved independently of its publication.
 
 There is no second timeline container and no projection outbox. Reads scope on
-indexed top-level ownership fields (``chatId``, ``threadId``), never on nested
-payload predicates.
+indexed top-level ownership fields (``chatId``, ``threadId``). Read-only receipt
+navigation additionally selects canonical result metadata before paging; it
+never changes the stored log or grants execution authority.
 """
 
 from __future__ import annotations
@@ -34,6 +35,10 @@ from thesis_runtime.adapters.cosmos.chunks import (
 )
 from thesis_runtime.adapters.cosmos.ownership import fenced_batch
 from thesis_runtime.adapters.cosmos.work import work_id
+from thesis_runtime.adapters.receipt_projection import (
+    cosmos_receipt_header,
+    receipt_header,
+)
 from thesis_runtime.conversations.streaming import CommitNotifier
 
 #: Timeline item kinds.
@@ -370,6 +375,59 @@ class CosmosTimeline:
         )[:limit]
         recent.reverse()
         return [self.hydrate(item) for item in recent]
+
+    def read_receipts(
+        self,
+        *,
+        workspace_id: str,
+        chat_id: str,
+        after_seq: int,
+        through_seq: int,
+        limit: int,
+        result_types: tuple[str, ...],
+        structured_kinds: tuple[str, ...],
+        metadata_fields: tuple[str, ...],
+        metadata_arrays: tuple[tuple[str, str], ...],
+    ) -> list[dict[str, object]]:
+        """Select canonical receipts before paging; hydrate current chunked bodies.
+
+        Chunk manifests deliberately carry no content predicates. Include those
+        message documents so their canonical facts remain available to readers.
+        """
+        query = (
+            'SELECT TOP @limit VALUE IIF(IS_DEFINED(c.payload._cosmosChunks), {"chunkDocument":c}, '
+            + cosmos_receipt_header(metadata_fields, metadata_arrays)
+            + ") FROM c WHERE c.chatId = @chat "
+            "AND c.kind = 'message' AND c.seq > @after AND c.seq <= @through AND ("
+            "(c.threadId = 'root' AND (c.payload.role = 'user' OR "
+            "ARRAY_LENGTH(c.payload.data.sessionMessage.content.requests) > 0)) OR "
+            "ARRAY_CONTAINS(@types, c.payload.data.sessionMessage.content.result.datumType) OR "
+            "ARRAY_CONTAINS(@kinds, c.payload.data.sessionMessage.content.result.structured.kind) OR "
+            "EXISTS(SELECT VALUE d FROM d IN c.payload.data.sessionMessage.content.result.datums "
+            "WHERE ARRAY_CONTAINS(@types, d.datumType) OR ARRAY_CONTAINS(@kinds, d.structured.kind)) OR "
+            "IS_DEFINED(c.payload._cosmosChunks)) ORDER BY c.seq ASC"
+        )
+        rows = self._container.query_items(
+            query=query,
+            parameters=[
+                {"name": "@chat", "value": chat_id},
+                {"name": "@after", "value": after_seq},
+                {"name": "@through", "value": through_seq},
+                {"name": "@limit", "value": limit},
+                {"name": "@types", "value": list(result_types)},
+                {"name": "@kinds", "value": list(structured_kinds)},
+            ],
+            partition_key=workspace_id,
+            max_item_count=limit,
+        )
+        return [
+            receipt_header(
+                self.hydrate(item["chunkDocument"]), metadata_fields, metadata_arrays
+            )
+            if "chunkDocument" in item
+            else dict(item)
+            for item in rows
+        ][:limit]
 
 
 __all__ = [

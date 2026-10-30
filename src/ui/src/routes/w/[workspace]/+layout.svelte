@@ -17,6 +17,7 @@ import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
 		COPILOT_MIN_WIDTH,
 		notify,
 		setCopilotWidth,
+		setSidebarCompact,
 		setLastWorkspace,
 		ui
 	} from '$lib/workspace.svelte';
@@ -183,6 +184,8 @@ import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
 
 <div class="grid-bg flex h-screen overflow-hidden bg-surface-950">
 	<Sidebar
+		compact={ui.sidebarCompact}
+		onToggleCompact={() => setSidebarCompact(!ui.sidebarCompact)}
 		snapshot={snapshot}
 		ready={detailReady}
 		{workspaceId}
@@ -207,7 +210,7 @@ import DataModeBadge from '$lib/components/shell/DataModeBadge.svelte';
 			copilotVisible={copilotVisible}
 			onToggleCopilot={() => (ui.copilotOpen = !ui.copilotOpen)}
 		/>
-		<main class="min-h-0 flex-1 overflow-y-auto p-5" id="main-content">
+		<main class="min-h-0 flex-1 {isChats ? 'overflow-hidden bg-surface-900' : 'overflow-y-auto p-5'}" id="main-content">
 			{@render children()}
 		</main>
 	</div>

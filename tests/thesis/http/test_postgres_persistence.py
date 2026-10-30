@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg.conninfo import make_conninfo
 from psycopg.sql import SQL, Identifier
+from psycopg.types.json import Jsonb
 from tests.thesis.http.test_stateless_ownership import Provider
 
 from thesis.application.composition import build_serving_stack, build_serving_worker
@@ -30,6 +31,98 @@ from thesis_runtime.workflows.execution_store import (
     ExecutionIdentity,
     ExecutionStoreConflict,
 )
+
+
+def test_navigation_and_history_are_bounded_and_details_retain_canonical_evidence(
+    postgres: PostgresStore,
+) -> None:
+    client, persistence, _ = replica(postgres, Provider())
+    try:
+        chat = persistence.chat.create_chat(
+            "workspace", title="Large history", owner_actor_id="operator"
+        )
+        turn = persistence.chat.send_message(
+            "workspace",
+            chat.chat_id,
+            actor_id="operator",
+            body="Inspect retained evidence",
+        )
+        receipt = persistence.chat.send_message(
+            "workspace",
+            chat.chat_id,
+            actor_id="tool",
+            role=MessageRole.TOOL,
+            body="Read artifact",
+            tool_result={
+                "datumType": "read_artifact",
+                "ok": True,
+                "summary": "Read metrics",
+                "failure": None,
+                "structured": {
+                    "job_id": "job-1",
+                    "name": "metrics.json",
+                    "content": "retained-evidence-" * 20_000,
+                },
+                "text": "retained-evidence-" * 20_000,
+            },
+        )
+        # Arrange a large external log in one statement; the HTTP boundary must
+        # select receipts before paging, even when raw activity dominates it.
+        with postgres.pool.connection() as connection:
+            connection.execute(
+                "INSERT INTO thesis_documents(collection,workspace_id,id,body) SELECT 'catalog','workspace','fragment-'||n,"
+                "jsonb_build_object('id','fragment-'||n,'workspaceId','workspace','chatId',%s::text,'kind','output','seq',n,"
+                "'threadId','root','payload',jsonb_build_object('messageId',%s::text,'state','delta','text','fragment')) "
+                "FROM generate_series(3,5002) n",
+                (chat.chat_id, receipt.message_id),
+            )
+            connection.execute(
+                "UPDATE thesis_documents SET body=jsonb_set(body,'{nextSeq}',%s) WHERE workspace_id='workspace' AND id=%s",
+                (Jsonb(5002), "counter:" + chat.chat_id),
+            )
+        headers = {"Authorization": "Bearer token"}
+        base = f"/v1/workspaces/workspace/chats/{chat.chat_id}"
+        outline = client.get(base + "/outline", headers=headers)
+        assert outline.status_code == 200, outline.text
+        assert outline.json()["nextAfter"] is None
+        assert [
+            (entry["kind"], entry["messageId"]) for entry in outline.json()["items"]
+        ] == [("turn", turn.message_id), ("artifact", receipt.message_id)]
+        assert "retained-evidence-" not in outline.text
+        page = client.get(base + "/timeline?thread=root", headers=headers)
+        assert page.status_code == 200, page.text
+        assert len(page.content) < 256 * 1024
+        assert page.json()["after"] == 5002
+        preview = next(
+            item
+            for item in page.json()["items"]
+            if item["payload"].get("message_id") == receipt.message_id
+        )
+        assert preview["payload"]["detailsAvailable"] is True
+        assert "sessionMessage" not in (preview["payload"]["data"] or {})
+        detail = client.get(base + f"/timeline/items/{preview['seq']}", headers=headers)
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["payload"] == receipt.as_dict()
+        assert persistence.chat.get_message("workspace", receipt.message_id) == receipt
+        assert (
+            client.get(base + "/outline?after=5002", headers=headers).json()["items"]
+            == []
+        )
+        assert (
+            client.get(base + "/timeline/items/9000", headers=headers).status_code
+            == 404
+        )
+        assert (
+            client.get(
+                base.replace(chat.chat_id, "missing")
+                + f"/timeline/items/{preview['seq']}",
+                headers=headers,
+            ).status_code
+            == 404
+        )
+        assert client.get(base + f"/timeline/items/{preview['seq']}").status_code == 401
+    finally:
+        persistence.timeline.commits.close()
 
 
 @pytest.fixture(scope="session")

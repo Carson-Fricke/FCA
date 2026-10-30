@@ -55,7 +55,9 @@ from thesis.workflows.research_models import BacktestResearchModelRunner
 from thesis.workspaces.local import LocalWorkspaceProvider, default_workspace_root
 from thesis.workspaces.programs import WorkspacePrograms
 from thesis.workspaces.repository import WorkspaceRepositoryProvider
+from thesis.workspaces.sdk import SdkReferences
 from thesis_runtime.adapters.providers.families import model_family_adapter
+from thesis_runtime.adapters.providers.jev import JevEvidenceRanker
 from thesis_runtime.adapters.providers.openrouter import (
     OpenRouterProfile,
     OpenRouterProvider,
@@ -65,6 +67,7 @@ from thesis_runtime.adapters.providers.transports import (
     EnvironmentApiKeySource,
     HttpOpenRouterTransport,
 )
+from thesis_runtime.contracts.compaction import ContextPolicy
 from thesis_runtime.contracts.context import ToolContext
 from thesis_runtime.contracts.messages import MessageContent, SessionMessage
 from thesis_runtime.contracts.records import RecordNotFound, SubAgentRecord
@@ -92,6 +95,7 @@ class _WorkflowModelProvider:
             provider,
             family=model_family_adapter(provider.model),
             origin=(provider.provider_name, provider.model),
+            max_output_tokens=_serving_output_tokens(provider.model),
         )
 
     def invoke(
@@ -218,12 +222,22 @@ def _serving_model_name() -> str:
     return (os.environ.get("THESIS_MODEL") or "").strip() or DEFAULT_SERVING_MODEL
 
 
+def _serving_output_tokens(model: str) -> int:
+    """Reserve the same explicit cap sent to OpenRouter, including reasoning."""
+    return int(
+        os.environ.get("THESIS_MAX_OUTPUT_TOKENS")
+        or ("131072" if model == DEFAULT_SERVING_MODEL else "32768")
+    )
+
+
 def open_serving_model_provider() -> OpenRouterProvider | None:
     """Open the optional model provider; missing credentials leave durable chat only."""
     if not (os.environ.get("OPENROUTER_API_KEY") or "").strip():
         return None
     profile = OpenRouterProfile(
-        profile_id=_SERVING_PROFILE_ID, model=_serving_model_name()
+        profile_id=_SERVING_PROFILE_ID,
+        model=_serving_model_name(),
+        max_output_tokens=_serving_output_tokens(_serving_model_name()),
     )
     return OpenRouterProvider(
         profile, EnvironmentApiKeySource(), HttpOpenRouterTransport(profile.base_url)
@@ -289,6 +303,7 @@ def build_serving_stack(
         ),
         harness_tools,
         submissions=submissions,
+        sdk=SdkReferences(harness_tools),
     )
     allowed_tools = tuple(
         sorted(
@@ -330,7 +345,7 @@ def build_serving_stack(
             programs=programs
             if context.workflow_execution_id is None
             else cast(WorkspacePrograms | None, bindings.programs),
-            data_window=bindings.data_window,
+            resolve_data_window=bindings.resolve_data_window,
             job_retention=bindings.job_retention,
         )
 
@@ -360,10 +375,25 @@ def build_serving_stack(
             model_provider,
             family=model_family_adapter(model_provider.model),
             origin=(model_provider.provider_name, model_provider.model),
+            max_output_tokens=_serving_output_tokens(model_provider.model),
         ),
         registry_factory=registry_for,
         root_allowed_tools=allowed_tools,
         root_system_prompt=FCA_SYSTEM_PROMPT,
+        context_policy=ContextPolicy(
+            window_tokens=int(
+                os.environ.get("THESIS_CONTEXT_WINDOW_TOKENS")
+                or (
+                    "1000000"
+                    if model_provider.model == DEFAULT_SERVING_MODEL
+                    else "128000"
+                )
+            ),
+            output_tokens=_serving_output_tokens(model_provider.model),
+        ),
+        evidence_ranker=JevEvidenceRanker(os.environ["TYPESAFE_API_KEY"])
+        if os.environ.get("TYPESAFE_API_KEY")
+        else None,
         lifecycle=lifecycle,
         policies=resolved_policies,
         on_fault=fail_execution,

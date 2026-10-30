@@ -25,6 +25,7 @@ from thesis.extensions.workflows.research_investigation.contracts import (
 )
 from thesis.integrations.mcp import HarnessMcpTransportError, McpToolResult
 from thesis.workspaces.programs import WorkspacePrograms
+from thesis.workspaces.sdk import SdkReferences
 from thesis_runtime.adapters.cosmos.ownership import CosmosOwnershipStore
 from thesis_runtime.adapters.cosmos.work import CosmosWorkStore
 from thesis_runtime.adapters.providers.families import model_family_adapter
@@ -53,6 +54,8 @@ from thesis_runtime.workflows.execution_store import InMemoryExecutionStore
 
 WORKSPACE = "workspace-one"
 PROPOSAL = {
+    "attempts": [],
+    "evidence": [],
     "construction": "Daily context conditions intraday pullback occurrences.",
     "design": "Compare direction-adjusted hypothetical paths across context, using session contrasts.",
     "decision": "Retain or revise the context representation.",
@@ -70,7 +73,16 @@ ADJUDICATION = {
     "reason": "Proceed with scoped uncertainty.",
     "resolutions": [],
     "remainingUncertainty": "Execution and out-of-sample behavior remain unresolved.",
+    "repairs": [],
+    "attempts": [],
+    "evidence": [],
+    "review": {
+        "target": "critique",
+        "scope": "Review the substantive construction against the branch decision.",
+        "issueIds": [],
+    },
 }
+COMPLETED_ADJUDICATION = {**ADJUDICATION, "review": None}
 
 
 class ResearchHarness(Harness):
@@ -115,13 +127,17 @@ class ResearchModel:
     def __init__(self):
         self.responses = []
         self.calls = 0
+        self.requests = []
 
     def stream(self, *, message_id=None, **kwargs):
         self.calls += 1
+        self.requests.append(kwargs)
         assert self.responses, "unexpected model turn, including a record-only anchor"
         requests = self.responses.pop(0)()
         yield ModelCompletion(
-            message=ProviderMessage(
+            message=requests
+            if isinstance(requests, ProviderMessage)
+            else ProviderMessage(
                 "assistant",
                 "",
                 tool_calls=tuple(
@@ -142,7 +158,9 @@ def kit(tmp_path, request):
     git = MemoryGitFactory()
     repositories = Repositories(tmp_path / "workspaces", git)
     harness = ResearchHarness()
-    programs = WorkspacePrograms(repositories, harness, git_factory=git)
+    programs = WorkspacePrograms(
+        repositories, harness, git_factory=git, sdk=SdkReferences(harness)
+    )
     reference = programs.sketches.save(WORKSPACE, "momentum", _sketch_document())[
         "reference"
     ]
@@ -158,7 +176,8 @@ def kit(tmp_path, request):
         if database is not None
         else None
     )
-    model = ResearchModel() if queue is not None else None
+    undeclared = getattr(request, "param", None) == "undeclared"
+    model = ResearchModel() if queue is not None or undeclared else None
     chat = ChatService(store_for(database) if database is not None else None, clock=now)
     thread = chat.create_chat(WORKSPACE, title="Research", owner_actor_id="operator")
     trigger = chat.send_message(
@@ -235,7 +254,7 @@ def kit(tmp_path, request):
             programs=cast(WorkspacePrograms | None, binding.programs),
             workflow_tools=binding.tools,
             phase_completion_schema=binding.completion_schema,
-            data_window=binding.data_window,
+            resolve_data_window=binding.resolve_data_window,
             job_retention=binding.job_retention,
         )
 
@@ -289,7 +308,8 @@ def kit(tmp_path, request):
         "development": {"start": "2024-01-01T00:00:00Z", "end": "2024-02-01T00:00:00Z"},
         "forward": {"start": "2024-02-01T00:00:00Z", "end": "2024-03-01T00:00:00Z"},
     }
-    assert tool(discovery_id, "set_research_window", windows).ok
+    if not undeclared:
+        assert tool(discovery_id, "set_research_window", windows).ok
     brief = {
         "direction": "Develop conditional pullback geometry.",
         "question": "Does context distinguish pullback outcomes?",
@@ -311,6 +331,238 @@ def kit(tmp_path, request):
         return result.structured["executionId"]
 
     return SimpleNamespace(**locals())
+
+
+@pytest.mark.parametrize("kit", ["undeclared"], indirect=True)
+def test_discovery_catalog_is_complete_and_missing_windows_return_repairable_errors(
+    kit,
+):
+    from fastapi.testclient import TestClient
+
+    from thesis.http.application import create_app
+
+    def launch_branch():
+        reference = kit.programs.sketches.read(WORKSPACE, "discovery-candidate")[
+            "reference"
+        ]
+        return [
+            (
+                "start_workflow",
+                {
+                    "workflow": "research-investigation",
+                    "input": {**kit.brief, "sketchReference": reference},
+                },
+            )
+        ]
+
+    def complete(target, field, payload):
+        return lambda: [
+            (
+                "request_phase_completion",
+                {"completion": {"target": target, "intentEpoch": 0, field: payload}},
+            )
+        ]
+
+    def complete_discovery():
+        job_id = kit.chat.get_execution(WORKSPACE, kit.request.execution_id).job_ids[0]
+        return complete(
+            "completed",
+            "discovery",
+            {
+                "noCandidateReason": "The synthetic harness evidence is inconclusive.",
+                "attempts": [
+                    {
+                        "jobId": job_id,
+                        "purpose": "Exercise the proposed construction.",
+                        "dataTypes": ["bars"],
+                        "window": "development",
+                        "result": "Synthetic execution and independent design reviews only.",
+                    }
+                ],
+                "untouchedData": "Forward data was not read.",
+                "limitations": "This exercise establishes tool and workflow behavior only.",
+            },
+        )()
+
+    def declare_and_author():
+        assert not kit.chat.get_execution(WORKSPACE, kit.request.execution_id).job_ids
+        assert not any(
+            name in {"run_backtest", "run_study"} for name, _ in kit.harness.calls
+        )
+        # Both calls use the catalog bound before declaration. Authoring must
+        # resolve the now-durable window instead of retaining a stale policy.
+        return [
+            ("set_research_window", kit.windows),
+            (
+                "author_strategy_sketch",
+                {"sketch_id": "discovery-candidate", "sketch": _sketch_document()},
+            ),
+        ]
+
+    kit.model.responses = [
+        lambda: [
+            (
+                "author_strategy_sketch",
+                {"sketch_id": "discovery-candidate", "sketch": _sketch_document()},
+            ),
+            (
+                "author_strategy",
+                {
+                    "program_id": "discovery-policy",
+                    "template": "basic",
+                    "configuration": CONFIG,
+                },
+            ),
+            ("validate_strategy", {"program_id": "discovery-policy"}),
+            ("read_sdk_reference", {"topic": "strategy"}),
+            ("list_strategy_sketches", {}),
+            ("read_study_output", {"job_id": "not-run"}),
+            ("run_backtest", {"program_id": "discovery-policy"}),
+            (
+                "run_backtest_batch",
+                {"program_id": "discovery-policy", "assignments": [{}]},
+            ),
+            (
+                "run_null_batch",
+                {
+                    "program_id": "discovery-policy",
+                    "mode": "permutation",
+                    "block_size": 1,
+                    "seeds": [7],
+                },
+            ),
+            ("run_study", {"program_id": "not-authored"}),
+            (
+                "start_workflow",
+                {"workflow": "research-investigation", "input": kit.brief},
+            ),
+            (
+                "request_phase_completion",
+                {
+                    "completion": {
+                        "target": "completed",
+                        "intentEpoch": 0,
+                        "discovery": {
+                            "noCandidateReason": "No work has run.",
+                            "attempts": [
+                                {
+                                    "jobId": "not-run",
+                                    "purpose": "Unexecuted attempt",
+                                    "dataTypes": ["bars"],
+                                    "window": "development",
+                                    "result": "None",
+                                }
+                            ],
+                            "untouchedData": "All data untouched.",
+                            "limitations": "No empirical evidence.",
+                        },
+                    }
+                },
+            ),
+        ],
+        declare_and_author,
+        lambda: [
+            (
+                "author_strategy",
+                {
+                    "program_id": "discovery-policy",
+                    "template": "basic",
+                    "configuration": CONFIG,
+                },
+            )
+        ],
+        lambda: [("validate_strategy", {"program_id": "discovery-policy"})],
+        lambda: [("run_backtest", {"program_id": "discovery-policy"})],
+        launch_branch,
+        lambda: ProviderMessage(
+            "assistant", "Research is delegated; awaiting its result."
+        ),
+        complete("critique", "proposal", PROPOSAL),
+        *(complete("collect_critiques", "critique", CRITIQUE) for _ in REVIEW_PHASES),
+        complete("completed", "adjudication", COMPLETED_ADJUDICATION),
+        complete_discovery,
+    ]
+    while (
+        kit.wakes
+        and kit.chat.get_execution(WORKSPACE, kit.request.execution_id).state.value
+        != "completed"
+    ):
+        kit.wakes.pop(0)()
+    assert not kit.model.responses
+
+    def names(request):
+        return {tool["function"]["name"] for tool in request["tools"]}
+
+    first = kit.model.requests[0]
+    assert {
+        "author_strategy_sketch",
+        "start_workflow",
+        "request_phase_completion",
+        "read_sdk_reference",
+        "author_strategy",
+        "validate_strategy",
+        "run_backtest",
+    } <= names(first)
+    assert all(request["tools"] == first["tools"] for request in kit.model.requests[:7])
+    messages = [
+        from_record(row)
+        for row in kit.chat.list_conversation_messages(
+            WORKSPACE, kit.thread.chat_id, kit.discovery_id
+        )
+    ]
+    blocked = {
+        row.content.correlation.tool_name: row.content.result["failure"]
+        for row in messages
+        if row.content.correlation is not None
+        and row.content.result is not None
+        and row.content.result.get("ok") is False
+    }
+    assert set(blocked) == {
+        "author_strategy_sketch",
+        "author_strategy",
+        "validate_strategy",
+        "read_sdk_reference",
+        "list_strategy_sketches",
+        "read_study_output",
+        "run_backtest",
+        "run_backtest_batch",
+        "run_null_batch",
+        "run_study",
+        "start_workflow",
+        "request_phase_completion",
+    }
+    assert all(
+        "set_research_window" in failure["message"]
+        for failure in cast(Any, blocked).values()
+    )
+    assert all(
+        failure["kind"] == "research_window" and failure["certainty"] == "not_started"
+        for tool_name, failure in cast(Any, blocked).items()
+        if tool_name not in {"start_workflow", "request_phase_completion"}
+    )
+    assert kit.programs.sketches.read(WORKSPACE, "discovery-candidate")["reference"]
+
+    with TestClient(
+        create_app(
+            bearer_token="test", chat_service=kit.chat, conversations=kit.conversations
+        )
+    ) as client:
+        response = client.get(
+            f"/v1/workspaces/{WORKSPACE}/chats/{kit.thread.chat_id}/sub_agents",
+            headers={"Authorization": "Bearer test"},
+        )
+    assert response.status_code == 200, response.json()
+    nodes = response.json()["items"]
+    assert {"discovery", "proposal", *REVIEW_PHASES.values(), "adjudicate"} <= {
+        node["phase"] for node in nodes
+    }
+    assert all(
+        node["status"] == "completed" for node in nodes if node["phaseExecutor"]
+    ), [
+        (node["phase"], node["status"], node.get("result"))
+        for node in nodes
+        if node["phaseExecutor"] and node["status"] != "completed"
+    ]
 
 
 @pytest.mark.parametrize("kit", ["durable"], indirect=True)
@@ -356,7 +608,7 @@ def test_durable_research_phases_read_and_complete_without_turning_workflow_node
             },
         ),
         *((phase, "collect_critiques", CRITIQUE) for phase in REVIEW_PHASES.values()),
-        ("adjudicate", "completed", ADJUDICATION),
+        ("adjudicate", "completed", COMPLETED_ADJUDICATION),
     ]
     for phase, target, payload in stages:
         executor = kit.node(branch, phase)
@@ -451,8 +703,8 @@ def test_streamed_read_selectors_reach_research_handler_and_durable_receipt(kit)
     arguments = {
         "execution_id": branch,
         "handoff": 1,
-        "offset": 1000,
-        "max_chars": 1000,
+        "token_offset": 10,
+        "max_tokens": 1000,
     }
     encoded = json.dumps(arguments)
     boundary = encoded.index(', "handoff"')
@@ -532,13 +784,16 @@ def test_streamed_read_selectors_reach_research_handler_and_durable_receipt(kit)
     assert receipt["arguments"] == arguments
     page = receipt["datums"][0]["structured"]
     accepted = kit.executions.get(branch).transitions[0].as_dict()
-    assert (
-        page["content"]
-        == json.dumps(accepted, ensure_ascii=False, separators=(",", ":"))[1000:2000]
+    from thesis_runtime.tools.reading import read_tokenizer
+
+    codec = read_tokenizer()
+    tokens = codec.encode_ordinary(
+        json.dumps(accepted, ensure_ascii=False, separators=(",", ":"))
     )
+    end = page["nextTokenOffset"] or len(tokens)
+    assert page["content"] == codec.decode(tokens[10:end])
     assert page["handoff"] == 1
-    assert page["offset"] == 1000
-    assert page["nextArguments"] == {**arguments, "offset": 2000}
+    assert page["tokenOffset"] == 10
     assert any(row["role"] == "tool" for row in requests[-1]["messages"])
 
 
@@ -555,6 +810,7 @@ def test_large_handoffs_are_paged_and_repairs_survive_phase_reentry(kit):
         "consequence": "The composed construction remains untested. " * 80,
         "evidence": "The proposal omits the wavelet comparison named in its brief.",
         "repair": "Measure the feature interaction or narrow the conclusion. " * 60,
+        "reopenReason": None,
     }
     kit.complete(branch, "adjudicate", {**CRITIQUE, "issues": [issue]})
     kit.complete(
@@ -579,13 +835,20 @@ def test_large_handoffs_are_paged_and_repairs_survive_phase_reentry(kit):
     kit.complete(branch, "critique", {**proposal, "repairs": [repair]})
     assert kit.node(branch).sub_agent_id == critic
 
+    whole = kit.tool(
+        critic, "read_research_investigations", {"execution_id": None, "handoff": 1}
+    )
+    assert whole.ok and whole.structured["complete"]
+    assert len(whole.structured["content"]) > 8000
+    assert whole.structured["nextArguments"] is None
+
     def read_all(arguments, reader=critic):
         parts = []
         arguments = {
             "execution_id": branch,
             "handoff": None,
-            "offset": 0,
-            "max_chars": 1000,
+            "token_offset": 0,
+            "max_tokens": 1000,
             **arguments,
         }
         while arguments is not None:
@@ -596,16 +859,16 @@ def test_large_handoffs_are_paged_and_repairs_survive_phase_reentry(kit):
             )
             assert response.ok, response.failure
             page = response.structured
-            assert len(page["content"]) <= 1000
+            assert page["tokenCount"] <= 1000
             parts.append(page["content"])
             continuation = page["nextArguments"]
             if continuation is not None:
                 assert continuation["execution_id"] == branch
-                assert continuation["offset"] == page["nextOffset"]
-                assert continuation["offset"] > page["offset"]
+                assert continuation["token_offset"] == page["nextTokenOffset"]
+                assert continuation["token_offset"] > page["tokenOffset"]
                 assert continuation.get("handoff") == arguments.get("handoff")
             else:
-                assert page["nextOffset"] is None
+                assert page["nextTokenOffset"] is None
             arguments = continuation
         return json.loads("".join(parts))
 
@@ -632,7 +895,12 @@ def test_large_handoffs_are_paged_and_repairs_survive_phase_reentry(kit):
     assert not kit.tool(
         critic,
         "read_research_investigations",
-        {"execution_id": sibling, "handoff": None, "offset": 0, "max_chars": 1000},
+        {
+            "execution_id": sibling,
+            "handoff": None,
+            "token_offset": 0,
+            "max_tokens": 1000,
+        },
     ).ok
     kit.complete(
         branch,
@@ -688,7 +956,7 @@ def test_independent_specialists_preserve_findings_and_narrow_repairs_stay_focus
         brief = kit.tool(
             reviewer.sub_agent_id,
             "read_research_investigations",
-            {"execution_id": None, "handoff": 0, "offset": 0, "max_chars": 6000},
+            {"execution_id": None, "handoff": 0, "token_offset": 0, "max_tokens": 6000},
         )
         original = json.loads(brief.structured["content"])["operatorRequest"]
         assert original == {
@@ -704,6 +972,7 @@ def test_independent_specialists_preserve_findings_and_narrow_repairs_stay_focus
             "evidence": f"{name} traced the equality case against the accepted source.",
             "consequence": "The proposed conclusion is unsupported.",
             "repair": "Correct this boundary claim and demonstrate the result.",
+            "reopenReason": None,
         }
         issues[name] = issue
         if name == "implementation":
@@ -734,7 +1003,12 @@ def test_independent_specialists_preserve_findings_and_narrow_repairs_stay_focus
             sibling_read = kit.tool(
                 reviewers["alignment"].sub_agent_id,
                 "read_research_investigations",
-                {"execution_id": None, "handoff": 2, "offset": 0, "max_chars": 6000},
+                {
+                    "execution_id": None,
+                    "handoff": 2,
+                    "token_offset": 0,
+                    "max_tokens": 6000,
+                },
             )
             assert not sibling_read.ok
 
@@ -742,7 +1016,7 @@ def test_independent_specialists_preserve_findings_and_narrow_repairs_stay_focus
     read = kit.tool(
         judge.sub_agent_id,
         "read_research_investigations",
-        {"execution_id": None, "handoff": None, "offset": 0, "max_chars": 8000},
+        {"execution_id": None, "handoff": None, "token_offset": 0, "max_tokens": 8000},
     )
     state = json.loads(read.structured["content"])
     assert set(state["critiques"]) == set(REVIEW_PHASES)
@@ -754,6 +1028,11 @@ def test_independent_specialists_preserve_findings_and_narrow_repairs_stay_focus
         {
             **ADJUDICATION,
             "reason": "Implementation boundary needs a narrow calculation check via focused_critique.",
+            "review": {
+                "target": "focused_critique",
+                "scope": "Independently recompute the corrected equality case.",
+                "issueIds": [issues["implementation"]["issueId"]],
+            },
             "resolutions": [
                 {
                     "issueId": issues["implementation"]["issueId"],
@@ -809,15 +1088,24 @@ def test_independent_specialists_preserve_findings_and_narrow_repairs_stay_focus
             ],
         },
     )
-    result = kit.tool(
-        kit.discovery_id,
-        "read_research_investigations",
-        {"execution_id": branch, "handoff": None, "offset": 0, "max_chars": 6000},
-    ).structured["branches"][0]
+    result = json.loads(
+        kit.tool(
+            kit.discovery_id,
+            "read_research_investigations",
+            {
+                "execution_id": branch,
+                "handoff": None,
+                "token_offset": 0,
+                "max_tokens": 6000,
+            },
+        ).structured["content"]
+    )["branches"][0]
     assert (
         result["issues"][issues["implementation"]["issueId"]]["verification"] == proof
     )
     assert result["issues"][issues["experimental"]["issueId"]]["status"] == "open"
+    assert result["review"]["target"] == "focused_critique"
+    assert result["review"]["issueIds"] == [issues["implementation"]["issueId"]]
     assert all(
         kit.conversations.store.get_sub_agent(WORKSPACE, node.sub_agent_id).status
         is SubAgentStatus.COMPLETED
@@ -834,13 +1122,30 @@ def test_independent_specialists_preserve_findings_and_narrow_repairs_stay_focus
             "evidence": [],
         },
     )
+    repeated = kit.tool(
+        kit.node(branch, "implementation_critique").sub_agent_id,
+        "request_phase_completion",
+        {
+            "completion": {
+                "target": "collect_critiques",
+                "intentEpoch": 0,
+                "critique": {**CRITIQUE, "issues": [issues["implementation"]]},
+            }
+        },
+    )
+    assert not repeated.ok and "reopenReason" in repeated.failure["message"]
     kit.complete_one(
         branch,
         "implementation_critique",
         "collect_critiques",
         {
             **CRITIQUE,
-            "issues": [issues["implementation"]],
+            "issues": [
+                {
+                    **issues["implementation"],
+                    "reopenReason": "The changed construction reintroduced the equality defect; traced its new source predicate.",
+                }
+            ],
         },
     )
     kit.complete_one(
@@ -858,15 +1163,218 @@ def test_independent_specialists_preserve_findings_and_narrow_repairs_stay_focus
         },
     )
     kit.complete_one(branch, "alignment_critique", "collect_critiques", CRITIQUE)
-    conflict = kit.tool(
-        kit.discovery_id,
-        "read_research_investigations",
-        {"execution_id": branch, "handoff": None, "offset": 0, "max_chars": 6000},
-    ).structured["branches"][0]
+    conflict = json.loads(
+        kit.tool(
+            kit.discovery_id,
+            "read_research_investigations",
+            {
+                "execution_id": branch,
+                "handoff": None,
+                "token_offset": 0,
+                "max_tokens": 6000,
+            },
+        ).structured["content"]
+    )["branches"][0]
     assert conflict["issues"][issues["implementation"]["issueId"]]["status"] == "open"
     assert (
         conflict["critiques"]["experimental"]["verifiedRepairs"][0]["evidence"] == proof
     )
+
+
+@pytest.mark.parametrize("target", ["focused_critique", "critique"])
+def test_adjudicator_repairs_existing_program_and_routes_independent_review(
+    kit, target
+):
+    branch = kit.launch()
+    proposer = kit.node(branch).sub_agent_id
+    authored = kit.tool(
+        proposer,
+        "author_study",
+        {"program_id": "boundary-study", "template": "basic", "configuration": CONFIG},
+    )
+    assert authored.ok
+    kit.complete(branch, "critique", PROPOSAL)
+    local = {
+        "issueId": "implementation:boundary",
+        "concern": "The boundary interpretation is incorrect.",
+        "evidence": "The source includes the equality case.",
+        "consequence": "The stated comparison is unsupported.",
+        "repair": "Correct the boundary and verify against exact source.",
+        "reopenReason": None,
+    }
+    upstream = {
+        **local,
+        "issueId": "alignment:shared-sketch",
+        "concern": "Discovery's shared sketch needs a scope decision.",
+        "repair": "Discovery should reconcile the shared sketch with these scoped findings.",
+    }
+    for phase in REVIEW_PHASES.values():
+        issues = (
+            [local]
+            if phase == "implementation_critique"
+            else [upstream]
+            if phase == "alignment_critique"
+            else []
+        )
+        kit.complete_one(
+            branch, phase, "collect_critiques", {**CRITIQUE, "issues": issues}
+        )
+    judge = kit.node(branch).sub_agent_id
+    assert not kit.tool(judge, "author_strategy_sketch", {}).ok
+    changed = kit.tool(
+        judge,
+        "update_study",
+        {
+            "program_id": "boundary-study",
+            "expected_version": authored.structured["version"],
+            "expected": "use harness_strategy_sdk::{export_study_program,",
+            "replacement": "// corrected boundary interpretation\nuse harness_strategy_sdk::{export_study_program,",
+        },
+    )
+    assert changed.ok, changed.failure
+    assert kit.tool(judge, "validate_study", {"program_id": "boundary-study"}).ok
+    run = kit.tool(judge, "run_study", {"program_id": "boundary-study"})
+    assert run.ok, run.failure
+    job_id = run.structured["job_id"]
+    tracking = kit.chat.find_tool_job(WORKSPACE, job_id)
+    assert tracking.attribution["phase"] == "adjudicate"
+    # The same branch cap applies to adjudicator repairs.
+    assert not kit.tool(judge, "run_study", {"program_id": "boundary-study"}).ok
+    review = {
+        "target": target,
+        "scope": "Implementation: trace the corrected boundary interpretation against the executed source.",
+        "issueIds": [local["issueId"]],
+    }
+    repaired = {
+        **ADJUDICATION,
+        "repairs": [
+            {
+                "issueId": local["issueId"],
+                "response": f"Corrected boundary-study version {changed.structured['version']}; verify job {job_id}.",
+            }
+        ],
+        "evidence": [{"jobId": job_id, "artifactName": "metrics.json"}],
+        "review": review,
+        "resolutions": [
+            {
+                "issueId": local["issueId"],
+                "disposition": "repair",
+                "reason": "Independent verification remains.",
+            },
+            {
+                "issueId": upstream["issueId"],
+                "disposition": "escalate",
+                "reason": "Discovery owns shared-sketch scope; local findings can complete.",
+            },
+        ],
+    }
+    for invalid_review in (
+        None,
+        {
+            **review,
+            "target": "critique"
+            if target == "focused_critique"
+            else "focused_critique",
+        },
+        {**review, "issueIds": ["implementation:invented"]},
+    ):
+        invalid = kit.tool(
+            judge,
+            "request_phase_completion",
+            {
+                "completion": {
+                    "target": target,
+                    "intentEpoch": 0,
+                    "adjudication": {**repaired, "review": invalid_review},
+                }
+            },
+        )
+        assert not invalid.ok and "adjudication.review" in invalid.failure["message"]
+    kit.complete(branch, target, repaired)
+    phases = (
+        ("focused_critique",)
+        if target == "focused_critique"
+        else tuple(REVIEW_PHASES.values())
+    )
+    assert set(kit.chat.get_execution(WORKSPACE, branch).active_phases) == set(phases)
+    for phase in phases:
+        reviewer = kit.node(branch, phase).sub_agent_id
+        state_read = kit.tool(
+            reviewer,
+            "read_research_investigations",
+            {"execution_id": None, "handoff": None},
+        )
+        state = json.loads(state_read.structured["content"])
+        assert state["review"] == review
+        assert state["reviewSubject"] == "adjudication"
+        assert state["issues"][upstream["issueId"]]["status"] == "escalate"
+        repeated = kit.tool(
+            reviewer,
+            "request_phase_completion",
+            {
+                "completion": {
+                    "target": "adjudicate"
+                    if target == "focused_critique"
+                    else "collect_critiques",
+                    "intentEpoch": 0,
+                    "critique": {**CRITIQUE, "issues": [upstream]},
+                }
+            },
+        )
+        assert not repeated.ok and "reopenReason" in repeated.failure["message"]
+        accepted = kit.tool(
+            reviewer,
+            "read_research_investigations",
+            {"execution_id": None, "handoff": state["reviewHandoff"]},
+        )
+        assert (
+            json.loads(accepted.structured["content"])["output"]["adjudication"]
+            == repaired
+        )
+        source = kit.tool(
+            reviewer, "read_study", {"program_id": "boundary-study", "job_id": job_id}
+        )
+        assert (
+            source.ok
+            and "// corrected boundary interpretation" in source.structured["source"]
+        )
+        kit.complete_one(
+            branch,
+            phase,
+            "adjudicate" if target == "focused_critique" else "collect_critiques",
+            {
+                **CRITIQUE,
+                "verifiedRepairs": [
+                    {
+                        "issueId": local["issueId"],
+                        "evidence": f"Traced the corrected source in immutable job {job_id}.",
+                    }
+                ],
+            },
+        )
+        if phase != phases[-1]:
+            assert (
+                "adjudicate"
+                not in kit.chat.get_execution(WORKSPACE, branch).active_phases
+            )
+    kit.complete(branch, "completed", COMPLETED_ADJUDICATION)
+    outcome = cast(Any, kit.research.result(kit.research.request(WORKSPACE, branch)))
+    assert outcome["issues"][local["issueId"]]["status"] == "verified"
+    assert outcome["issues"][upstream["issueId"]]["status"] == "escalate"
+    assert outcome["adjudicatorRepairs"][0]["repairs"] == repaired["repairs"]
+    assert len(outcome["jobs"]) == 1
+    anchor = Anchor(WORKSPACE, kit.thread.chat_id, kit.discovery_id)
+    delivered = next(
+        row
+        for row in kit.conversations.transcript(anchor)
+        if row.data.get("kind") == "workflow_outcome"
+    )
+    content = from_record(delivered).content.result
+    assert content is not None
+    result = cast(Any, content["structured"])
+    assert [dict(item) for item in result["escalations"]] == [
+        {"issueId": upstream["issueId"], "reason": repaired["resolutions"][1]["reason"]}
+    ]
 
 
 @pytest.mark.parametrize("kind", ["study", "strategy"])
@@ -1046,7 +1554,7 @@ def test_parallel_branches_loop_and_return_independently_with_original_scope(kit
         b,
         "completed",
         {
-            **ADJUDICATION,
+            **COMPLETED_ADJUDICATION,
             "reason": "Direction requires discovery's decision; no empirical claim.",
         },
     )
@@ -1093,27 +1601,39 @@ def test_parallel_branches_loop_and_return_independently_with_original_scope(kit
         },
     )
     assert not rejected.ok and kit.node(a).sub_agent_id == judge.sub_agent_id
-    kit.complete(a, "completed", ADJUDICATION)
-    branches = kit.tool(
-        kit.discovery_id,
-        "read_research_investigations",
-        {"execution_id": None, "handoff": None, "offset": 0, "max_chars": 6000},
-    ).structured["branches"]
+    kit.complete(a, "completed", COMPLETED_ADJUDICATION)
+    branches = json.loads(
+        kit.tool(
+            kit.discovery_id,
+            "read_research_investigations",
+            {
+                "execution_id": None,
+                "handoff": None,
+                "token_offset": 0,
+                "max_tokens": 6000,
+            },
+        ).structured["content"]
+    )["branches"]
     assert {item["executionId"] for item in branches} == {a, b}
     assert all(item["status"] == "completed" for item in branches)
 
 
+@pytest.mark.parametrize("phase", ["investigation", "adjudicate"])
 @pytest.mark.parametrize("mode", ["success", "unknown", "mismatch"])
 @pytest.mark.parametrize("kind", ["study", "strategy"])
-def test_child_retention_reconciliation_and_discovery_evidence_handoff(kit, mode, kind):
+def test_child_retention_reconciliation_and_discovery_evidence_handoff(
+    kit, mode, kind, phase
+):
     branch = kit.launch()
     kit.complete(branch, "critique", PROPOSAL)
     kit.complete(branch, "adjudicate", CRITIQUE)
-    kit.complete(branch, "investigation", ADJUDICATION)
+    if phase == "investigation":
+        kit.complete(branch, "investigation", ADJUDICATION)
     investigator = kit.node(branch)
     ctx = kit.context(investigator.sub_agent_id)
     bindings = kit.router.resolve(ctx)
-    assert bindings.data_window.label == "development"
+    assert bindings.resolve_data_window is not None
+    assert bindings.resolve_data_window().label == "development"
     assert not kit.tool(investigator.sub_agent_id, "author_strategy_sketch", {}).ok
     assert not kit.tool(investigator.sub_agent_id, "start_workflow", {}).ok
     assert kit.tool(
@@ -1174,20 +1694,33 @@ def test_child_retention_reconciliation_and_discovery_evidence_handoff(kit, mode
         branch,
         "critique",
         {
-            "interpretation": "Useful question remains unresolved.",
-            "limitations": "No evidence of strategy profitability.",
+            **(
+                ADJUDICATION
+                if phase == "adjudicate"
+                else {
+                    "interpretation": "Useful question remains unresolved.",
+                    "limitations": "No evidence of strategy profitability.",
+                }
+            ),
             "attempts": [attempt],
             "evidence": [],
         },
     )
     kit.complete(branch, "adjudicate", CRITIQUE)
-    kit.complete(branch, "completed", ADJUDICATION)
+    kit.complete(branch, "completed", COMPLETED_ADJUDICATION)
     read = kit.tool(
         kit.discovery_id,
         "read_research_investigations",
-        {"execution_id": branch, "handoff": None, "offset": 0, "max_chars": 6000},
+        {
+            "execution_id": branch,
+            "handoff": None,
+            "token_offset": 0,
+            "max_tokens": 6000,
+        },
     )
-    assert read.structured["branches"][0]["attempts"] == [attempt]
+    assert json.loads(read.structured["content"])["branches"][0]["attempts"] == [
+        attempt
+    ]
     # The original discovery contract accepts genuine delegated evidence without
     # changing job identity or admitting unrelated executions.
     completion = {
@@ -1255,6 +1788,8 @@ def test_registered_definition_and_launch_scope_use_production_composition(kit):
         ]
         assert sorted(result.json()["routes"]["adjudicate"]) == [
             "completed",
+            "critique",
+            "focused_critique",
             "investigation",
             "proposal",
         ]
@@ -1424,7 +1959,7 @@ def test_training_search_nulls_and_prototype_handoff_retain_exact_policy(kit):
     assert executed.ok, executed.failure
     assert not kit.tool(critic, "run_backtest", {"program_id": "training-policy"}).ok
     kit.complete(branch, "adjudicate", CRITIQUE)
-    kit.complete(branch, "completed", ADJUDICATION)
+    kit.complete(branch, "completed", COMPLETED_ADJUDICATION)
     job = kit.chat.find_tool_job(WORKSPACE, candidate_job)
     reference = {
         key: job.attribution[key]
@@ -1535,3 +2070,239 @@ def test_discovery_itself_can_search_and_compare_conditional_null_plans(kit):
             kit.chat.find_tool_job(WORKSPACE, job_id).attribution["phase"]
             == "discovery"
         )
+
+
+def test_read_failures_report_known_read_errors_without_mutation_reconciliation(kit):
+    missing = kit.tool(
+        kit.discovery_id, "read_strategy", {"program_id": "does-not-exist"}
+    )
+    assert not missing.ok
+    assert missing.failure["certainty"] == "observed_failure"
+    assert missing.failure["retry_safe"] is True
+    assert (
+        "does-not-exist" in missing.failure["message"]
+        or "missing" in missing.failure["message"]
+    )
+
+
+@pytest.mark.parametrize(
+    "tool_name", ["run_study", "run_backtest", "run_backtest_batch", "run_null_batch"]
+)
+def test_agent_program_runs_return_admission_without_any_result_polling(kit, tool_name):
+    node = kit.discovery_id
+    kind = "study" if tool_name == "run_study" else "strategy"
+    assert kit.tool(
+        node,
+        "author_" + kind,
+        {
+            "program_id": "async-policy",
+            "template": "basic",
+            "configuration": CONFIG,
+            **(
+                {
+                    "parameter_declaration": {
+                        "lookback": {"type": "integer", "default": 5}
+                    }
+                }
+                if kind == "strategy"
+                else {}
+            ),
+        },
+    ).ok
+    assert kit.tool(node, "validate_" + kind, {"program_id": "async-policy"}).ok
+    original = kit.harness.call_tool
+    submitted = []
+
+    def call(name, arguments=None):
+        assert name not in {"get_job_result", "get_job_status"}, (
+            "admission must not poll"
+        )
+        result = original(name, arguments)
+        if name in {"run_study", "run_backtest"}:
+            assert arguments is not None
+            job_id = arguments["config"]["job_id"]
+            submitted.append(job_id)
+            return McpToolResult(
+                tool=name,
+                is_error=False,
+                structured={"job_id": job_id, "state": "queued"},
+            )
+        return result
+
+    kit.harness.call_tool = call
+    arguments = {"program_id": "async-policy"}
+    if tool_name == "run_backtest_batch":
+        arguments["assignments"] = [{"lookback": 5}, {"lookback": 10}]
+    if tool_name == "run_null_batch":
+        arguments.update(mode="permutation", block_size=1, seeds=[1, 2])
+    result = kit.tool(node, tool_name, arguments)
+    assert result.ok, result.failure
+    assert result.pending_jobs == tuple(submitted)
+    assert len(submitted) == (2 if tool_name.endswith("batch") else 1)
+    for job_id in submitted:
+        retained = kit.programs.submissions.get(WORKSPACE, job_id)
+        assert retained["inputs"]["recipient"]["conversationId"] == node
+        assert (
+            retained["inputs"]["recipient"]["workflowExecutionId"]
+            == kit.request.execution_id
+        )
+
+
+def test_initial_context_uses_explicit_original_ids_and_is_not_reseeded_on_repair(kit):
+    from thesis_runtime.contracts.messages import from_record
+
+    branch = kit.launch()
+    first = kit.node(branch)
+    child = kit.conversations.get(WORKSPACE, first.sub_agent_id)
+    original, assignment = [from_record(row) for row in child.transcript()]
+    assert original.content.source == "agent_context"
+    assert original.content.text == kit.trigger.body
+    assert original.content.result is not None
+    assert original.content.result["structured"] == {
+        "sourceMessageId": kit.trigger.message_id,
+        "sourceConversationId": kit.trigger.conversation_id,
+    }
+    assert original.message_id != kit.trigger.message_id
+    assert kit.trigger.body not in assignment.content.text
+    kit.complete(branch, "critique", PROPOSAL)
+    kit.complete(branch, "adjudicate", CRITIQUE)
+    kit.complete(branch, "proposal", ADJUDICATION)
+    same = kit.conversations.get(WORKSPACE, first.sub_agent_id)
+    assert same.conversation_id == child.conversation_id
+    contexts = [
+        from_record(row)
+        for row in same.transcript()
+        if from_record(row).content.source == "agent_context"
+    ]
+    assert len(contexts) == 1 and contexts[0] == original
+
+
+@pytest.mark.parametrize("kind", ["strategy", "study"])
+@pytest.mark.parametrize("mode", ["success", "unknown", "mismatch"])
+def test_proposal_executes_and_hands_exact_retained_evidence_to_critique(
+    kit, kind, mode
+):
+    branch = kit.launch()
+    proposer = kit.node(branch).sub_agent_id
+    authored = kit.tool(
+        proposer,
+        f"author_{kind}",
+        {
+            "program_id": "initial-policy",
+            "template": "basic",
+            "configuration": CONFIG,
+        },
+    )
+    assert authored.ok, authored.failure
+    assert kit.tool(proposer, f"validate_{kind}", {"program_id": "initial-policy"}).ok
+    kit.harness.mode = mode
+    tool_name = "run_backtest" if kind == "strategy" else "run_study"
+    outcome = kit.tool(proposer, tool_name, {"program_id": "initial-policy"})
+    assert outcome.ok == (mode == "success")
+    execution = kit.chat.get_execution(WORKSPACE, branch)
+    assert len(execution.job_ids) == 1
+    job_id = execution.job_ids[0]
+    retained = kit.chat.find_tool_job(WORKSPACE, job_id)
+    assert retained.attribution["phase"] == "proposal"
+    report = {
+        **PROPOSAL,
+        "attempts": [
+            {
+                "jobId": job_id,
+                "purpose": "Initial executable policy",
+                "dataTypes": ["bars"],
+                "window": "development",
+                "result": "Completed initial execution",
+                "changed": True,
+            }
+        ],
+        "evidence": [{"jobId": job_id, "artifactName": "metrics.json"}],
+    }
+    kit.complete(branch, "critique", report)
+    critic = kit.node(branch).sub_agent_id
+    product = kit.tool(
+        critic, "read_research_investigations", {"execution_id": None, "handoff": 1}
+    )
+    assert product.ok and product.structured["complete"]
+    accepted = json.loads(product.structured["content"])["output"]["proposal"]
+    assert accepted["attempts"][0]["jobId"] == job_id
+    source = kit.tool(
+        critic, f"read_{kind}", {"program_id": "initial-policy", "job_id": job_id}
+    )
+    assert source.ok and source.structured["source"]
+    assert len([call for call in kit.harness.calls if call[0] == tool_name]) == 1
+
+
+def test_proposal_repair_reuses_verified_branch_evidence_without_reexecution(kit):
+    branch = kit.launch()
+    proposer = kit.node(branch).sub_agent_id
+    assert kit.tool(
+        proposer,
+        "author_strategy",
+        {"program_id": "initial-policy", "template": "basic", "configuration": CONFIG},
+    ).ok
+    assert kit.tool(proposer, "validate_strategy", {"program_id": "initial-policy"}).ok
+    run = kit.tool(proposer, "run_backtest", {"program_id": "initial-policy"})
+    assert run.ok
+    job_id = run.structured["job_id"]
+    report = {
+        **PROPOSAL,
+        "attempts": [
+            {
+                "jobId": job_id,
+                "purpose": "Initial policy",
+                "dataTypes": ["bars"],
+                "window": "development",
+                "result": "Executed",
+                "changed": True,
+            }
+        ],
+        "evidence": [{"jobId": job_id, "artifactName": "metrics.json"}],
+    }
+    kit.complete(branch, "critique", report)
+    kit.complete(branch, "adjudicate", CRITIQUE)
+    kit.complete(branch, "proposal", ADJUDICATION)
+    repaired = {**PROPOSAL, "evidence": report["evidence"]}
+    kit.complete(branch, "focused_critique", repaired)
+
+
+def test_completion_annotations_need_not_repeat_retained_execution_ledger(kit):
+    branch = kit.launch()
+    proposer = kit.node(branch).sub_agent_id
+    assert kit.tool(
+        proposer,
+        "author_strategy",
+        {
+            "program_id": "ledger-policy",
+            "template": "basic",
+            "configuration": CONFIG,
+        },
+    ).ok
+    assert kit.tool(proposer, "validate_strategy", {"program_id": "ledger-policy"}).ok
+    jobs = [
+        kit.tool(proposer, "run_backtest", {"program_id": "ledger-policy"}).structured[
+            "job_id"
+        ]
+        for _ in range(1)
+    ]
+    kit.complete(branch, "critique", {**PROPOSAL, "attempts": [], "evidence": []})
+    assert list(kit.chat.get_execution(WORKSPACE, branch).job_ids) == jobs
+    assert len(kit.chat.get_execution(WORKSPACE, branch).job_ids) == 1
+    assert len([call for call in kit.harness.calls if call[0] == "run_backtest"]) == 1
+
+
+def test_research_state_token_continuation_rejects_a_changed_product(kit):
+    branch = kit.launch()
+    initial = kit.tool(
+        kit.discovery_id,
+        "read_research_investigations",
+        {"execution_id": branch, "handoff": None, "max_tokens": 128},
+    )
+    assert initial.ok and initial.structured["nextArguments"] is not None
+    kit.complete(branch, "critique", PROPOSAL)
+    stale = kit.tool(
+        kit.discovery_id,
+        "read_research_investigations",
+        initial.structured["nextArguments"],
+    )
+    assert not stale.ok and "state changed" in stale.failure["message"]

@@ -90,6 +90,7 @@ pub fn code_fingerprint() -> String {
         ("backtest.config", include_str!("config.rs")),
         ("backtest.engine_core", include_str!("engine_core.rs")),
         ("backtest.event_bus", include_str!("event_bus.rs")),
+        ("backtest.execution", include_str!("execution.rs")),
         ("backtest.fees", include_str!("fees.rs")),
         ("backtest.fixture", include_str!("fixture.rs")),
         ("backtest.history", include_str!("history.rs")),
@@ -177,6 +178,10 @@ pub fn code_fingerprint() -> String {
         (
             "trading.fills.simple_touch",
             include_str!("../../../trading/src/fills/simple_touch.rs"),
+        ),
+        (
+            "trading.fills.trades",
+            include_str!("../../../trading/src/fills/trades.rs"),
         ),
         (
             "trading.fills.trade_through",

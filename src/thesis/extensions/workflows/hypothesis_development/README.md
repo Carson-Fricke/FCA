@@ -24,7 +24,7 @@ Subdirectories: `composers/`, `contracts/`, `phases/`, `prompts/`. Each document
 - `provenance.py`: Provenance checks that bind every reported job to the run that executed it.
 - `rebuild.py`: The execution-store rebuild fold (REQ-B4).
 - `services.py`: Composed domain services for the hypothesis-development workflow.
-- `session_services.py`: Hypothesis workflow policy, discovery-owned `set_research_window` declaration, scoped program access and completion services for conversation tools.
+- `session_services.py`: Hypothesis workflow policy, discovery-owned `set_research_window` declaration, scoped program access and completion services for conversation tools. The permitted program catalog is available from the first request; calls resolve the frozen window at call time and return a repairable error if declaration has not occurred. Discovery is prompted to declare the windows first.
 - `spec.py`: Assemble the hypothesis-development workflow specification and object.
 - `state.py`: Workflow state and outcome records.
 

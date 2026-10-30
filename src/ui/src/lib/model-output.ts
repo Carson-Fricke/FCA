@@ -1,6 +1,6 @@
 /** Rebuild provisional output from durable, idempotent UTF-8-offset fragments. */
-import type { TimelineItemWire, TimelineOutputWire } from './generated';
-import type { ChatMessage } from './types';
+import type { TimelineOutputWire } from './generated';
+import type { ChatMessage, TimelineItem } from './types';
 
 export function projectModelOutputs(items: TimelineOutputWire[]): ChatMessage[] {
     const groups = new Map<string, TimelineOutputWire[]>();
@@ -51,7 +51,7 @@ export class ModelOutputProjection {
     #frames = new Map<string, Map<string, TimelineOutputWire>>();
     #messages = new Map<string, ChatMessage>();
 
-    merge(items: TimelineItemWire[]): ChatMessage[] {
+    merge(items: TimelineItem[]): ChatMessage[] {
         const changed = new Set<string>();
         for (const item of items) {
             if (item.kind === 'message') {

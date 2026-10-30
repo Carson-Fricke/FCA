@@ -118,6 +118,7 @@ def test_exact_neutral_fields_and_round_trip() -> None:
         "arguments": "malformed JSON",
     }
     assert not hasattr(request, "as_wire")
+
     for message in (envelope("request", "call"), datum("result", "call")):
         assert (
             SessionMessage.from_dict(json.loads(json.dumps(message.as_dict())))
@@ -133,6 +134,37 @@ def test_exact_neutral_fields_and_round_trip() -> None:
         SessionMessage.from_dict({**incoming("x").as_dict(), "role": "system"})
     with pytest.raises(ValueError, match="identity"):
         from_record(record("other", data={"sessionMessage": incoming("x").as_dict()}))
+
+
+@pytest.mark.parametrize("matched", [False, True])
+@pytest.mark.parametrize("same_arguments", [False, True])
+def test_projection_omits_only_duplicate_arguments_of_an_exact_complete_call(
+    matched, same_arguments
+):
+    request = envelope("request", "call")
+    receipt = SessionMessage(
+        "receipt",
+        "incoming",
+        MessageContent(
+            "Result",
+            "tool",
+            ToolCorrelation("request" if matched else "foreign", "call", "check"),
+            {
+                "arguments": {} if same_arguments else {"distinct": True},
+                "structured": {"evidence": "preserved"},
+            },
+        ),
+    )
+    before = receipt.as_dict()
+    projected = project_native_messages((request, receipt))
+    value = json.loads(projected[-1].content)
+    assert ("arguments" in value["result"]) is not (matched and same_arguments)
+    assert value["result"]["structured"] == {"evidence": "preserved"}
+    assert receipt.as_dict() == before
+    replay = tuple(
+        SessionMessage.from_dict(item.as_dict()) for item in (request, receipt)
+    )
+    assert project_native_messages(replay) == projected
 
 
 def test_content_is_deeply_immutable_and_serialization_detached() -> None:
@@ -709,7 +741,8 @@ def test_request_snapshot_is_pure_detached_and_matches_emitted_request(
             response_format: Mapping[str, object] | None = None,
         ) -> ModelCompletion:
             seen.update(
-                projection="native-session-v4",
+                projection="native-session-v6",
+                max_tokens=32768,
                 model_family="generic",
                 family_adapter_version="1",
                 catalog_version="sha256:"
@@ -761,7 +794,7 @@ def test_request_snapshot_is_pure_detached_and_matches_emitted_request(
         messages_payload(project_native_messages(messages))
     )
     assert snapshot["role"] == "research"
-    assert snapshot["projection"] == "native-session-v4"
+    assert snapshot["projection"] == "native-session-v6"
     assert (
         snapshot["catalog_version"]
         == "sha256:"
@@ -817,8 +850,9 @@ def test_request_snapshot_preserves_absent_and_empty_options() -> None:
         Provider(), id_factory=lambda: pytest.fail("snapshot must not allocate IDs")
     )
     assert adapter.request_snapshot(messages=[]) == {
-        "projection": "native-session-v4",
+        "projection": "native-session-v6",
         "stream": True,
+        "max_tokens": 32768,
         "model_family": "generic",
         "family_adapter_version": "1",
         "messages": [],
@@ -828,8 +862,9 @@ def test_request_snapshot_preserves_absent_and_empty_options() -> None:
         "catalog_version": "sha256:" + hashlib.sha256(b"null").hexdigest(),
     }
     assert adapter.request_snapshot(messages=[], tools=[], response_format={}) == {
-        "projection": "native-session-v4",
+        "projection": "native-session-v6",
         "stream": True,
+        "max_tokens": 32768,
         "model_family": "generic",
         "family_adapter_version": "1",
         "messages": [],
@@ -842,3 +877,24 @@ def test_request_snapshot_preserves_absent_and_empty_options() -> None:
         adapter.request_snapshot(messages=[], response_format={"invalid": float("nan")})
     with pytest.raises(TypeError):
         adapter.request_snapshot(messages=[], tools=[{"invalid": object()}])
+
+
+def test_interrupted_replay_preserves_full_reasoning_and_partial_answer():
+    reasoning = "retained reasoning " * 1_000
+    answer = "retained partial answer " * 1_000
+    message = SessionMessage(
+        "partial",
+        "outgoing",
+        MessageContent(
+            answer,
+            "agent",
+            result={
+                "interrupted": True,
+                "reasoning": reasoning,
+                "failure": {"kind": "provider_rejected"},
+            },
+        ),
+    )
+    projected = project_native_messages((message,))
+    assert reasoning in projected[0].content
+    assert answer in projected[0].content

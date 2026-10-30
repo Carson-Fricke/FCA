@@ -31,6 +31,10 @@ NATIVE = {
 ROLES = {"user", "assistant", "system", "tool"}
 REQUIRED = (
     "src/thesis_runtime/contracts/messages.py",
+    "src/thesis_runtime/contracts/compaction.py",
+    "src/thesis_runtime/contracts/completion.py",
+    "src/thesis_runtime/sessions/compaction.py",
+    "src/thesis_runtime/sessions/context_manager.py",
     "src/thesis_runtime/conversations/inbox.py",
     "src/thesis_runtime/sessions/session.py",
     "src/thesis_runtime/sessions/model_invocation.py",
@@ -468,6 +472,7 @@ def _adapter_errors(tree: ast.AST) -> list[str]:
         "uuid",
         "contextlib",
         "thesis_runtime.contracts.output",
+        "thesis_runtime.contracts.completion",
         "thesis_runtime.contracts.messages",
         "thesis_runtime.contracts.records",
         "thesis_runtime.contracts.activity",
@@ -661,9 +666,21 @@ def test_delivery_guard_distinguishes_tool_receipts_from_runtime_evidence(
 
 def test_session_has_no_native_history_or_parallel_result_intake() -> None:
     tree = _source("src/thesis_runtime/sessions/session.py")
+    context = _source("src/thesis_runtime/sessions/context_manager.py")
+    assert not _neutral_errors(context), "\n".join(_neutral_errors(context))
     assert not _neutral_errors(tree), "\n".join(_neutral_errors(tree))
     assert _fields(_class(tree, "SessionTurn"))["message"] == "SessionMessage"
     assert "role" not in _fields(_class(tree, "SessionTurn"))
+    context_calls = _calls(_class(context, "SessionCompaction"))
+    for call in context_calls:
+        if (
+            _name(call.func) == "inbox.deliver"
+            and call.args
+            and isinstance(call.args[0], ast.Call)
+        ):
+            assert not _incoming_delivery_errors(call.args[0]), (
+                _incoming_delivery_errors(call.args[0])
+            )
     run = _function(_class(tree, "AgentSession"), "run")
     deliveries = [call for call in _calls(run) if _name(call.func) == "inbox.deliver"]
     results = [

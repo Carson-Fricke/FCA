@@ -2,7 +2,7 @@
 import { listChatSubAgents, postNodeMessage } from './api';
 import { TimelineController } from './timeline.svelte';
 import { deriveSubAgentTree, isWorkflowNodeRole, subAgentNodeRef, type SubAgentTreeNode } from './subagent';
-import { applyHashTarget, parseScope, phaseScopeId, phaseScopeTarget, scopeFromHash, scopeStorageKey, serializeScope, ScopeController, type ScopeSegment } from './scope.svelte';
+import { applyHashTarget, parseScope, phaseScopeId, phaseScopeTarget, scopeFromHash, scopeStorageKey, ScopeController, type ScopeSegment } from './scope.svelte';
 import type { ChatMessage, SubAgentNode } from './types';
 import { isTerminalWorkflow } from './workflow-live';
 import { untrack } from 'svelte';
@@ -215,7 +215,7 @@ export class WorkflowScopeController {
 			seen.add(parentId);
 			const parent = this.subAgentById(parentId);
 			if (!parent) break;
-			chain.unshift(parent);
+			if (!isWorkflowNodeRole(parent.role)) chain.unshift(parent);
 			parentId = parent.parentSubAgentId;
 		}
 		return chain;
@@ -232,8 +232,10 @@ export class WorkflowScopeController {
 		const rebuilt = [segments[0]];
 		for (const segment of segments.slice(1)) {
 			if (segment.kind !== 'sub_agent') { rebuilt.push(segment); continue; }
+			if (this.knownNodes.some((node) => node.subAgentId === segment.id && isWorkflowNodeRole(node.role))) continue;
 			const node = this.subAgentById(segment.id);
 			if (!node) break;
+			if (isWorkflowNodeRole(node.role)) continue;
 			for (const item of [...this.ancestorsOf(node), node]) {
 				if (!rebuilt.some((candidate) => candidate.kind === 'sub_agent' && candidate.id === item.subAgentId)) {
 					const persisted = segments.find((candidate) => candidate.kind === 'sub_agent' && candidate.id === item.subAgentId);
@@ -241,7 +243,7 @@ export class WorkflowScopeController {
 				}
 			}
 		}
-		if (serializeScope(rebuilt) !== serializeScope(segments)) this.scope.reset(rebuilt);
+		if (JSON.stringify(rebuilt) !== JSON.stringify(segments)) this.scope.reset(rebuilt);
 	}
 
 	back(): void { this.navigateTo(Math.max(0, this.scope.segments.length - 2)); }

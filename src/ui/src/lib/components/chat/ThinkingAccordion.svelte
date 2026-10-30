@@ -10,12 +10,20 @@
 		text,
 		testId = 'thinking-accordion',
 		initiallyOpen = false,
+		onOpen,
 		outputState = 'completed'
-	}: { text: string; testId?: string; initiallyOpen?: boolean; outputState?: 'streaming' | 'interrupted' | 'completed' } = $props();
+	}: { text: string; testId?: string; initiallyOpen?: boolean; onOpen?: () => Promise<void>; outputState?: 'streaming' | 'interrupted' | 'completed' } = $props();
 
 	// The initial open state is intentionally captured once per mounted accordion.
 	// svelte-ignore state_referenced_locally
 	let open = $state(initiallyOpen);
+	let error = $state('');
+	async function toggle(): Promise<void> {
+		open = !open;
+		if (open && onOpen) {
+			try { await onOpen(); } catch (failure) { error = failure instanceof Error ? failure.message : 'Could not load reasoning'; }
+		}
+	}
 </script>
 
 {#if text || outputState !== 'completed'}
@@ -25,7 +33,7 @@
 			class="flex items-center gap-1 text-xs text-slate-500 italic transition-colors hover:text-slate-700"
 			aria-expanded={open}
 			data-testid="{testId}-toggle"
-			onclick={() => (open = !open)}
+			onclick={toggle}
 		>
 			<svg
 				class="h-3 w-3 transition-transform duration-150 {open ? 'rotate-90' : ''}"
@@ -43,6 +51,7 @@
 		</button>
 		{#if open}
 			<div class="mt-1 pl-4" data-testid="{testId}-body">
+				{#if error}<p role="status">{error}</p>{/if}
 				<MarkdownBody text={text} class="text-xs text-slate-500 italic" />
 			</div>
 		{/if}

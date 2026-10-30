@@ -120,7 +120,7 @@ fn row_event(
         .ok_or_else(|| DataError::value("lake replay rows must contain datetime timestamps"))?;
     let raw_symbol = string_value(batch, "symbol", row)?
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| Cow::Borrowed(source_symbol));
+        .unwrap_or(Cow::Borrowed(source_symbol));
     let symbol = canonical_symbol(&raw_symbol)?;
     let event_id = string_value(batch, "event_id", row)?
         .filter(|value| !value.is_empty())
@@ -350,7 +350,11 @@ impl<'a> BoundBatch<'a> {
         }
     }
 }
-fn string_value<'a>(batch: &BoundBatch<'a>, name: &str, row: usize) -> Result<Option<Cow<'a, str>>, DataError> {
+fn string_value<'a>(
+    batch: &BoundBatch<'a>,
+    name: &str,
+    row: usize,
+) -> Result<Option<Cow<'a, str>>, DataError> {
     let Some(column) = batch.column(name).present(row) else {
         return Ok(None);
     };
@@ -359,7 +363,11 @@ fn string_value<'a>(batch: &BoundBatch<'a>, name: &str, row: usize) -> Result<Op
         Column::U64(a) => Cow::Owned(a.value(row).to_string()),
         Column::I64(a) => Cow::Owned(a.value(row).to_string()),
         Column::U32(a) => Cow::Owned(a.value(row).to_string()),
-        _ => return Err(DataError::value(format!("Parquet column {name} must be a UTF-8 string"))),
+        _ => {
+            return Err(DataError::value(format!(
+                "Parquet column {name} must be a UTF-8 string"
+            )))
+        }
     }))
 }
 fn integer_value(batch: &BoundBatch<'_>, name: &str, row: usize) -> Result<Option<i64>, DataError> {
@@ -370,10 +378,18 @@ fn integer_value(batch: &BoundBatch<'_>, name: &str, row: usize) -> Result<Optio
         Column::U64(a) => a.value(row) as i64,
         Column::I64(a) => a.value(row),
         Column::U32(a) => i64::from(a.value(row)),
-        _ => return Err(DataError::value(format!("Parquet column {name} must be an integer"))),
+        _ => {
+            return Err(DataError::value(format!(
+                "Parquet column {name} must be an integer"
+            )))
+        }
     }))
 }
-fn decimal_value(batch: &BoundBatch<'_>, name: &str, row: usize) -> Result<Option<Decimal18>, DataError> {
+fn decimal_value(
+    batch: &BoundBatch<'_>,
+    name: &str,
+    row: usize,
+) -> Result<Option<Decimal18>, DataError> {
     let Some(column) = batch.column(name).present(row) else {
         return Ok(None);
     };
@@ -382,7 +398,11 @@ fn decimal_value(batch: &BoundBatch<'_>, name: &str, row: usize) -> Result<Optio
         Column::U64(a) => Decimal18::from_i64(a.value(row) as i64),
         Column::I64(a) => Decimal18::from_i64(a.value(row)),
         Column::U32(a) => Decimal18::from_i64(i64::from(a.value(row))),
-        _ => return Err(DataError::value(format!("Parquet column {name} must be a decimal128 or integer"))),
+        _ => {
+            return Err(DataError::value(format!(
+                "Parquet column {name} must be a decimal128 or integer"
+            )))
+        }
     }))
 }
 
@@ -407,14 +427,22 @@ fn rescale(unscaled: i128, scale: i8) -> Result<i128, DataError> {
     }
 }
 
-fn read_timestamp(batch: &BoundBatch<'_>, name: &str, row: usize) -> Result<Option<DateTime>, DataError> {
+fn read_timestamp(
+    batch: &BoundBatch<'_>,
+    name: &str,
+    row: usize,
+) -> Result<Option<DateTime>, DataError> {
     let Some(column) = batch.column(name).present(row) else {
         return Ok(None);
     };
     Ok(Some(match column {
         Column::Nanos(a) => DateTime::from_nanos(a.value(row)),
         Column::Micros(a) => DateTime::from_micros(a.value(row)),
-        _ => return Err(DataError::value(format!("Parquet column {name} must be a timestamp"))),
+        _ => {
+            return Err(DataError::value(format!(
+                "Parquet column {name} must be a timestamp"
+            )))
+        }
     }))
 }
 

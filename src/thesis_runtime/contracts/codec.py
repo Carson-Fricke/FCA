@@ -14,6 +14,7 @@ from thesis_runtime.contracts.records import (
     ChatContractError,
     ChatMessage,
     ChatThread,
+    ContextCheckpoint,
     ConversationRecord,
     SubAgentRecord,
     ToolJob,
@@ -28,6 +29,7 @@ Record = (
     | ToolJob
     | SubAgentRecord
     | AgentInvocation
+    | ContextCheckpoint
 )
 
 
@@ -45,6 +47,7 @@ _ID_FIELDS: Mapping[RecordType, str] = {
     ToolJob: "job_id",
     SubAgentRecord: "sub_agent_id",
     AgentInvocation: "invocation_id",
+    ContextCheckpoint: "checkpoint_id",
 }
 
 
@@ -56,6 +59,7 @@ _RECORD_TYPES: tuple[RecordType, ...] = (
     ToolJob,
     SubAgentRecord,
     AgentInvocation,
+    ContextCheckpoint,
 )
 
 

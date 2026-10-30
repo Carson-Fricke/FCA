@@ -3,11 +3,13 @@
 from collections.abc import Mapping
 from typing import cast
 
+from thesis.experiments.mandate import DataWindowResolver, MandateError
 from thesis.persistence.git import GitPublicationError
 from thesis.workspaces.local import WorkspaceRepositoryError
 from thesis.workspaces.sketch_contract import SKETCH_SCHEMA
 from thesis.workspaces.sketches import SketchPublicationError, WorkspaceSketches
 from thesis_runtime.contracts.context import ToolContext
+from thesis_runtime.contracts.failures import failure_from_exception
 from thesis_runtime.tools.registry import RegisteredTool, ToolExecution
 from thesis_runtime.tools.schema import render_violations, validate_arguments
 
@@ -20,7 +22,10 @@ SKETCH_TOOL_NAMES = (
 
 
 def sketch_registered_tools(
-    service: WorkspaceSketches, context: ToolContext
+    service: WorkspaceSketches,
+    context: ToolContext,
+    *,
+    resolve_data_window: DataWindowResolver | None = None,
 ) -> tuple[RegisteredTool, ...]:
     """Use ordinary tool dispatch and neutral inbox delivery with trusted workspace scope."""
     tools = []
@@ -68,6 +73,22 @@ def sketch_registered_tools(
             operation: str = name,
             parameters: Mapping[str, object] = schema,
         ) -> ToolExecution:
+            if resolve_data_window is not None:
+                try:
+                    resolve_data_window()
+                except MandateError as error:
+                    return ToolExecution(
+                        ok=False,
+                        failure=failure_from_exception(
+                            error,
+                            **{
+                                "kind": "research_window",
+                                "message": str(error),
+                                "certainty": "not_started",
+                                "retry_safe": True,
+                            },
+                        ),
+                    )
             misses = validate_arguments(parameters, arguments)
             if misses:
                 return ToolExecution(
@@ -107,7 +128,9 @@ def sketch_registered_tools(
                         "reference": error.reference,
                         "executionCertainty": "committed_locally",
                     },
-                    failure={"kind": "publication", "message": str(error)},
+                    failure=failure_from_exception(
+                        error, **{"kind": "publication", "message": str(error)}
+                    ),
                 )
             except (
                 ValueError,
@@ -116,7 +139,10 @@ def sketch_registered_tools(
                 WorkspaceRepositoryError,
             ) as error:
                 return ToolExecution(
-                    ok=False, failure={"kind": "sketch", "message": str(error)}
+                    ok=False,
+                    failure=failure_from_exception(
+                        error, **{"kind": "sketch", "message": str(error)}
+                    ),
                 )
             return ToolExecution(ok=True, structured=result)
 

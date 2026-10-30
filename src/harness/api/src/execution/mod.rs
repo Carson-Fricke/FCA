@@ -1,6 +1,7 @@
 //! Durable admission and isolated finite execution; market acquisition stays in
 //! the hosted market-data capability and simulation stays in the native engine.
 pub mod backend;
+pub mod completions;
 pub mod dispatch;
 pub mod launch;
 pub mod renewal;
@@ -75,6 +76,9 @@ pub fn start_control_reconciler() -> tokio::task::JoinHandle<()> {
             let result = tokio::task::spawn_blocking(|| -> backend::Result<()> {
                 let store = configured_store()?;
                 store.recover_interrupted()?;
+                if let Err(cause) = completions::retry_pending(&store) {
+                    eprintln!("{cause}");
+                }
                 if !store.queued()?.is_empty() {
                     let max = std::env::var("HARNESS_EXECUTION_MAX_WORKERS")
                         .ok()

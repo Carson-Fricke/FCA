@@ -13,9 +13,30 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from thesis_runtime.contracts.records import WorkflowExecution
+from thesis_runtime.subagents.specs import InitialContext
 from thesis_runtime.workflows.execution_store import StoreTransition
 
 PROTOCOL_VERSION = 2
+
+
+@dataclass(frozen=True, slots=True)
+class PhaseSeed:
+    """An assignment and explicitly selected source context, never a transcript."""
+
+    text: str
+    initial_context: tuple[InitialContext, ...] = ()
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, object]) -> PhaseSeed:
+        text = value["text"]
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("phase seed requires a non-empty assignment")
+        contexts = value.get("initialContext", [])
+        if not isinstance(contexts, list) or any(
+            not isinstance(item, Mapping) for item in contexts
+        ):
+            raise ValueError("initialContext must be a list of source messages")
+        return cls(text, tuple(InitialContext.from_dict(item) for item in contexts))
 
 
 class WorkflowExtension(Protocol):

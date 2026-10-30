@@ -109,6 +109,11 @@ models, while response schemas and UI decoding use the neutral reference shape.
 
 The pure record codec lives in `contracts/codec.py`; Cosmos does not import the
 filesystem adapter. Provider failure categories live in neutral contracts.
+`contracts/failures.py` owns the lossless tool-failure value and exception carrier.
+Failed tool outcomes cannot omit a nonempty category and explanation. The common
+dispatcher preserves typed domain evidence, including recovery arguments, through
+the existing canonical inbox and pure provider projection. No diagnostic queue or
+alternate delivery path is introduced.
 `ChatService.finish_workflow` is the fenced terminal-state authority and rejects
 late terminal overwrites; record and event writes share the fence but are not
 claimed to be a cross-record transaction.
@@ -148,6 +153,96 @@ resumed. Source changes do not delete unrelated local executions; affected old
 executions must be retired during the deployment cutover. Behavior is verified
 by `test_launch_schema.py`, `test_research_mandate.py` and the study-validation
 HTTP suite; pure window/schema checks live in `tests/thesis/experiments/test_mandate.py`.
+
+## Context checkpoints
+
+Root, helper and phase sessions use the same complete canonical context window.
+There is no 40-message buffer. `ConversationTurn` reads every scoped message after
+`ContextCheckpoint.through_message_id`, prepends the checkpoint's canonical
+summary and retained evidence references, and supplies the current configured
+bootstrap instructions. Superseded compaction summaries are control artifacts,
+not additional task history. The complete transcript is retained for inspection.
+`ContextCheckpoint` is a new optional selector record; existing current canonical
+transcripts require no conversion or deletion and start with complete history.
+Outdated canonical/provider contracts continue to be rejected, never upgraded.
+
+`contracts/compaction.py` defines capacity budgets and the optional evidence
+ranking port. `sessions/compaction.py` owns pure token estimation, consumed-prefix
+cuts and complete correlated group selection. `sessions/context_manager.py` owns
+the intrinsic `compact_context(focus?)` tool, capacity backstop, usage notices,
+audited same-model summary requests and window installation. Application
+composition supplies the model capacity and optional TypeSafe Jev adapter.
+No runtime component interprets research progress or decides important job IDs.
+The summary instructions ask the working model to preserve the assignment,
+corrections, decisions, progress, unresolved evidence and next steps.
+
+Each request is estimated from its full pure provider snapshot, including current
+instructions, tools and opaque continuation; reply and safety capacity are
+reserved separately. Estimates are explicitly approximate. The default serving
+DeepSeek window is 1,000,000 tokens; other models default to 128,000 unless
+`THESIS_CONTEXT_WINDOW_TOKENS` is configured. `THESIS_MAX_OUTPUT_TOKENS` controls
+both the OpenRouter output cap and runtime output reserve, including reasoning
+(default 131,072 for the serving DeepSeek model, 32,768 for other models).
+Usage notices begin at 50% and update in 5% bands. They use the canonical incoming
+writer and force reconciliation before a provider request, preventing a later
+notice position from acknowledging an unseen intervening arrival.
+
+Compaction summarizes the original retiring span with the same provider/model,
+using dedicated checkpoint instructions. The shared pure provider projection
+encodes the retiring canonical transcript as data, including original tool calls
+and opaque continuation, rather than resuming that native tool exchange.
+`contracts/completion.py` supplies immutable per-request options: the summary
+output cap and disabled tool selection are identical in audit and transport.
+Configured task instructions remain intact for subsequent normal requests.
+Pending input cannot be retired. Outstanding calls may cross a compaction
+boundary: their original database records remain durable, and turn liveness is
+derived from the full scoped transcript, independently of the active model view.
+Late results use the canonical inbox and retain their exact correlation; an
+original request outside the active view produces neutral incoming evidence,
+not an orphaned provider tool result. Compaction neither reissues nor settles
+work and does not require copying open request envelopes into the next window.
+Oversized consumed history is summarized in complete chunks; every original chunk reaches
+the working model and each checkpoint can resume after slice yield. The
+recent tail and optional bounded Jev-selected complete groups remain exact.
+Jev receives bounded advisory excerpts; its selection never filters the model's
+source. Every selector request is audited before dispatch without credentials.
+Unavailable selection is a durable notification and falls back to summary plus
+recent history. `TYPESAFE_API_KEY` enables this optional adapter.
+
+The summary is committed through the normal outgoing boundary before the scoped
+selector is atomically saved. A failed summary or selector write does not advance
+the window or consume input. Completed summaries failing validation are retained
+only as non-executable invocation audit evidence, with a specific validation
+reason and estimated size; they never enter dispatch or replace the active
+window. Provider interruptions retain sealed partial evidence through the normal
+outgoing boundary.
+Compaction never ACKs task input. New arrivals stay
+outside the sealed boundary; successful compaction returns to reconciliation
+before the next model request. Model-supplied compaction focus is delivered as neutral data, not inserted into
+trusted instructions. Fulfilled compaction request IDs are retained in
+the canonical summary metadata, preventing a still-pending receipt from causing
+repeated compaction across execution slices. Restart selects the same view from
+the same log, writer and consumption cursor. Irreducible context fails visibly,
+with no silent truncation or automatic capacity retry storm. Interrupted output
+also replays in full; the old provider-side failure excerpts are removed.
+
+`tests/thesis/http/test_context_compaction.py` covers full history, manual and
+automatic checkpoints, slice-yield recovery, repeated checkpoints/restarts on
+memory/filesystem/Cosmos adapters, late arrivals, summary/checkpoint faults,
+optional audited Jev selection, and oversized pending input. Pure overlapping
+call-group ordering is covered by `tests/thesis_runtime/test_context_window_rules.py`.
+The same HTTP suite covers async results during and after real compaction,
+restart, duplicate delivery, partial completion and tool-disabled transport
+options; the original request records need not remain in the model view.
+These mechanical checks do not certify semantic fidelity of generated summaries.
+
+FCA's `extensions/tools/artifacts.py` owns agent-facing artifact windows before
+canonical result delivery: 12,000 characters by default, at most 24,000, with
+explicit total length, next offset and optional JSON-pointer selection. This
+prevents an immutable artifact's complete trade ledger from flooding model
+context. The harness artifact contract and deterministic full-file consumers
+remain complete. `tests/thesis/http/test_artifact_pages.py` verifies paging,
+selection, exact Unicode/binary reconstruction and unchanged full-file access.
 
 ## Incremental model output
 
@@ -231,6 +326,11 @@ Verification: `tests/thesis/http/test_model_output_streaming.py`,
 
 ## Status
 
+Normal response completion keeps a turn open while the scoped durable transcript
+contains unreturned tool requests or spawned-child handles. Execution ownership
+is released until incoming delivery resumes it. No wait tools, blocking child
+waits, pending-work store, timer or harness-job monitor is introduced.
+
 Discovery in workflow `6.0.0` develops a Git-committed strategy sketch through
 ordinary session tools. Workspace `sketch_contract.py` owns pure contracts;
 `sketches.py` owns immutable content-addressed revisions and CAS updates.
@@ -254,7 +354,7 @@ This is agent guidance, not an engine gate or proof of alpha or model compliance
 ### Bounded research investigations
 
 `thesis/extensions/workflows/research_investigation/` implements workflow
-`research-investigation@4.0.0`. Discovery's skill 1.11.0 prompts default delegation
+`research-investigation@6.0.0`. Discovery's skill 1.11.0 prompts default delegation
 of substantive implementation/testing while retaining directions, allocation and
 integration. Constructions remain provisional, structural alternatives have no fixed
 quota, and substantial concentration is justified through evidence. It prompts
@@ -270,7 +370,7 @@ parented to the launching discovery conversation, using the unchanged generic ho
 | `implementation_critique`, `experimental_critique`, `alignment_critique` | Independent model contexts check implementation, experimental validity and goal alignment respectively. | `collect_critiques` |
 | `collect_critiques` | Pure deterministic collection preserving each report; no verdict. | `adjudicate` |
 | `focused_critique` | Model checks narrow repairs requested by adjudication without restarting all specialists. | `adjudicate` |
-| `adjudicate` | Model resolves objections and chooses a scoped next action. | `proposal`, `investigation`, `completed` |
+| `adjudicate` | Model resolves objections, makes bounded local repairs and assigns the next review; delegates substantial work. | `critique`, `focused_critique`, `proposal`, `investigation`, `completed` |
 | `investigation` | Model develops training strategies, searches parameters and checks robustness with targeted diagnostics and artifacts. | `critique`, `focused_critique` |
 | `completed`, `failed` | Terminal metadata; no model. | None |
 
@@ -287,26 +387,47 @@ including blocked no-job rounds. Specialist critiques inspect claims before the
 repair ledger and require concrete evidence on issues and verified repairs. Issue
 IDs are specialist-prefixed; the join collects reports without voting or selecting
 a scientific outcome. Existing split/join scopes hide current sibling reports until
-collection; the generic host is unchanged. The adjudicator owns reconciliation and
-may request focused verification for narrow repairs. The runtime snapshots the
-original operator trigger message independently of the discovery-authored brief;
-phase seeds and handoff zero expose this `operatorRequest`. Branches may extend or
+collection; the generic host is unchanged. The adjudicator owns reconciliation.
+Adjudication's required `review` identifies the next review target, scope and issue
+IDs, including after delegated repair; it is null only at completion. Direct
+review routes reuse the existing specialist fan-out or focused critic. Adjudicate
+has branch author/validate/run tools with the same retained-submission path and
+budget. Its immutable repair handoffs retain corrections and evidence across
+later adjudications; `reviewHandoff` selects the current product. Prompts direct
+independent verification of consequential repairs, reuse of valid evidence and
+completion when the local decision is supported. They do not impose a round cap
+or change completion wakes. Settled issue IDs require explicit new counterevidence
+in `reopenReason` to reopen. An `escalate` resolution removes discovery-owned
+decisions from local repair assignments and returns them with the branch outcome.
+The runtime snapshots the original operator trigger message independently of the
+discovery-authored brief.
+Extensions select initial context with explicit `contextMessageIds`; the host
+resolves those exact canonical records within the chat, without ancestor traversal.
+Each child receives the original text as neutral `agent_context` before its
+separate runnable assignment. Source-message/conversation references are provenance,
+never privileged roles. Source-keyed delivery is idempotent across interrupted
+startup and phase revisits. Handoff zero also exposes `operatorRequest`. Branches may extend or
 replace provisional implementations within scope. No new scientific/operator gate
 or fixed experimentation checklist is introduced.
 
 Phase seeds carry bounded brief/active-issue excerpts and accepted handoff indices,
-not accumulated phase bodies. `read_research_investigations` provides bounded reads
-with required `execution_id`, `handoff`, `offset` and `max_chars` arguments.
-Null branch selection means the phase's own branch or discovery's branch list;
-null handoff selects state/branch inspection, zero selects the original brief,
-and a positive integer selects an accepted handoff. Missing selectors are invalid
-arguments rather than an implicit page-zero read. Paged responses include
-`nextArguments` carrying the exact selector, page size and next offset for the
-next call, or null at the end. Repeated arguments reread the same page; the tool
-does not infer selection from prose or maintain a hidden cursor. The descriptor
-and phase prompt explain these arguments and favor a known handoff over paging
-through the complete accepted state. Handoff zero denotes the original brief;
-positive indices select exact accepted handoffs. Research executors can read
+not accumulated phase bodies. `read_research_investigations` provides complete accepted-product reads by default
+with required `execution_id` and `handoff` selectors. Optional `token_offset` and
+`max_tokens` use the fixed cl100k_base read-budget tokenizer (16,384 default,
+65,536 maximum). Large products return exact `nextArguments` and a content hash;
+changed state is rejected on continuation. Ordinary products are delivered whole,
+without JSON section selection or character paging. Handoff zero selects the
+original brief; positive indices select immutable accepted products; null selects
+current state/branch inspection. The same tokenizer budgets SDK, program,
+knowledge and artifact reads through `thesis_runtime/tools/reading.py`; the serving
+Rust SDK reference uses tiktoken-rs with matching cursors. This budget includes
+JSON string escaping and is distinct from provider context accounting. Container
+builds prefetch Python's tokenizer assets for offline runtime reads.
+Proposal, investigation and adjudicate agents own author/validate/run tools and durable
+submission retention. Proposal reports attempts and evidence before critique;
+the phase prompt directs actual initial strategy/study execution, inspecting
+completion asynchronously without polling. No engine execution gate is added.
+Research executors can read
 only their own branch's accepted causal products, never private transcripts.
 Proposals record repair responses by issue ID; Critique explicitly records verified
 repairs. The accepted issue ledger survives proposal replacement and distinguishes
@@ -347,7 +468,7 @@ mismatched acknowledgements without replay, and delegated discovery handoff. The
 tests establish routing/contracts; live model behavior is assessed separately through
 `.github/runbooks/thesis-discovery-evaluation.md`.
 
-SDK ABI v5 publishes sequences, events, tables and fitted state. The host
+SDK ABI v8 publishes sequences, events, tables and fitted state. The host
 records these and composed indicator histories in immutable job artifact
 `exploratory_outputs.json`, retaining undefined reasons and availability times.
 Host-owned fitted-state provenance binds the training window and owning job.
@@ -365,7 +486,7 @@ have no interval. Screeners declare `bar_intervals`, accessing series by
 symbol and interval, and retain completed-session as-of-date evaluation.
 Later selection, null, variation and forward phase purposes remain unchanged.
 
-Current study authoring uses SDK ABI v5 and shared `MarketConsumer` callbacks.
+Current study authoring uses SDK ABI v8 and shared `MarketConsumer` callbacks.
 The model declares exact `harnessConfiguration.subscriptions` for bars, quotes
 and/or trades, including requirements of its owned indicators. Source declares
 the same union through `subscriptions()` and `indicators()`. Compilation
@@ -393,8 +514,9 @@ Argument-schema feedback reports concise paths and expected/received types,
 including failures nested in schema unions. Three consecutive tool rounds with
 the same structural violations interrupt the turn after persisting their results;
 operator input or execution progress resets that slice-local repair budget. The
-conversation service durably schedules a backed-off continuation and notifies the
-nearest supervising conversation; it does not request human input. The 64-request
+conversation service durably schedules a backed-off continuation and notifies an
+explicit conversational return target without crossing workflow record boundaries;
+it does not request human input. The 64-request
 execution slice yields into another durable turn with no lifetime iteration cap.
 These mechanics do not choose research directions or complete workflow phases. Unexpected root runtime faults are logged and recorded as
 interruptions when persistence is available, then propagated so durable workers
@@ -491,7 +613,7 @@ Historical full-message invocation audit formats must be rejected under the
 current-contract policy; their acceptance is removed.
 The opaque audit
 records actual projected messages, advertised tool catalog,
-options, protocol-mapping/projection version (`native-session-v4`), and
+options, protocol-mapping/projection version (`native-session-v6`), and
 tool-catalog version prepared purely at the provider boundary. Caller persistence
 owns this opaque runtime effect; the adapter remains pure. Terminal updates
 preserve those fields. Cosmos forces `provider_request` into workspace-scoped,
@@ -645,10 +767,14 @@ reasoning/text is sealed as canonical outgoing partial evidence with
 No empty outgoing message is invented when nothing was received. Large failed
 outputs remain complete canonically but project labeled bounded excerpts with
 message references, so reasoning-only failures cannot poison the next context.
-The current audit projection is native-session-v4. The shared pure
+The current audit projection is native-session-v6. The shared pure
 provider projection distinguishes provider interruption from operator steering.
 Recovery notices enter the singular incoming writer as neutral runtime evidence,
-never fabricated operator input. Every recovery is a separately audited fresh model
+never fabricated operator input. A direct helper may notify its conversational
+return target. A phase returning to a workflow record retains its failure and
+continuation locally; recovery never skips that record to notify or wake an
+ancestor conversation. Explicit workflow outcomes keep their declared return path.
+Every recovery is a separately audited fresh model
 request in the same session/agent/intent epoch, using retained tool receipts and
 job references. Failed requests ACK no pending inputs; only successfully committed
 output enables normal ACK and dispatch. A failure to persist the failed audit,
@@ -669,13 +795,15 @@ Behavior coverage is in `tests/thesis_runtime/test_provider_recovery.py` (actual
 OpenRouter HTTP exchange through durable root/phase conversations), the session
 audit/delivery suites, and the durable study-submission recovery case in
 `tests/thesis/extensions/workflows/research_investigation/test_workflow.py`.
+`tests/thesis/http/test_recovery_scope.py` verifies workflow containment, direct
+helper notices, scoped durable wakes and recovery after worker replacement.
 
-Discovery posts an early plan, authors committed studies, validates changed input,
-runs the latest validated ID, and inspects artifacts. Discovery, model creation,
-and strategy design share `prompts/sdk.py`: read matching SDK signatures/templates
-before authoring or repairing, apply targeted patches, and ask through
-`request_workflow_input` after three unsuccessful repairs. That compiler-repair
-limit is prompt guidance, not a runtime-enforced repair cap or workflow gate.
+Discovery declares windows first, commits a sketch and delegates substantive
+construction/testing. Its concise assignment retrieves SDK guidance by need.
+Implementation phases share `prompts/sdk.py`; specialist review prompts describe
+review duties rather than candidate development. Operator acceptance is stated
+once per conversational phase and remains agent-owned. No prompt-size quota,
+review checklist engine or runtime repair gate is introduced.
 
 The changed hypothesis-development topology is version `3.0.0`. Definition
 requests can name a version; unsupported historical versions return an explicit
@@ -713,7 +841,7 @@ The durable sub-agent runtime is implemented in `thesis_runtime`:
   repair-turn budgets specified below;
 - `ControlToolService` is a thin adapter over the `Conversations` service: it
   records the spawn as a first-class tool invocation and delegates spawn,
-  await, completion, and operator input to the conversation handles;
+  completion and operator input to the conversation handles;
   Local and deployed serving use this same implementation. Entrypoints must not
   subclass it for logging or replace its completion methods: trusted phase-attempt
   identity must reach the shared completion authority unchanged. The local wiring
@@ -769,7 +897,7 @@ REQ-034..REQ-040) is implemented in `thesis_runtime.conversations.conversation` 
   lifecycle, and operator policy before persistence and wake. It cannot bypass
   admission by writing directly to the shared chat;
 - `ChildConversation` composes the return layer over an inner conversation:
-  the `returns_to` anchor, `complete`/`fail`/`result`/`await_result`/
+  the `returns_to` anchor, `complete`/`fail`/`result`/
   `children`/`cancel`, and one turn-end policy. Durable `CompletionMode` selects
   `OneShotPolicy` (`complete_on_text`) or `ConversationalPolicy`
   (`explicit_completion`), independently of the input `kind`.
@@ -819,6 +947,16 @@ Runtime program-reference checks use the canonical conversation activity writer.
 
 ### Committed Workspace Programs
 
+Application composition supplies `WorkspacePrograms` with an `AuthoringSdk`
+capability independently of its execution client. The SDK implementation in
+`workspaces/sdk/` owns source identity, metadata agreement, token reference
+validation and template rendering. It receives only a metadata/source port and
+local SDK root, never the program lifecycle service or its repository/submission
+state. `workspaces/program_contracts.py` owns their shared value and failure
+rules. Dependency guards in `tests/thesis/workspaces/test_sdk_architecture.py`
+protect this direction; public program behavior remains covered through serving
+composition and program operations.
+
 `workspaces/programs.py::WorkspacePrograms` owns studies, strategies, and
 indicators under `studies/<program_id>/`, `strategies/<program_id>/`, and
 `indicators/<program_id>/`. Each contains `program.rs`, `manifest.json`, and,
@@ -858,16 +996,40 @@ the composed service; workflow bindings grant it only to the owning discovery,
 model-creation, strategy-design, or strategy-backtesting executor, not helpers
 merely inheriting tool names. The effective tool policy still filters the catalog.
 
-`read_sdk_reference` supplies bounded line ranges from matching local SDK sources,
+Agent execution calls return admission receipts immediately. The immutable
+submission retains its trusted conversation recipient before dispatch. Terminal
+publication in the harness commits a compact completion outbox event in the same
+conditional write as the result. Finite workers POST that event to the configured
+Thesis completion endpoint; the existing control reconciler retries unacknowledged
+delivery events. No caller or background job monitor polls execution status.
+The receiver resolves the retained job ID and delivers once through
+`Conversations.deliver_session_message`. Failure/cancellation is terminal evidence;
+stopped, cancelled or stale-epoch recipients retain late results without revival.
+A stable message identity makes lost HTTP acknowledgements safe to redeliver.
+
+Liveness is derived from exact request correlations and runtime-authored
+`pendingJobs`/`completedJobs` fields across the full scoped transcript. A one-shot
+agent ending its response remains waiting until its results arrive, including
+across compaction and when a completion precedes its admission receipt. A normal
+response can end while other work runs; new incoming evidence resumes the agent.
+Read-only failures remain safe observations with actionable diagnostics;
+unknown-outcome mutation recovery retains the original IDs without resubmission.
+
+`read_sdk_reference` supplies bounded source pages from matching SDK sources,
 the `decimal` kernel topic, and study/strategy/indicator templates. `template=basic` renders declared
 subscriptions into the matching template. Version and ABI metadata come from
 the SDK's `Cargo.toml` and `src/abi.rs` and must match the canonical packaged SDK.
+Reads report selected `startLine`/`endLine`, `totalTokens`, `tokenizer`, and
+`nextArguments` with original-range token offsets. Whole topics fit the default
+16,384-token budget; large topics continue within the same selected source range.
+There is no hidden line-count or character page cap. Rust serving and Python
+local/template projections share this current contract, with exact UTF-8 pages.
 SDK identity hashes Cargo manifests and Rust source files across `strategy-sdk`,
 `contracts`, and `num`; dependency changes invalidate stored validation. The wheel
 and source distribution carry these canonical crates with portable relative Cargo
 dependencies, not a separate Python-side SDK copy. Remote harness access does not
 supply local references. Missing or mismatched sources fail explicitly. The
-study/strategy/indicator templates in `programs.py` are shared by reference reads
+study/strategy/indicator templates in `workspaces/sdk/templates.py` are shared by reference reads
 and basic authoring; they are minimal SDK contracts, not completed research models.
 
 Model creation and strategy design complete with artifact references
@@ -918,7 +1080,13 @@ composed once, and never created lazily by requests. Production explicitly uses
 `in_memory=False`; absent services return typed 503 errors. `http/schema.py`
 exports the app's OpenAPI 3.1 plus runtime activity/message/datum/tool schemas;
 `http/wire.py` derives durable record fields from their dataclasses and response
-envelopes from typed models, including complete input receipts and tree records.
+envelopes from typed models, including complete input receipts, display messages
+and flat node summaries. Bounded history previews and canonical item detail reads
+share IDs/sequences with the single SSE stream; they never enter provider context,
+inbox persistence or consumption. Storage receipt-header queries select caller-owned
+result types and metadata fields before paging. PostgreSQL and Cosmos project
+headers directly, with explicit hydration for current chunk manifests. No second
+stored log or writer is introduced.
 Schema generation and wire validation are implemented. This does not establish
 complete side-effect recovery or output-publication receipts for every operation.
 
@@ -964,7 +1132,7 @@ harness-hosted MCP endpoint:
   a remote `POST /v1/studies/jobs` route, and a `harness study-job` entrypoint
   that writes a `study.json` artifact with the `study` shell;
 - the study execution mode is Rust-JIT: the authored source compiles through
-  `harness-strategy-jit` against `harness-strategy-sdk` ABI v4 and implements
+  `harness-strategy-jit` against `harness-strategy-sdk` ABI v8 and implements
   `MarketConsumer<Context = ObservationContext>` plus `StudyProgram`
   (`new(parameters)`, `on_stop(&mut MetricPublisher)`). It observes subscribed
   quotes, trades, and atomic frames through the common callbacks, has no order
@@ -1115,6 +1283,7 @@ Required assertions and verification paths:
 | Only pending inputs actually included in a successful provider request are ACKed after output persistence; empty/unusable completion interrupts without ACK or invented empty reply; initial pending input, mid-model and post-provider arrivals, interrupted/provider/output/ACK faults, partial activity, and results after terminal requests stay truthful and unconsumed until eligible | `tests/thesis_runtime/test_session_delivery.py`, `test_canonical_delivery.py`, `test_session_input_snapshot.py` in the same directory; `tests/thesis_runtime/test_arrival_reconciliation.py` |
 | Operator steering closes the active stream, seals received reasoning/text without tool dispatch or ACK, and starts a new request whose live/replay context contains the partial and steering; phase execution remains running. Recovery retains sealed partials as interruption without replay | `tests/thesis/http/test_model_output_streaming.py`, `tests/thesis/http/test_stateless_ownership.py`, `tests/thesis_runtime/test_arrival_reconciliation.py` |
 | Concurrent operator/root admission and root/phase progress acquire shared Cosmos document locks in the same order while retaining CAS, ownership, and deletion fences | `tests/thesis_runtime/adapters/cosmos/test_conversation_scope.py`, `tests/thesis/http/test_stateless_ownership.py` |
+| Asynchronous job completion resumes parked responses; terminal returns deduplicate and retain late evidence without revival | `tests/thesis/http/test_job_completions.py`, `tests/thesis/extensions/workflows/research_investigation/test_workflow.py`; harness `execution-storage/tests/job_outcomes.rs`, `api/tests/job_completions.rs` |
 | Synchronous and asynchronous completion, skipped/not-started calls, unknown mutation outcomes, terminal/cancelled late delivery, and private child transcripts do not resurrect nodes or replay effects | `tests/thesis_runtime/test_canonical_delivery.py`, `test_session_live_activity.py`, `test_durable_architecture.py` in the same directory; `tests/thesis/extensions/workflows/hypothesis_development/test_live_tool_recovery.py` |
 | Restart/reload/resume preserve all incoming sources and per-anchor input/consumed positions, pending partial groups, correlations, idempotency, delayed-wake fences, and the same projection, without synthetic results or side-effect replay | `tests/thesis_runtime/test_durable_architecture.py`, `test_turn_retirement.py`, `test_unified_conversation.py` in the same directory |
 | Steering epoch is installed before canonical wake for synchronous and asynchronous workers; root/model-only routing, source completion, node lifecycle, store CAS, and effects outside the acceptance guard remain unchanged; deterministic executor faults still fail workflows | `tests/thesis/workflows/test_steering_delivery.py`, `test_unified_session.py` in the same directory; `tests/thesis/http/test_input_acknowledgement_wiring.py`, `test_serving_midturn.py` in the same directory; `tests/thesis/extensions/workflows/hypothesis_development/test_acceptance_fence.py`; `tests/thesis_runtime/test_lifecycle_acceptance_guard.py` |
@@ -1313,6 +1482,26 @@ The dispatcher MUST intersect the catalog with the sub-agent's immutable
 allowed-tool policy. A tool absent from the intersection MUST be rejected
 before transport dispatch.
 
+Hypothesis-development exposes the phase's permitted program, sketch and SDK
+tools from the first model request. Research-window declaration does not alter
+the advertised catalog. Discovery's prompt directs it to call
+`set_research_window` first. Workflow bindings inject `resolve_data_window`;
+program, sketch and exploratory-output handlers check that prerequisite at call
+time. Missing windows return a model-visible `research_window` / `not_started`
+failure naming `set_research_window` and instructing the model to declare first
+and retry. Research-launch and completion errors also name that repair action.
+Declaring a window and authoring within one tool-call bundle uses the newly
+persisted declaration. Study, backtest, parameter-batch and null-batch execution
+pass the resolved policy to the program service before job allocation, retention
+or dispatch. Development and sealed-forward restrictions remain enforced there.
+Chat-level tools may deliberately have no resolver. Phase authorization still
+comes from trusted bindings and the immutable allowed-tool intersection.
+
+Generic child completion guidance follows the durable `completion_mode`:
+explicit completion requires its advertised tool, while a text answer only ends
+a turn. The runtime does not choose research branches or automatically retry a
+phase that ends a turn without pending work.
+
 ### Trusted Tool Context
 
 Every dispatched tool MUST receive trusted context attached by the Thesis
@@ -1345,7 +1534,6 @@ The initial control catalog MUST include:
 | `request_sub_agent_completion` | Submit a non-phase sub-agent's specification-specific terminal result. |
 | `request_operator_input` | Publish an agent-authored question and pause for an operator reply. |
 | `spawn_sub_agent` | Create a durable chat-attached child using an allowed specification. |
-| `await_sub_agent` | Return a child's current state or terminal result to the calling agent. |
 
 All sub-agent creation MUST pass through the `spawn_sub_agent` command handler.
 A workflow deterministically starting a phase MUST invoke that same command
@@ -1354,12 +1542,19 @@ persist its returned sub-agent handle.
 A model dynamically creating a helper invokes it as a normal tool call.
 
 `spawn_sub_agent` is asynchronous. Its immediate result MUST return the durable
-child id and initial state to the caller. `await_sub_agent` MUST return either a
-terminal result or a non-terminal status such as `running` or `needs_input`.
+child id and initial state to the caller. At a normal model stop, the session
+checks exact ToolCorrelation joins for unreturned calls and existing child-handle
+receipts for missing child-result messages. Pending work returns `waiting` rather
+than automatically completing a one-shot task or scheduling another model call.
+The full scoped transcript is checked, including evidence before compaction;
+only the active context is sent to the model. Incoming input already admitted
+during the response is processed before completion. Late arrivals wake the
+existing serialized worker. No wait tools, separate pending-work store, timers
+or submission replay are introduced.
 Child output MUST NOT be injected into the parent conversation implicitly.
 The child requests terminal completion through `request_sub_agent_completion`;
 the result is constructed against the completion contract captured in its
-specification. The parent obtains that result through `await_sub_agent`.
+specification. Canonical delivery supplies that result to the parent.
 
 Each child MUST inherit workspace and chat scope. A child MUST receive a budget
 no greater than its parent's remaining delegated budget. Spawn authorization,
@@ -1370,7 +1565,7 @@ not represented as a sub-agent.
 `request_sub_agent_completion` MUST use the same typed construction feedback
 and repair-turn machinery as phase completion. Its deterministic lifecycle
 validator replaces the workflow acceptance gate. Acceptance marks the child
-completed and freezes its terminal result for `await_sub_agent`.
+completed and freezes its terminal result for canonical delivery to the caller.
 
 ## Phase Completion Protocol
 
@@ -1521,7 +1716,7 @@ code.
 
 A study is a statistical replay, not a trading strategy. When it runs a
 research model, that model is an authored Rust program compiled through
-`harness-strategy-jit` against `harness-strategy-sdk` ABI v4. It implements
+`harness-strategy-jit` against `harness-strategy-sdk` ABI v8. It implements
 `MarketConsumer<Context = ObservationContext>` for market callbacks and
 `StudyProgram` for construction (`new(parameters)`) and final publication
 (`on_stop(&mut MetricPublisher)`). Fitted parameters use `fit.<parameter>`;
@@ -1575,7 +1770,7 @@ The tool spans the harness Rust workspace and the harness-hosted MCP endpoint:
    version) and is driven over exact subscribed inputs, never binding order,
    position, sizing, portfolio, or venue capability.
 3. The study configuration declares `shell: study` and `data.subscriptions`.
-   After construction, ABI v4 exposes the canonical source-and-dependency union
+   After construction, ABI v8 exposes the canonical source-and-dependency union
    as JSON. The echo MUST canonically equal that union before acquisition.
    The harness ensures and reads exactly those types, symbols, and bar intervals
    through the market lake via
@@ -1589,7 +1784,7 @@ The tool spans the harness Rust workspace and the harness-hosted MCP endpoint:
    a run, including dependencies and instances; conflicts fail before any lake
    ensure/read. Tick-only studies need no interval. Interval-only documents are
    rejected; authored source MUST use the current SDK API and compiled artifacts
-   MUST rebuild for ABI v4.
+   MUST rebuild for ABI v8.
 5. Thesis calls `run_study` through `McpStudyRunner` over the hosted MCP
    endpoint and binds phase completion to the returned study's metric
    references; the `fit.<parameter>` metrics freeze as the content-addressed
@@ -1702,7 +1897,7 @@ daily bounds use real XNYS sessions including DST and early closes; crypto
 daily bounds use UTC days. Mixed equity/crypto daily intervals are rejected.
 Duplicate symbol/interval rows, unexpected symbols, and off-grid starts fail
 validation. Raw replay counts/fingerprints remain distinct from frame dispatch
-counts. SDK ABI v5 invalidates older compiled artifacts; authored studies and
+counts. SDK ABI v8 invalidates older compiled artifacts; authored studies and
 strategies MUST move market methods into `MarketConsumer` and declare exact
 subscriptions. `new` and `on_stop` remain in the specialized program impl;
 strategies also retain `on_start` and `on_fill` there.
@@ -1762,7 +1957,8 @@ defaults; reserved names are rejected); the optimization and variation phases
 additionally hold `run_backtest_batch`, and the null-testing and
 forward-validation phases hold `run_null_batch` (the same strategy under
 seeded signal-destruction transforms); both batch tools validate every point
-before any submission and return per-point run ids and states without waiting.
+before any submission. Agent-facing calls return retained IDs immediately; terminal
+evidence arrives through asynchronous canonical completion delivery for each point.
 Conversational phases hold
 `search_knowledge`/`read_knowledge`. Knowledge retrieval is collection-scoped per phase:
 discovery may retrieve `discovery`, `data-quality`, `trading-costs`, and
@@ -2147,18 +2343,23 @@ completion tool.
   that sees them all; a message arriving mid-turn is visible to the next model
   iteration.
 
-**REQ-033: Asynchronous results and bounded await.** A child's terminal result
-MUST be delivered at its caller's anchor and schedule the caller's turn, except
-when the caller is a workflow node — a durable record that MUST never be
-scheduled or turned. `await_sub_agent` MUST wait for the child for a bounded
-time and return its status and result; on timeout it MUST return the current
-state rather than blocking indefinitely.
+**REQ-033: Transcript-derived asynchronous continuation.** A child's
+terminal result MUST be delivered at its caller's anchor and schedule the
+caller's turn, except for workflow record anchors which never run. A normal
+model response MUST leave the logical turn open while exact request/result
+correlations or spawned-child handle/result messages show outstanding work.
+The worker MUST release ownership until new canonical input arrives. There
+MUST NOT be a model wait tool, polling wait, second inbox or pending-work store.
+Success, failure and cancellation are delivered outcomes; a rejected call with
+a failure receipt is settled. Automatic one-shot completion requires all
+returns to be present and consumed. Explicit completion/cancellation retain
+their existing lifecycle authority.
 
-- Rationale: waiting is optional because delivery wakes the caller; the tool is
-  named await, so it must actually wait when called.
-- Verification: a completed child wakes its caller without an await; an await
-  returns the terminal result when the child finishes inside the window and the
-  current state at the timeout.
+- Rationale: requests, handles and results already exist durably; derive
+  liveness from those facts and use existing incoming wake routing.
+- Verification: `tests/thesis/http/test_async_returns.py` covers exact joins,
+  worker replacement, partial child returns, one-shot task retention,
+  success/failure/cancellation, rejected spawns and racing local input.
 
 **REQ-034: One conversation abstraction.** Chats and sub-agents MUST share
 one implementation of internals (identity, transcript, send/deliver/answer,
@@ -2174,7 +2375,7 @@ be the conversation's turn implementation. Target design:
 
 **REQ-035: Child semantics are composed, not inherited.** A child MUST
 delegate every internal to its inner conversation and add only the return
-target, `complete`/`fail`/`result`/`await_result`/`children`, cancellation,
+target, `complete`/`fail`/`result`/`children`, cancellation,
 and one turn-end hook ("does a text-ending turn complete me?"). A wrapper
 that implements turns, identity, or persistence is a defect.
 
@@ -2326,8 +2527,8 @@ They do not authorize compatibility facades or ongoing historical decoders.
 
 ### Wave 3: Sub-Agent Tools
 
-- Implement `spawn_sub_agent`, `await_sub_agent`,
-  `request_sub_agent_completion`, and `request_operator_input`.
+- Implement `spawn_sub_agent`, `request_sub_agent_completion`, and
+  `request_operator_input`.
 - Route both chat and workflow phase spawning through the same command handler.
 - Add depth, child-count, budget-inheritance, and authorization tests.
 
@@ -2460,7 +2661,7 @@ unconfirmed mutation automatically. `deliver_session_message` returns the
 committed `ChatMessage`; session inbox persistence projects it with `from_record`.
 Already retained incoming records are observations, never another persistence.
 SSE timeline notifications remain hints; cross-process timeline readers poll
-durable cursors. Session execution separately loads the latest bounded history
+durable cursors. Session execution separately loads complete history since its committed context checkpoint
 plus every unconsumed input, then reads only inputs after its observed position.
 A point-read inbox head avoids unchanged SQL reads. Sessions retain their selected
 records and persisted outputs for arrival reconciliation; success-bound ACKs,
@@ -2531,10 +2732,22 @@ data is not deleted by runtime startup.
 `tests/thesis/http/test_stateless_ownership.py` verifies atomic HTTP acceptance
 without catalog queries or duplicate work creates, rollback without orphaned
 messages/cursors/work, notification dispatch after API replacement and during
-busy conversation ownership, bounded history plus pending input outside that
-history, and unchanged-head reads without SQL. The external Cosmos fake models
+busy conversation ownership, complete scoped context and pending input, and unchanged-head reads without SQL. The external Cosmos fake models
 transaction CAS/rollback, latest-version feed pages, and empty-page continuation.
 `tests/thesis_runtime/test_arrival_reconciliation.py` verifies late steering,
 explicit tool-result correlations, consumption ACKs, and exact live/replay
 provider requests through both memory and Cosmos storage compositions, for root
 and phase conversations. The required delivery architecture guard remains active.
+
+### Harness completion transport configuration
+
+`HARNESS_COMPLETION_URL` names Thesis's `/v1/internal/harness/completions` endpoint;
+`HARNESS_COMPLETION_TOKEN` is its service bearer, retained only in configuration.
+The local launcher wires the local endpoint and stable harness bearer. Azure
+composition supplies the Thesis ingress URL and the existing harness bearer
+secret to the API, finite execution workers and scheduled dispatcher. Thesis
+accepts this service token separately from operator cookies/CSRF/workspace
+membership. Unknown/non-conversation jobs are acknowledged without a model wake.
+The endpoint accepts only compact terminal evidence, never model-chosen routing
+or accepted source. Existing jobs without a conversation recipient are not
+inferred or upgraded; newly retained agent submissions carry the current contract.

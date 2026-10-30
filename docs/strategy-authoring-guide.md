@@ -39,6 +39,7 @@ pub trait MarketConsumer {
     fn on_quote(&mut self, event: &QuoteEvent, ctx: &mut Self::Context) {}
     fn on_trade(&mut self, event: &TradeEvent, ctx: &mut Self::Context) {}
     fn on_bar(&mut self, frame: &BarFrame, ctx: &mut Self::Context) {}
+    fn on_decision(&mut self, ctx: &mut DecisionContext<'_>) {}
 }
 
 pub trait StrategyProgram: MarketConsumer<Context = OrderSink> {
@@ -54,7 +55,9 @@ pub trait StudyProgram: MarketConsumer<Context = ObservationContext> {
 }
 
 pub trait Indicator: MarketConsumer<Context = ObservationContext> {
-    fn value(&self) -> Option<Decimal>;
+    fn value(&self, symbol: &str) -> Option<Decimal>;
+    fn sequence(&self) -> &IndicatorSequence;
+    fn sequence_mut(&mut self) -> &mut IndicatorSequence;
 }
 ```
 
@@ -64,9 +67,12 @@ pub trait Indicator: MarketConsumer<Context = ObservationContext> {
 - `on_quote`/`on_trade`/`on_bar` belong to `MarketConsumer`; strategy callbacks
   may submit orders through their context. Bar callbacks see complete intervals
   at interval end, never bar-start lookahead.
-- `on_fill` folds a fill owned by this program.
+- `on_fill` optionally observes a fill already booked by the harness. Use the
+  execution context for positions, cash, fees and returns; implement no fill ledger.
 - `on_stop` runs once after the replay and is the only place that publishes
   metrics.
+- `on_decision` runs on the program root after each effective bar frame has
+  updated its dependencies and ordinary callback. Capture causal features here.
 
 Every callback has a no-op default, so a strategy implements only what it uses.
 Keep `new`, `on_start`, `on_fill`, and `on_stop` in the `StrategyProgram` impl;
@@ -81,15 +87,15 @@ Subscriptions are tagged as `bars` (symbols plus interval `1min` or `1d`),
 indicators are recursively unioned and deduplicated before data acquisition.
 Each dependency is updated before its parent and receives only its own inputs.
 Declarations and dependency topology must remain stable after construction;
-cycles and zero-sized indicator dependencies fail validation. One run supports
-one bars interval; incompatible intervals fail before acquisition.
+cycles and zero-sized indicator dependencies fail validation. A run supports multiple declared bar intervals; keep symbol and cadence state
+separate and use only observations already available at the decision time.
 
 Studies fetch only their effective subscription union. Backtests additionally
 fetch quote/trade feeds needed by the execution model; these are recorded
 separately as execution subscriptions. An optional `data.subscriptions` echo
 must match compiled consumer requirements, not execution feeds.
 
-ABI v4 exposes the constructed source-and-dependency union as tagged JSON before
+ABI v8 exposes the constructed source-and-dependency union as tagged JSON before
 any lake ensure/read. Thesis authors `harnessConfiguration.subscriptions`,
 preserves it as `data.subscriptions`, and uses `validate_study` to return the
 compiled union and reject canonically unequal echoes. Entries have exactly
@@ -97,7 +103,7 @@ compiled union and reject canonically unequal echoes. Entries have exactly
 tick intervals are rejected. Optional global symbols must equal the subscription
 symbol union. Tick-only inputs need no interval. Interval-only configuration is
 rejected; authored source uses the current SDK API and artifacts build for
-ABI v4.
+ABI v8.
 
 The manifest distinguishes `effective_subscriptions` (source plus dependencies),
 `execution_subscriptions` (backtest quote/trade feeds), and
@@ -107,6 +113,53 @@ uses one causal availability queue; ticks precede completed frames, then
 generated execution events at equal time. Frames are available at interval end.
 
 ## 3. Events and the capability surface
+
+For feature/outcome evidence, use the shared `DecisionContext` in studies and
+strategies. Read `read_sdk_reference(topic="causal")` against the serving SDK.
+The study template demonstrates the current API:
+
+```rust
+fn on_decision(&mut self, context: &mut DecisionContext<'_>) {
+    // self.features was computed by causal on_bar callbacks and dependencies.
+    context.capture("signal", "SPY", self.features.clone(), 60_000_000_000)
+        .expect("host-sealed features");
+}
+```
+
+Dataset and feature names contain 1–64 ASCII letters, digits, `.`, `_` or `-`.
+Pass an unprefixed dataset name such as `signal`; the host publishes
+`causal/signal`. Capture 1–256 finite features, skip warm-up, and keep each
+dataset's feature names and positive nanosecond horizon fixed. A rejection fails
+the run even if its return value is ignored; the job failure identifies the
+violated field. The same dataset/symbol can be captured only once per frame.
+
+The harness copies finite features immediately and assigns the observation ID,
+decision availability, symbol and cadence from the active frame. There is no
+timestamp argument, update operation, outcome reader or capture port at stop.
+One dataset/symbol capture per frame is allowed; its feature schema and positive
+elapsed horizon remain fixed. Warm-up may skip capture. An ignored capture
+rejection still fails the run. Outcomes use the same symbol and cadence at
+exactly `decision_at_ns + horizon_ns`; they are close-to-close returns in bps,
+without execution costs. Gaps are `missing`, and remaining horizons at stop are
+`end_of_run`, with null returns. Later bars never substitute for missing ones.
+An elapsed day is not a trading-session horizon; overnight and weekend gaps
+remain missing under this contract.
+
+Only the harness publishes `causal/<dataset>` as `causal_observations`. These
+outputs contain decimal-string nanosecond clocks, immutable `feature/*` columns,
+reference/outcome prices, outcome availability and explicit outcome status.
+Research views and dataset semantics can reference them. Authored publications
+cannot use this kind or namespace. The inspector marks these outputs as
+`harness_replay`; ordinary tables, series, fitted state and metrics remain
+authored exploratory claims. A retrospective join cannot acquire sealed
+provenance by declaring earlier availability. SDK ABI 8 requires compiled
+artifacts to rebuild; the loader rejects mismatched artifacts rather than
+decoding an old layout. Existing exploratory artifacts remain exploratory.
+
+This enforces causality for supported replay/capture inputs. Native Rust is not
+a security sandbox: hard-coded future knowledge, external I/O, incorrect source
+availability, training leakage and research selection bias require separate
+controls. Raw post-run tables do not prove causal backtest results.
 
 Event string fields are borrowed across the ABI; frame maps are constructed
 locally by the SDK. Every price and quantity is an exact `Decimal` (never `f64`):
@@ -141,38 +194,35 @@ checked conversion. Never build a `Decimal` from a float.
 
 ## 4. Orders
 
-Submit through `OrderSink::submit` with a `SubmittedOrder`. The host stamps the
-event time; the author never supplies a timestamp.
+Use managed signed inventory targets for entry and exit. The harness owns
+partial fills, pending orders, cancellations, actual position size and accounting:
 
 ```rust
-let _ = orders.submit(SubmittedOrder {
-    order_id: format!("mom-buy-{}", event.sequence),
-    symbol: event.symbol.to_string(),
-    side: Side::Buy,
-    quantity: "10".parse().unwrap_or_default(),
-    order_type: OrderType::Market,
-    time_in_force: TimeInForce::Day,
-    limit_price: None,
-    stop_price: None,
-    sequence: event.sequence,
-    event_id: format!("mom-buy-event-{}", event.sequence),
-});
+ctx.target_position("MSFT", Decimal::from_i128(10)).expect("target request");
+// When the policy chooses to exit:
+ctx.close_position("MSFT").expect("close request");
 ```
 
-- `Side` is `Buy`/`Sell`; `OrderType` is `Market`/`Limit`/`Stop`/`StopLimit`;
-  `TimeInForce` is `Day`/`Gtc`/`Ioc`.
-- `limit_price` is required for `Limit`/`StopLimit`; `stop_price` for
-  `Stop`/`StopLimit`; both are `None` for `Market`.
-- `order_id` must be unique and deterministic. A prefix plus a sequence-derived
-  ordinal keeps restarts reproducible.
-- Use exact decimals. Parse from strings (`"10".parse()`), never from a float.
+Repeated targets are idempotent while orders are pending. For explicit execution
+policy, `ctx.place(Order::market/limit/stop/stop_limit(...))` supplies required
+prices and allocates the order identity. `ctx.cancel(id)` cancels an owned order.
+Time-in-force policies are `Day`, `Gtc` and `Ioc`. The host stamps causal time.
+`SubmittedOrder` remains a low-level surface for specialized intent producers;
+ordinary strategies do not construct identifiers or event sequences themselves.
+
+`ctx.execution()` supplies booked positions, average price, cash, fees, equity
+and exposure. `ctx.orders()` / `ctx.order(id)` supply lifecycle, and
+`ctx.closed_trades()` supplies canonical FIFO trade P&L and entry-notional returns.
+These history views are loaded separately on demand. Final views are available
+through `MetricPublisher` in `on_stop`. See [Strategy execution SDK](strategy-execution-sdk.md)
+for cancellation races, rejection, return denominators and accounting conventions.
 
 ## 5. Metrics
 
 `MetricPublisher::publish(name, value)` records one finite numeric run metric.
 Names must match `^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$` and must not be a
-reserved harness name (`cagr`, `fees_total`, `fill_count`, `max_drawdown`,
-`slippage_total`, `strategy_id`, `total_return`). A rejection is recorded
+reserved harness name (see `is_reserved_metric_name` and `RESERVED_METRIC_NAMES`),
+including canonical financial values and their undefined-reason fields. A rejection is recorded
 host-side and fails the run even when the return value is ignored.
 
 Metrics take `f64`; exact decimals convert at publish time:
@@ -205,30 +255,19 @@ midpoints, liquidate once the entry has filled.
 use std::cmp::Ordering;
 
 use harness_strategy_sdk::serde_json::Value;
-use harness_strategy_sdk::{
-    export_strategy_program, Decimal, Fill, MarketConsumer, MetricPublisher, OrderSink,
-    OrderType, QuoteEvent, Side, StrategyProgram, SubmittedOrder, Subscription, TimeInForce,
-};
+use harness_strategy_sdk::{export_strategy_program, Decimal, MarketConsumer,
+    OrderSink, QuoteEvent, StrategyProgram, Subscription};
 
 struct Momentum {
     streak: u64,
     last_mid: Option<Decimal>,
-    entered: bool,
-    filled: bool,
-    liquidated: bool,
+    activated: bool,
+    closing: bool,
 }
 
 impl StrategyProgram for Momentum {
     fn new(_parameters: Value) -> Self {
-        Self { streak: 0, last_mid: None, entered: false, filled: false, liquidated: false }
-    }
-
-    fn on_fill(&mut self, _fill: &Fill) {
-        self.filled = true;
-    }
-
-    fn on_stop(&mut self, metrics: &mut MetricPublisher) {
-        let _ = metrics.publish("momentum_liquidated", f64::from(self.liquidated));
+        Self { streak: 0, last_mid: None, activated: false, closing: false }
     }
 }
 
@@ -245,34 +284,14 @@ impl MarketConsumer for Momentum {
             self.streak = if mid.cmp_value(previous) == Ordering::Greater { self.streak + 1 } else { 0 };
         }
         self.last_mid = Some(mid);
-        if !self.entered && self.streak >= 4 {
-            self.entered = true;
-            let _ = orders.submit(SubmittedOrder {
-                order_id: format!("mom-buy-{}", event.sequence),
-                symbol: event.symbol.to_string(),
-                side: Side::Buy,
-                quantity: "10".parse().unwrap_or_default(),
-                order_type: OrderType::Market,
-                time_in_force: TimeInForce::Day,
-                limit_price: None,
-                stop_price: None,
-                sequence: event.sequence,
-                event_id: format!("mom-buy-event-{}", event.sequence),
-            });
-        } else if self.entered && self.filled && !self.liquidated {
-            self.liquidated = true;
-            let _ = orders.submit(SubmittedOrder {
-                order_id: format!("mom-sell-{}", event.sequence),
-                symbol: event.symbol.to_string(),
-                side: Side::Sell,
-                quantity: "10".parse().unwrap_or_default(),
-                order_type: OrderType::Market,
-                time_in_force: TimeInForce::Day,
-                limit_price: None,
-                stop_price: None,
-                sequence: event.sequence,
-                event_id: format!("mom-sell-event-{}", event.sequence),
-            });
+        if self.streak >= 4 { self.activated = true; }
+        if orders.execution().quantity(event.symbol) == Decimal::from_i128(10) {
+            self.closing = true;
+        }
+        if self.closing {
+            orders.close_position(event.symbol).expect("close request");
+        } else if self.activated {
+            orders.target_position(event.symbol, Decimal::from_i128(10)).expect("entry target");
         }
     }
 
@@ -309,7 +328,7 @@ strategy_instances:
 ## 9. Local verification
 
 An authored strategy is a Rust crate compiled against the pinned toolchain.
-Run the repository Rust gates from the repository root:
+Run the harness Rust gates from `src/harness`:
 
 ```powershell
 cargo fmt --all --check
@@ -329,7 +348,7 @@ containment, and metric rejection handling.
    decimals convert to `f64` only at the metric or statistic boundary.
 3. Do not use wall clocks, networks, subprocesses, threads, or unseeded
    randomness. These are authoring rules, not compile-time Rust restrictions.
-4. `order_id` values are deterministic and unique for the instance.
-5. `on_fill` handles only fills this program owns.
+4. The platform supplies deterministic order identities through `place` and targets.
+5. The harness accounts for fills; `on_fill` observes only fills this program owns.
 6. A study or screening capability is never used from a strategy, and vice
    versa; the three program kinds are separate traits and vtables.

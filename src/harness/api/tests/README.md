@@ -9,6 +9,7 @@ acknowledgement coverage required by the execution contract.
 - `execution_pool.rs`: durable duplicate/conflicting admission, lost notifications, expired-owner fencing, bounded startup reservations, streamed artifacts and responsive health during blocking control work. Replaces the former thread-specific worker check in `job_id_receipt.rs`.
 - `http_parity.rs`: authenticated HTTP launch/query/result behavior with injected runners.
 - `job_id_receipt.rs`: native backtest, study and screening receipts retain the caller's ID and override document placeholders.
+- `job_completions.rs`: Real worker completion POST delivery, durable failure retry, immutable terminal evidence and acknowledgement behavior without execution replay.
 - `job_metrics.rs`: complete native result metrics survive publication.
 - `mcp_http.rs`: authenticated MCP catalog, shared admission and result access.
 - `sdk_metadata.rs`: SDK reference and validation provenance.

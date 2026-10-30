@@ -58,6 +58,7 @@ from thesis.integrations.runtime_status import RuntimeStatusClient
 from thesis.persistence.submissions import SqliteSubmissionStore, SubmissionStore
 from thesis.screening.service import ScreenerService
 from thesis.strategies import WorkspaceStrategyArtifacts
+from thesis.workspaces.sdk import SdkReferences
 from thesis_runtime.conversations import ChatService, ChatState
 
 if TYPE_CHECKING:
@@ -727,7 +728,9 @@ def build_local_workspace_data(
     if repositories is not None:
         from thesis.workspaces.programs import WorkspacePrograms
 
-        programs = WorkspacePrograms(repositories, submissions=submissions)
+        programs = WorkspacePrograms(
+            repositories, submissions=submissions, sdk=SdkReferences()
+        )
     strategies = StrategyDataService(
         clock=resolved_clock,
         id_factory=ids,

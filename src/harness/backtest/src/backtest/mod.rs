@@ -3,6 +3,7 @@
 pub mod config;
 pub mod engine_core;
 pub mod event_bus;
+mod execution;
 pub mod fees;
 pub mod fixture;
 pub mod history;

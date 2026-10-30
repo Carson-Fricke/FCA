@@ -16,7 +16,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 from pydantic.alias_generators import to_camel
 from pydantic.json_schema import JsonSchemaValue
 
@@ -79,16 +79,23 @@ class SubAgentNodeWire(BaseModel):
 ChatSubAgentNode = SubAgentNodeWire
 
 
+class SubAgentSummaryWire(SubAgentNodeWire):
+    """A flat hierarchy row; the node detail endpoint owns retained results."""
+
+    result: Mapping[str, object] | None = Field(default=None, exclude=True)
+    children: tuple[SubAgentNodeWire, ...] = Field(default=(), exclude=True)
+    result_available: bool = False
+
+
 class ChatSubAgentTreeWire(BaseModel):
-    """Canonical tree response used by the projection and HTTP schema export."""
+    """Flat node summaries; parent identities reconstruct the hierarchy once."""
 
     model_config = ConfigDict(
         frozen=True, extra="forbid", alias_generator=to_camel, populate_by_name=True
     )
 
     chat_id: str
-    roots: tuple[SubAgentNodeWire, ...]
-    items: tuple[SubAgentNodeWire, ...]
+    items: tuple[SubAgentSummaryWire, ...]
 
 
 def chat_sub_agent_tree_schema() -> JsonSchemaValue:
@@ -131,7 +138,18 @@ class ChatSubAgentTree:
     def as_dict(self) -> dict[str, object]:
         """Return the canonical, JSON-ready tree."""
         return ChatSubAgentTreeWire(
-            chat_id=self.chat_id, roots=self.roots, items=tuple(self.nodes.values())
+            chat_id=self.chat_id,
+            items=tuple(
+                SubAgentSummaryWire.model_validate(
+                    {
+                        **node.model_dump(
+                            by_alias=True, exclude={"children", "result"}
+                        ),
+                        "resultAvailable": node.result is not None,
+                    }
+                )
+                for node in self.nodes.values()
+            ),
         ).model_dump(mode="json", by_alias=True)
 
 

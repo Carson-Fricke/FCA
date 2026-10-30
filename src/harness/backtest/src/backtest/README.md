@@ -15,6 +15,12 @@ retain their exact logical sample count and final observed timestamp. Unused
 configured capital remains cash; negative or excessive allocations are rejected.
 
 The sibling `research` capability consumes ensured lake Arrow batches incrementally into replay events.
+Historical ticks retain immutable bounded blocks through native dispatch and the
+authored ABI, without allocating per-event symbols, venues or identifiers on
+prepared-cache hits. Exact scale-18 coefficients become variable-scale views
+without re-rounding. Owned synthetic/live observations use the same market view.
+Null transforms materialize original source values before their existing checked
+rescaling; they never rescale already-rounded observations.
 `research/src/market_replay.rs` merges chronological per-symbol/type cursors with bounded lookahead,
 plans coverage and provenance from committed catalog snapshots without scanning ticks.
 Only bars needed for consumer frame assembly are read before simulation; the
@@ -71,6 +77,11 @@ transform, and transform only bars during planning; ticks transform during repla
 - `mod.rs` declares the backtest modules and public facade.
 - `config.rs` validates and normalizes execution inputs.
 - `engine_core.rs` owns causal dispatch and strategy execution.
+- `execution.rs` owns scoped order actions, risk admission, managed signed targets
+  and booked execution snapshots. It cancels conflicting working exposure, waits
+  for in-flight fills and stops automatic retries after a risk rejection. Only
+  engine-created managed orders can satisfy a target's projected inventory;
+  protective stops and other explicit orders must be cancelled before flattening.
 - `fees.rs` assesses and aggregates execution fees.
 - `fixture.rs` loads and fingerprints fixture data.
 - `history.rs` stores bounded, compressed scratch histories with reusable codec
@@ -78,6 +89,10 @@ transform, and transform only bars during planning; ticks transform during repla
 - `manifest.rs` records accepted inputs and acquired data provenance.
 - `null.rs` applies declared null transformations.
 - `portfolio.rs` owns portfolio and allocation accounting.
+- Strategy views read the owning portfolio book; they do not reconstruct a book
+  inside authored code. Venue order views distinguish scheduled from booked fills
+  and retain rejected/unfilled/canceled/expired orders. Day expiration uses the
+  acquired exchange session boundaries; IOC cancels its unfilled remainder.
 - `preflight.rs` validates coverage before replay.
 - `rng.rs` supplies deterministic seeded randomness.
 - `screen.rs` executes screening programs.
@@ -102,4 +117,8 @@ transform, and transform only bars during planning; ticks transform during repla
 
 - `subscriptions.rs`: Owns replay requirement normalization and causal bar-frame assembly; no execution or storage.
 
-- `venue.rs`: Owns resting-order lifecycle, stable per-symbol active-order indexes and event scheduling using shared matching policy. Completed orders remain in history but are not scanned on market events.
+- `venue.rs`: Owns resting-order lifecycle, stable per-symbol active/pending-fill
+  indexes and deadline-scheduled day expiration. Completed orders remain in
+  history but are not scanned for matching, expiration or managed targets on
+  market events. Due expiration waits for committed fills to book before it
+  expires the remaining quantity at the next market boundary.

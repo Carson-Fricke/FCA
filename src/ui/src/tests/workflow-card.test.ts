@@ -136,7 +136,7 @@ describe('WorkflowCard phase transition graph', () => {
 		render(WorkflowCard, { props: { execution, phases: [{ name: 'discovery', status: 'active' }] } });
 		await screen.findByText('Versioned backend workflow');
 		expect(screen.getAllByTestId('phase-step').map((node) => node.dataset.phase))
-			.toEqual(['discovery', 'new_backend_phase', 'completed']);
+			.toEqual(['discovery', 'new_backend_phase']);
 		expect(getWorkflowDefinition).toHaveBeenCalledWith(execution.workflow_id, {
 			workspaceId: '', version: execution.workflow_version
 		});

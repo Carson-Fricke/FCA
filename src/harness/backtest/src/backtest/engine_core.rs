@@ -22,15 +22,12 @@ use std::collections::BTreeSet;
 
 use super::event_bus::EngineEvent;
 use super::event_bus::EventBus;
+use super::execution::Execution;
 use super::outcome::BacktestOutcome;
 use super::projection::EventProjection;
-use super::risk::evaluate_rule;
 use super::risk::resolve_risk_rules;
 use super::risk::ResolvedRiskRule;
-use super::risk::RiskAudit;
-use super::risk::RiskDecision;
 use super::subscriptions::*;
-use super::venue::SimulatedVenue;
 
 /// Explicit knobs for one native engine run.
 #[derive(Clone, Debug)]
@@ -160,10 +157,8 @@ pub fn run_native_engine(
 
     let mut bus = EventBus::new();
     bus.frame_replay = !frames.is_empty();
-    let mut venue = SimulatedVenue::new();
+    let mut execution = Execution::new(fixture.sessions.clone());
     let mut prices: BTreeMap<String, Decimal> = BTreeMap::new();
-    let mut order_owners: BTreeMap<String, String> = BTreeMap::new();
-    let mut order_counts: BTreeMap<String, u64> = BTreeMap::new();
     let mut fills: Vec<EngineFill> = Vec::new();
     let mut valuations = super::valuation::ValuationTracker::new(
         configuration.start_ns,
@@ -171,7 +166,6 @@ pub fn run_native_engine(
         options.history.clone(),
     )?;
     let mut assessments: Vec<FeeAssessment> = Vec::new();
-    let mut risk_decisions: Vec<RiskDecision> = Vec::new();
     let mut halted_strategies = BTreeSet::new();
     let mut halt_reason = None;
     let mut market_event_count = 0u64;
@@ -206,11 +200,7 @@ pub fn run_native_engine(
                 Some(event) => {
                     let event = event?;
                     market_event_count += 1;
-                    let kind = match &event {
-                        MarketEvent::Quote { .. } => 0,
-                        MarketEvent::Trade { .. } => 1,
-                        MarketEvent::Bar { .. } => 2,
-                    };
+                    let kind = event.kind();
                     if let Some(counts) = observed.get_mut(event.symbol()) {
                         counts[kind] += 1;
                     } else {
@@ -284,14 +274,11 @@ pub fn run_native_engine(
                 &schedule,
                 &rules,
                 &mut bus,
-                &mut venue,
+                &mut execution,
                 &mut hub,
                 &mut prices,
-                &mut order_owners,
-                &mut order_counts,
                 &mut fills,
                 &mut assessments,
-                &mut risk_decisions,
                 &mut strategies,
                 &subscriptions,
                 &mut halted_strategies,
@@ -345,7 +332,17 @@ pub fn run_native_engine(
     let mut custom_metrics = BTreeMap::new();
     let mut exploratory_outputs = BTreeMap::new();
     let mut metric_owners = BTreeMap::new();
+    execution.venue.expire(configuration.end_ns);
     for instance in &mut strategies {
+        if instance.runtime.wants_execution_state() {
+            instance
+                .runtime
+                .update_execution_state(&execution.snapshot(
+                    &instance.instance_id,
+                    &hub,
+                    configuration.end_ns,
+                )?)?;
+        }
         if let Err(error) = instance.runtime.on_stop() {
             teardown_errors.push(error.to_string());
         }
@@ -379,7 +376,8 @@ pub fn run_native_engine(
         return Err(BacktestError::StrategyExecution(teardown_errors.join("; ")));
     }
 
-    let order_count: u64 = order_counts.values().sum();
+    let order_count: u64 = execution.counts.values().sum();
+    let orders = execution.orders();
     if halt_reason.is_none() {
         verify_replay(fixture, preflight, market_event_count)?;
     }
@@ -439,7 +437,8 @@ pub fn run_native_engine(
         fee_assessments: assessments,
         fee_totals,
         portfolio: hub.snapshot(),
-        risk_decisions,
+        risk_decisions: execution.risk_decisions,
+        orders,
         halted_strategies: halted_strategies.into_iter().collect(),
         stopped_strategies: stopped,
         teardown_errors,
@@ -457,20 +456,18 @@ fn dispatch_event(
     schedule: &FeeSchedule,
     rules: &[ResolvedRiskRule],
     bus: &mut EventBus,
-    venue: &mut SimulatedVenue,
+    execution: &mut Execution,
     hub: &mut PortfolioHub,
     prices: &mut BTreeMap<String, Decimal>,
-    order_owners: &mut BTreeMap<String, String>,
-    order_counts: &mut BTreeMap<String, u64>,
     fills: &mut Vec<EngineFill>,
     assessments: &mut Vec<FeeAssessment>,
-    risk_decisions: &mut Vec<RiskDecision>,
     strategies: &mut [StrategyInstance],
     subscriptions: &[Vec<MarketSubscription>],
     halted_strategies: &mut BTreeSet<String>,
 ) -> Result<(), BacktestError> {
     match event {
         EngineEvent::BarFrame(frame) => {
+            execution.venue.expire(frame.available_at_ns);
             for bar in frame.bars_by_symbol.values() {
                 prices.insert(bar.symbol.clone(), bar.close);
                 hub.mark(&bar.symbol, bar.close);
@@ -494,35 +491,39 @@ fn dispatch_event(
                     .filter(|s| !routed.bars_by_symbol.contains_key(*s))
                     .cloned()
                     .collect();
-                let orders = instance.runtime.on_frame_orders(&routed)?;
+                if instance.runtime.wants_execution_state() {
+                    instance
+                        .runtime
+                        .update_execution_state(&execution.snapshot(
+                            &instance.instance_id,
+                            hub,
+                            frame.available_at_ns,
+                        )?)?;
+                }
+                let orders = instance.runtime.on_frame_actions(&routed)?;
                 if configuration.shell == "study" && !orders.is_empty() {
                     return Err(BacktestError::StrategyExecution(
                         "studies cannot submit orders".into(),
                     ));
                 }
-                for order in orders {
-                    process_order(
-                        &order,
-                        &instance.instance_id,
-                        configuration,
-                        rules,
-                        frame.available_at_ns,
-                        bus,
-                        venue,
-                        hub,
-                        prices,
-                        order_owners,
-                        order_counts,
-                        risk_decisions,
-                        halted_strategies,
-                    )?;
-                }
+                execution.actions(
+                    orders,
+                    &instance.instance_id,
+                    configuration,
+                    rules,
+                    frame.available_at_ns,
+                    bus,
+                    hub,
+                    prices,
+                    halted_strategies,
+                )?;
             }
         }
         EngineEvent::Market(market) => {
             let clock_ns = market.timestamp_ns();
             if configuration.shell != "study" {
-                venue.on_market(market, clock_ns, bus)?;
+                execution.venue.expire(clock_ns);
+                execution.venue.on_market(market, clock_ns, bus)?;
             }
             let mark = market.mark_price();
             if let Some(price) = prices.get_mut(market.symbol()) {
@@ -535,11 +536,7 @@ fn dispatch_event(
                 if halted_strategies.contains(&instance.instance_id) {
                     continue;
                 }
-                let kind = match market {
-                    EngineMarket::Quote { .. } => "quote",
-                    EngineMarket::Trade { .. } => "trade",
-                    EngineMarket::Bar(_) => "bars",
-                };
+                let kind = market.data_type();
                 if !inputs
                     .iter()
                     .any(|s| s.data_type == kind && s.symbols.iter().any(|s| s == market.symbol()))
@@ -548,40 +545,40 @@ fn dispatch_event(
                 }
                 // Individual bars are assembled before dispatch; tick callbacks
                 // receive only the exact declared symbol/type union.
-                let orders = match market {
-                    EngineMarket::Bar(bar) => instance.runtime.on_bar(bar)?,
-                    _ => instance.runtime.on_market(market)?,
-                };
+                if instance.runtime.wants_execution_state() {
+                    instance
+                        .runtime
+                        .update_execution_state(&execution.snapshot(
+                            &instance.instance_id,
+                            hub,
+                            clock_ns,
+                        )?)?;
+                }
+                let orders = instance.runtime.on_market_actions(market)?;
                 if configuration.shell == "study" && !orders.is_empty() {
                     return Err(BacktestError::StrategyExecution(
                         "studies cannot submit orders".into(),
                     ));
                 }
-                for order in orders {
-                    process_order(
-                        &order,
-                        &instance.instance_id,
-                        configuration,
-                        rules,
-                        clock_ns,
-                        bus,
-                        venue,
-                        hub,
-                        prices,
-                        order_owners,
-                        order_counts,
-                        risk_decisions,
-                        halted_strategies,
-                    )?;
-                }
+                execution.actions(
+                    orders,
+                    &instance.instance_id,
+                    configuration,
+                    rules,
+                    clock_ns,
+                    bus,
+                    hub,
+                    prices,
+                    halted_strategies,
+                )?;
             }
         }
         EngineEvent::Report(report) => {
-            venue.on_report(report);
+            execution.venue.on_report(report);
         }
         EngineEvent::Fill(fill) => {
-            venue.on_fill(fill);
-            let owner = order_owners.get(&fill.order_id).cloned();
+            execution.venue.on_fill(fill);
+            let owner = execution.owners.get(&fill.order_id).cloned();
             let strategy_id = owner.clone().unwrap_or_else(|| "unattributed".to_string());
             let fee_fill = FeeFill {
                 fill_id: &fill.fill_id,
@@ -616,106 +613,36 @@ fn dispatch_event(
             }
             fills.push(booked.clone());
             if let Some(owner) = &owner {
+                execution.book_fill(owner, &booked)?;
                 if let Some(instance) = strategies
                     .iter_mut()
                     .find(|instance| &instance.instance_id == owner)
                 {
+                    if instance.runtime.wants_execution_state() {
+                        instance
+                            .runtime
+                            .update_execution_state(&execution.snapshot(
+                                owner,
+                                hub,
+                                booked.timestamp_ns,
+                            )?)?;
+                    }
                     instance.runtime.on_fill(&booked)?;
                 }
+                execution.reconcile_owner(
+                    owner,
+                    configuration,
+                    rules,
+                    booked.timestamp_ns,
+                    bus,
+                    hub,
+                    prices,
+                    halted_strategies,
+                )?;
             }
         }
     }
     Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn process_order(
-    order: &EngineOrder,
-    instance_id: &str,
-    configuration: &BacktestConfig,
-    rules: &[ResolvedRiskRule],
-    clock_ns: i64,
-    bus: &mut EventBus,
-    venue: &mut SimulatedVenue,
-    hub: &PortfolioHub,
-    prices: &BTreeMap<String, Decimal>,
-    order_owners: &mut BTreeMap<String, String>,
-    order_counts: &mut BTreeMap<String, u64>,
-    risk_decisions: &mut Vec<RiskDecision>,
-    halted_strategies: &mut BTreeSet<String>,
-) -> Result<(), BacktestError> {
-    if halted_strategies.contains(instance_id) {
-        return Ok(());
-    }
-    let snapshot = hub.snapshot();
-    let current_quantity = snapshot
-        .positions
-        .iter()
-        .find(|position| position.symbol == order.symbol)
-        .map_or(Decimal::ZERO, |position| position.quantity);
-    let mut audits = Vec::new();
-    let mut reason = None;
-    let mut action = "allow".to_string();
-    let mut approved = order.clone();
-    // A reduction restarts earlier rules so every approved order passes the full pipeline.
-    let mut index = 0;
-    let mut pass = 1;
-    while index < rules.len() {
-        let rule = &rules[index];
-        let (rule_action, rule_reason, quantity) =
-            evaluate_rule(rule, &approved, prices, current_quantity)?;
-        audits.push(RiskAudit {
-            sequence: audits.len() as u64,
-            pass_number: pass,
-            rule_id: rule.rule_id.clone(),
-            action: rule_action.clone(),
-            reason: rule_reason.clone(),
-            halt: rule_action == "reject"
-                && configuration.risk_pipeline.on_reject != "reject_order",
-        });
-        if rule_action == "reject" {
-            action = "reject".to_string();
-            reason = rule_reason;
-            break;
-        }
-        if let Some(quantity) = quantity {
-            approved.quantity = quantity;
-            action = "reduce".into();
-            reason = rule_reason;
-            pass += 1;
-            index = 0;
-        } else {
-            index += 1;
-        }
-    }
-    risk_decisions.push(RiskDecision {
-        action: action.clone(),
-        order_id: order.order_id.clone(),
-        strategy_id: instance_id.to_string(),
-        reason: reason.clone(),
-        halt_scope: if action == "reject" {
-            harness_trading::risk::pipeline::OnReject::parse(&configuration.risk_pipeline.on_reject)
-                .map_err(|e| BacktestError::Configuration(e.to_string()))?
-                .halt_scope()
-        } else {
-            None
-        },
-        audits,
-    });
-    if action == "reject" {
-        if configuration.risk_pipeline.on_reject == "halt_runtime" {
-            return Err(BacktestError::BacktestAbort(
-                reason.unwrap_or_else(|| "risk halted runtime".into()),
-            ));
-        }
-        if configuration.risk_pipeline.on_reject == "halt_strategy" {
-            halted_strategies.insert(instance_id.into());
-        }
-        return Ok(());
-    }
-    *order_counts.entry(instance_id.to_string()).or_insert(0) += 1;
-    order_owners.insert(order.order_id.clone(), instance_id.to_string());
-    venue.submit(approved, clock_ns, bus)
 }
 
 /// The starting cash of one strategy instance: the configured initial cash

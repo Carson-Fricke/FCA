@@ -10,6 +10,15 @@ import type {ToolResult} from '$lib/types';
 const pages=fixture.pages as Record<string,ExploratoryOutputPage>;
 const reader=async (_job:string,instance?:string,name?:string,offset=0)=>name?pages[`${instance}/${name}/${offset}`]:fixture.catalog as ExploratoryOutputPage;
 describe('untrusted published research evidence',()=>{
+ it('pages host-sealed observations without rounding clocks or exposing fabricated labels',async()=>{
+  const output={kind:'causal_observations',dataset:{horizon_ns:'60000000000',feature_columns:['feature/close'],columns:['observation_id','decision_at_ns','outcome_status','outcome_return_bps','feature/close'],rows:[['1','1783958220000000001','observed',100,100],['2','1783958280000000001','end_of_run',null,101]]}};
+  const read=async(_job:string,_instance?:string,_name?:string,offset=0)=>({job_id:'causal-job',artifactName:'exploratory_outputs.json',artifactSha256:'a'.repeat(64),instanceId:'study',name:'causal/signal',output:{...output,dataset:{...output.dataset,rows:output.dataset.rows.slice(offset,offset+1)}},total:2,nextOffset:offset===0?1:null});
+  const data=await researchResources('causal-job',read).evidence('study','causal/signal',new AbortController().signal);
+  expect(data.rows).toHaveLength(2);expect(data.total).toBe(2);
+  expect(data.output.kind).toBe('causal_observations');
+  expect(data.rows[0].decision_at_ns).toBe('1783958220000000001');
+  expect(data.rows[1].outcome_return_bps).toBeNull();
+ });
  it('strictly decodes standalone SDK semantics and rejects invalid roles and duplicate grain',()=>{
   const raw=pages['wavelets/energy_semantics/0'].output!.semantics;
   const metadata=decodeSemantics(raw);

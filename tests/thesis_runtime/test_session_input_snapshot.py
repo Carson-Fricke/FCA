@@ -1,7 +1,7 @@
 """Durable neutral request evidence precedes execution and survives state updates."""
 
 from collections.abc import Mapping, MutableMapping, Sequence
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from operator import setitem
 from typing import Any, cast
@@ -21,6 +21,8 @@ from thesis_runtime.adapters.providers.invocations import (
     content_digest,
 )
 from thesis_runtime.contracts.codec import record_from_payload, record_payload
+from thesis_runtime.contracts.compaction import ContextPolicy
+from thesis_runtime.contracts.completion import CompletionOptions
 from thesis_runtime.contracts.context import ToolContext
 from thesis_runtime.contracts.messages import (
     MessageContent,
@@ -64,6 +66,7 @@ class _SnapshotProvider:
         role: str,
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
+        options: CompletionOptions | None = None,
     ) -> Mapping[str, object]:
         return {
             "projection": "test-neutral",
@@ -71,6 +74,7 @@ class _SnapshotProvider:
             "role": role,
             "tools": None if tools is None else list(tools),
             "response_format": response_format,
+            **({"options": asdict(options)} if options else {}),
         }
 
 
@@ -190,7 +194,9 @@ def test_tool_correlation_and_original_arguments_hash_precede_dispatch(
         return ToolExecution(
             ok=not fails,
             terminal=not fails,
-            failure={"kind": "rejected"} if fails else None,
+            failure={"kind": "rejected", "message": "Request rejected"}
+            if fails
+            else None,
         )
 
     session = _session(Provider(), store, handler)
@@ -390,8 +396,14 @@ def test_audit_persists_exact_advertised_catalog_before_execution() -> None:
             audit = self.request_snapshot(messages=messages, **kwargs)
             assert store.records[-1].as_dict()["provider_request"] == audit
             assert store.records[-1].input_hash == content_digest(audit)
-            assert audit["tools"] == [
-                {"name": "work", "parameters": {"type": "object"}}
+            advertised = cast(list[Mapping[str, object]], audit["tools"])
+            assert advertised[0] == {
+                "name": "work",
+                "parameters": {"type": "object"},
+            }
+            assert [tool["name"] for tool in advertised] == [
+                "work",
+                "compact_context",
             ]
             return SessionMessage(
                 "answer", "outgoing", MessageContent("Answer", "model")
@@ -538,6 +550,7 @@ def test_large_cosmos_provider_audit_is_durable_before_provider_execution(
         provider=Provider(),
         registry=SessionToolRegistry(),
         store=store,
+        context_policy=ContextPolicy(window_tokens=8_000_000),
     )
     if failure:
         with pytest.raises(RuntimeError, match="write failed"):
@@ -592,7 +605,11 @@ def test_tool_outcome_keeps_one_large_payload_and_explicit_correlation() -> None
             ok=False,
             structured=structured,
             text=text,
-            failure={"kind": "harness", "payload": structured},
+            failure={
+                "kind": "harness",
+                "message": "Harness rejected the input",
+                "payload": structured,
+            },
         ),
     )
     session._max_tool_iterations = 1
@@ -644,7 +661,11 @@ def test_compaction_preserves_distinct_tool_text_failure_evidence_and_pure_proje
         lambda _, context: ToolExecution(
             ok=False,
             text=text,
-            failure={"kind": "harness", "payload": {"distinct": True}},
+            failure={
+                "kind": "harness",
+                "message": "Harness rejected the input",
+                "payload": {"distinct": True},
+            },
             datums=(Datum("first", structured={"receipt": "one"}),),
         ),
     )

@@ -152,6 +152,12 @@ param rthTraderReplicas int = 1
 @maxValue(86400)
 param backtestReplicaTimeoutSeconds int = 3600
 
+@description('Thesis completion recipient app. Empty disables delivery when Thesis is not composed.')
+param completionAppName string = ''
+
+@description('Whether the Thesis recipient uses external ingress.')
+param completionExternalIngress bool = false
+
 var consumptionProfileName = 'Consumption'
 // Quant-harness workloads share the Container Apps environment and Log
 // Analytics workspace with the lake but run under the dedicated quant
@@ -175,13 +181,7 @@ var traderSecrets = [
     identity: quantIdentityResourceId
   }
 ]
-var quantApiSecrets = concat(backtestSecrets, [
-  {
-    name: 'harness-api-bearer-token'
-    keyVaultUrl: '${keyVaultUri}secrets/harness-api-bearer-token'
-    identity: quantIdentityResourceId
-  }
-])
+var quantApiSecrets = backtestSecrets
 // Paper and live Alpaca trading endpoints share one key pair, so the
 // credential mode does not change which Key Vault secrets the traders read.
 var rthTraderSecrets = traderSecrets
@@ -275,6 +275,11 @@ var cryptoTraderEnvironment = concat(quantBaseEnvironment, [
 // API endpoint and the lake bearer token under the quant identity.
 var backtestSecrets = [
   {
+    name: 'harness-api-bearer-token'
+    keyVaultUrl: '${keyVaultUri}secrets/harness-api-bearer-token'
+    identity: quantIdentityResourceId
+  }
+  {
     name: 'api-bearer-token'
     keyVaultUrl: '${keyVaultUri}secrets/api-bearer-token'
     identity: quantIdentityResourceId
@@ -285,7 +290,14 @@ var backtestSecrets = [
 var apiBaseUrl = enableExternalApiIngress
   ? 'https://${quantApiAppName}.${containerAppsEnvironment.properties.defaultDomain}/market-data'
   : 'https://${quantApiAppName}.internal.${containerAppsEnvironment.properties.defaultDomain}/market-data'
-var backtestEnvironment = concat(quantBaseEnvironment, [
+var completionEnvironment = empty(completionAppName) ? [] : [
+  {
+    name: 'HARNESS_COMPLETION_URL'
+    value: 'https://${completionAppName}${completionExternalIngress ? '' : '.internal'}.${containerAppsEnvironment.properties.defaultDomain}/v1/internal/harness/completions'
+  }
+  { name: 'HARNESS_COMPLETION_TOKEN', secretRef: 'harness-api-bearer-token' }
+]
+var backtestEnvironment = concat(quantBaseEnvironment, completionEnvironment, [
   {
     name: 'LAKE_API_URL'
     value: apiBaseUrl

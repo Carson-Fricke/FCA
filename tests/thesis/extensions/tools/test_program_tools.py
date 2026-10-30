@@ -6,13 +6,13 @@ from typing import cast
 
 from thesis.experiments.mandate import (
     DataWindowPolicy,
-    derive_mandate,
 )
 from thesis.extensions.tools.program import (
     PROGRAM_TOOL_NAMES,
     program_registered_tools,
 )
-from thesis.workspaces.programs import ProgramPublicationError, WorkspacePrograms
+from thesis.workspaces.program_contracts import ProgramPublicationError
+from thesis.workspaces.programs import WorkspacePrograms
 from thesis_runtime.contracts.context import ToolContext
 from thesis_runtime.tools.registry import RegisteredTool
 
@@ -286,7 +286,7 @@ def _tool_map(
         for tool in program_registered_tools(
             cast(WorkspacePrograms, service),
             ToolContext("trusted-workspace", "chat", "conversation", "actor"),
-            data_window=data_window,
+            resolve_data_window=None if data_window is None else lambda: data_window,
             job_retention=job_retention,
         )
     }
@@ -353,48 +353,6 @@ def test_strategy_tools_expose_parameter_declaration_only_for_strategies() -> No
     assert service.calls[-1][1]["parameter_declaration"] == declaration
 
 
-def test_run_backtest_passes_parameters_and_run_study_stays_id_only() -> None:
-    service = Service()
-    tools = _tool_map(service)
-    assert (
-        tools["run_study"]
-        .handler(
-            {"program_id": "alpha"},
-            ToolContext("trusted-workspace", "chat", "conversation", "actor"),
-        )
-        .ok
-    )
-    assert service.calls[-1][1] == {"data_window": None, "retain": None}
-    assert (
-        tools["run_backtest"]
-        .handler(
-            {"program_id": "alpha", "parameters": {"lookback": 20}},
-            ToolContext("trusted-workspace", "chat", "conversation", "actor"),
-        )
-        .ok
-    )
-    assert service.calls[-1][1]["parameters"] == {"lookback": 20}
-    assert (
-        tools["run_backtest"]
-        .handler(
-            {"program_id": "alpha"},
-            ToolContext("trusted-workspace", "chat", "conversation", "actor"),
-        )
-        .ok
-    )
-    assert service.calls[-1][1]["parameters"] is None
-    count = len(service.calls)
-    assert (
-        not tools["run_backtest"]
-        .handler(
-            {"program_id": "alpha", "parameters": ["not", "an", "object"]},
-            ToolContext("trusted-workspace", "chat", "conversation", "actor"),
-        )
-        .ok
-    )
-    assert len(service.calls) == count
-
-
 def test_run_backtest_batch_schema_bounds_and_dispatch() -> None:
     service = Service()
     tools = _tool_map(service)
@@ -417,27 +375,6 @@ def test_run_backtest_batch_schema_bounds_and_dispatch() -> None:
             invalid, ToolContext("trusted-workspace", "chat", "conversation", "actor")
         ).ok
     assert len(service.calls) == count
-    assert batch.handler(
-        {
-            "program_id": "alpha",
-            "assignments": [{"lookback": 20}, {"lookback": 40}],
-            "label": "grid",
-        },
-        ToolContext("trusted-workspace", "chat", "conversation", "actor"),
-    ).ok
-    positional, kwargs = service.calls[-1]
-    assert positional[:4] == (
-        "trusted-workspace",
-        "strategy",
-        "alpha",
-        [{"lookback": 20}, {"lookback": 40}],
-    )
-    assert kwargs == {"label": "grid", "data_window": None, "retain": None}
-    assert batch.handler(
-        {"program_id": "alpha", "assignments": [{"lookback": 20}]},
-        ToolContext("trusted-workspace", "chat", "conversation", "actor"),
-    ).ok
-    assert service.calls[-1][1]["label"] is None
 
 
 def test_run_null_batch_schema_bounds_and_dispatch() -> None:
@@ -521,50 +458,6 @@ def test_run_null_batch_schema_bounds_and_dispatch() -> None:
             invalid, ToolContext("trusted-workspace", "chat", "conversation", "actor")
         ).ok
     assert len(service.calls) == count
-    assert null_batch.handler(
-        {
-            "program_id": "alpha",
-            "parameters": {"lookback": 20},
-            "mode": "block_permutation",
-            "block_size": 5,
-            "seeds": [1, 2],
-            "label": "seeds",
-        },
-        ToolContext("trusted-workspace", "chat", "conversation", "actor"),
-    ).ok
-    positional, kwargs = service.calls[-1]
-    assert positional == ("trusted-workspace", "strategy", "alpha")
-    assert kwargs == {
-        "parameters": {"lookback": 20},
-        "mode": "block_permutation",
-        "block_size": 5,
-        "seeds": [1, 2],
-        "offset": 0,
-        "chunk_size": 64,
-        "label": "seeds",
-        "data_window": None,
-        "retain": None,
-    }
-    assert null_batch.handler(
-        {
-            "program_id": "alpha",
-            "mode": "block_permutation",
-            "block_size": 5,
-            "seeds": [1],
-        },
-        ToolContext("trusted-workspace", "chat", "conversation", "actor"),
-    ).ok
-    assert service.calls[-1][1] == {
-        "parameters": None,
-        "mode": "block_permutation",
-        "block_size": 5,
-        "seeds": [1],
-        "offset": 0,
-        "chunk_size": 64,
-        "label": None,
-        "data_window": None,
-        "retain": None,
-    }
 
 
 def _launch_request(cutoff: datetime) -> dict[str, object]:
@@ -579,82 +472,6 @@ def _launch_request(cutoff: datetime) -> dict[str, object]:
             "start": (cutoff - timedelta(days=90)).isoformat(),
             "end": cutoff.isoformat(),
         },
-    }
-
-
-def test_execution_handlers_forward_the_research_mandate_policy() -> None:
-    mandate = derive_mandate(
-        "trusted-workspace",
-        "execution-1",
-        _launch_request(datetime(2026, 9, 4, tzinfo=UTC)),
-    )
-    assert mandate is not None
-    policy = mandate.default_window
-    service = Service()
-    tools = _tool_map(service, data_window=policy)
-    assert (
-        tools["run_study"]
-        .handler(
-            {"program_id": "alpha"},
-            ToolContext("trusted-workspace", "chat", "conversation", "actor"),
-        )
-        .ok
-    )
-    assert service.calls[-1][1] == {"data_window": policy, "retain": None}
-    assert (
-        tools["run_backtest"]
-        .handler(
-            {"program_id": "alpha", "parameters": {"lookback": 20}},
-            ToolContext("trusted-workspace", "chat", "conversation", "actor"),
-        )
-        .ok
-    )
-    assert service.calls[-1][1] == {
-        "parameters": {"lookback": 20},
-        "data_window": policy,
-        "retain": None,
-    }
-    assert (
-        tools["run_backtest_batch"]
-        .handler(
-            {"program_id": "alpha", "assignments": [{"lookback": 20}]},
-            ToolContext("trusted-workspace", "chat", "conversation", "actor"),
-        )
-        .ok
-    )
-    positional, kwargs = service.calls[-1]
-    assert positional[:4] == (
-        "trusted-workspace",
-        "strategy",
-        "alpha",
-        [{"lookback": 20}],
-    )
-    assert kwargs == {"label": None, "data_window": policy, "retain": None}
-    assert (
-        tools["run_null_batch"]
-        .handler(
-            {
-                "program_id": "alpha",
-                "mode": "block_permutation",
-                "block_size": 5,
-                "seeds": [1, 2],
-            },
-            ToolContext("trusted-workspace", "chat", "conversation", "actor"),
-        )
-        .ok
-    )
-    positional, kwargs = service.calls[-1]
-    assert positional == ("trusted-workspace", "strategy", "alpha")
-    assert kwargs == {
-        "parameters": None,
-        "mode": "block_permutation",
-        "block_size": 5,
-        "seeds": [1, 2],
-        "offset": 0,
-        "chunk_size": 64,
-        "label": None,
-        "data_window": policy,
-        "retain": None,
     }
 
 

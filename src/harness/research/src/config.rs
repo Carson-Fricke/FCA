@@ -44,7 +44,7 @@ pub fn build_instances(
     for configured in &configuration.strategy_instances {
         let source = authored_source(configured)?;
         verify_bundle_hash(configured, &source)?;
-        let mut parameters = parameters_value(configured);
+        let mut parameters = parameters_value(configured)?;
         if parameters.get("symbols").is_none() {
             parameters["symbols"] = serde_json::json!(configured.symbols);
         }
@@ -118,34 +118,47 @@ fn verify_bundle_hash(configured: &StrategyInstanceConfig, source: &str) -> Resu
     )))
 }
 
-fn parameters_value(configured: &StrategyInstanceConfig) -> serde_json::Value {
-    serde_json::Value::Object(
+fn parameters_value(configured: &StrategyInstanceConfig) -> Result<serde_json::Value, JitError> {
+    Ok(serde_json::Value::Object(
         configured
             .parameters
             .iter()
-            .map(|(key, value)| (key.clone(), json_to_serde(value)))
-            .collect(),
-    )
+            .map(|(key, value)| Ok((key.clone(), json_to_serde(value)?)))
+            .collect::<Result<_, JitError>>()?,
+    ))
 }
 
-fn json_to_serde(value: &JsonValue) -> serde_json::Value {
-    match value {
+fn json_to_serde(value: &JsonValue) -> Result<serde_json::Value, JitError> {
+    Ok(match value {
         JsonValue::Null => serde_json::Value::Null,
         JsonValue::Bool(inner) => serde_json::Value::Bool(*inner),
         JsonValue::String(text) => serde_json::Value::String(text.clone()),
         JsonValue::Int(inner) => serde_json::Value::from(*inner),
-        JsonValue::UInt(inner) => i64::try_from(*inner).map_or_else(
-            |_| serde_json::Value::from(inner.to_string()),
-            serde_json::Value::from,
-        ),
+        JsonValue::UInt(inner) => serde_json::Value::from(*inner),
         JsonValue::Array(items) => {
-            serde_json::Value::Array(items.iter().map(json_to_serde).collect())
+            serde_json::Value::Array(items.iter().map(json_to_serde).collect::<Result<_, _>>()?)
+        }
+        JsonValue::Object(entries) if entries.contains_key("$decimal") => {
+            if entries.len() != 1 {
+                return Err(JitError::Invalid(
+                    "parameter decimal wrapper must contain only $decimal".into(),
+                ));
+            }
+            let JsonValue::String(text) = &entries["$decimal"] else {
+                return Err(JitError::Invalid(
+                    "parameter $decimal must contain decimal text".into(),
+                ));
+            };
+            let number: serde_json::Number = text.parse().map_err(|error| {
+                JitError::Invalid(format!("invalid numeric parameter {text:?}: {error}"))
+            })?;
+            serde_json::Value::Number(number)
         }
         JsonValue::Object(entries) => serde_json::Value::Object(
             entries
                 .iter()
-                .map(|(key, item)| (key.clone(), json_to_serde(item)))
-                .collect(),
+                .map(|(key, item)| Ok((key.clone(), json_to_serde(item)?)))
+                .collect::<Result<_, JitError>>()?,
         ),
-    }
+    })
 }

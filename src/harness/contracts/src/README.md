@@ -10,3 +10,5 @@ Individual-option selectors and resolution evidence are re-exported from lake-co
 - `canonical_json.rs`: Canonical JSON encoding matching Python's
 
 - `sha256.rs`: Hardware-accelerated SHA-256 with the engine's stable byte and hex interface.
+
+- `causal.rs`: Strict capture requests without authored clocks and host-only sealed observation publications with exact timestamp strings.

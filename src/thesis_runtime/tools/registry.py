@@ -9,6 +9,7 @@ from dataclasses import dataclass, field, replace
 
 from thesis_runtime.contracts.context import ToolContext
 from thesis_runtime.contracts.datum import Datum, ToolOperation
+from thesis_runtime.contracts.failures import ToolFailure, failure_from_exception
 from thesis_runtime.storage.ownership import assert_owned
 from thesis_runtime.tools.schema import (
     check_schema,
@@ -36,6 +37,13 @@ class ToolExecution:
     failure: Mapping[str, object] | None = None
     terminal: bool = False
     datums: tuple[Datum, ...] = ()
+    pending_jobs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.ok:
+            if self.failure is None:
+                raise ValueError("failed tool outcome omitted its failure contract")
+            object.__setattr__(self, "failure", ToolFailure(self.failure))
 
     def as_content(self) -> str:
         payload: dict[str, object] = {
@@ -179,16 +187,34 @@ class SessionToolRegistry:
             started = True
             execution = tool.handler(arguments, context)
             if not execution.ok:
+                failure = {
+                    "tool": name,
+                    "certainty": (execution.failure or {}).get("executionCertainty")
+                    or "observed_failure",
+                    "retry_safe": False,
+                    **(execution.failure or {}),
+                }
+                if tool.operation == "read":
+                    uncertain = (
+                        failure.get("certainty") == "unknown_outcome"
+                        or failure.get("executionCertainty") == "unknown_outcome"
+                    )
+                    certainty = (
+                        "not_started"
+                        if failure.get("certainty") == "not_started"
+                        else "observed_failure"
+                    )
+                    failure.update(certainty=certainty, retry_safe=True)
+                    if "executionCertainty" in failure:
+                        failure["executionCertainty"] = certainty
+                    if uncertain and "retryGuidance" in failure:
+                        failure["retryGuidance"] = (
+                            "Correct the read arguments or retry the read when its dependency is available."
+                        )
                 execution = replace(
                     execution,
                     terminal=False,
-                    failure={
-                        "certainty": (execution.failure or {}).get(
-                            "executionCertainty", "observed_failure"
-                        ),
-                        "retry_safe": False,
-                        **(execution.failure or {}),
-                    },
+                    failure=failure,
                 )
             return execution
         except (CancelledError, SessionPersistenceError):
@@ -196,10 +222,17 @@ class SessionToolRegistry:
         except Exception as error:  # noqa: BLE001 - a tool fault is a normal turn
             return ToolExecution(
                 ok=False,
-                failure={
-                    "kind": "tool",
-                    "message": str(error) or type(error).__name__,
-                    "certainty": "unknown_outcome" if started else "not_started",
-                    "retry_safe": not started,
-                },
+                failure=failure_from_exception(
+                    error,
+                    **{
+                        "kind": "tool",
+                        "tool": name,
+                        "certainty": "unknown_outcome"
+                        if started and tool.operation != "read"
+                        else "observed_failure"
+                        if started
+                        else "not_started",
+                        "retry_safe": not started or tool.operation == "read",
+                    },
+                ),
             )

@@ -1,11 +1,14 @@
+import { toTranscriptMessage } from '$lib/transcript';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import * as api from '$lib/api';
 import backendTree from './backend-tree.json';
 import { deriveSubAgentTree } from '$lib/subagent';
 import type { ExecutionEvent } from '$lib/types';
-import backendMessage from './backend-message.json';
+import backendMessageFixture from './backend-message.json';
+import { decodeWire } from '$lib/wire';
 import backendThread from './backend-thread.json';
 const node = backendTree.items[0];
+const backendMessage = decodeWire('ChatMessageWire', backendMessageFixture, 'test/backend-message');
 
 describe('backend base classification', () => {
 	it('recognizes loopback bases only', () => {
@@ -28,12 +31,12 @@ describe('timeline page transport', () => {
 	});
 	afterAll(() => vi.unstubAllEnvs());
 	it('preserves durable node attempt and freshness fields from the tree API', async () => {
-		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ chatId: 'chat', roots: [node], items: [node] })));
-		try { const { children, ...raw } = node; expect((await realApi.listChatSubAgents('ws', 'chat'))[0]).toMatchObject(raw); }
+		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ chatId: 'chat', items: [node] })));
+		try { expect((await realApi.listChatSubAgents('ws', 'chat'))[0]).toMatchObject(node); }
 		finally { fetch.mockRestore(); }
 	});
 	it('leaves omitted sandbox context unknown rather than fabricating production data', async () => {
-		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ chatId: 'chat', roots: [node], items: [node] })));
+		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ chatId: 'chat', items: [node] })));
 		try { expect((await realApi.listChatSubAgents('ws', 'chat'))[0].context).toBeNull(); }
 		finally { fetch.mockRestore(); }
 	});
@@ -47,11 +50,11 @@ describe('timeline page transport', () => {
 			const projected = deriveSubAgentTree([old], known)[0].node;
 			expect(projected).toMatchObject({ status: 'running', acceptsInput: true, phaseAttemptId: 'attempt-b',
 				kind: 'conversation', phaseExecutor: true, completionMode: 'explicit_completion',
-				allowedTools: ['validate_study'], delegatedBudget: 20, result: null, context: null });
+				allowedTools: ['validate_study'], delegatedBudget: 20, resultAvailable: false, context: null });
 		} finally { fetch.mockRestore(); }
 	});
 	it('rejects partial production trees rather than manufacturing defaults', async () => {
-		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ chatId: 'chat', roots: [], items: [{ subAgentId: 'node' }] })));
+		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ chatId: 'chat', items: [{ subAgentId: 'node' }] })));
 		try { await expect(realApi.listChatSubAgents('alpha-lab', 'chat')).rejects.toMatchObject({ name: 'WireDecodeError' }); }
 		finally { fetch.mockRestore(); }
 	});
@@ -90,11 +93,11 @@ describe('timeline page transport', () => {
 	it('validates successful production timeline pages through their own schema', async () => {
 		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ items: [{
 			id: backendMessage.message_id, chatId: backendMessage.chat_id, workspaceId: backendMessage.workspace_id,
-			kind: 'message', seq: 1, ts: backendMessage.created_at, payload: backendMessage
+			kind: 'message', seq: 1, ts: backendMessage.created_at, payload: toTranscriptMessage(backendMessage)
 		}], nextBefore: null, after: 1 })));
 		try {
 			const page = await realApi.listTimelinePage('workspace', backendMessage.chat_id, null, null);
-			expect(page.items[0].payload).toEqual(backendMessage);
+			expect(page.items[0].payload).toEqual(toTranscriptMessage(backendMessage));
 			expect(page.after).toBe(1);
 		}
 		finally { fetch.mockRestore(); }
@@ -106,7 +109,7 @@ describe('timeline page transport', () => {
 			const query = new URL(String(fetch.mock.calls[0][0]), 'http://test').searchParams;
 			expect(query.get('thread')).toBe('agent/a');
 			expect(query.get('before')).toBe('101');
-			expect(query.get('limit')).toBe('200');
+			expect(query.get('limit')).toBe('40');
 			expect(query.has('after')).toBe(false);
 			expect(fetch).toHaveBeenCalledTimes(1);
 		} finally { fetch.mockRestore(); }

@@ -16,6 +16,8 @@ from thesis.application.composition import build_serving_stack
 from thesis.workspaces import programs as program_module
 from thesis.workspaces.manifest import WorkspaceManifest, load_workspace_manifest
 from thesis.workspaces.programs import WorkspacePrograms
+from thesis.workspaces.sdk import SdkReferences
+from thesis.workspaces.sdk import identity as sdk_identity
 from thesis_runtime.adapters.providers.invocations import (
     ModelCompletion,
     ProviderMessage,
@@ -36,7 +38,10 @@ def _sdk_checkout(source: Path, destination: Path, newlines: str) -> Path:
         "lake/contracts",
     ):
         crate = source.parents[1] / relative
-        for path in [crate / "Cargo.toml", *sorted((crate / "src").rglob("*.rs"))]:
+        metadata = [crate / "Cargo.toml"]
+        if relative == "harness/strategy-sdk":
+            metadata.append(crate / "reference-topics.json")
+        for path in [*metadata, *sorted((crate / "src").rglob("*.rs"))]:
             target = destination / relative / path.relative_to(crate)
             target.parent.mkdir(parents=True, exist_ok=True)
             data = path.read_bytes().replace(b"\r\n", b"\n")
@@ -74,16 +79,20 @@ def test_serving_authors_template_validates_and_runs_by_id(
     repositories.create(WorkspaceManifest.model_validate(manifest))
     calls: list[tuple[str, Mapping[str, object]]] = []
     catalogs: list[Sequence[Mapping[str, object]]] = []
-    source_sdk = program_module._PACKAGED_SDK_ROOT
+    source_sdk = sdk_identity.PACKAGED_SDK_ROOT
     serving = WorkspacePrograms(
         repositories,
-        sdk_root=_sdk_checkout(source_sdk, tmp_path / "serving", "lf"),
+        sdk=SdkReferences(root=_sdk_checkout(source_sdk, tmp_path / "serving", "lf")),
     )
-    sdk_version, sdk_abi = serving._sdk_metadata(serving.sdk_root)
-    serving_identity = serving._sdk_identity()
+    serving_metadata = serving.sdk.matched_metadata()
+    sdk_version, sdk_abi = (
+        serving_metadata["sdkVersion"],
+        serving_metadata["sdkAbiVersion"],
+    )
+    serving_identity = serving_metadata["sdkIdentity"]
     monkeypatch.setattr(
-        program_module,
-        "_PACKAGED_SDK_ROOT",
+        sdk_identity,
+        "PACKAGED_SDK_ROOT",
         _sdk_checkout(source_sdk, tmp_path / "local", newlines),
     )
 

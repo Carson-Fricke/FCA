@@ -1,3 +1,4 @@
+import { transcriptItems, nodeSummaries } from './read-fixtures';
 import { expect, test } from '@playwright/test';
 import chats from '../src/lib/fixtures/chats.json' with { type: 'json' };
 import messages from '../src/lib/fixtures/chat-messages.json' with { type: 'json' };
@@ -55,17 +56,18 @@ test('nested workflow phases stay inside their card while ordinary helpers remai
         const path = url.pathname;
         if (path.endsWith('/timeline/stream')) return route.fulfill({ contentType: 'text/event-stream', body: ': idle\n\n' });
         if (path.endsWith('/timeline')) return route.fulfill({ json: {
-            items: url.searchParams.has('before') ? [] : history.filter((item) =>
-                !url.searchParams.has('thread') || url.searchParams.get('thread') === item.threadId),
+            items: transcriptItems(url.searchParams.has('before') ? [] : history.filter((item) =>
+                !url.searchParams.has('thread') || url.searchParams.get('thread') === item.threadId)),
             nextBefore: null, after: 1
         } });
         if (path.endsWith('/executions')) return route.fulfill({ json: { items: [], after: 1 } });
-        if (path.endsWith('/sub_agents')) return route.fulfill({ json: { chatId: chat.chat_id, roots: [], items: nodes } });
+        if (path.endsWith('/outline')) return route.fulfill({ json: { items: [], after: 1, nextAfter: null } });
+        if (path.endsWith('/sub_agents')) return route.fulfill({ json: { chatId: chat.chat_id, items: nodeSummaries(nodes) } });
         if (path.endsWith('/workflows/research-investigation')) return route.fulfill({ json: {
             workflow_id: 'research-investigation', version: '2.0.0', title: 'Research investigation', splits: {},
-            phases, terminal_phases: ['completed', 'failed'], transitions: {
-                proposal: ['critique'], critique: ['adjudicate'],
-                adjudicate: ['proposal', 'investigation', 'completed'], investigation: ['critique'], completed: [], failed: []
+            phases, terminal_phases: ['completed', 'failed'], inputs: {}, routes: {
+                proposal: { critique: ['critique.input'] }, critique: { adjudicate: ['adjudicate.input'] },
+                adjudicate: { proposal: ['proposal.input'], investigation: ['investigation.input'], completed: ['completed.input'] }, investigation: { critique: ['critique.input'] }, completed: {}, failed: {}
             }
         } });
         if (path.endsWith('/chats')) return route.fulfill({ json: { items: [chat] } });
@@ -80,6 +82,8 @@ test('nested workflow phases stay inside their card while ordinary helpers remai
     await page.goto(url);
     const card = page.getByTestId('workflow-card').filter({ has: page.getByTestId('workflow-card-body') });
     await expect(card).toHaveCount(1);
+    await expect(card.getByTestId('phase-step')).toHaveCount(4);
+    await expect(card.locator('[data-phase="completed"], [data-phase="failed"]')).toHaveCount(0);
     await expect(page.getByTestId('scope-sub-agent')).toHaveCount(1);
     await expect(page.getByTestId('scope-sub-agent')).toContainText('Independent data helper');
 

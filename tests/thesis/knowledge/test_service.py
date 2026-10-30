@@ -224,10 +224,10 @@ def test_bounded_actual_excerpts_and_read(environment) -> None:
     assert "momentum" in excerpt
     assert excerpt in body
     assert result["truncated"] is True
-    read = service.read("alpha", result["reference"], max_chars=50)
-    assert read["content"] == body[:50]
+    read = service.read("alpha", result["reference"], max_tokens=50)
+    assert read["tokenCount"] <= 50
     assert read["truncated"] is True
-    assert read["total_chars"] == len(body)
+    assert read["totalTokens"] > 0
     assert (
         service.search("alpha", "momentum")["retrieval_baseline"]
         == "hashed-bag-of-words"

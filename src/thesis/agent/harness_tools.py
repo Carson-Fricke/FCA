@@ -131,6 +131,9 @@ class HarnessToolFailure:
     @property
     def retry_guidance(self) -> str:
         """Describe recovery without authorizing an automatic mutation replay."""
+        supplied = self.payload.get("retryGuidance")
+        if isinstance(supplied, str) and supplied.strip():
+            return supplied
         if self.deterministic_compiler_diagnostic:
             return "Fix the authored source using these compiler diagnostics before validating again."
         if self.execution_certainty == "not_started":

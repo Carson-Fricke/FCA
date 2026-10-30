@@ -377,6 +377,14 @@ Get-Content -LiteralPath $EnvFile | ForEach-Object {
     Set-Item -LiteralPath ("Env:{0}" -f $name) -Value $value
 }
 
+# Completion events use service credentials, never job inputs or model arguments.
+if (-not $env:HARNESS_COMPLETION_URL) {
+    $env:HARNESS_COMPLETION_URL = 'http://127.0.0.1:8000/v1/internal/harness/completions'
+}
+if (-not $env:HARNESS_COMPLETION_TOKEN) {
+    $env:HARNESS_COMPLETION_TOKEN = $env:HARNESS_API_BEARER_TOKEN
+}
+
 # Every server must find its own bearer in the process environment: the UI is
 # compiled against PUBLIC_THESIS_API_BEARER_TOKEN, the Thesis API authenticates
 # callers with THESIS_API__BEARER_TOKEN, and the harness and lake validate

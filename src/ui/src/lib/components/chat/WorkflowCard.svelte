@@ -7,6 +7,8 @@
 		computeWorkflowGraph,
 		NODE_WIDTH,
 		NODE_HEIGHT,
+		ARROW_HEAD_LENGTH,
+		ARROW_HEAD_HALF_ANGLE,
 		type GraphNode,
 		type WorkflowGraphModel
 	} from '$lib/workflow-graph';
@@ -15,8 +17,10 @@
 	 * Transcript item of kind `workflow`.
 	 *
 	 * Renders an interactive HTML5 Canvas with pan and zoom showing the phase
-	 * transition graph (including forward flow and loopbacks). Preserves
-	 * click-to-drill into phase behavior: clicking the card body enters the
+	 * transition graph (including forward flow and loopbacks), with shared fan-out
+	 * dots as presentation-only connectors outside phase hit targets.
+	 * Runtime routing and phase status are supplied by the definition/live projection.
+	 * Preserves click-to-drill into phase behavior: clicking the card body enters the
 	 * current active orchestrator; clicking any non-pending node drills into
 	 * that phase's governing sub-agent (read-only when finished).
 	 */
@@ -104,6 +108,8 @@
 	let hoveredNode = $state<string | null>(null);
 	let animFrameId: number | null = null;
 	let initialFitDone = false;
+	let fittedDefinition: WorkflowDefinition | null | undefined;
+	const MIN_ZOOM = 0.15;
 	let inViewport = $state(false);
 	let documentVisible = $state(true);
 
@@ -137,7 +143,7 @@
 
 		const scaleX = (w - 36) / graphModel.width;
 		const scaleY = (h - 32) / graphModel.height;
-		const targetZoom = Math.min(1.0, Math.max(0.5, Math.min(scaleX, scaleY)));
+		const targetZoom = Math.min(1.0, Math.max(MIN_ZOOM, Math.min(scaleX, scaleY)));
 
 		zoom = Number(targetZoom.toFixed(2));
 		panX = Math.max(16, Math.round((w - graphModel.width * zoom) / 2));
@@ -150,7 +156,7 @@
 	}
 
 	function zoomOut() {
-		applyZoom(Math.max(0.4, Number((zoom / 1.2).toFixed(2))));
+		applyZoom(Math.max(MIN_ZOOM, Number((zoom / 1.2).toFixed(2))));
 	}
 
 	function applyZoom(newZoom: number, centerClientX?: number, centerClientY?: number) {
@@ -168,7 +174,7 @@
 	function handleWheel(e: WheelEvent) {
 		e.preventDefault();
 		const factor = e.deltaY < 0 ? 1.12 : 0.88;
-		const nextZoom = Math.min(2.2, Math.max(0.4, Number((zoom * factor).toFixed(2))));
+		const nextZoom = Math.min(2.2, Math.max(MIN_ZOOM, Number((zoom * factor).toFixed(2))));
 		applyZoom(nextZoom, e.clientX, e.clientY);
 	}
 
@@ -255,18 +261,18 @@
 		angle: number,
 		color: string
 	) {
-		const headlen = 7;
+		const headlen = ARROW_HEAD_LENGTH;
 		ctx.save();
 		ctx.fillStyle = color;
 		ctx.beginPath();
 		ctx.moveTo(toX, toY);
 		ctx.lineTo(
-			toX - headlen * Math.cos(angle - Math.PI / 6),
-			toY - headlen * Math.sin(angle - Math.PI / 6)
+			toX - headlen * Math.cos(angle - ARROW_HEAD_HALF_ANGLE),
+			toY - headlen * Math.sin(angle - ARROW_HEAD_HALF_ANGLE)
 		);
 		ctx.lineTo(
-			toX - headlen * Math.cos(angle + Math.PI / 6),
-			toY - headlen * Math.sin(angle + Math.PI / 6)
+			toX - headlen * Math.cos(angle + ARROW_HEAD_HALF_ANGLE),
+			toY - headlen * Math.sin(angle + ARROW_HEAD_HALF_ANGLE)
 		);
 		ctx.closePath();
 		ctx.fill();
@@ -563,8 +569,9 @@
 	});
 
 	$effect(() => {
-		if (containerEl && !initialFitDone && graphModel.nodes.length) {
+		if (containerEl && graphModel.nodes.length && (!initialFitDone || fittedDefinition !== definition)) {
 			initialFitDone = true;
+			fittedDefinition = definition;
 			fitGraph();
 		} else {
 			redraw();
@@ -690,6 +697,15 @@
 					class="absolute inset-0 pointer-events-none"
 					style="transform: translate({panX}px, {panY}px) scale({zoom}); transform-origin: 0 0;"
 				>
+					{#each graphModel.junctions as junction (junction.id)}
+						<span
+							class="absolute rounded-full {junction.highlight ? 'bg-accent' : 'bg-slate-400'}"
+							style="left: {junction.x - junction.radius}px; top: {junction.y - junction.radius}px; width: {junction.radius * 2}px; height: {junction.radius * 2}px;"
+							role="img"
+							aria-label="Parallel route to {junction.destinations.map((destination) => destination.split('.')[0].replace(/_/g, ' ')).join(', ')}"
+							data-testid="workflow-junction"
+						></span>
+					{/each}
 					{#each graphModel.nodes as node (node.name)}
 						{@const isAttention = attentionPhaseNames.includes(node.name)}
 						{@const isDone = node.status === 'done'}

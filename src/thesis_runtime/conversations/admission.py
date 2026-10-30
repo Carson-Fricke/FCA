@@ -96,21 +96,19 @@ def select_message_window(
     messages: Sequence[ChatMessage],
     *,
     after_position: int | None,
-    consumed_position: int,
-    limit: int,
+    after_message_id: str | None,
 ) -> tuple[ChatMessage, ...]:
-    """Small embedded-store implementation of the indexed storage read contract."""
-    ordered = sorted(
-        messages,
-        key=message_order_key,
-    )
+    """Complete scoped history after a checkpoint, or new incoming arrivals."""
+    ordered = sorted(messages, key=message_order_key)
     if after_position is not None:
         return tuple(row for row in ordered if row.input_position > after_position)
-    selected = {row.message_id for row in ordered[-limit:]}
-    return tuple(
-        row
-        for row in ordered
-        if row.message_id in selected or row.input_position > consumed_position
+    if after_message_id is None:
+        return tuple(ordered)
+    for index, row in enumerate(ordered):
+        if row.message_id == after_message_id:
+            return tuple(ordered[index + 1 :])
+    raise RecordNotFound(
+        "context checkpoint boundary was not found in this conversation"
     )
 
 

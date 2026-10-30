@@ -2,8 +2,9 @@
 
 A :class:`ChildConversation` holds an inner conversation it delegates every
 operation to, and adds only: a ``returns_to`` anchor (who receives the
-result), ``complete`` / ``fail`` / ``result`` / ``await_result`` /
-``children``, cancellation, and one turn-end hook — "does a turn that ends
+result), ``complete`` / ``fail`` / ``result`` /
+``children``, cancellation returns and transcript-based return settlement,
+and one turn-end hook — "does a turn that ends
 in text complete me?"  The hook is the child's creation-time policy:
 :attr:`OneShotPolicy` completes the child and delivers its answer to the
 return anchor; :attr:`ConversationalPolicy` keeps the conversation open.
@@ -20,6 +21,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Protocol
 
 from thesis_runtime.contracts.datum import Datum
+from thesis_runtime.contracts.messages import SessionMessage
 from thesis_runtime.conversations import (
     ChatMessage,
     MessageRole,
@@ -35,7 +37,6 @@ if TYPE_CHECKING:
         Conversation,
         Conversations,
     )
-    from thesis_runtime.subagents.control import AwaitResult
 
 
 class TurnEndPolicy(Protocol):
@@ -85,6 +86,39 @@ class ConversationalPolicy:
 
     def turn_ended(self, record: SubAgentRecord, result: object) -> None:
         del record, result
+
+
+def has_pending_child_returns(messages: Sequence[SessionMessage]) -> bool:
+    """Join existing spawn-handle receipts to delivered terminal child results.
+
+    Spawn returns a handle immediately; only the later child-result message
+    settles that delegated work. The caller supplies one scoped transcript.
+    """
+    handles: set[str] = set()
+    returned: set[str] = set()
+    for message in messages:
+        if message.direction != "incoming":
+            continue
+        result = message.content.result or {}
+        if result.get("kind") == "child_result":
+            child_id = result.get("childSubAgentId")
+            if isinstance(child_id, str):
+                returned.add(child_id)
+        datums = result.get("datums", ())
+        if not isinstance(datums, list | tuple):
+            continue
+        for datum in datums:
+            if (
+                not isinstance(datum, Mapping)
+                or datum.get("datumType") != "sub_agent_handle"
+            ):
+                continue
+            structured = datum.get("structured")
+            if datum.get("ok") is True and isinstance(structured, Mapping):
+                child_id = structured.get("sub_agent_id")
+                if isinstance(child_id, str):
+                    handles.add(child_id)
+    return bool(handles - returned)
 
 
 class ChildConversation:
@@ -173,17 +207,6 @@ class ChildConversation:
         )
         return None if record is None else record.result
 
-    def await_result(self, timeout_seconds: float | None = None) -> AwaitResult:
-        """Wait (bounded) for the child to finish and return its state.
-
-        The wait is bounded: when the child is still running at the timeout,
-        the current state is returned so the caller can end its turn — the
-        child's result is delivered to the return anchor when it finishes.
-        """
-        return self._service.await_child_result(
-            self.workspace_id, self.conversation_id, timeout_seconds
-        )
-
     def children(self) -> tuple[SubAgentRecord, ...]:
         """Return the child's direct children."""
         return self._service.children(self.workspace_id, self.conversation_id)
@@ -195,9 +218,13 @@ class ChildConversation:
         are left untouched, and only ids that actually transitioned to
         ``cancelled`` are returned, in root-first tree order.
         """
-        return self._service.lifecycle.cancel_subtree(
+        cancelled = self._service.lifecycle.cancel_subtree(
             self.workspace_id, self.conversation_id
         )
+        record = self.record
+        if record is not None:
+            self._service.delivery.deliver_child_result(self._returns_to, record)
+        return cancelled
 
     # -- everything else delegates to the inner conversation ------------------
 

@@ -278,7 +278,7 @@ def test_persistent_disconnect_exhausts_budget_without_acknowledging_input(backo
     ]
     assert len(continuations) == 1
     assert continuations[0].position > 0
-    assert any(
+    assert not any(
         (m.content.result or {}).get("childRecovery")
         for m in decode_transcript(
             service.root(anchor.workspace_id, anchor.chat_id).transcript()
@@ -550,7 +550,7 @@ def test_technical_continuation_cannot_override_deliberate_operator_approval_pau
     assert result.status == "completed" and len(exchange.requests) == 5
 
 
-def test_large_failed_reasoning_is_retained_but_does_not_poison_recovery_context(
+def test_oversized_failed_reasoning_retains_full_evidence_without_lossy_retry(
     backoff,
 ):
     thought = "start " + "x" * 440000 + " end"
@@ -565,22 +565,25 @@ def test_large_failed_reasoning_is_retained_but_does_not_poison_recovery_context
     result = service.run_node_turn(
         anchor.workspace_id, anchor.chat_id, anchor.schedule_id
     )
-    assert result.status == "completed"
+    # Supersedes bounded-excerpt recovery: pending evidence is never truncated
+    # to manufacture a request that fits. The capacity failure stays visible.
+    assert result.status == "interrupted"
+    assert result.failure["kind"] == "context_capacity"
+    assert len(exchange.requests) == 1
     partial = next(
         m
         for m in decode_transcript(service.transcript(anchor))
         if (m.content.result or {}).get("interrupted")
     )
+    assert partial.content.result is not None
+    assert partial.content.result["reasoning"] == thought
+    assert thought in project_native_messages((partial,))[0].content
     assert (
-        partial.content.result is not None
-        and partial.content.result["reasoning"] == thought
+        service.chat.read_consumed_input(
+            anchor.workspace_id, anchor.chat_id, anchor.schedule_id
+        )
+        == 0
     )
-    replay = next(
-        m["content"]
-        for m in exchange.requests[-1]["messages"]
-        if partial.message_id in m["content"]
-    )
-    assert len(replay) < 5000 and "start " in replay and " end" in replay
 
 
 def test_repeated_schema_failures_yield_then_repair_without_replaying_a_mutation(

@@ -242,6 +242,16 @@ fn study_strategy_and_owned_indicators_share_filtered_callbacks_and_effective_re
     assert!(
         JitStrategyRuntime::from_source(&workspace, source, &json!({"invalid": true})).is_err()
     );
+    for (mutation, field) in [
+        ("empty_cancel", "cancel.order_id"),
+        ("empty_target", "target_position.symbol"),
+    ] {
+        let mut runtime =
+            JitStrategyRuntime::from_source(&workspace, source, &json!({"mutation": mutation}))
+                .unwrap();
+        let error = runtime.on_market(&quote("AAA")).unwrap_err().to_string();
+        assert!(error.contains(field), "{mutation}: {error}");
+    }
     for mutation in ["callback", "dependency", "topology"] {
         let mut runtime =
             JitStrategyRuntime::from_source(&workspace, source, &json!({"mutation": mutation}))

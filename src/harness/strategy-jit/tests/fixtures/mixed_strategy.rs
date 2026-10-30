@@ -129,8 +129,10 @@ impl MarketConsumer for MixedStrategy {
             vec![&mut self.indicator]
         }
     }
-    fn on_quote(&mut self, _: &QuoteEvent, _: &mut OrderSink) {
+    fn on_quote(&mut self, _: &QuoteEvent, orders: &mut OrderSink) {
         self.quotes += 1;
+        if self.mutation == "empty_cancel" { let _ = orders.cancel(""); }
+        if self.mutation == "empty_target" { let _ = orders.target_position("", Decimal::ZERO); }
         if self.mutation == "callback" {
             self.changed = true;
         }

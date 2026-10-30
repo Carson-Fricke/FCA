@@ -149,3 +149,21 @@ class SessionInbox:
             self._pending_ids.difference_update(
                 message.message_id for message in messages
             )
+
+    def compact(self, history: Sequence[SessionMessage]) -> None:
+        """Install a committed context view without consuming or rewriting input."""
+        with self._lock:
+            identities = {message.message_id for message in history}
+            if not self._pending_ids.issubset(identities):
+                raise ValueError("compaction cannot discard pending inputs")
+            if any(
+                message.direction == "instruction"
+                and message.message_id not in identities
+                for message in self._arrivals
+            ):
+                raise ValueError("compaction cannot discard configured instructions")
+            if len(identities) != len(history) or any(
+                self._messages.get(message.message_id) != message for message in history
+            ):
+                raise ValueError("compaction must select existing canonical messages")
+            self._arrivals = list(history)

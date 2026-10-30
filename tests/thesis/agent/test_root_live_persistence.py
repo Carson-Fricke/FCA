@@ -144,7 +144,10 @@ def test_root_persists_envelope_and_results_before_next_dispatch(
                 assert datums[0]["ok"] is True
                 assert datums[0]["structured"] == {"value": 42}
                 assert datums[0]["text"] == "Checked"
-                assert canonical.content.as_dict()["result"] == payload["result"]
+                expected = canonical.content.as_dict()["result"]
+                assert isinstance(expected, dict)
+                assert expected.pop("arguments") == {"value": 42}
+                assert expected == payload["result"]
                 assert canonical.content.correlation is not None
                 assert payload["correlation"] == canonical.content.correlation.as_dict()
             return super().complete(

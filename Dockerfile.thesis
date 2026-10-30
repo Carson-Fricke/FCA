@@ -21,6 +21,8 @@ RUN uv sync --locked --no-dev --no-install-project
 
 COPY --from=python-sources /wheel-inputs/src/ ./src/
 RUN uv sync --locked --no-dev --no-editable
+ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
+RUN uv run --no-sync python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 COPY scripts/ci/installed_sdk_smoke.py /tmp/installed_sdk_smoke.py
 RUN uv run --no-sync python -I /tmp/installed_sdk_smoke.py
 RUN test -x /opt/venv/bin/thesis
@@ -41,6 +43,8 @@ RUN groupadd --gid 10001 thesis \
     && useradd --uid 10001 --gid thesis --create-home --shell /usr/sbin/nologin thesis
 
 COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /opt/tiktoken-cache /opt/tiktoken-cache
+ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
 COPY config/thesis/ /app/config/thesis/
 
 WORKDIR /app

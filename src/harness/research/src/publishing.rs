@@ -217,6 +217,26 @@ pub(super) fn write_report(
 ) -> Result<PathBuf, BacktestJobError> {
     let mut header = ReportHeader::new(job_id);
     header.seed = seed.to_string();
+    header
+        .metadata
+        .insert("Initial capital".into(), ledger.initial_cash.to_string());
+    header
+        .metadata
+        .insert("Final equity".into(), ledger.final_equity.to_string());
+    header
+        .metadata
+        .insert("Final cash".into(), ledger.final_cash.to_string());
+    header.metadata.insert(
+        "Peak gross exposure".into(),
+        ledger.peak_gross_exposure.to_string(),
+    );
+    header.metadata.insert(
+        "Peak exposure / initial capital".into(),
+        match ledger.peak_gross_exposure_fraction {
+            Ok(value) => value.to_string(),
+            Err(reason) => format!("undefined ({reason})"),
+        },
+    );
     let document = render_report(&header, equity, &ledger.chart, &ledger.trade_stats);
     let path = directory.join("report.html");
     std::fs::write(&path, document.into_bytes())

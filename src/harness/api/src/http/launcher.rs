@@ -102,6 +102,7 @@ pub fn artifact_metrics(artifacts: &BTreeMap<String, Vec<u8>>) -> BTreeMap<Strin
     let equity = document.get("equity");
     let execution = document.get("execution");
     let trades = document.get("trades");
+    let capital = document.get("capital");
     for (key, section) in [
         ("total_return", equity),
         ("max_drawdown", equity),
@@ -119,6 +120,11 @@ pub fn artifact_metrics(artifacts: &BTreeMap<String, Vec<u8>>) -> BTreeMap<Strin
         ("net_loss", trades),
         ("gross_profit", trades),
         ("gross_loss", trades),
+        ("initial_cash", capital),
+        ("final_cash", capital),
+        ("final_equity", capital),
+        ("peak_gross_exposure", capital),
+        ("peak_gross_exposure_fraction", capital),
     ] {
         let reason_key = format!("{key}_reason");
         if let Some(reason) = section
@@ -146,6 +152,11 @@ pub fn artifact_metrics(artifacts: &BTreeMap<String, Vec<u8>>) -> BTreeMap<Strin
     }
     if let Some(custom) = document.get("custom").and_then(Value::as_object) {
         for (key, value) in custom {
+            // Undefined engine metrics remain undefined. Custom observations
+            // cannot fill their nulls or impersonate authoritative accounting.
+            if harness_strategy_sdk::is_reserved_metric_name(key) {
+                continue;
+            }
             if let Some(text) = scalar_string(value) {
                 metrics.entry(key.clone()).or_insert(text);
             }

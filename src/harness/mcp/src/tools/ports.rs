@@ -49,38 +49,41 @@ impl Boundary {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolExecutionError {
     message: String,
-    payload: Option<Value>,
+    payload: Value,
 }
 
 impl ToolExecutionError {
     /// Add observed boundary certainty without dropping structured server details.
     #[must_use]
     pub fn with_certainty(mut self, certainty: &str) -> Self {
-        let mut payload = match self.payload.take() {
-            Some(Value::Object(payload)) => payload,
-            Some(value) => Map::from_iter([("serverError".to_string(), value)]),
-            None => Map::new(),
+        let mut payload = match std::mem::take(&mut self.payload) {
+            Value::Object(payload) => payload,
+            value => Map::from_iter([("serverError".to_string(), value)]),
         };
         payload.insert("executionCertainty".into(), json!(certainty));
-        self.payload = Some(Value::Object(payload));
+        self.payload = Value::Object(payload);
         self
     }
 
-    /// Construct an error with no structured payload.
+    /// Construct an error with a structured category and explanation.
     #[must_use]
     pub fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            payload: None,
-        }
+        Self::with_payload(message, json!({}))
     }
 
     /// Construct an error carrying a structured outcome payload.
     #[must_use]
     pub fn with_payload(message: impl Into<String>, payload: Value) -> Self {
+        let message = message.into();
+        let mut payload = match payload {
+            Value::Object(payload) => payload,
+            value => Map::from_iter([("serverError".to_string(), value)]),
+        };
+        payload.entry("kind").or_insert(json!("tool"));
+        payload.entry("message").or_insert(json!(message));
         Self {
-            message: message.into(),
-            payload: Some(payload),
+            message,
+            payload: Value::Object(payload),
         }
     }
 
@@ -90,10 +93,10 @@ impl ToolExecutionError {
         &self.message
     }
 
-    /// The optional structured payload.
+    /// The structured payload; every constructed error has one.
     #[must_use]
     pub fn payload(&self) -> Option<&Value> {
-        self.payload.as_ref()
+        Some(&self.payload)
     }
 }
 

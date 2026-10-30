@@ -1,3 +1,4 @@
+import { toTranscriptMessage } from '$lib/transcript';
 /// <reference types="node" />
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
@@ -5,11 +6,12 @@ import { generateWire } from '../../generate-wire.mjs';
 import { decodeWire, WireDecodeError } from '$lib/wire';
 import { createChat, deleteChat, listChats, listTimelinePage, postMessage, postNodeMessage } from '$lib/api';
 import { TimelineStream } from '$lib/sse';
-import backendMessage from './backend-message.json';
+import backendMessageFixture from './backend-message.json';
 import backendTree from './backend-tree.json';
 import backendThread from './backend-thread.json';
 import { aggregateDatums, aggregateMessage } from './timeline-fixture';
 import { toChatMessage } from '$lib/transcript';
+const backendMessage = decodeWire('ChatMessageWire', backendMessageFixture, 'test/backend-message');
 
 describe('committed backend wire contract', () => {
     it('accepts null metadata and preserves a neutral delivery without a tool request identity', () => {
@@ -46,16 +48,21 @@ describe('committed backend wire contract', () => {
   const response = await fetch(`http://127.0.0.1:8000/v1/workspaces/test-ws-1/chats/${encodeURIComponent(chatId)}/timeline?limit=1000`,
    { headers: { Authorization: 'Bearer local-thesis-token' } });
   expect(response.ok).toBe(true);
-  const page = decodeWire('TimelinePageWire', await response.json(), 'live/timeline');
+  const page = decodeWire('TranscriptPageWire', await response.json(), 'live/timeline');
   expect(page.items.length).toBeGreaterThan(0);
-  for (const item of page.items) expect(decodeWire('TimelineItemWire', item, 'live/timeline/stream')).toEqual(item);
-  const bytes = new TextEncoder().encode(page.items.map((item) =>
+  const canonical = await Promise.all(page.items.map(async item => {
+   const detail = await fetch(`http://127.0.0.1:8000/v1/workspaces/test-ws-1/chats/${encodeURIComponent(chatId)}/timeline/items/${item.seq}`,
+    { headers: { Authorization: 'Bearer local-thesis-token' } });
+   expect(detail.ok).toBe(true);
+   return decodeWire('TimelineItemWire', await detail.json(), 'live/timeline/detail');
+  }));
+  const bytes = new TextEncoder().encode(canonical.map((item) =>
    `id: ${item.seq}\nevent: timeline\ndata: ${JSON.stringify(item)}\n\n`).join(''));
    const stream = new TimelineStream({ baseUrl: '/api', workspaceId: 'test-ws-1', chatId, after: 0,
    fetchImpl: async () => new Response(new ReadableStream({ start(controller) { controller.enqueue(bytes); } })) });
   const received: unknown[] = [];
   await stream.start((decoded) => { received.push(decoded); if (received.length === page.items.length) stream.stop(); });
-  expect(received).toEqual(page.items);
+  expect(received).toEqual(canonical);
  });
  it('accepts the persisted discovery seed delivery through history and live SSE', async () => {
   const delivered = {
@@ -64,13 +71,14 @@ describe('committed backend wire contract', () => {
    kind: 'agent_prompt', phase: 'discovery', attempt: 0, subAgentId: 'discovery-agent',
    deliveryKey: 'phase-seed-discovery', activityKind: 'delivery'
   };
-   const message = { ...backendMessage, role: 'user', tool_result: delivered,
+   const message = { ...backendMessage, role: 'user' as const, tool_result: delivered,
     conversation_id: 'discovery-agent', parent_conversation_id: backendMessage.chat_id,
    data: delivered };
   const item = { id: 'message:discovery-seed', chatId: message.chat_id,
    workspaceId: message.workspace_id, kind: 'message', seq: 9,
    ts: message.created_at, threadId: 'discovery-agent', payload: message };
-   expect(decodeWire('TimelinePageWire', { items: [item], nextBefore: 9, after: 9 }, 'history').items).toEqual([item]);
+   const previewItem = { ...item, payload: toTranscriptMessage(message) };
+   expect(decodeWire('TranscriptPageWire', { items: [previewItem], nextBefore: 9, after: 9 }, 'history').items).toEqual([previewItem]);
   const bytes = new TextEncoder().encode(`id: 9\nevent: timeline\ndata: ${JSON.stringify(item)}\n\n`);
    const stream = new TimelineStream({ baseUrl: '/api', workspaceId: item.workspaceId, chatId: item.chatId, after: 0,
    fetchImpl: async () => new Response(new ReadableStream({ start(controller) { controller.enqueue(bytes); } })) });
@@ -92,9 +100,9 @@ describe('committed backend wire contract', () => {
 		}
 	});
 	it('requires a non-negative snapshot watermark even on an empty history page', () => {
-		expect(decodeWire('TimelinePageWire', { items: [], nextBefore: null, after: 0 }, 'empty-history').after).toBe(0);
-		expect(() => decodeWire('TimelinePageWire', { items: [], nextBefore: null }, 'missing-watermark')).toThrow(WireDecodeError);
-		expect(() => decodeWire('TimelinePageWire', { items: [], nextBefore: null, after: -1 }, 'invalid-watermark')).toThrow(WireDecodeError);
+		expect(decodeWire('TranscriptPageWire', { items: [], nextBefore: null, after: 0 }, 'empty-history').after).toBe(0);
+		expect(() => decodeWire('TranscriptPageWire', { items: [], nextBefore: null }, 'missing-watermark')).toThrow(WireDecodeError);
+		expect(() => decodeWire('TranscriptPageWire', { items: [], nextBefore: null, after: -1 }, 'invalid-watermark')).toThrow(WireDecodeError);
 	});
 	it('matches named response refs to the generated validators and preserves the required consumed map', async () => {
 		const source = JSON.parse(await readFile('backend-wire.json', 'utf8'));
@@ -133,7 +141,7 @@ describe('committed backend wire contract', () => {
 		const history = await listTimelinePage('alpha-lab', chats[0].chat_id, null, null);
 		expect(history.items.length).toBeGreaterThan(0);
 		expect(history.after).toBe(Math.max(...history.items.map((item) => item.seq)));
-		for (const item of history.items) expect(decodeWire('TimelineItemWire', item, 'fixture')).toEqual(item);
+		expect(decodeWire('TranscriptPageWire', history, 'fixture')).toEqual(history);
 		const created = await createChat('wire-fixture');
 		try {
 			await postMessage('wire-fixture', created.chat_id, { body: 'offline wire message' });
@@ -144,7 +152,7 @@ describe('committed backend wire contract', () => {
 			const scoped = await listTimelinePage('wire-fixture', created.chat_id, 'node', null);
 			expect(scoped.items).toHaveLength(1);
 			expect(scoped.after).toBe(page.after);
-			for (const item of page.items) expect(decodeWire('TimelineItemWire', item, 'fixture')).toEqual(item);
+		expect(decodeWire('TranscriptPageWire', page, 'fixture')).toEqual(page);
 		} finally { await deleteChat('wire-fixture', created.chat_id); }
 	});
 

@@ -287,27 +287,20 @@
     },
     "ChatSubAgentTreeWire": {
       "additionalProperties": false,
-      "description": "Canonical tree response used by the projection and HTTP schema export.",
+      "description": "Flat node summaries; parent identities reconstruct the hierarchy once.",
       "properties": {
         "chatId": {
           "type": "string"
         },
         "items": {
           "items": {
-            "$ref": "#/$defs/SubAgentNodeWire"
-          },
-          "type": "array"
-        },
-        "roots": {
-          "items": {
-            "$ref": "#/$defs/SubAgentNodeWire"
+            "$ref": "#/$defs/SubAgentSummaryWire"
           },
           "type": "array"
         }
       },
       "required": [
         "chatId",
-        "roots",
         "items"
       ],
       "type": "object"
@@ -452,6 +445,132 @@
         "explicit_completion"
       ],
       "type": "string"
+    },
+    "ConversationOutlineEntryWire": {
+      "additionalProperties": false,
+      "description": "Navigation metadata; the canonical receipt remains in the timeline.",
+      "properties": {
+        "datumIndex": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "entityId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "executionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "turn",
+            "request",
+            "workflow",
+            "study",
+            "artifact"
+          ],
+          "type": "string"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "requestMessageId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "seq",
+        "threadId",
+        "messageId",
+        "datumIndex",
+        "entityId",
+        "executionId",
+        "requestMessageId",
+        "status"
+      ],
+      "type": "object"
+    },
+    "ConversationOutlinePageWire": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ConversationOutlineEntryWire"
+          },
+          "type": "array"
+        },
+        "nextAfter": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "after",
+        "nextAfter"
+      ],
+      "type": "object"
     },
     "CreateAttachmentRequest": {
       "additionalProperties": false,
@@ -1264,6 +1383,60 @@
       },
       "required": [
         "activityKind"
+      ],
+      "type": "object"
+    },
+    "JobCompletion": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "error_message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "job_id": {
+          "pattern": "^[A-Za-z0-9_.-]{1,128}$",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "backtest",
+            "study",
+            "screen"
+          ],
+          "type": "string"
+        },
+        "metrics": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "state": {
+          "enum": [
+            "succeeded",
+            "failed",
+            "cancelled"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "kind",
+        "state",
+        "metrics",
+        "artifact_count",
+        "error_message"
       ],
       "type": "object"
     },
@@ -2386,6 +2559,176 @@
       ],
       "type": "string"
     },
+    "SubAgentSummaryWire": {
+      "additionalProperties": false,
+      "description": "A flat hierarchy row; the node detail endpoint owns retained results.",
+      "properties": {
+        "acceptsInput": {
+          "type": "boolean"
+        },
+        "allowedTools": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "chatId": {
+          "type": "string"
+        },
+        "completionContractRef": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "completionMode": {
+          "$ref": "#/$defs/CompletionMode"
+        },
+        "createdAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "delegatedBudget": {
+          "type": "integer"
+        },
+        "inputContractRef": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/SubAgentKind"
+        },
+        "parentSubAgentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phaseAttemptId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phaseExecutor": {
+          "type": "boolean"
+        },
+        "resultAvailable": {
+          "default": false,
+          "type": "boolean"
+        },
+        "resultRef": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "returnsToSubAgentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "type": "string"
+        },
+        "specVersion": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/SubAgentStatus"
+        },
+        "subAgentId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workflowExecutionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "subAgentId",
+        "chatId",
+        "role",
+        "kind",
+        "status",
+        "parentSubAgentId",
+        "workflowExecutionId",
+        "phaseAttemptId",
+        "specVersion",
+        "completionMode",
+        "phaseExecutor",
+        "returnsToSubAgentId",
+        "phase",
+        "acceptsInput",
+        "allowedTools",
+        "delegatedBudget",
+        "inputContractRef",
+        "completionContractRef",
+        "resultRef",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
     "SubmitToolJobRequest": {
       "additionalProperties": false,
       "properties": {
@@ -2716,44 +3059,6 @@
       ],
       "type": "object"
     },
-    "TimelinePageWire": {
-      "additionalProperties": false,
-      "properties": {
-        "after": {
-          "minimum": 0,
-          "type": "integer"
-        },
-        "items": {
-          "items": {
-            "$ref": "#/$defs/TimelineItemWire"
-          },
-          "type": "array"
-        },
-        "nextBefore": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "outputPrefixes": {
-          "default": [],
-          "items": {
-            "$ref": "#/$defs/TimelineOutputWire"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "items",
-        "nextBefore",
-        "after"
-      ],
-      "type": "object"
-    },
     "ToolCorrelation": {
       "additionalProperties": false,
       "description": "The immutable, exact join to a request in a particular message.",
@@ -2948,6 +3253,325 @@
         "artifact"
       ],
       "type": "string"
+    },
+    "TranscriptItemWire": {
+      "discriminator": {
+        "mapping": {
+          "event": "#/$defs/TimelineEventWire",
+          "execution": "#/$defs/TimelineExecutionWire",
+          "message": "#/$defs/TranscriptMessageItemWire",
+          "output": "#/$defs/TimelineOutputWire"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/TranscriptMessageItemWire"
+        },
+        {
+          "$ref": "#/$defs/TimelineEventWire"
+        },
+        {
+          "$ref": "#/$defs/TimelineExecutionWire"
+        },
+        {
+          "$ref": "#/$defs/TimelineOutputWire"
+        }
+      ]
+    },
+    "TranscriptMessageItemWire": {
+      "additionalProperties": false,
+      "properties": {
+        "chatId": {
+          "type": "string"
+        },
+        "executionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "message",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/TranscriptMessageWire"
+        },
+        "seq": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "threadId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ts": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "chatId",
+        "workspaceId",
+        "seq",
+        "ts",
+        "kind",
+        "payload"
+      ],
+      "type": "object"
+    },
+    "TranscriptMessageWire": {
+      "additionalProperties": false,
+      "description": "Bounded display projection, with explicit canonical detail availability.",
+      "properties": {
+        "actor_id": {
+          "type": "string"
+        },
+        "attachment_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "body": {
+          "type": "string"
+        },
+        "chat_id": {
+          "type": "string"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "data": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detailsAvailable": {
+          "type": "boolean"
+        },
+        "execution_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input_position": {
+          "type": "integer"
+        },
+        "intent_epoch": {
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/TranscriptItemKind"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "parent_conversation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasoning": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "receipt": {
+          "$ref": "#/$defs/TranscriptReceiptWire"
+        },
+        "references": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        },
+        "role": {
+          "$ref": "#/$defs/MessageRole"
+        },
+        "root_conversation_id": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/MessageState"
+        },
+        "tool_result": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workspace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "created_at",
+        "created_by",
+        "schema_version",
+        "chat_id",
+        "conversation_id",
+        "root_conversation_id",
+        "parent_conversation_id",
+        "message_id",
+        "actor_id",
+        "role",
+        "kind",
+        "state",
+        "attachment_ids",
+        "references",
+        "execution_id",
+        "intent_epoch",
+        "input_position",
+        "updated_at",
+        "body",
+        "reasoning",
+        "data",
+        "tool_result",
+        "receipt",
+        "detailsAvailable"
+      ],
+      "type": "object"
+    },
+    "TranscriptPageWire": {
+      "additionalProperties": false,
+      "description": "Byte-bounded history with the same canonical sequence and resume watermark.",
+      "properties": {
+        "after": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/TranscriptItemWire"
+          },
+          "type": "array"
+        },
+        "nextBefore": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outputPrefixes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TimelineOutputWire"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items",
+        "nextBefore",
+        "after"
+      ],
+      "type": "object"
+    },
+    "TranscriptReceiptWire": {
+      "additionalProperties": false,
+      "description": "Presentation facts from one canonical receipt; never provider context.",
+      "properties": {
+        "correlation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolCorrelation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requests": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ToolRequest"
+          },
+          "type": "array"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
     },
     "UploadAttachmentRequest": {
       "additionalProperties": false,

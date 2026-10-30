@@ -1,7 +1,7 @@
 """Compose one merged tool catalog for an agent session.
 
 The catalog is the union of the quant-harness MCP tools, the Thesis control
-tools (spawn, await, operator input), and the workflow-launch tools.  Every
+tools (spawn, completion, operator input), and the workflow-launch tools. Every
 handler is bound at composition time to the trusted
 :class:`~thesis_runtime.contracts.context.ToolContext`, and the resulting registry
 enforces the context's effective allowed-tool policy by default-deny.
@@ -14,7 +14,8 @@ from typing import cast
 from uuid import uuid4
 
 from thesis.agent.harness_tools import HarnessToolProvider, HarnessToolResult
-from thesis.experiments.mandate import DataWindowPolicy
+from thesis.experiments.mandate import DataWindowResolver
+from thesis.extensions.tools.artifacts import artifact_registered_tool
 from thesis.extensions.tools.exploration import (
     EXPLORATION_TOOL_NAMES,
     exploration_registered_tools,
@@ -38,6 +39,7 @@ from thesis.knowledge.service import KnowledgeScope, KnowledgeService
 from thesis.persistence.submissions import SubmissionStore, retain_submission
 from thesis.workspaces.programs import WorkspacePrograms
 from thesis_runtime.contracts.context import ToolContext
+from thesis_runtime.contracts.failures import failure_from_exception
 from thesis_runtime.subagents.control_tools import (
     CONTROL_CHAT_TOOL_NAMES,
     CONTROL_NODE_TOOL_NAMES,
@@ -131,18 +133,22 @@ def _harness_handler(
                         "arguments": submitted,
                         "chat_id": context.chat_id,
                         "conversation_id": context.conversation_id,
+                        "recipient": context.as_dict(),
                     },
                 )
             except Exception as error:
                 return ToolExecution(
                     ok=False,
                     structured={"job_id": job_id},
-                    failure={
-                        "kind": "persistence",
-                        "message": str(error),
-                        "certainty": "not_started",
-                        "retry_safe": True,
-                    },
+                    failure=failure_from_exception(
+                        error,
+                        **{
+                            "kind": "persistence",
+                            "message": str(error),
+                            "certainty": "not_started",
+                            "retry_safe": True,
+                        },
+                    ),
                 )
         try:
             result: HarnessToolResult = provider.call_tool(name, submitted)
@@ -152,18 +158,23 @@ def _harness_handler(
             return ToolExecution(
                 ok=False,
                 structured={"job_id": job_id},
-                failure={
-                    "kind": "transport",
-                    "message": str(error),
-                    "certainty": "unknown_outcome",
-                    "retry_safe": False,
-                    "job_id": job_id,
-                },
+                pending_jobs=(job_id,),
+                failure=failure_from_exception(
+                    error,
+                    **{
+                        "kind": "transport",
+                        "message": str(error),
+                        "certainty": "unknown_outcome",
+                        "retry_safe": False,
+                        "job_id": job_id,
+                    },
+                ),
             )
         if job_id is not None and result.structured.get("job_id") != job_id:
             return ToolExecution(
                 ok=False,
                 structured={"job_id": job_id},
+                pending_jobs=(job_id,),
                 failure={
                     "kind": "protocol",
                     "message": "harness acknowledgement did not match retained job_id",
@@ -195,6 +206,10 @@ def _harness_handler(
             return ToolExecution(
                 ok=True,
                 structured=structured,
+                pending_jobs=(job_id,)
+                if job_id is not None
+                and structured.get("state") in {"queued", "running"}
+                else (),
                 text=""
                 if name in ("get_job_status", "get_job_result")
                 else result.text,
@@ -205,7 +220,14 @@ def _harness_handler(
         else:
             failure = dict(result.failure.as_dict())
         return ToolExecution(
-            ok=False, structured=structured, text=result.text, failure=failure
+            ok=False,
+            structured=structured,
+            text=result.text,
+            failure=failure,
+            pending_jobs=(job_id,)
+            if job_id is not None
+            and failure.get("executionCertainty") == "unknown_outcome"
+            else (),
         )
 
     return handle
@@ -220,6 +242,9 @@ def harness_registered_tools(
     """Return the discovered harness MCP tools as session tools."""
     tools: list[RegisteredTool] = []
     for spec in provider.list_tools():
+        if spec.name == "read_artifact":
+            tools.append(artifact_registered_tool(provider, spec))
+            continue
         if spec.name == "launch_trader":
             # This optional native capability only accepts host-local paths;
             # it cannot yet satisfy immutable, cross-host submission retention.
@@ -266,7 +291,7 @@ def build_session_registry(
     knowledge_scope: KnowledgeScope = "both",
     knowledge_collections: tuple[str, ...] | None = None,
     programs: WorkspacePrograms | None = None,
-    data_window: DataWindowPolicy | None = None,
+    resolve_data_window: DataWindowResolver | None = None,
     job_retention: ContextJobRetention | None = None,
     submissions: SubmissionStore | None = None,
     workflow_tools: tuple[RegisteredTool, ...] = (),
@@ -296,13 +321,21 @@ def build_session_registry(
             )
         )
     if programs is not None:
-        tools.extend(sketch_registered_tools(programs.sketches, context))
-        tools.extend(exploration_registered_tools(programs))
+        tools.extend(
+            sketch_registered_tools(
+                programs.sketches, context, resolve_data_window=resolve_data_window
+            )
+        )
+        tools.extend(
+            exploration_registered_tools(
+                programs, resolve_data_window=resolve_data_window
+            )
+        )
         tools.extend(
             program_registered_tools(
                 programs,
                 context,
-                data_window=data_window,
+                resolve_data_window=resolve_data_window,
                 job_retention=job_retention,
             )
         )

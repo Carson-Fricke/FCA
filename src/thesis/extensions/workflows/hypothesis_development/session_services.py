@@ -11,6 +11,7 @@ from thesis.agent.hypothesis_skills import with_hypothesis_development_skills
 from thesis.agent.router import Role, RolePolicy
 from thesis.agent.tool_dispatch import with_harness_mcp
 from thesis.experiments.mandate import (
+    DataWindowPolicy,
     MandateError,
     ResearchMandate,
     derive_mandate,
@@ -28,9 +29,11 @@ from thesis.workflows.research_models import (
     resolve_study_reference,
     study_configuration,
 )
-from thesis.workspaces.programs import JobSettlement, ProgramArtifactError, ProgramKind
+from thesis.workspaces.program_contracts import ProgramArtifactError, ProgramKind
+from thesis.workspaces.programs import JobSettlement
 from thesis.workspaces.sketch_contract import StrategySketchReference
 from thesis_runtime.contracts.context import ToolContext
+from thesis_runtime.contracts.failures import failure_from_exception
 from thesis_runtime.contracts.records import (
     RecordNotFound,
     SubAgentRecord,
@@ -187,13 +190,22 @@ class HypothesisSessionServices:
             )
             else None
         )
-        mandate = (
-            self._resolve_mandate(context.workspace_id, context.workflow_execution_id)
-            if programs is not None
-            else None
-        )
-        if mandate is None:
-            programs = None
+
+        def resolve_data_window() -> DataWindowPolicy:
+            mandate = self._resolve_mandate(
+                context.workspace_id, cast(str, context.workflow_execution_id)
+            )
+            if mandate is None:
+                raise MandateError(
+                    "Call set_research_window to declare development and forward "
+                    "windows first, then retry this tool."
+                )
+            return (
+                mandate.forward_window
+                if phase == "forward_validation"
+                else mandate.default_window
+            )
+
         return WorkflowSessionBindings(
             tools=self._research_window_tools()
             if phase_executor and phase == "discovery"
@@ -204,13 +216,7 @@ class HypothesisSessionServices:
             if phase is None
             else self._policy.phase_knowledge.get(phase),
             programs=programs,
-            data_window=None
-            if mandate is None
-            else (
-                mandate.forward_window
-                if phase == "forward_validation"
-                else mandate.default_window
-            ),
+            resolve_data_window=resolve_data_window if programs is not None else None,
             job_retention=(
                 self._program_job_retention(phase)
                 if programs is not None and phase is not None
@@ -505,7 +511,7 @@ class HypothesisSessionServices:
         state = self._state(request)
         mandate = self._resolve_mandate(workspace_id, record.workflow_execution_id)
         if mandate is None:
-            return "Discovery must declare research windows before empirical work or completion."
+            return "Call set_research_window to declare development and forward windows first, then retry request_phase_completion."
         forward_window = None
         if mandate is not None:
             forward_window = (
@@ -667,7 +673,11 @@ class HypothesisSessionServices:
                 TypeError,
                 FalsificationComposeError,
             ) as error:
-                return ToolExecution(ok=False, text=str(error))
+                return ToolExecution(
+                    ok=False,
+                    text=str(error),
+                    failure=failure_from_exception(error, kind="program_reference"),
+                )
 
         result = self._activity(
             context,

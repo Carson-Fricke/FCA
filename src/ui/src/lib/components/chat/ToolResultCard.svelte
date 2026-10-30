@@ -1,4 +1,6 @@
 <script lang="ts">
+ import { untrack } from 'svelte';
+ import { getTranscriptDetails } from './transcript-details';
  import type { ToolResult } from '$lib/types';
  import { toolResultComponent, toolResultPresentation, toolResultHeader } from './tool-results/registry';
  import ActivityMarker from './tool-results/ActivityMarker.svelte';
@@ -18,20 +20,44 @@
  const status=$derived(result.pending?'pending':result.outcome??(result.ok?'completed':'failed'));
  const header=$derived(toolResultHeader(result));
  const label=$derived(header.subject ? `${header.action}: ${header.subject}` : header.action);
+ const loadDetails = getTranscriptDetails();
+ let receiptOpen = $state(false);
+ let loading = $state(false);
+ let error = $state('');
+ let surface = $state<HTMLElement>();
+ async function revealDetails(): Promise<void> {
+  if (!result.detailsSeq || !loadDetails || loading) return;
+  loading = true; error = '';
+  try { await loadDetails(result.detailsSeq); }
+  catch (failure) { error = failure instanceof Error ? failure.message : 'Could not load evidence'; }
+  finally { loading = false; }
+ }
+ $effect(() => {
+  if (!surface || !prominent || !result.detailsSeq || !loadDetails) return;
+  const observer = new IntersectionObserver((entries) => {
+   if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); void revealDetails(); }
+  });
+  observer.observe(surface);
+  return () => observer.disconnect();
+ });
+ $effect(() => {
+  if (!result.ok && !result.pending) { receiptOpen = true; untrack(() => { void revealDetails(); }); }
+ });
 </script>
 
-<section class="tool-activity" class:connectRail class:prominent class:failed={!result.ok&&!result.pending} data-testid="tool-result-card" data-tool={result.tool} data-datum-type={result.datumType}>
+<section bind:this={surface} class="tool-activity" class:connectRail class:prominent class:failed={!result.ok&&!result.pending} data-testid="tool-result-card" data-tool={result.tool} data-datum-type={result.datumType}>
  <span class="activity-marker"><ActivityMarker icon={header.icon}/></span>
  {#if prominent}
   <div class="activity-label">{@render receiptLabel()}</div>
-  <div class="activity-result"><Card {result} {workspaceId} hideSummary={true}/></div>
+  <div class="activity-result">{#if !result.detailsSeq}<Card {result} {workspaceId} hideSummary={true}/>{:else}<p role="status" class="text-xs text-slate-500">{loading ? 'Loading evidence…' : 'Evidence loads when visible.'}</p>{/if}</div>
   {#if startedAt!=null||durationMs!=null||reused!=null||argumentsData!=null||result.callId}<details class="metadata-disclosure"><summary>Execution receipt</summary>{@render metadata()}</details>{/if}
  {:else}
-  <details class="activity-receipt" open={!result.ok&&!result.pending}>
+  <details class="activity-receipt" open={receiptOpen} ontoggle={(event) => { receiptOpen = event.currentTarget.open; if (receiptOpen) void revealDetails(); }}>
    <summary>{@render receiptLabel()}<span class="disclosure" aria-hidden="true">›</span></summary>
-   <div class="receipt-content"><Card {result} {workspaceId} hideSummary={true}/>{@render metadata()}</div>
+   <div class="receipt-content">{#if receiptOpen}{#if !result.detailsSeq}<Card {result} {workspaceId} hideSummary={true}/>{:else}<p role="status">Loading evidence…</p>{/if}{/if}{@render metadata()}</div>
   </details>
  {/if}
+ {#if error}<p role="status" class="text-xs text-warn">{error}</p><button type="button" class="text-xs text-accent" onclick={revealDetails}>Retry evidence</button>{/if}
 </section>
 
 {#snippet receiptLabel()}

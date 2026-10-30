@@ -81,6 +81,7 @@ export class ChatHostController {
 	}
 
 	select(chatId: string | null): void {
+		if (chatId !== null && chatId === this.chatId && !this.drafting) return;
 		++this.#selection;
 		this.timeline.reset();
 		this.chatId = chatId;

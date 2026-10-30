@@ -408,9 +408,9 @@ def test_failed_admission_leaves_no_message_cursor_or_runnable_work() -> None:
 
 
 @pytest.mark.parametrize(
-    "consumed", [True, False], ids=["consumed-history", "pending-outside-tail"]
+    "consumed", [True, False], ids=["consumed-history", "pending-history"]
 )
-def test_bounded_session_history_and_unchanged_head_need_no_catalog_scan(
+def test_complete_session_history_and_unchanged_head_need_no_catalog_scan(
     consumed: bool,
 ) -> None:
     class BoundedProvider(Provider):
@@ -423,14 +423,11 @@ def test_bounded_session_history_and_unchanged_head_need_no_catalog_scan(
 
         def complete(self, **kwargs: Any) -> ModelCompletion:
             messages = kwargs["messages"]
-            assert len(messages) == (
-                41 if consumed else 42
-            )  # Policy, tail, and any pending input outside the tail.
-            assert "Continue" in messages[-1].content
             assert (
-                any("oldest input" in message.content for message in messages)
-                is not consumed
-            )
+                len(messages) == 83
+            )  # Instructions, every historical message, new input.
+            assert "Continue" in messages[-1].content
+            assert any("oldest input" in message.content for message in messages)
             return super().complete(**kwargs)
 
     container, provider = LimitedContainer(), BoundedProvider()
@@ -466,8 +463,8 @@ def test_bounded_session_history_and_unchanged_head_need_no_catalog_scan(
             running.result(timeout=5)
     assert provider.calls == 1
     assert (
-        len(container.queries) == 3
-    )  # Startup work snapshot, initial tail, pending inputs.
+        len(container.queries) == 2
+    )  # Startup work snapshot and complete context read.
     for _ in range(3):
         assert (
             chat.read_message_window(
@@ -478,7 +475,7 @@ def test_bounded_session_history_and_unchanged_head_need_no_catalog_scan(
             )
             == ()
         )
-    assert len(container.queries) == 3
+    assert len(container.queries) == 2
 
 
 class ConcurrentCatalog(LimitedContainer):

@@ -1,7 +1,7 @@
 """One incoming delivery boundary, stable identity, and success-only consumption."""
 
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
+from dataclasses import asdict, replace
 from typing import Literal
 
 import pytest
@@ -11,6 +11,7 @@ from thesis_runtime.adapters.providers.invocations import (
     ProviderUnreachableError,
 )
 from thesis_runtime.adapters.providers.session_adapter import project_native_messages
+from thesis_runtime.contracts.completion import CompletionOptions
 from thesis_runtime.contracts.context import ToolContext
 from thesis_runtime.contracts.datum import Datum
 from thesis_runtime.contracts.messages import (
@@ -42,6 +43,7 @@ class _Provider:
         role: Literal["primary", "coding", "critique", "research"],
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
+        options: CompletionOptions | None = None,
     ) -> Mapping[str, object]:
         return {
             "projection": "test-neutral",
@@ -49,6 +51,7 @@ class _Provider:
             "role": role,
             "tools": None if tools is None else list(tools),
             "response_format": response_format,
+            **({"options": asdict(options)} if options else {}),
         }
 
     def __init__(self, *responses: SessionMessage | Exception) -> None:
@@ -67,6 +70,7 @@ class _Provider:
         role: Literal["primary", "coding", "critique", "research"],
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
+        options: CompletionOptions | None = None,
     ) -> SessionMessage:
         self.requests.append(tuple(messages))
         response = next(self.responses)
@@ -101,6 +105,65 @@ def _session(provider: _Provider, handler=None) -> AgentSession:
         provider=provider,
         registry=registry,
     )
+
+
+@pytest.mark.parametrize("raise_error", [False, True])
+def test_new_tool_failure_preserves_diagnostics_to_model_without_adapter_code(
+    raise_error,
+):
+    from thesis_runtime.contracts.failures import ToolFailureError
+
+    failure = {
+        "kind": "new_sdk_constraint",
+        "message": "The supplied window exceeds available observations.",
+        "certainty": "not_started",
+        "retry_safe": True,
+        "violations": [{"path": "window", "actual": 20, "maximum": 12}],
+        "nextArguments": {"window": 12},
+        "retryGuidance": "Reduce window using the supplied bound.",
+    }
+
+    def handler(arguments, context):
+        if raise_error:
+            raise ToolFailureError(failure)
+        return ToolExecution(ok=False, failure=failure)
+
+    provider = _Provider(
+        _output("request", ToolRequest("action", "work", "{}")),
+        _output("answer"),
+    )
+    _session(provider, handler).run((_input("seed"),))
+    delivered = next(
+        message for message in provider.requests[-1] if message.content.correlation
+    )
+    assert delivered.content.result is not None
+    retained = delivered.content.result["failure"]
+    assert isinstance(retained, Mapping)
+    for key, value in failure.items():
+        actual = retained[key]
+        if isinstance(actual, tuple):
+            actual = list(actual)
+        assert actual == value
+    projected = project_native_messages(provider.requests[-1])
+    assert "new_sdk_constraint" in str(projected)
+    assert "Reduce window using the supplied bound." in str(projected)
+
+
+def test_failed_tool_cannot_omit_failure_contract():
+    provider = _Provider(
+        _output("request", ToolRequest("action", "work", "{}")),
+        _output("answer"),
+    )
+    _session(provider, lambda _, context: ToolExecution(ok=False)).run(
+        (_input("seed"),)
+    )
+    delivered = next(
+        message for message in provider.requests[-1] if message.content.correlation
+    )
+    assert delivered.content.result is not None
+    retained = delivered.content.result["failure"]
+    assert isinstance(retained, Mapping)
+    assert "omitted its failure contract" in str(retained["message"])
 
 
 def test_inbox_assigns_durable_position_deduplicates_and_orders_arrivals() -> None:
@@ -193,22 +256,18 @@ def test_arrival_during_completion_stays_before_output_after_acknowledgement() -
             return super().complete(**kwargs)
 
     acknowledged: list[tuple[SessionMessage, ...]] = []
-    provider = Provider(output)
+    provider = Provider(output, _output("follow-up"))
     _session(provider).run(
         (),
         inbox=inbox,
         on_consumed=lambda messages: acknowledged.append(tuple(messages)),
     )
-    assert provider.requests == [(initial,)]
-    assert acknowledged == [(initial,)]
-    assert inbox.snapshot() == (
-        (initial, late, replace(output, message_id=inbox.transcript()[-1].message_id)),
-        (late,),
-    )
-    assert (
-        SessionInbox(inbox.transcript(), pending_ids={"late"}).snapshot()
-        == inbox.snapshot()
-    )
+    assert provider.requests[0] == (initial,)
+    assert provider.requests[1][:2] == (initial, late)
+    assert acknowledged == [(initial,), (late,)]
+    assert inbox.transcript()[:2] == (initial, late)
+    assert inbox.pending() == ()
+    assert SessionInbox(inbox.transcript()).snapshot() == inbox.snapshot()
 
 
 @pytest.mark.parametrize("anchor", ["root", "phase"])
@@ -686,10 +745,17 @@ def test_arrival_during_completion_is_not_acknowledged_by_earlier_snapshot() -> 
             inbox.deliver(_input("late"))
             return super().complete(**kwargs)
 
-    provider = Provider(_output("answer"))
-    _session(provider).run((), inbox=inbox)
-    assert provider.requests == [(first,)]
-    assert inbox.pending() == (_input("late"),)
+    provider = Provider(_output("answer"), _output("follow-up"))
+    acknowledged: list[tuple[SessionMessage, ...]] = []
+    _session(provider).run(
+        (),
+        inbox=inbox,
+        on_consumed=lambda messages: acknowledged.append(tuple(messages)),
+    )
+    assert provider.requests[0] == (first,)
+    assert _input("late") in provider.requests[1]
+    assert acknowledged == [(first,), (_input("late"),)]
+    assert inbox.pending() == ()
 
 
 def test_tools_and_external_producers_use_identical_delivery_and_correlations() -> None:

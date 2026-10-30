@@ -1,3 +1,4 @@
+import { transcriptItems, nodeSummaries } from './read-fixtures';
 import { test, expect } from '@playwright/test';
 import { send, WORKSPACE_ID } from './fixtures';
 import seed from '../src/lib/fixtures/chat-messages.json' with { type: 'json' };
@@ -37,7 +38,7 @@ test('thinking grows while collapsed, restores from history, and keeps expansion
         return route.fulfill({ json: { items: [] } });
     });
     await page.route('**/chats/*/timeline?**', async (route) => {
-        await route.fulfill({ json: { items: frames, after: frames.at(-1)?.seq ?? 0, nextBefore: null } });
+        await route.fulfill({ json: { items: transcriptItems(frames), after: frames.at(-1)?.seq ?? 0, nextBefore: null } });
     });
     await page.route('**/chats/*/timeline/stream?**', async (route) => {
         const after = Number(new URL(route.request().url()).searchParams.get('after') ?? 0);

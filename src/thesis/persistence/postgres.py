@@ -56,6 +56,17 @@ class PostgresSubmissionStore:
             )
         )
 
+    def find(self, job_id: str) -> dict[str, object] | None:
+        rows = self.store.query(
+            "id=%s AND record_type='JobSubmission'",
+            ["JobSubmission:" + job_id],
+            collection="submissions",
+            limit=2,
+        )
+        if len(rows) > 1:
+            raise ValueError("ambiguous retained execution identity")
+        return None if not rows else rows[0]["payload"]
+
 
 class PostgresInvestigationStore:
     def __init__(self, store: PostgresStore) -> None:

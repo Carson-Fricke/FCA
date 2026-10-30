@@ -1,3 +1,4 @@
+import { receiptFor } from './transcript';
 /** Pure, execution-indexed presentation of the single canonical chat timeline. */
 import { derivePhases, isWorkflowPhase, projectExecution, type SubAgentTreeNode } from './subagent';
 import type { ChatMessage, ExecutionEvent, WorkflowExecutionRecord, WorkflowPhase } from './types';
@@ -29,7 +30,7 @@ export function deriveWorkflowLive(
 ): Map<string, WorkflowLiveState> {
 	const anchors = new Map<string, { execution: WorkflowExecutionRecord; phases: WorkflowPhase[] }>();
 	for (const message of messages) {
-		const datums = message.data?.sessionMessage?.content.result?.datums;
+		const datums = receiptFor(message)?.result?.datums;
 		const sources = Array.isArray(datums) ? datums.flatMap((datum) => datum && typeof datum === 'object' && datum.datumType === 'workflow_execution' ? [datum.structured] : []) :
 			message.tool_result?.datumType === 'workflow_execution' ? [message.tool_result.structured] : [];
 		for (const data of sources) {

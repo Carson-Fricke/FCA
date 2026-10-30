@@ -34,8 +34,10 @@
 mod abi;
 /// Causal numeric building blocks for authored market consumers.
 pub mod building_blocks;
+mod causal;
 mod consumer;
 mod events;
+mod execution;
 /// Macro-support trampolines; reachable only through the exported macros.
 #[doc(hidden)]
 pub mod export;
@@ -47,29 +49,33 @@ pub mod research;
 mod wavelet;
 
 pub use abi::{
-    CBarEvent, CBarFrame, CDecimal, CFill, CMarketOrder, CMetricSink, COrderSink, CQuoteEvent,
-    CSlice, CStart, CStr, CTradeEvent, MetricPublishFn, OrderSubmitFn, OutputPublishFn,
-    ScreeningCreateFn, ScreeningDestroyFn, ScreeningProgramVTable, ScreeningResultFn,
-    ScreeningScreenFn, StrategyBarFrameFn, StrategyProgramVTable, StudyBarFrameFn,
-    StudyProgramVTable, StudyQuoteFn, StudyTradeFn, SubscriptionsFn, ABI_EXPORT, LAST_ERROR_EXPORT,
-    METRIC_INVALID_NAME, METRIC_NOT_FINITE, METRIC_OK, METRIC_REJECTED, METRIC_RESERVED_NAME,
-    SCREENING_VTABLE_EXPORT, SDK_ABI_VERSION, SDK_ERROR, SDK_OK, STRATEGY_VTABLE_EXPORT,
-    STUDY_VTABLE_EXPORT,
+    CBarEvent, CBarFrame, CDecimal, CExecutionSource, CFill, CMarketOrder, CMetricSink, COrderSink,
+    CQuoteEvent, CSlice, CStart, CStr, CTradeEvent, MetricPublishFn, OrderSubmitFn,
+    OutputPublishFn, ScreeningCreateFn, ScreeningDestroyFn, ScreeningProgramVTable,
+    ScreeningResultFn, ScreeningScreenFn, StrategyBarFrameFn, StrategyProgramVTable,
+    StudyBarFrameFn, StudyProgramVTable, StudyQuoteFn, StudyTradeFn, SubscriptionsFn, ABI_EXPORT,
+    LAST_ERROR_EXPORT, METRIC_INVALID_NAME, METRIC_NOT_FINITE, METRIC_OK, METRIC_REJECTED,
+    METRIC_RESERVED_NAME, SCREENING_VTABLE_EXPORT, SDK_ABI_VERSION, SDK_ERROR, SDK_OK,
+    STRATEGY_VTABLE_EXPORT, STUDY_VTABLE_EXPORT,
 };
+pub use abi::{CDecisionSink, DecisionFn};
+pub use causal::DecisionContext;
 pub use consumer::{
     canonical_subscriptions, effective_subscriptions, route_bar, route_quote, route_trade,
-    MarketConsumer, ObservationContext, Subscription,
+    MarketConsumer, ObservationContext, RoutingPlan, Subscription,
 };
 pub use events::{BarEvent, BarFrame, Fill, ProgramStart, QuoteEvent, TradeEvent};
+pub use execution::{ClosedTrade, ExecutionSnapshot, Order, OrderState, Position};
+pub use harness_contracts::causal::CausalObservations;
 pub use indicator::{
     indicator_add, indicator_context, indicator_div, indicator_mul, indicator_sub, Indicator,
     IndicatorBar, IndicatorMissing, IndicatorSequence, INDICATOR_CONTEXT_PRECISION,
 };
 pub use outputs::{OutputEvent, OutputPoint, StudyOutput};
 pub use program::{
-    Bar, MetricPublisher, OrderSink, OrderType, PublishError, ScreenContext, ScreenRow,
-    ScreeningProgram, Side, StrategyProgram, StudyProgram, SubmitError, SubmittedOrder,
-    TimeInForce, RESERVED_METRIC_NAMES,
+    is_reserved_metric_name, Bar, MetricPublisher, OrderSink, OrderType, PublishError,
+    ScreenContext, ScreenRow, ScreeningProgram, Side, StrategyProgram, StudyProgram, SubmitError,
+    SubmittedOrder, TimeInForce, RESERVED_METRIC_NAMES,
 };
 pub use wavelet::{WaveletIndicator, WaveletScale, WaveletSnapshot};
 

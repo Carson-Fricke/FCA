@@ -15,6 +15,7 @@ from functools import partial
 from typing import Any, Protocol, cast
 
 from thesis_runtime.contracts.datum import Datum, DatumType
+from thesis_runtime.contracts.messages import from_record
 from thesis_runtime.contracts.records import (
     WORKFLOW_NODE_ROLE,
     CompletionMode,
@@ -48,7 +49,7 @@ from thesis_runtime.execution.workflow_events import (
 from thesis_runtime.subagents.control import PhaseCompletionRejected
 from thesis_runtime.subagents.control_tools import CONTROL_PHASE_TOOL_NAMES
 from thesis_runtime.subagents.lifecycle import SubAgentLifecycle
-from thesis_runtime.subagents.specs import SubAgentSpec
+from thesis_runtime.subagents.specs import InitialContext, SubAgentSpec
 from thesis_runtime.workflows.delivery import WorkflowNodeManager
 from thesis_runtime.workflows.events import emit_phase, finish_execution, graph_payload
 from thesis_runtime.workflows.execution_store import (
@@ -59,6 +60,7 @@ from thesis_runtime.workflows.execution_store import (
     StoreTransition,
 )
 from thesis_runtime.workflows.extensions import (
+    PhaseSeed,
     RunRequest,
     StateSnapshot,
     WorkflowExtension,
@@ -677,7 +679,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         context: HandoffContext,
         *,
         override: str | None = None,
-    ) -> str | None:
+    ) -> PhaseSeed | None:
         """Compose the phase agent's first prompt from the accepted handoff.
 
         The start/transition adapter's text wins; otherwise the phase's
@@ -688,16 +690,37 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         if self._doctrine is None:
             return None
         phase_value = self._phase_value(phase)
-        task = override or self._extension(
-            "seed", self._extension_input(request, state, context)
-        ).get("text")
+        seed = self._extension("seed", self._extension_input(request, state, context))
+        task = override or seed.get("text")
         if task is not None and not isinstance(task, str):
             raise WorkflowEngineError("extension seed text must be a string")
         task = task or self._doctrine.tasks.get(phase_value)
         if not task:
             return None
         instruction = self._completion_instruction(phase_value)
-        return f"{task}\n\n{instruction}" if instruction else task
+        identities = seed.get("contextMessageIds", [])
+        if not isinstance(identities, list) or any(
+            not isinstance(item, str) for item in identities
+        ):
+            raise WorkflowEngineError(
+                "contextMessageIds must contain explicit source message IDs"
+            )
+        _, chat = self._require_doctrine_chat()
+        initial_context = []
+        for message_id in identities:
+            original = chat.get_message(request.workspace_id, message_id)
+            if original.chat_id != request.chat_id:
+                raise WorkflowEngineError("initial context belongs to another chat")
+            initial_context.append(
+                InitialContext(
+                    from_record(original).content.text,
+                    original.message_id,
+                    original.conversation_id,
+                )
+            )
+        return PhaseSeed(
+            f"{task}\n\n{instruction}" if instruction else task, tuple(initial_context)
+        )
 
     def _phase_spawn_spec(
         self, request: RequestT, phase_value: str
@@ -899,7 +922,11 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         return {"executionId": request.execution_id, "phase": target, "applied": True}
 
     def _enqueue_phase(
-        self, request: RequestT, phase: str, prompt: str | None, context: HandoffContext
+        self,
+        request: RequestT,
+        phase: str,
+        prompt: PhaseSeed | None,
+        context: HandoffContext,
     ) -> None:
         if self._work_store is None:
             raise WorkflowEngineError("durable phase dispatch is not composed")
@@ -931,7 +958,10 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                     "intent_epoch": request.intent_epoch,
                     "phase": phase,
                     "attempt_id": attempt,
-                    "prompt": prompt,
+                    "prompt": None if prompt is None else prompt.text,
+                    "initial_context": []
+                    if prompt is None
+                    else [item.as_dict() for item in prompt.initial_context],
                     "context": {
                         "source": context.source,
                         "target": context.target,
@@ -970,7 +1000,14 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
                 request,
                 phase,
                 self._reconstruct_state(request, phase),
-                cast(str | None, payload["prompt"]),
+                None
+                if payload["prompt"] is None
+                else PhaseSeed.from_dict(
+                    {
+                        "text": payload["prompt"],
+                        "initialContext": payload.get("initial_context", []),
+                    }
+                ),
                 context,
             )
         except OwnershipLost:
@@ -1122,7 +1159,7 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         request: RequestT,
         phase: object,
         state: StateT,
-        prompt: str | None,
+        prompt: PhaseSeed | None,
         context: HandoffContext,
     ) -> str | None:
         """Enter one node; durable workers serialize deterministic attempt work."""
@@ -1575,11 +1612,11 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         self._nodes.finish(self._context(request), final_state)
 
     def _start_phase_agent(
-        self, request: RequestT, phase: object, *, prompt: str
+        self, request: RequestT, phase: object, *, prompt: PhaseSeed
     ) -> ActiveSubAgent:
         """Start or revisit a phase through its one spawn-with-prompt path."""
         doctrine, chat = self._require_doctrine_chat()
-        if self._conversations is None or not prompt.strip():
+        if self._conversations is None or not prompt.text.strip():
             raise WorkflowEngineError("agent phase entry requires a service and prompt")
         phase_value = self._phase_value(phase)
         node_id = self._workflow_node_id(request)
@@ -1607,12 +1644,13 @@ class Workflow[RequestT: WorkflowRequest, StateT: WorkflowState, OutcomeT]:
         child = self._conversations.spawn(
             Anchor(request.workspace_id, request.chat_id, sub_agent_id=node_id),
             spec,
-            prompt,
+            prompt.text,
             SubAgentKind.CONVERSATION,
             sub_agent_id=previous,
             actor_id=self._actor,
             completion_mode=CompletionMode.EXPLICIT_COMPLETION,
             phase_executor=True,
+            initial_context=prompt.initial_context,
             prompt_key=f"phase-seed-{request.execution_id}-{phase_value}-{ordinal}",
             prompt_data={"phase": phase_value, "attempt": ordinal},
             attribution={

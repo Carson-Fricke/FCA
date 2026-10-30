@@ -17,11 +17,9 @@ from thesis.persistence.journal import content_hash
 from thesis.strategies import StrategyArtifactError, WorkspaceStrategyArtifacts
 from thesis.workspaces.local import LocalWorkspaceProvider
 from thesis.workspaces.manifest import load_workspace_manifest
-from thesis.workspaces.programs import (
-    INDICATOR_TEMPLATE,
-    STUDY_TEMPLATE,
-    WorkspacePrograms,
-)
+from thesis.workspaces.programs import WorkspacePrograms
+from thesis.workspaces.sdk import SdkReferences
+from thesis.workspaces.sdk.templates import INDICATOR_TEMPLATE, STUDY_TEMPLATE
 
 SOURCE = """use harness_strategy_sdk::{StrategyProgram, export_strategy_program};
 struct Demo;
@@ -95,7 +93,9 @@ def workspace(
     strategy_artifacts = WorkspaceStrategyArtifacts(provider)
     # Strategy publication exercises real Git; program catalog projection
     # needs only the external Git port's committed documents.
-    programs = WorkspacePrograms(provider, git_factory=MemoryGitFactory())
+    programs = WorkspacePrograms(
+        provider, git_factory=MemoryGitFactory(), sdk=SdkReferences()
+    )
     programs.author(
         workspace_id, "indicator", "rsi_value", INDICATOR_TEMPLATE, configuration=CONFIG
     )

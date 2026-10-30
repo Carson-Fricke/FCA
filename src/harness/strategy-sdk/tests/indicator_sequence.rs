@@ -11,6 +11,7 @@ use harness_strategy_sdk::IndicatorSequence;
 use harness_strategy_sdk::MarketConsumer;
 use harness_strategy_sdk::ObservationContext;
 use harness_strategy_sdk::QuoteEvent;
+use harness_strategy_sdk::RoutingPlan;
 use harness_strategy_sdk::Subscription;
 use harness_strategy_sdk::TradeEvent;
 use std::collections::BTreeMap;
@@ -108,8 +109,21 @@ fn trade(symbol: &str, time: i64, price: i128) -> TradeEvent<'_> {
 #[test]
 fn trades_and_quotes_produce_symbol_bound_ohlc_at_requested_fidelity() {
     let mut owner = owner(true);
-    route_trade(&mut owner, &trade("AAA", 1, 4), &mut ObservationContext).unwrap();
-    route_trade(&mut owner, &trade("BBB", 2, 99), &mut ObservationContext).unwrap();
+    let mut owner_plan = RoutingPlan::new(&mut owner).unwrap();
+    route_trade(
+        &mut owner,
+        &trade("AAA", 1, 4),
+        &mut ObservationContext,
+        &mut owner_plan,
+    )
+    .unwrap();
+    route_trade(
+        &mut owner,
+        &trade("BBB", 2, 99),
+        &mut ObservationContext,
+        &mut owner_plan,
+    )
+    .unwrap();
     let quote = QuoteEvent {
         event_id: "q",
         timestamp_ns: 3,
@@ -121,14 +135,21 @@ fn trades_and_quotes_produce_symbol_bound_ohlc_at_requested_fidelity() {
         ask_quantity: Decimal::ZERO,
         venue: "test",
     };
-    route_quote(&mut owner, &quote, &mut ObservationContext).unwrap();
-    route_trade(&mut owner, &trade("AAA", 4, 8), &mut ObservationContext).unwrap();
+    route_quote(&mut owner, &quote, &mut ObservationContext, &mut owner_plan).unwrap();
+    route_trade(
+        &mut owner,
+        &trade("AAA", 4, 8),
+        &mut ObservationContext,
+        &mut owner_plan,
+    )
+    .unwrap();
     assert!(owner.indicator.sequence().completed().is_empty());
     // An observed global time seals populated windows even without new input for that symbol.
     route_trade(
         &mut owner,
         &trade("UNREQUESTED", 10, 100),
         &mut ObservationContext,
+        &mut owner_plan,
     )
     .unwrap();
     let bars = owner.indicator.sequence().completed();
@@ -151,10 +172,22 @@ fn trades_and_quotes_produce_symbol_bound_ohlc_at_requested_fidelity() {
         bars[&("BBB".into(), "ticks:10".into())][0].close,
         Some(Decimal::from_i128(99))
     );
-    route_trade(&mut owner, &trade("AAA", 35, 7), &mut ObservationContext).unwrap();
+    route_trade(
+        &mut owner,
+        &trade("AAA", 35, 7),
+        &mut ObservationContext,
+        &mut owner_plan,
+    )
+    .unwrap();
     assert_eq!(owner.indicator.sequence().completed().len(), 2);
     assert_eq!(owner.indicator.sequence().in_progress()["AAA"].start_ns, 30);
-    assert!(route_trade(&mut owner, &trade("AAA", 34, 6), &mut ObservationContext).is_err());
+    assert!(route_trade(
+        &mut owner,
+        &trade("AAA", 34, 6),
+        &mut ObservationContext,
+        &mut owner_plan
+    )
+    .is_err());
     assert_eq!(owner.indicator.value("AAA"), Some(Decimal::from_i128(7)));
 }
 fn frame(start: i64, close: i128, missing: bool) -> BarFrame<'static> {
@@ -189,9 +222,28 @@ fn frame(start: i64, close: i128, missing: bool) -> BarFrame<'static> {
 #[test]
 fn bar_outputs_preserve_boundaries_warmup_and_missing_without_carry_forward() {
     let mut owner = owner(false);
-    route_bar(&mut owner, &frame(0, 0, false), &mut ObservationContext).unwrap();
-    route_bar(&mut owner, &frame(10, 5, false), &mut ObservationContext).unwrap();
-    route_bar(&mut owner, &frame(20, 0, true), &mut ObservationContext).unwrap();
+    let mut owner_plan = RoutingPlan::new(&mut owner).unwrap();
+    route_bar(
+        &mut owner,
+        &frame(0, 0, false),
+        &mut ObservationContext,
+        &mut owner_plan,
+    )
+    .unwrap();
+    route_bar(
+        &mut owner,
+        &frame(10, 5, false),
+        &mut ObservationContext,
+        &mut owner_plan,
+    )
+    .unwrap();
+    route_bar(
+        &mut owner,
+        &frame(20, 0, true),
+        &mut ObservationContext,
+        &mut owner_plan,
+    )
+    .unwrap();
     let bars = &owner.indicator.sequence().completed()[&("AAA".into(), "1min".into())];
     assert_eq!(bars.len(), 3);
     assert_eq!(bars[0].missing, Some(IndicatorMissing::Undefined));
@@ -210,9 +262,8 @@ fn tick_fidelity_must_be_explicit_and_positive() {
     assert!(IndicatorSequence::ticks(-1).is_err());
     let mut owner = owner(true);
     owner.indicator.sequence = IndicatorSequence::default();
-    assert!(
-        route_trade(&mut owner, &trade("AAA", 0, 1), &mut ObservationContext)
-            .unwrap_err()
-            .contains("fidelity")
-    );
+    assert!(harness_strategy_sdk::RoutingPlan::new(&mut owner)
+        .err()
+        .unwrap()
+        .contains("fidelity"));
 }

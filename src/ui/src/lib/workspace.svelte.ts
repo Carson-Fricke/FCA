@@ -34,15 +34,27 @@ function readCopilotWidth(): number {
 	return Number.isFinite(raw) && raw >= COPILOT_MIN_WIDTH ? Math.round(raw) : 320;
 }
 
+function readSidebarCompact(): boolean {
+	try { return typeof localStorage === 'undefined' || localStorage.getItem('thesis.sidebarCompact') !== 'false'; }
+	catch { return true; }
+}
+
 export const ui = $state({
 	/** Workspaces the user pinned widgets in: { workspaceId: [widgetId] } */
 	pinnedWidgets: readPins() as Record<string, string[]>,
 	toasts: [] as Toast[],
 	copilotOpen: true,
+	/** The navigation rail starts compact; expansion is a browser preference. */
+	sidebarCompact: readSidebarCompact(),
 	/** Persisted copilot pane width in pixels. */
 	copilotWidth: readCopilotWidth(),
 	lastWorkspace: (typeof localStorage !== 'undefined' ? localStorage.getItem('thesis.workspace') : null) ?? ''
 });
+
+export function setSidebarCompact(compact: boolean): void {
+	ui.sidebarCompact = compact;
+	try { localStorage.setItem('thesis.sidebarCompact', String(compact)); } catch { /* Presentation preference only. */ }
+}
 
 export function setCopilotWidth(width: number): void {
 	ui.copilotWidth = Math.max(COPILOT_MIN_WIDTH, Math.round(width));

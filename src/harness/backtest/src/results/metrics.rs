@@ -73,44 +73,7 @@ pub struct EquityPoint {
     pub equity: Decimal18,
 }
 
-/// One closed-trade slice: a FIFO lot slice matched against one closing fill.
-///
-/// Fees follow `fill_quantity_share.v1`: the entry fee is the slice's share of
-/// the opening lot's remaining fee, and the exit fee is its share of the closing
-/// fill's remaining fee, each rounded half-even at scale 18.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TradeRow {
-    /// Trade identifier in exit order, starting at 1.
-    pub trade_id: u64,
-    /// Instrument symbol.
-    pub symbol: String,
-    /// `long` when the opening fill bought, `short` when it sold.
-    pub side: String,
-    /// Matched quantity, positive.
-    pub quantity: Decimal18,
-    /// Sequence of the fill that opened the matched lot.
-    pub entry_sequence: u64,
-    /// Sequence of the fill that closed the slice.
-    pub exit_sequence: u64,
-    /// Epoch nanoseconds of the opening fill.
-    pub entry_timestamp_ns: i64,
-    /// Epoch nanoseconds of the closing fill.
-    pub exit_timestamp_ns: i64,
-    /// Entry price.
-    pub entry_price: Decimal18,
-    /// Exit price.
-    pub exit_price: Decimal18,
-    /// Price PnL before fees.
-    pub gross_pnl: Decimal18,
-    /// Allocated entry fee.
-    pub entry_fee: Decimal18,
-    /// Allocated exit fee.
-    pub exit_fee: Decimal18,
-    /// `entry_fee + exit_fee`.
-    pub fees: Decimal18,
-    /// `gross_pnl - fees`.
-    pub net_pnl: Decimal18,
-}
+pub use harness_trading::fills::trades::ClosedTrade as TradeRow;
 
 /// One fill ledger row.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -704,17 +667,15 @@ impl EquityVariance {
 
     /// Add cached, exact returns in their original sample order. Repeated
     /// contributions are deliberately added one by one, never multiplied.
-    pub(crate) fn add_returns(
-        &mut self,
-        sample: Result<Decimal18, MetricsError>,
-        count: u64,
-    ) {
+    pub(crate) fn add_returns(&mut self, sample: Result<Decimal18, MetricsError>, count: u64) {
         if count == 0 {
             return;
         }
         if let Ok(mean) = self.mean {
             self.squares = self.squares.and_then(|mut squares| {
-                let deviation = sample.and_then(|r| sub(r, mean, "sharpe_per_sample"))?.to_f64();
+                let deviation = sample
+                    .and_then(|r| sub(r, mean, "sharpe_per_sample"))?
+                    .to_f64();
                 let contribution = deviation * deviation;
                 if contribution != 0.0 {
                     for _ in 0..count {

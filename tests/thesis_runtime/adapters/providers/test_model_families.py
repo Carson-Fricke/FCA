@@ -184,7 +184,9 @@ def test_deepseek_launch_exchange_preserves_validation_audit_and_replay(
         ),
         *decode_transcript(durable[:-1]),
     )
-    snapshot = adapter.request_snapshot(messages=replay, tools=registry.catalog())
+    snapshot = adapter.request_snapshot(
+        messages=replay, tools=[tool["function"] for tool in requests[1]["tools"]]
+    )
     assert snapshot["messages"] == requests[1]["messages"]
     assert snapshot["tools"] == requests[1]["tools"]
     assert snapshot["model_family"] == "deepseek"

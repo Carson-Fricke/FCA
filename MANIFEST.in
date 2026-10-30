@@ -15,6 +15,7 @@ recursive-include src/thesis/knowledge/library *.md
 # Wheel SDK references and their portable Cargo path dependencies use these
 # canonical sources directly, not a separately maintained Python-side copy.
 include src/harness/strategy-sdk/Cargo.toml
+include src/harness/strategy-sdk/reference-topics.json
 recursive-include src/harness/strategy-sdk/src *.rs
 include src/harness/contracts/Cargo.toml
 recursive-include src/harness/contracts/src *.rs

@@ -5,5 +5,5 @@ FCA workflow registrations and session capability bindings. Concrete extensions 
 Subdirectories: `hypothesis_development/`, `research_investigation/`. Each documents its local boundary.
 
 - `__init__.py`: Register concrete workflows with the engine registry.
-- `bindings.py`: Defines FCA workflow session capabilities, schema/retrieval bindings, workflow-owned session tools and runtime activity ports.
+- `bindings.py`: Defines FCA workflow session capabilities, schema/retrieval bindings, execution-time data-window resolution, workflow-owned session tools and runtime activity ports.
 - `session_services.py`: Routes session capabilities and completions by durable workflow identity; grants discovery the bounded research launch/read tools.

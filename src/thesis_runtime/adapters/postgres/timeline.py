@@ -8,6 +8,7 @@ from typing import Any
 
 from psycopg import Connection
 
+from thesis_runtime.adapters.receipt_projection import postgres_receipt_header
 from thesis_runtime.conversations.streaming import CommitNotifier
 
 from .store import PostgresStore, identity
@@ -195,3 +196,37 @@ class PostgresTimeline:
             )
             prefixes.extend(self.hydrate(row) for row in rows)
         return prefixes
+
+    def read_receipts(
+        self,
+        *,
+        workspace_id: str,
+        chat_id: str,
+        after_seq: int,
+        through_seq: int,
+        limit: int,
+        result_types: tuple[str, ...],
+        structured_kinds: tuple[str, ...],
+        metadata_fields: tuple[str, ...],
+        metadata_arrays: tuple[tuple[str, str], ...],
+    ) -> list[dict[str, object]]:
+        """Page selected canonical receipts rather than streaming fragments."""
+        rows = self.store.query(
+            "workspace_id=%s AND chat_id=%s AND kind='message' AND seq>%s AND seq<=%s "
+            "AND ((thread_id='root' AND (body#>>'{payload,role}'='user' OR "
+            "jsonb_array_length(COALESCE(body#>'{payload,data,sessionMessage,content,requests}','[]'))>0)) "
+            "OR jsonb_path_query_array(body,'$.payload.data.sessionMessage.content.result.**.datumType') ?| %s "
+            "OR jsonb_path_query_array(body,'$.payload.data.sessionMessage.content.result.**.structured.kind') ?| %s)",
+            [
+                workspace_id,
+                chat_id,
+                after_seq,
+                through_seq,
+                list(result_types),
+                list(structured_kinds),
+            ],
+            order="seq",
+            limit=limit,
+            columns=postgres_receipt_header(metadata_fields, metadata_arrays),
+        )
+        return [row[0] for row in rows]

@@ -23,8 +23,8 @@ import { fixtures } from './fixtures';
 import { fetchJson, ThesisApiError } from './transport';
 import { fixtureTimeline } from './fixture-timeline';
 import { decodeWire } from './wire';
-import { toChatMessage } from './transcript';
-import type { TimelinePageWire, CreateMessageResponseWire, SubAgentNodeWire, ChatThreadWire, NodeInputReceiptWire } from './generated';
+import { toChatMessage, toTranscriptMessage } from './transcript';
+import type { TranscriptPageWire, CreateMessageResponseWire, SubAgentSummaryWire, ChatThreadWire, NodeInputReceiptWire } from './generated';
 export { ThesisApiError } from './transport';
 import type {
 	ArtifactEntry,
@@ -565,7 +565,35 @@ export function deleteChat(workspaceId: string, chatId: string, signal?: AbortSi
 	);
 }
 
-export type TimelinePage = TimelinePageWire;
+export type TimelinePage = TranscriptPageWire;
+
+/** Load exact canonical evidence without changing the history or stream cursor. */
+export async function getTimelineDetail(workspaceId: string, chatId: string, sequence: number, signal?: AbortSignal) {
+	if (fixtureMode) {
+		const page = fixtureTimeline.page(workspaceId, chatId, null, sequence + 1);
+		const item = page.items.find(item => item.seq === sequence);
+		if (!item) throw new Error('Timeline item was not found');
+		return item;
+	}
+	const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}/chats/${encodeURIComponent(chatId)}/timeline/items/${sequence}`;
+	return decodeWire('TimelineItemWire', await apiFetch<unknown>(path, { signal }), path);
+}
+
+/** Navigation metadata is separate from full selected-thread history. */
+export async function listConversationOutline(workspaceId: string, chatId: string, after: number, signal?: AbortSignal) {
+	const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}/chats/${encodeURIComponent(chatId)}/outline?after=${after}`;
+	if (fixtureMode) {
+		const page = fixtureTimeline.page(workspaceId, chatId, 'root', null);
+		const turns = page.items.flatMap((item) => item.kind === 'message' && item.payload.role === 'user' ? [{
+			id: item.payload.message_id, kind: 'turn' as const, title: item.payload.body.slice(0, 160),
+			seq: item.seq, threadId: 'root', messageId: item.payload.message_id, datumIndex: null,
+			entityId: null, executionId: item.payload.execution_id, requestMessageId: null, status: null
+		}] : []);
+		const items = turns.filter((item) => item.seq > after);
+		return decodeWire('ConversationOutlinePageWire', { items, after: page.after, nextAfter: null }, 'fixture/outline');
+	}
+	return decodeWire('ConversationOutlinePageWire', await apiFetch<unknown>(path, { signal }), path);
+}
 
 /** Fetch a snapshot page and its chat-wide stream watermark; null thread selects all threads. */
 export async function listTimelinePage(
@@ -574,10 +602,11 @@ export async function listTimelinePage(
 ): Promise<TimelinePage> {
 	if (fixtureMode) {
 		signal?.throwIfAborted();
-		return decodeWire('TimelinePageWire', fixtureTimeline.page(workspaceId, chatId, threadId, before), 'fixture/timeline');
+		const page = fixtureTimeline.page(workspaceId, chatId, threadId, before);
+		return decodeWire('TranscriptPageWire', { ...page, items: page.items.map(item => item.kind === 'message' ? { ...item, payload: toTranscriptMessage(item.payload) } : item) }, 'fixture/timeline');
 	}
 	signal?.throwIfAborted();
-	const query = new URLSearchParams({ limit: '200' });
+	const query = new URLSearchParams({ limit: '40' });
 	if (threadId !== null) query.set('thread', threadId);
 	if (before !== null) query.set('before', String(before));
 	const request = new AbortController();
@@ -595,7 +624,7 @@ export async function listTimelinePage(
 			{ signal: request.signal }
 		), aborted]);
 		signal?.throwIfAborted();
-		return decodeWire('TimelinePageWire', page, `/chats/${chatId}/timeline`);
+		return decodeWire('TranscriptPageWire', page, `/chats/${chatId}/timeline`);
 	} finally {
 		clearTimeout(timeout);
 		signal?.removeEventListener('abort', cancel);
@@ -806,9 +835,8 @@ export function chatNodeBase(
  * Normalize the backend's durable sub-agent node to the camelCase UI
  * contract. The chat-scoped tree serializes `ChatSubAgentNode.as_dict()`.
  */
-function toSubAgentNode(raw: SubAgentNodeWire): SubAgentNode {
-	const { children, ...node } = raw;
-	return { ...node, context: null };
+function toSubAgentNode(raw: SubAgentSummaryWire): SubAgentNode {
+	return { ...raw, context: null };
 }
 
 /**
@@ -824,7 +852,7 @@ export function listChatSubAgents(
 	signal?: AbortSignal
 ): Promise<SubAgentNode[]> {
 	const path = `${chatNodeBase(workspaceId, chatId)}/sub_agents`;
-	if (fixtureMode) return wait(5).then(() => decodeWire('ChatSubAgentTreeWire', { chatId, roots: [], items: [] }, path).items.map(toSubAgentNode));
+	if (fixtureMode) return wait(5).then(() => decodeWire('ChatSubAgentTreeWire', { chatId, items: [] }, path).items.map(toSubAgentNode));
 	return apiFetch<unknown>(path, { signal }).then((raw) =>
 		decodeWire('ChatSubAgentTreeWire', raw, path).items.map(toSubAgentNode)
 	);
@@ -1483,7 +1511,8 @@ export function listWorkspaceArtifacts(workspaceId: string): Promise<WorkspaceAr
 export interface ExploratoryOutputPage {
 	job_id: string; artifactName: string; artifactSha256: string;
 	instanceId?: string; name?: string;
-	outputs?: { instanceId: string; name: string; kind: string; count: number | null }[];
+	outputs?: { instanceId: string; name: string; kind: string; count: number | null; authority: 'harness_replay' | 'authored' }[];
+	authority?: 'harness_replay' | 'authored';
 	output?: Record<string, unknown>; total: number; nextOffset: number | null;
 }
 

@@ -35,6 +35,8 @@ pub struct BacktestOutcome {
     pub order_count: u64,
     /// Booked fills.
     pub fills: Vec<EngineFill>,
+    /// All submitted orders, including unfilled, canceled and risk-rejected orders.
+    pub orders: Vec<ExecutionOrder>,
     /// Causal cash/inventory accounting with compact exact sample histories.
     pub valuations: super::valuation::ValuationHistory,
     /// Fee assessments.
@@ -125,6 +127,38 @@ impl BacktestOutcome {
             (
                 "fills",
                 JsonValue::Array(self.fills.iter().map(fill_json).collect()),
+            ),
+            (
+                "orders",
+                JsonValue::Array(
+                    self.orders
+                        .iter()
+                        .map(|order| {
+                            JsonValue::object([
+                                ("order_id", JsonValue::string(&order.order_id)),
+                                ("symbol", JsonValue::string(&order.symbol)),
+                                ("side", JsonValue::string(&order.side)),
+                                ("quantity", JsonValue::string(order.quantity.to_string())),
+                                (
+                                    "filled_quantity",
+                                    JsonValue::string(order.filled_quantity.to_string()),
+                                ),
+                                (
+                                    "remaining_quantity",
+                                    JsonValue::string(order.remaining_quantity.to_string()),
+                                ),
+                                ("status", JsonValue::string(&order.status)),
+                                (
+                                    "reason",
+                                    order
+                                        .reason
+                                        .as_ref()
+                                        .map_or(JsonValue::Null, JsonValue::string),
+                                ),
+                            ])
+                        })
+                        .collect(),
+                ),
             ),
             ("fees", fees_json(&self.fee_assessments, &self.fee_totals)),
             ("portfolio", portfolio_json(&self.portfolio)),

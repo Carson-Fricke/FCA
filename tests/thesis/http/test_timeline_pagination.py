@@ -142,7 +142,7 @@ def test_backward_pages_recover_complete_scoped_history(
         if thread is not None:
             params["thread"] = thread
         recovered: list[int] = []
-        for _ in range(10):
+        for _ in range(50):
             response = client.get(url, params=params)
             assert response.status_code == 200
             page = response.json()

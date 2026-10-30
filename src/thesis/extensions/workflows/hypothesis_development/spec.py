@@ -167,14 +167,12 @@ def _discovery_prompt(
     workflow: DevelopmentActivities,
     request: HypothesisDevelopmentRequest,
 ) -> str:
-    """Build the discovery prompt: phase instructions plus the operator's words."""
-    from .phases.creation import trigger_text
+    """Build the assignment; the original request is delivered separately."""
     from .prompts.discovery import _discovery_turn_prompt
 
     return (
         f"Launch timestamp (UTC): {request.created_at.isoformat() if request.created_at else 'unavailable'}\n\n"
         + _discovery_turn_prompt(
-            [("user", trigger_text(workflow, request))],
             mandate=_mandate(workflow, request),
         )
     )
@@ -216,17 +214,16 @@ def _sketch_section(
         raise WorkflowError(
             "workspace programs are required to resolve the accepted sketch"
         )
-    document = programs.verify_strategy_sketch(
-        request.workspace_id, reference.document()
-    )
+    programs.verify_strategy_sketch(request.workspace_id, reference.document())
     return [
         "",
         "Accepted strategy sketch (exact committed revision):",
         json.dumps(
-            {"reference": reference.document(), "sketch": document},
+            {"reference": reference.document()},
             ensure_ascii=True,
             indent=2,
         ),
+        "Read this exact revision with read_strategy_sketch(sketch_id, version, git_commit).",
     ]
 
 
@@ -1057,10 +1054,9 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
         "content and requires its current accepted validation. Use read_sdk_reference "
         "for exact SDK signatures, not guessed APIs. If validation is stale or "
         "rejected, report the blocker rather than supplying inline source or "
-        "bypassing validation. Launch acceptance is not a successful completed run: "
-        "never assume launch success means results are available. Retain the returned "
-        "job_id and inspect get_job_status {job_id: ...} while queued or "
-        "running. After terminal status, call get_job_result {job_id: ...}, "
+        "bypassing validation. Run tools return immediately; completion arrives here. "
+        "Continue useful work or end your response to resume on arrival. Do not poll "
+        "or resubmit unknown outcomes. Inspect delivered terminal evidence. Use "
         "list_artifacts {job_id: ...} and read_artifact {job_id: ..., name: ...} to "
         "inspect actual "
         "metrics and evidence. Record terminal failures honestly; do not fabricate "
@@ -1134,7 +1130,6 @@ def phase_declarations() -> tuple[PhaseDeclaration, ...]:
                 "set_research_window",
                 "start_workflow",
                 "read_research_investigations",
-                "await_sub_agent",
                 *sketch_tools,
                 *program_tools,
                 "run_study",

@@ -16,6 +16,7 @@ from thesis_runtime.contracts.activity import (
     decode_activity,
     owns_anchor,
 )
+from thesis_runtime.contracts.compaction import ContextPolicy, EvidenceRanker
 from thesis_runtime.contracts.context import ToolContext
 from thesis_runtime.contracts.datum import Datum
 from thesis_runtime.contracts.messages import (
@@ -73,11 +74,10 @@ from thesis_runtime.subagents.child import (
     ConversationalPolicy,
     OneShotPolicy,
 )
-from thesis_runtime.subagents.control import AwaitResult
 from thesis_runtime.subagents.lifecycle import SubAgentLifecycle
 from thesis_runtime.subagents.policy import AnsweringActor, OperatorPolicyRegistry
 from thesis_runtime.subagents.spawn import SubAgentSpawner
-from thesis_runtime.subagents.specs import SubAgentSpec
+from thesis_runtime.subagents.specs import InitialContext, SubAgentSpec
 from thesis_runtime.subagents.store import PersistenceSubAgentStore, SubAgentStore
 from thesis_runtime.tools.registry import (
     ToolExecution,
@@ -126,13 +126,10 @@ class Conversations:
         root_actor_id: str = "thesis-agent",
         root_allowed_tools: Sequence[str] | None = None,
         root_system_prompt: str = AGENT_SYSTEM_PROMPT,
-        max_history: int = 40,
+        context_policy: ContextPolicy | None = None,
+        evidence_ranker: EvidenceRanker | None = None,
         spawn_thread: Callable[[Callable[[], None]], None] | None = None,
         on_turn_error: Callable[[tuple[str, str, Exception]], None] | None = None,
-        await_timeout_seconds: float = 30.0,
-        poll_interval_seconds: float = 0.25,
-        await_sleep: Callable[[float], None] | None = None,
-        await_monotonic: Callable[[], float] | None = None,
         read_consumed_input: Callable[[str, str, str], int] | None = None,
         acknowledge_input: Callable[[str, str, str, int], None] | None = None,
         work_store: WorkStore | None = None,
@@ -167,13 +164,8 @@ class Conversations:
             None if root_allowed_tools is None else tuple(root_allowed_tools)
         )
         self._root_system_prompt = root_system_prompt
-        if max_history < 1:
-            raise ValueError("max_history must be positive")
-        self._max_history = max_history
-        self._await_timeout = await_timeout_seconds
-        self._poll_interval = poll_interval_seconds
-        self._await_sleep = await_sleep or time.sleep
-        self._await_monotonic = await_monotonic or time.monotonic
+        self._context_policy = context_policy or ContextPolicy()
+        self._evidence_ranker = evidence_ranker
         self._max_tool_iterations = 64
         self._workers = NodeTurnCoordinator(
             runner=ServiceTurnRunner(self),
@@ -208,11 +200,6 @@ class Conversations:
     def delivery(self) -> DeliveryService:
         """Return the one delivery path this service routes."""
         return self._delivery
-
-    @property
-    def max_history(self) -> int:
-        """Return the reply history window for a root conversation turn."""
-        return self._max_history
 
     @property
     def root_actor_id(self) -> str:
@@ -273,12 +260,14 @@ class Conversations:
         attribution: Mapping[str, str | None] | None = None,
         completion_mode: CompletionMode | None = None,
         phase_executor: bool = False,
+        initial_context: Sequence[InitialContext] = (),
     ) -> ChildConversation:
         """Create one child and give it its first prompt in a single act.
 
-        Spawning is prompting: the durable record is created and the first
-        prompt is delivered at the child's own anchor, and that delivery is
-        what wakes the child's own turn.  ``returns_to`` anchors the child's
+        Spawning persists explicitly selected initial context before the
+        assignment at the child's own anchor. Only the assignment wakes its
+        turn; initial source context is not repeated on revisit.
+        ``returns_to`` anchors the child's
         result — its parent — and ``kind`` selects the child's turn-end
         policy, so a one-shot child completes on its final answer while a
         conversational one stays open.  ``attribution`` is caller-owned inert
@@ -300,6 +289,7 @@ class Conversations:
                 prompt,
                 key=prompt_key,
                 data=prompt_data,
+                initial_context=initial_context,
             )
             record = existing
         else:
@@ -322,6 +312,7 @@ class Conversations:
                 ),
                 returns_to_sub_agent_id=returns_to.sub_agent_id,
                 phase_executor=phase_executor,
+                initial_context=initial_context,
                 **record_fields,
             )
             record = spawned.record
@@ -651,8 +642,9 @@ class Conversations:
             root_actor_id=self._root_actor_id,
             root_allowed_tools=self._root_allowed_tools,
             root_system_prompt=self._root_system_prompt,
-            max_history=self._max_history,
             max_tool_iterations=self._max_tool_iterations,
+            context_policy=self._context_policy,
+            evidence_ranker=self._evidence_ranker,
         ).run(workspace_id, chat_id, sub_agent_id)
         return result
 
@@ -686,7 +678,6 @@ class Conversations:
             anchor.workspace_id,
             anchor.chat_id,
             anchor.sub_agent_id or anchor.chat_id,
-            limit=32,
         )
         message, attempt = continuation_message(history, failure, now=time.time())
         self.deliver_session_message(
@@ -715,42 +706,6 @@ class Conversations:
         child = self.get(record.workspace_id, record.sub_agent_id)
         if isinstance(child, ChildConversation):
             child.turn_ended(result)
-
-    def await_child_result(
-        self,
-        workspace_id: str,
-        conversation_id: str,
-        timeout_seconds: float | None = None,
-    ) -> AwaitResult:
-        """Wait (bounded) for one child to finish, then return its state.
-
-        The wait is bounded: when the child is still running at the timeout,
-        the current state is returned so the caller can end its turn — the
-        child's result is delivered to its return anchor when it finishes.
-        """
-        budget = self._await_timeout if timeout_seconds is None else timeout_seconds
-        deadline = self._await_monotonic() + max(
-            0.0, min(float(budget), self._await_timeout)
-        )
-        while True:
-            result = self._await_once(workspace_id, conversation_id)
-            if result.terminal or self._await_monotonic() >= deadline:
-                return result
-            self._await_sleep(self._poll_interval)
-
-    def _await_once(self, workspace_id: str, conversation_id: str) -> AwaitResult:
-        """Return a child's current or terminal state to its caller."""
-        record = self._lifecycle.get(workspace_id, conversation_id)
-        if record is None:
-            raise NodeTurnError("sub-agent does not exist")
-        terminal = record.status.value in {"completed", "failed", "cancelled"}
-        return AwaitResult(
-            sub_agent_id=record.sub_agent_id,
-            status=record.status.value,
-            terminal=terminal,
-            result=record.result,
-            result_ref=record.result_ref,
-        )
 
     def observe_tool_result(
         self, workspace_id: str, chat_id: str, chunk: ToolResultChunk

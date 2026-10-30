@@ -10,360 +10,420 @@
         "instanceId": "events",
         "name": "events",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "events",
         "name": "events_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "events",
         "name": "paths",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "events",
         "name": "paths_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "events",
         "name": "research_view",
         "kind": "research_view",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "falsification",
         "name": "claims",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "falsification",
         "name": "claims_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "falsification",
         "name": "controls",
         "kind": "table",
+        "authority": "authored",
         "count": 4
       },
       {
         "instanceId": "falsification",
         "name": "controls_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "falsification",
         "name": "null",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "falsification",
         "name": "null_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "falsification",
         "name": "research_view",
         "kind": "research_view",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "falsification",
         "name": "subsamples",
         "kind": "table",
+        "authority": "authored",
         "count": 4
       },
       {
         "instanceId": "falsification",
         "name": "subsamples_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "learned_models",
         "name": "diagnostics",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "learned_models",
         "name": "diagnostics_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "learned_models",
         "name": "features",
         "kind": "table",
+        "authority": "authored",
         "count": 4
       },
       {
         "instanceId": "learned_models",
         "name": "features_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "learned_models",
         "name": "predictions",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "learned_models",
         "name": "predictions_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "learned_models",
         "name": "research_view",
         "kind": "research_view",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "learned_models",
         "name": "windows",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "learned_models",
         "name": "windows_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "liquidity",
         "name": "costs",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "liquidity",
         "name": "costs_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "liquidity",
         "name": "quotes",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "liquidity",
         "name": "quotes_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "liquidity",
         "name": "research_view",
         "kind": "research_view",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "parameters",
         "name": "experiments",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "parameters",
         "name": "experiments_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "parameters",
         "name": "research_view",
         "kind": "research_view",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "predictive_signals",
         "name": "calibration",
         "kind": "table",
+        "authority": "authored",
         "count": 4
       },
       {
         "instanceId": "predictive_signals",
         "name": "calibration_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "predictive_signals",
         "name": "horizons",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "predictive_signals",
         "name": "horizons_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "predictive_signals",
         "name": "observations",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "predictive_signals",
         "name": "observations_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "predictive_signals",
         "name": "research_view",
         "kind": "research_view",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "predictive_signals",
         "name": "stability",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "predictive_signals",
         "name": "stability_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "regimes",
         "name": "dwell",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "regimes",
         "name": "dwell_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "regimes",
         "name": "research_view",
         "kind": "research_view",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "regimes",
         "name": "states",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "regimes",
         "name": "states_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "regimes",
         "name": "transitions",
         "kind": "table",
+        "authority": "authored",
         "count": 16
       },
       {
         "instanceId": "regimes",
         "name": "transitions_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "seasonality",
         "name": "calendar",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "seasonality",
         "name": "calendar_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "seasonality",
         "name": "paths",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "seasonality",
         "name": "paths_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "seasonality",
         "name": "research_view",
         "kind": "research_view",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "wavelets",
         "name": "coefficients",
         "kind": "table",
+        "authority": "authored",
         "count": 992
       },
       {
         "instanceId": "wavelets",
         "name": "energy",
         "kind": "table",
+        "authority": "authored",
         "count": 160
       },
       {
         "instanceId": "wavelets",
         "name": "energy_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "wavelets",
         "name": "price",
         "kind": "table",
+        "authority": "authored",
         "count": 128
       },
       {
         "instanceId": "wavelets",
         "name": "price_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "wavelets",
         "name": "research_view",
         "kind": "research_view",
+        "authority": "authored",
         "count": null
       },
       {
         "instanceId": "wavelets",
         "name": "sessions",
         "kind": "table",
+        "authority": "authored",
         "count": 24
       },
       {
         "instanceId": "wavelets",
         "name": "sessions_semantics",
         "kind": "dataset_semantics",
+        "authority": "authored",
         "count": null
       }
     ],
@@ -19497,6 +19557,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -19596,6 +19657,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -19760,6 +19822,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -19841,6 +19904,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -19982,6 +20046,7 @@
           "title": "events"
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -20121,6 +20186,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -20190,6 +20256,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -20229,6 +20296,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 4,
       "nextOffset": null
     },
@@ -20299,6 +20367,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -20438,6 +20507,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -20510,6 +20580,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -20702,6 +20773,7 @@
           "title": "falsification"
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -20741,6 +20813,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 4,
       "nextOffset": null
     },
@@ -20811,6 +20884,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -20900,6 +20974,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -20949,6 +21024,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -20988,6 +21064,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 4,
       "nextOffset": null
     },
@@ -21058,6 +21135,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -21197,6 +21275,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -21266,6 +21345,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -21449,6 +21529,7 @@
           "title": "learned models"
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -21613,6 +21694,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -21694,6 +21776,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -21833,6 +21916,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -21905,6 +21989,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -22094,6 +22179,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -22204,6 +22290,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -22348,6 +22435,7 @@
           "title": "liquidity"
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -22537,6 +22625,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -22636,6 +22725,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -22725,6 +22815,7 @@
           "title": "parameters"
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -22764,6 +22855,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 4,
       "nextOffset": null
     },
@@ -22834,6 +22926,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -22973,6 +23066,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -23045,6 +23139,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -23184,6 +23279,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -23253,6 +23349,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -23445,6 +23542,7 @@
           "title": "predictive signals"
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -23584,6 +23682,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -23656,6 +23755,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -23795,6 +23895,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -23867,6 +23968,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -24033,6 +24135,7 @@
           "title": "regimes"
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -24197,6 +24300,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -24278,6 +24382,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -24394,6 +24499,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 16,
       "nextOffset": null
     },
@@ -24473,6 +24579,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -24637,6 +24744,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -24718,6 +24826,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -24882,6 +24991,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -24963,6 +25073,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -25087,6 +25198,7 @@
           "title": "seasonality"
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -26212,6 +26324,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 992,
       "nextOffset": 100
     },
@@ -27337,6 +27450,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 992,
       "nextOffset": 200
     },
@@ -28462,6 +28576,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 992,
       "nextOffset": 300
     },
@@ -29587,6 +29702,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 992,
       "nextOffset": 400
     },
@@ -30712,6 +30828,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 992,
       "nextOffset": 500
     },
@@ -31837,6 +31954,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 992,
       "nextOffset": 600
     },
@@ -32962,6 +33080,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 992,
       "nextOffset": 700
     },
@@ -34087,6 +34206,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 992,
       "nextOffset": 800
     },
@@ -35212,6 +35332,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 992,
       "nextOffset": 900
     },
@@ -36249,6 +36370,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 992,
       "nextOffset": null
     },
@@ -37172,6 +37294,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 160,
       "nextOffset": 100
     },
@@ -37735,6 +37858,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 160,
       "nextOffset": null
     },
@@ -37824,6 +37948,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -38343,6 +38468,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 128,
       "nextOffset": 100
     },
@@ -38502,6 +38628,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 128,
       "nextOffset": null
     },
@@ -38574,6 +38701,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -38755,6 +38883,7 @@
           "title": "wavelets"
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     },
@@ -38944,6 +39073,7 @@
           ]
         ]
       },
+      "authority": "authored",
       "total": 24,
       "nextOffset": null
     },
@@ -39031,6 +39161,7 @@
           "schema_version": 1
         }
       },
+      "authority": "authored",
       "total": 0,
       "nextOffset": null
     }

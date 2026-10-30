@@ -6,6 +6,7 @@ import ssl
 import uuid
 from collections.abc import Mapping, Sequence
 from concurrent.futures import CancelledError
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -19,6 +20,7 @@ from thesis_runtime.adapters.providers.invocations import (
     Role,
     ToolCall,
 )
+from thesis_runtime.contracts.completion import CompletionOptions
 from thesis_runtime.contracts.context import ToolContext
 from thesis_runtime.contracts.datum import Datum
 from thesis_runtime.contracts.messages import (
@@ -60,6 +62,7 @@ class _Provider:
         role: Role,
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
+        options: CompletionOptions | None = None,
     ) -> Mapping[str, object]:
         return {
             "projection": "test-neutral",
@@ -67,6 +70,7 @@ class _Provider:
             "role": role,
             "tools": None if tools is None else list(tools),
             "response_format": response_format,
+            **({"options": asdict(options)} if options else {}),
         }
 
     def __init__(self, *responses: ModelCompletion | Exception) -> None:
@@ -85,6 +89,7 @@ class _Provider:
         role: Role,
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
+        options: CompletionOptions | None = None,
     ) -> SessionMessage:
         self.requests.append(tuple(messages))
         response = next(self.responses)
@@ -330,17 +335,19 @@ def test_malformed_schema_fails_before_advertisement() -> None:
     assert not provider.requests
 
 
-def test_normalization_failure_is_recoverable(monkeypatch: pytest.MonkeyPatch) -> None:
-    def broken(*args: object, **kwargs: object) -> tuple[Datum, ...]:
-        raise ValueError("cannot normalize")
-
-    monkeypatch.setattr("thesis_runtime.sessions.session.normalize_datums", broken)
+def test_unserializable_tool_evidence_is_returned_as_recoverable_failure() -> None:
     provider = _Provider(_completion(_CALL), _completion(content="Recovered"))
-    result = _session(provider, lambda _, context: ToolExecution(ok=True)).run(_INPUT)
-
+    result = _session(
+        provider,
+        lambda _, context: ToolExecution(ok=True, structured={"invalid": object()}),
+    ).run(_INPUT)
     assert result.status == "completed"
     assert result.turns[1].datums[0].ok is False
-    assert "cannot normalize" in str(provider.requests[1][-1].content.result)
+    failure = provider.requests[1][-1].content.result
+    assert failure is not None and failure["ok"] is False
+    assert isinstance(failure["failure"], Mapping)
+    assert failure["failure"]["certainty"] == "unknown_outcome"
+    assert failure["failure"]["retry_safe"] is False
 
 
 @pytest.mark.parametrize("cancel_before_handler", [False, True])
@@ -484,7 +491,9 @@ def test_reported_tool_failure_cannot_be_terminal() -> None:
     result = _session(
         provider,
         lambda _, context: ToolExecution(
-            ok=False, failure={"kind": "rejected"}, terminal=True
+            ok=False,
+            failure={"kind": "rejected", "message": "Request rejected"},
+            terminal=True,
         ),
     ).run(_INPUT)
 

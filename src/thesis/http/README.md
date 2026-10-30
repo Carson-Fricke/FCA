@@ -15,8 +15,10 @@ projection, workflow phase policy, or a second incoming-message writer.
 | `invites.py` | Invite lifecycle endpoints. |
 | `errors.py` | Shared typed HTTP error translation and fail-closed service resolution. |
 | `chat.py` | Workspace chats, stable-identity atomic message admission, attachments, investigations, execution controls, tool jobs, and REST execution-event replay. |
-| `chat_sub_agents.py` | Chat-scoped durable nodes, hierarchy, invocation/message/event reads, and stable-identity anchored input admission. |
-| `timeline.py` | Unified chat timeline REST history and SSE tailing of messages, events, and execution snapshots. |
+| `chat_sub_agents.py` | Chat-scoped durable nodes, hierarchy, invocation/message/event reads, stable-identity anchored input admission, and canonical cancellation returns to callers. |
+| `timeline.py` | Scoped display history, exact canonical item detail reads, receipt-header outline reads and the single canonical SSE tail. |
+| `conversation_outline.py` | Read-only navigation projection of canonical turn/request identities and workflow, study, and artifact receipt pointers; excludes transcript bodies and artifact content. |
+| `transcript.py` | Bounded display previews, explicit canonical detail availability and contiguous history byte budgets; never changes durable records. |
 | `streaming.py` | Timeline SSE media type, sleeper port, and reconnect cursor validation. |
 | `schema.py` | Authoritative OpenAPI 3.1 and runtime component-schema export. |
 | `wire.py` | Source-derived durable record models and typed HTTP response envelopes. |
@@ -29,6 +31,7 @@ projection, workflow phase policy, or a second incoming-message writer.
 | `deployments.py` | Deployment, order, portfolio, and risk-decision endpoints. |
 | `dashboards.py` | Workspace-persisted dashboard widget endpoints. |
 | `screeners.py` | Workspace screener definitions and harness-backed screening endpoints. |
+| `job_returns.py` | Bearer-authenticated internal completion POST; strict terminal evidence and canonical conversation delivery, independent of operator sessions. |
 | `harness.py` | Harness MCP-backed UI operations and imported artifact serving. |
 | `knowledge.py` | Knowledge-library search endpoints. |
 
@@ -39,6 +42,13 @@ Its initial `after` watermark anchors the sole conversation SSE route,
 `GET /v1/workspaces/{ws}/chats/{chat}/timeline/stream`. The stream tails greater
 sequences and resumes with `Last-Event-ID`; thread filtering narrows the same
 timeline rather than introducing another delivery path.
+
+`GET /v1/workspaces/{ws}/chats/{chat}/outline?after={seq}` scans at most 500
+timeline records per page across conversation scopes and returns compact
+navigation metadata with `after` and `nextAfter`. Authorization uses the same
+owning chat. Empty metadata pages may still advance the cursor across model
+output or ordinary messages. It persists nothing and cannot submit or replay
+work. A selected outline pointer is resolved through existing scoped history.
 
 Legacy execution, chat-message, and sub-agent SSE routes are removed. REST
 execution `/executions/{execution_id}/events` and chat-scoped sub-agent

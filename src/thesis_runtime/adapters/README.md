@@ -6,3 +6,4 @@ Subdirectories: `postgres/`, `cosmos/`, `filesystem/`, `providers/`. Each docume
 
 - `__init__.py`: adapters capability package.
 - `persistence.py`: explicit configured backend selection and the shared PostgreSQL pool.
+- `receipt_projection.py`: extension-independent PostgreSQL/Cosmos SELECT projection compilers and current chunked-receipt headers; callers select metadata names, never full result bodies.

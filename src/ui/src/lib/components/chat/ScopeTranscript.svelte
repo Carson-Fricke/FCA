@@ -1,5 +1,7 @@
 <script lang="ts">
 	import MarkdownBody from './MarkdownBody.svelte';
+	import MessageDetailButton from './MessageDetailButton.svelte';
+	import { getTranscriptDetails } from './transcript-details';
 	import ThinkingAccordion from './ThinkingAccordion.svelte';
 	import ToolResultCard from './ToolResultCard.svelte';
 	import FalsificationReportCard from './FalsificationReportCard.svelte';
@@ -40,6 +42,7 @@
 	} = $props();
 
 	const isUser = (role: string) => role === 'user';
+	const loadDetails = getTranscriptDetails();
 
 	const STATUS_TONE: Record<string, string> = {
 		spawned: 'border-accent/40 bg-accent/10 text-accent',
@@ -116,6 +119,7 @@
 						{#if entry.message.reasoning || entry.message.outputState}
 							<ThinkingAccordion
 								text={entry.message.reasoning ?? ''}
+								onOpen={entry.message.detailsAvailable && entry.message.seq ? () => loadDetails?.(entry.message.seq!) ?? Promise.resolve() : undefined}
 								outputState={entry.message.outputState ?? 'completed'}
 								testId="thinking-{entry.message.message_id}"
 							/>
@@ -130,6 +134,7 @@
 						{:else}
 							<MarkdownBody text={entry.message.body} />
 						{/if}
+						{#if entry.message.detailsAvailable && entry.message.seq}<MessageDetailButton sequence={entry.message.seq}/>{/if}
 						{#if entry.message.attachment_ids?.length}
 							<div class="mt-2 flex flex-wrap gap-1.5">
 								{#each entry.message.attachment_ids as id (id)}

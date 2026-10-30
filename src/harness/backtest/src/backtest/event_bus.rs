@@ -21,7 +21,7 @@ pub enum EngineEvent {
 impl EngineEvent {
     /// Event time in epoch nanoseconds.
     #[must_use]
-    pub const fn timestamp_ns(&self) -> i64 {
+    pub fn timestamp_ns(&self) -> i64 {
         match self {
             Self::Market(market) => market.timestamp_ns(),
             Self::BarFrame(frame) => frame.available_at_ns,
@@ -32,7 +32,7 @@ impl EngineEvent {
 
     /// Event sequence.
     #[must_use]
-    pub const fn sequence(&self) -> u64 {
+    pub fn sequence(&self) -> u64 {
         match self {
             Self::Market(market) => market.sequence(),
             Self::BarFrame(_) => 0,
@@ -56,8 +56,12 @@ impl EngineEvent {
     ///
     /// Frames carry the bar class priority at their availability time.
     #[must_use]
-    pub const fn class_priority(&self) -> u8 {
+    pub fn class_priority(&self) -> u8 {
         match self {
+            Self::Market(EngineMarket::Block(event)) => match event.kind() {
+                harness_trading::market::TickKind::Quote => 0,
+                harness_trading::market::TickKind::Trade => 1,
+            },
             Self::Market(EngineMarket::Quote { .. }) => 0,
             Self::Market(EngineMarket::Trade { .. }) => 1,
             Self::Market(EngineMarket::Bar(_)) => 9,
@@ -69,8 +73,12 @@ impl EngineEvent {
 
     /// Python `module.qualname` for the dispatch identity.
     #[must_use]
-    pub const fn qualname(&self) -> &'static str {
+    pub fn qualname(&self) -> &'static str {
         match self {
+            Self::Market(EngineMarket::Block(event)) => match event.kind() {
+                harness_trading::market::TickKind::Quote => "harness.core.types.events.QuoteEvent",
+                harness_trading::market::TickKind::Trade => "harness.core.types.events.TradeEvent",
+            },
             Self::Market(EngineMarket::Quote { .. }) => "harness.core.types.events.QuoteEvent",
             Self::Market(EngineMarket::Trade { .. }) => "harness.core.types.events.TradeEvent",
             Self::Market(EngineMarket::Bar(_)) => "harness.core.types.events.BarEvent",
@@ -82,8 +90,12 @@ impl EngineEvent {
 
     /// Python `event_type.value` for the dispatch identity.
     #[must_use]
-    pub const fn event_type(&self) -> &'static str {
+    pub fn event_type(&self) -> &'static str {
         match self {
+            Self::Market(EngineMarket::Block(event)) => match event.kind() {
+                harness_trading::market::TickKind::Quote => "quote",
+                harness_trading::market::TickKind::Trade => "trade",
+            },
             Self::Market(EngineMarket::Quote { .. }) => "quote",
             Self::Market(EngineMarket::Trade { .. }) => "trade",
             Self::Market(EngineMarket::Bar(_)) => "bar",
@@ -193,7 +205,9 @@ impl EventBus {
     /// Pop and record the next event, or `None` when empty.
     pub fn dispatch_next(&mut self) -> Option<EngineEvent> {
         let use_external = self.external.as_ref().is_some_and(|external| {
-            self.heap.peek().is_none_or(|queued| external.key() < queued.key())
+            self.heap
+                .peek()
+                .is_none_or(|queued| external.key() < queued.key())
         });
         let queued = if use_external {
             self.external.take().unwrap()
@@ -252,7 +266,8 @@ impl EventBus {
         self.identity.extend_from_slice(&digits[start..]);
         self.identity.push(0);
         self.identity.extend_from_slice(event.event_id().as_bytes());
-        self.hasher.update(&(self.identity.len() as u64).to_be_bytes());
+        self.hasher
+            .update(&(self.identity.len() as u64).to_be_bytes());
         self.hasher.update(&self.identity);
         if let EngineEvent::BarFrame(frame) = event {
             // Content evidence is independent of source row order and sequences.

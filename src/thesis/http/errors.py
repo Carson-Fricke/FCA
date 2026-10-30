@@ -19,6 +19,7 @@ from thesis.integrations.mcp import (
     HarnessMcpToolError,
     HarnessMcpTransportError,
 )
+from thesis_runtime.contracts.failures import ToolFailureError
 from thesis_runtime.conversations import (
     CrossWorkspaceLinkError,
     InvalidLifecycleTransition,
@@ -69,7 +70,12 @@ def service_error(error: Exception, *, resource: str = "record") -> HTTPExceptio
     if isinstance(error, HTTPException):
         return error
     details: object | None = None
-    if isinstance(error, RecordNotFound):
+    if isinstance(error, ToolFailureError):
+        supplied = error.failure.get("statusCode")
+        status = supplied if type(supplied) is int and 400 <= supplied < 600 else 422
+        code, message = str(error.failure["kind"]), str(error)
+        details = dict(error.failure)
+    elif isinstance(error, RecordNotFound):
         status, code, message = 404, "record_not_found", str(error)
     elif isinstance(error, KeyError):
         status, code, message = (

@@ -1,5 +1,6 @@
 """ID-based validation, durable failure receipts, and pinned workflow replay."""
 
+import json
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
@@ -33,6 +34,7 @@ from thesis.research.hypothesis import InMemoryHypothesisStore
 from thesis.research.models import InMemoryResearchModelStore
 from thesis.workspaces.manifest import load_workspace_manifest
 from thesis.workspaces.programs import WorkspacePrograms
+from thesis.workspaces.sdk import SdkReferences
 from thesis_runtime.adapters.providers.openrouter import OpenRouterProvider
 from thesis_runtime.contracts.context import ToolContext
 from thesis_runtime.contracts.messages import from_record
@@ -53,12 +55,14 @@ class Harness(HarnessToolProvider):
         from thesis.workspaces.programs import WorkspacePrograms
 
         # Fresh packaged SDK metadata, without an inherited uninitialized client.
-        programs = WorkspacePrograms(cast(Any, None), submissions=MemorySubmissions())
-        version, abi = programs._sdk_metadata(programs.sdk_root)
+        programs = WorkspacePrograms(
+            cast(Any, None), submissions=MemorySubmissions(), sdk=SdkReferences()
+        )
+        sdk = programs.sdk.matched_metadata()
         return {
-            "sdkIdentity": programs._sdk_identity(),
-            "sdkVersion": version,
-            "sdkAbiVersion": abi,
+            "sdkIdentity": sdk["sdkIdentity"],
+            "sdkVersion": sdk["sdkVersion"],
+            "sdkAbiVersion": sdk["sdkAbiVersion"],
             "validationIdentity": self.validation_identity(),
         }
 
@@ -137,6 +141,17 @@ class Harness(HarnessToolProvider):
                 structured={
                     "job_id": self._submitted_job_id(arguments),
                     "state": "running",
+                },
+            )
+        if name == "read_artifact":
+            return HarnessToolResult(
+                tool=name,
+                ok=True,
+                structured={
+                    "job_id": arguments["job_id"],
+                    "name": arguments["name"],
+                    "encoding": "utf-8",
+                    "content": json.dumps({"sharpe": 1.0, "fit.baseline": 0.5}),
                 },
             )
         return HarnessToolResult(
@@ -600,7 +615,8 @@ def test_inline_validation_and_foreign_or_stale_completion_are_rejected(
 
 
 def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch):
-    from thesis.workspaces.programs import STRATEGY_TEMPLATE, WorkspacePrograms
+    from thesis.workspaces.programs import WorkspacePrograms
+    from thesis.workspaces.sdk.templates import STRATEGY_TEMPLATE
 
     (
         repositories,
@@ -717,8 +733,8 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         {
             "program_id": "alpha",
             "expected_version": reference["version"],
-            "expected": "struct AuthoredStrategy {",
-            "replacement": "struct AuthoredStrategy /* changed latest */ {",
+            "expected": "struct AuthoredStrategy;",
+            "replacement": "struct AuthoredStrategy /* changed latest */;",
             "configuration": {**config, "end": "2024-01-03T00:00:00Z"},
         },
         context=context,
@@ -782,6 +798,7 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
     assert retained.state is ToolJobState.RUNNING
     assert retained.submission_certainty == "unknown_outcome"
     assert result.structured["result"]["state"] == "running"
+    assert result.pending_jobs == (executed_job_id,)
     assert "metrics" not in result.structured["result"]
     harness.refuse_backtest = True
     refused = backtest_registry.dispatch(
@@ -809,7 +826,7 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
     )
     instance = launch["config"]["strategy_instances"][0]
     latest_source = STRATEGY_TEMPLATE.replace(
-        "struct AuthoredStrategy {", "struct AuthoredStrategy /* changed latest */ {"
+        "struct AuthoredStrategy;", "struct AuthoredStrategy /* changed latest */;"
     )
     assert instance["parameters"]["source"] == latest_source
     assert launch["config"]["end"] == "2024-01-03T00:00:00Z"
@@ -949,7 +966,8 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
     assert batch.ok
     batch_id = cast(str, batch.structured["batchId"])
     points = cast(list[dict[str, object]], batch.structured["points"])
-    assert [point["state"] for point in points] == ["running", "running", "running"]
+    assert [point["state"] for point in points] == ["running"] * 3
+    assert batch.pending_jobs == tuple(point["jobId"] for point in points)
     for point in points:
         job_id = cast(str, point["jobId"])
         assert optimization_registry.dispatch(
@@ -1489,9 +1507,9 @@ def test_strategy_backtest_agent_runs_latest_validated_id(tmp_path, monkeypatch)
         assert run_document["start"] == forward_window["start"]
         assert run_document["end"] == forward_window["end"]
     assert (
-        WorkspacePrograms(repositories, git_factory=repositories.git_factory).load(
-            request.workspace_id, "strategy", "alpha"
-        )["version"]
+        WorkspacePrograms(
+            repositories, git_factory=repositories.git_factory, sdk=SdkReferences()
+        ).load(request.workspace_id, "strategy", "alpha")["version"]
         != reference["version"]
     )
 
@@ -1537,13 +1555,17 @@ def test_completion_receipt_writer_failure_propagates(
 
 
 def test_trials_pin_indicator_dependencies_and_configuration(tmp_path, monkeypatch):
-    from thesis.workspaces.programs import INDICATOR_TEMPLATE, WorkspacePrograms
+    from thesis.workspaces.programs import WorkspacePrograms
+    from thesis.workspaces.sdk.templates import INDICATOR_TEMPLATE
 
     repositories, _, _, request, record, registry, harness, callbacks, work = (
         setup_workflow(tmp_path, monkeypatch)
     )
     programs = WorkspacePrograms(
-        repositories, harness, git_factory=repositories.git_factory
+        repositories,
+        harness,
+        git_factory=repositories.git_factory,
+        sdk=SdkReferences(harness),
     )
     snapshot = programs.load(request.workspace_id, "study", "momentum")
     configuration = snapshot["configuration"]

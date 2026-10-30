@@ -12,13 +12,14 @@ from thesis.persistence.git import GitPublicationError
 from thesis.workspaces.local import LocalWorkspaceProvider
 from thesis.workspaces.manifest import load_workspace_manifest
 from thesis.workspaces.programs import WorkspacePrograms
+from thesis.workspaces.sdk import SdkReferences
 
 
 def test_sketch_revision_handoff_is_immutable_and_inspectable(tmp_path):
     provider = LocalWorkspaceProvider(tmp_path / "workspaces")
     manifest = load_workspace_manifest("config/thesis/workspace.yaml")
     provider.create(manifest)
-    programs = WorkspacePrograms(provider)
+    programs = WorkspacePrograms(provider, sdk=SdkReferences())
     document = {
         "title": "Compression release",
         "premise": "Investigate compression",

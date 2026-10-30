@@ -2,7 +2,86 @@
 //! Execution lifecycle and artifact manifests belong to harness-execution.
 use harness_execution::jobs::StoreError;
 use harness_execution::persistence::{error, Backend, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Publish a synced temporary file under the caller's object lock. Creation
+/// never clobbers; replacement keeps readers of the previous file usable.
+fn publish(temporary: tempfile::NamedTempFile, target: &Path, replace: bool) -> Result<()> {
+    let result = if replace {
+        replace_existing(temporary, target)
+    } else {
+        temporary
+            .persist_noclobber(target)
+            .map(|_| ())
+            .map_err(|failure| failure.error)
+    };
+    result.map_err(|failure| {
+        error(format!(
+            "failed to {} local object '{}': {failure}",
+            if replace { "replace" } else { "create" },
+            target.display()
+        ))
+    })
+}
+
+#[cfg(not(windows))]
+fn replace_existing(temporary: tempfile::NamedTempFile, target: &Path) -> std::io::Result<()> {
+    temporary
+        .persist(target)
+        .map(|_| ())
+        .map_err(|failure| failure.error)
+}
+
+#[cfg(windows)]
+fn replace_existing(temporary: tempfile::NamedTempFile, target: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{
+        ERROR_UNABLE_TO_MOVE_REPLACEMENT, ERROR_UNABLE_TO_MOVE_REPLACEMENT_2,
+    };
+    use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
+
+    // Close our staging handle before replacement; TempPath still owns cleanup
+    // on failure. Rename-based persistence fails with ordinary open readers on
+    // Windows, even when they allow delete sharing.
+    let mut temporary = temporary.into_temp_path();
+    let target: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+    let source: Vec<u16> = temporary.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SAFETY: both paths are owned NUL-terminated buffers valid through the call;
+    // no backup or optional parameters are supplied.
+    let replaced = unsafe {
+        ReplaceFileW(
+            target.as_ptr(),
+            source.as_ptr(),
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    };
+    if replaced == 0 {
+        let failure = std::io::Error::last_os_error();
+        // These documented partial failures can move/remove the old target.
+        // Retain the staged bytes for reconciliation rather than delete what
+        // may now be the only copy. Never retry an uncertain publication.
+        if matches!(
+            failure.raw_os_error().map(|code| code as u32),
+            Some(ERROR_UNABLE_TO_MOVE_REPLACEMENT | ERROR_UNABLE_TO_MOVE_REPLACEMENT_2)
+        ) {
+            temporary.disable_cleanup(true);
+            return Err(std::io::Error::new(
+                failure.kind(),
+                format!(
+                    "{failure}; staged replacement retained at '{}'",
+                    temporary.display()
+                ),
+            ));
+        }
+        Err(failure)
+    } else {
+        Ok(())
+    }
+}
+
 pub struct Local {
     pub root: PathBuf,
 }
@@ -20,7 +99,7 @@ impl Local {
         lock.lock().map_err(error)?;
         Ok(lock)
     }
-    fn replace(&self, path: &str, bytes: &[u8]) -> Result<()> {
+    fn write(&self, path: &str, bytes: &[u8], replace: bool) -> Result<()> {
         use std::io::Write;
         let target = self.root.join(path);
         let parent = target.parent().unwrap();
@@ -28,8 +107,7 @@ impl Local {
         let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(error)?;
         temporary.write_all(bytes).map_err(error)?;
         temporary.as_file().sync_all().map_err(error)?;
-        temporary.persist(target).map_err(error)?;
-        Ok(())
+        publish(temporary, &target, replace)
     }
 }
 impl Backend for Local {
@@ -52,8 +130,7 @@ impl Backend for Local {
         )
         .map_err(error)?;
         temporary.as_file().sync_all().map_err(error)?;
-        temporary.persist(target).map_err(error)?;
-        Ok(())
+        publish(temporary, &target, false)
     }
 
     fn open(&self, path: &str) -> Result<Box<dyn std::io::Read + Send>> {
@@ -73,7 +150,7 @@ impl Backend for Local {
         if self.read(path)?.is_some() {
             return Ok(false);
         }
-        self.replace(path, bytes)?;
+        self.write(path, bytes, false)?;
         Ok(true)
     }
     fn update(&self, path: &str, change: &mut dyn FnMut(Vec<u8>) -> Result<Vec<u8>>) -> Result<()> {
@@ -81,7 +158,7 @@ impl Backend for Local {
         let bytes = self
             .read(path)?
             .ok_or_else(|| StoreError::JobNotFound(path.into()))?;
-        self.replace(path, &change(bytes)?)
+        self.write(path, &change(bytes)?, true)
     }
     fn list(&self, prefix: &str) -> Result<Vec<String>> {
         fn walk(

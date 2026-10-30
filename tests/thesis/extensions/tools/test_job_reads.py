@@ -58,3 +58,43 @@ def test_session_job_read_returns_execution_reference_instead_of_source(name):
         == accepted
     )
     provider.close()
+
+
+@pytest.mark.parametrize("read_only", [False, True])
+def test_read_failure_recovery_uses_registered_operation_without_mutation_advice(
+    read_only,
+):
+    transport = Transport()
+    transport.catalog = [
+        {
+            "name": "get_job_result",
+            "inputSchema": {"type": "object"},
+            "annotations": {"readOnlyHint": read_only},
+        }
+    ]
+    transport.result = {
+        "isError": True,
+        "structuredContent": {
+            "error": "job missing",
+            "executionCertainty": "unknown_outcome",
+        },
+        "content": [{"type": "text", "text": "job missing"}],
+    }
+    provider = HarnessToolProvider(HarnessMcpClient(transport))
+    context = ToolContext("workspace-one", "chat-one", "chat-one", "operator")
+    registry = build_session_registry(context=context, harness_tools=provider)
+    result = registry.dispatch(
+        "get_job_result", {"job_id": "retained-job"}, context=context
+    )
+    assert not result.ok and result.failure is not None
+    assert result.failure["certainty"] == (
+        "observed_failure" if read_only else "unknown_outcome"
+    )
+    assert result.failure["retry_safe"] is read_only
+    if read_only:
+        assert result.failure["executionCertainty"] == "observed_failure"
+        assert (
+            result.failure["retryGuidance"]
+            == "Correct the read arguments or retry the read when its dependency is available."
+        )
+    provider.close()

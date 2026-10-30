@@ -5,27 +5,31 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import cast
 
-from thesis.experiments.mandate import DataWindowPolicy
+from thesis.experiments.mandate import DataWindowResolver, MandateError
 from thesis.integrations.mcp import HarnessMcpError
 from thesis.persistence.git import GitPublicationError
 from thesis.workspaces.local import WorkspaceRepositoryError
+from thesis.workspaces.program_contracts import (
+    PROGRAM_CONFIGURATION_SCHEMA,
+    ProgramArtifactError,
+    ProgramKind,
+    ProgramPublicationError,
+)
 from thesis.workspaces.programs import (
     INDICATOR_ID_PATTERN,
     MAX_LIST_RESULTS,
     MAX_NULL_BLOCK_SIZE,
-    MAX_READ_CHARS,
+    MAX_READ_TOKENS,
     NULL_TRANSFORM_MODES,
     PARAMETER_DECLARATION_SCHEMA,
-    PROGRAM_CONFIGURATION_SCHEMA,
     PROGRAM_ID_PATTERN,
     JobRetention,
     JobSettlement,
-    ProgramArtifactError,
-    ProgramKind,
-    ProgramPublicationError,
     WorkspacePrograms,
 )
 from thesis_runtime.contracts.context import ToolContext
+from thesis_runtime.contracts.failures import failure_from_exception
+from thesis_runtime.tools.reading import DEFAULT_READ_TOKENS
 from thesis_runtime.tools.registry import RegisteredTool, ToolExecution
 from thesis_runtime.tools.schema import render_violations, validate_arguments
 
@@ -84,11 +88,32 @@ def _context_retention(
     return retain
 
 
+def _pending_jobs(receipt: Mapping[str, object]) -> tuple[str, ...]:
+    """Return dispatched, unfinished job identities, including uncertain admissions."""
+    raw = receipt.get("points")
+    points = raw if isinstance(raw, list) else [receipt]
+    pending = []
+    for point in points:
+        if not isinstance(point, Mapping):
+            continue
+        result = point.get("result", {})
+        state = point.get("state") or (
+            result.get("state") if isinstance(result, Mapping) else None
+        )
+        job_id = point.get("jobId", point.get("job_id"))
+        if isinstance(job_id, str) and (
+            state in {"queued", "running"}
+            or point.get("executionCertainty") == "unknown_outcome"
+        ):
+            pending.append(job_id)
+    return tuple(pending)
+
+
 def program_registered_tools(
     service: WorkspacePrograms,
     context: ToolContext,
     *,
-    data_window: DataWindowPolicy | None = None,
+    resolve_data_window: DataWindowResolver | None = None,
     job_retention: ContextJobRetention | None = None,
 ) -> tuple[RegisteredTool, ...]:
     """Use the existing session dispatcher and inbox, never a parallel executor.
@@ -96,8 +121,10 @@ def program_registered_tools(
     Only author/update accept source; execution consumes committed IDs. Workspace
     authority comes out of band from ``context``, not program contents or metadata.
     Composition must replace conflicting harness/legacy author tool registrations.
-    ``data_window`` is the workflow execution's research-mandate policy, forwarded
-    to every execution handler; a missing policy leaves execution unrestricted.
+    ``resolve_data_window`` checks the workflow's frozen-window prerequisite at
+    call time without hiding tools. Execution also passes that resolved policy
+    to the program service before allocation or dispatch. No resolver means an
+    unrestricted chat-level operation.
     ``job_retention`` durably records each fresh execution id before dispatch for
     contexts that own a steerable workflow execution; chat-level contexts leave
     it unset and run unretained.
@@ -166,10 +193,15 @@ def program_registered_tools(
                 {
                     "start_line": _LINE,
                     "end_line": _LINE,
-                    "max_chars": {
+                    "token_offset": {"type": "integer", "minimum": 0},
+                    "expected_source_sha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$",
+                    },
+                    "max_tokens": {
                         "type": "integer",
-                        "minimum": 1,
-                        "maximum": MAX_READ_CHARS,
+                        "minimum": 32,
+                        "maximum": MAX_READ_TOKENS,
                     },
                 }
             )
@@ -225,30 +257,19 @@ def program_registered_tools(
             properties = {
                 "topic": {
                     "type": "string",
-                    "enum": [
-                        "study",
-                        "strategy",
-                        "indicator",
-                        "indicator_api",
-                        "wavelet",
-                        "consumer",
-                        "program",
-                        "events",
-                        "exports",
-                        "decimal",
-                        "building_blocks",
-                        "research_views",
-                        "research_publishing",
-                        "research_recipes",
-                        "outputs",
-                    ],
+                    "description": "SDK alias or discovered source path; use index to list available references. Templates: study, strategy, indicator.",
                 },
                 "start_line": _LINE,
                 "end_line": _LINE,
-                "max_chars": {
+                "token_offset": {
                     "type": "integer",
-                    "minimum": 1,
-                    "maximum": MAX_READ_CHARS,
+                    "minimum": 0,
+                    "description": "Token cursor into the original selected source; use nextArguments unchanged.",
+                },
+                "max_tokens": {
+                    "type": "integer",
+                    "minimum": 32,
+                    "maximum": MAX_READ_TOKENS,
                 },
             }
             required = ["topic"]
@@ -288,6 +309,9 @@ def program_registered_tools(
                     },
                 )
             try:
+                data_window = (
+                    resolve_data_window() if resolve_data_window is not None else None
+                )
                 if tool_operation == "author" and ("source" in arguments) == (
                     "template" in arguments
                 ):
@@ -305,7 +329,10 @@ def program_registered_tools(
                         cast(str, arguments["topic"]),
                         start_line=cast(int, arguments.get("start_line", 1)),
                         end_line=cast(int | None, arguments.get("end_line")),
-                        max_chars=cast(int, arguments.get("max_chars", MAX_READ_CHARS)),
+                        token_offset=cast(int, arguments.get("token_offset", 0)),
+                        max_tokens=cast(
+                            int, arguments.get("max_tokens", DEFAULT_READ_TOKENS)
+                        ),
                     )
                 elif tool_operation == "list":
                     result = service.list(
@@ -367,8 +394,12 @@ def program_registered_tools(
                             program_id,
                             start_line=cast(int, arguments.get("start_line", 1)),
                             end_line=cast(int | None, arguments.get("end_line")),
-                            max_chars=cast(
-                                int, arguments.get("max_chars", MAX_READ_CHARS)
+                            max_tokens=cast(
+                                int, arguments.get("max_tokens", DEFAULT_READ_TOKENS)
+                            ),
+                            token_offset=cast(int, arguments.get("token_offset", 0)),
+                            expected_source_sha256=cast(
+                                str | None, arguments.get("expected_source_sha256")
                             ),
                             job_id=cast(str | None, arguments.get("job_id")),
                         )
@@ -392,6 +423,7 @@ def program_registered_tools(
                             ),
                             data_window=data_window,
                             retain=retain,
+                            recipient=context.as_dict(),
                         )
                     elif tool_name == "run_backtest_batch":
                         result = service.run_batch(
@@ -405,6 +437,7 @@ def program_registered_tools(
                             label=cast(str | None, arguments.get("label")),
                             data_window=data_window,
                             retain=retain,
+                            recipient=context.as_dict(),
                         )
                     elif tool_name == "run_null_batch":
                         result = service.run_null_batch(
@@ -423,6 +456,7 @@ def program_registered_tools(
                             label=cast(str | None, arguments.get("label")),
                             data_window=data_window,
                             retain=retain,
+                            recipient=context.as_dict(),
                         )
                     else:
                         result = service.run(
@@ -431,7 +465,18 @@ def program_registered_tools(
                             program_id,
                             data_window=data_window,
                             retain=retain,
+                            recipient=context.as_dict(),
                         )
+            except MandateError as error:
+                return ToolExecution(
+                    ok=False,
+                    failure={
+                        "kind": "research_window",
+                        "message": str(error),
+                        "certainty": "not_started",
+                        "retry_safe": True,
+                    },
+                )
             except ProgramPublicationError as error:
                 return ToolExecution(
                     ok=False,
@@ -444,16 +489,26 @@ def program_registered_tools(
                     },
                 )
             except HarnessMcpError as error:
+                reading = tool_operation in {"read", "list"}
                 return ToolExecution(
                     ok=False,
-                    failure={
-                        "kind": "harness",
-                        "message": "Harness program request failed.",
-                        "executionCertainty": getattr(
-                            error, "execution_certainty", "unknown_outcome"
-                        ),
-                        "retryGuidance": "Inspect job/run state before an explicit retry; never automatically replay execution.",
-                    },
+                    failure=failure_from_exception(
+                        error,
+                        **{
+                            "kind": "harness",
+                            "message": f"{tool_name}: {error}",
+                            "job_id": getattr(error, "job_id", None),
+                            "executionCertainty": "observed_failure"
+                            if reading
+                            else getattr(
+                                error, "execution_certainty", "unknown_outcome"
+                            ),
+                            "retry_safe": reading,
+                            "retryGuidance": "Correct the read arguments or retry the read when the harness is available."
+                            if reading
+                            else "Inspect job/run state before an explicit retry; never automatically replay execution.",
+                        },
+                    ),
                 )
             except (
                 ProgramArtifactError,
@@ -463,21 +518,29 @@ def program_registered_tools(
             ) as error:
                 return ToolExecution(
                     ok=False,
-                    failure={
-                        "kind": "program",
-                        "message": str(error)
-                        if isinstance(error, ProgramArtifactError)
-                        else "Program persistence request failed.",
-                        "executionCertainty": "unknown_outcome"
-                        if isinstance(error, GitPublicationError)
-                        else "not_started",
-                        "retryGuidance": "Inspect committed program state before explicitly retrying a mutation.",
-                    },
+                    failure=failure_from_exception(
+                        error,
+                        **{
+                            "kind": "program",
+                            "message": f"{tool_name}: {error}",
+                            "executionCertainty": "observed_failure"
+                            if tool_operation in {"read", "list"}
+                            else "unknown_outcome"
+                            if isinstance(error, GitPublicationError)
+                            else "not_started",
+                            "retry_safe": tool_operation in {"read", "list"},
+                            "retryGuidance": "Correct the requested ID or source range using available references and nextArguments."
+                            if tool_operation in {"read", "list"}
+                            else "Inspect committed program state before explicitly retrying a mutation.",
+                        },
+                    ),
                 )
+            pending = _pending_jobs(result) if tool_operation == "run" else ()
             if result.get("accepted") is False or result.get("ok") is False:
                 return ToolExecution(
                     ok=False,
                     structured=result,
+                    pending_jobs=pending,
                     failure={
                         "kind": "validation"
                         if tool_operation == "validate"
@@ -488,14 +551,14 @@ def program_registered_tools(
                         "retryGuidance": result.get("retryGuidance"),
                     },
                 )
-            return ToolExecution(ok=True, structured=result)
+            return ToolExecution(ok=True, structured=result, pending_jobs=pending)
 
         tools.append(
             RegisteredTool(
                 descriptor={
                     "name": name,
                     "description": (
-                        "Read exact serving SDK signatures by topic, or locally tested Rust templates only when packaged and fresh serving SDK identities match. Without a harness, references are local guidance only."
+                        "Read bounded serving SDK source or a matching local template. Follow nextArguments exactly until null, including token_offset for partial lines. Without a harness, references are local guidance only."
                         if name == "read_sdk_reference"
                         else "Read a bounded program source range. With job_id, read the immutable accepted source for that executed program_id; without job_id, read the latest committed workspace source. Use job_id when reviewing results."
                         if name in ("read_study", "read_strategy")
@@ -503,12 +566,14 @@ def program_registered_tools(
                         if operation == "publish"
                         else f"List committed workspace {kind} IDs at HEAD with content version, hashes, and compact configuration. Read a selected ID before patching; author only a new ID."
                         if operation == "list"
-                        else "Submit distinct validated parameter assignments for a strategy through the existing run boundary; every point is validated before any submission and the deterministic batch id carries per-point run receipts. Unknown-outcome points are recorded truthfully and never replayed automatically; inspect each run before an explicit retry."
+                        else "Submit all validated strategy assignments asynchronously. Returns retained job IDs; completion is delivered to this conversation. Accepted queued jobs need no operator action. Continue useful work or end your response; completion resumes you automatically. Do not poll."
                         if name == "run_backtest_batch"
-                        else "Submit a bounded chunk of ordinary or block-permutation null jobs from the complete frozen seed list; advance offset to nextOffset until completedSubmission for a committed strategy; the parameter assignment and block_size are validated before any submission, every point carries the frozen null config and a fresh opaque run id, and unknown outcomes are recorded truthfully and never replayed."
+                        else "Submit a bounded chunk of frozen null seeds asynchronously. Follow nextOffset until completedSubmission. Job completions arrive here; continue other work or end your response. Do not poll or replay unknown submissions."
                         if name == "run_null_batch"
-                        else "Run a committed workspace strategy by program_id with an optional parameters assignment validated against its parameter_declaration before submission; omitted names receive declared defaults."
+                        else "Submit a committed strategy asynchronously. Omitted parameters use declared defaults. Completion arrives here; continue other work or end your response. Do not poll or replay unknown submissions."
                         if name == "run_backtest"
+                        else "Submit a committed study asynchronously. Completion arrives here; continue other work or end your response. Do not poll or replay unknown submissions."
+                        if name == "run_study"
                         else f"{operation.title()} a workspace {kind} by program_id. Latest committed contents are authoritative. "
                         "Author with source or template=basic and complete dated configuration with exact subscriptions. "
                         "Updates require a current content version; provide paired expected/replacement for a source patch or configuration alone. Validate before running. "

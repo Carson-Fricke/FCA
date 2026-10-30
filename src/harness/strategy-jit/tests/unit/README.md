@@ -8,6 +8,8 @@ are exercised by the integration tests in the parent directory.
 - `diagnostic_compactness.rs` checks bounded structured diagnostic projection.
 - `diagnostics.rs` checks sandbox-source validation.
 - `fixture.rs` supplies authored fixture sources for compiler tests.
+- `execution_views.rs` checks lazy host serialization-cache transitions without
+  eager encoding or invalidation of unchanged histories.
 - `provenance.rs` checks compiler fingerprint inputs and invalidation.
 - `sdk_reference.rs` pins cross-language SDK source canonicalization and real changes.
 - `validation.rs` checks validation-cache outcomes and bounds.

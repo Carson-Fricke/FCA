@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 
-/// One causal value; undefined observations carry their reason.
+/// One authored timestamped value; undefined observations carry their reason.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OutputPoint {
@@ -42,6 +42,11 @@ pub struct OutputEvent {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StudyOutput {
+    /// Host-sealed replay observations. Authored publication of this variant
+    /// is rejected; reference `causal/<dataset>` from views instead.
+    CausalObservations {
+        dataset: harness_contracts::causal::CausalObservations,
+    },
     /// Semantic description of one output, independent of an exhibit.
     DatasetSemantics {
         semantics: crate::research::DatasetSemantics,
@@ -65,7 +70,8 @@ pub enum StudyOutput {
         /// Frozen finite learned coefficients.
         weights: BTreeMap<String, f64>,
     },
-    /// Causal sequences, including warm-up and missing states.
+    /// Authored sequences, including warm-up and missing states. Timing shape
+    /// is validated; only `CausalObservations` has replay-sealed provenance.
     Series {
         /// Ordered observations.
         points: Vec<OutputPoint>,
@@ -92,6 +98,7 @@ impl StudyOutput {
     /// observations, duplicate columns, nested cells, and ragged tables.
     pub fn validate(&self) -> Result<(), String> {
         match self {
+            Self::CausalObservations { dataset } => dataset.validate()?,
             Self::ResearchView { view } => view.validate()?,
             Self::DatasetSemantics { semantics } => semantics.validate()?,
             Self::FittedState {
@@ -102,56 +109,65 @@ impl StudyOutput {
                 weights,
                 ..
             } => {
-                if method.trim().is_empty()
-                    || training_start_ns >= training_end_ns
-                    || training_end_ns > available_at_ns
-                    || weights.is_empty()
-                    || weights.values().any(|weight| !weight.is_finite())
-                {
-                    return Err(
-                        "fitted state requires finite weights and causal training provenance"
-                            .into(),
-                    );
+                if method.trim().is_empty() {
+                    return Err("fitted_state.method must be nonempty".into());
+                }
+                if training_start_ns >= training_end_ns || training_end_ns > available_at_ns {
+                    return Err(format!("fitted_state timing: require training_start_ns < training_end_ns <= available_at_ns; received {training_start_ns}, {training_end_ns}, {available_at_ns}"));
+                }
+                if weights.is_empty() {
+                    return Err("fitted_state.weights must be nonempty".into());
+                }
+                for (name, value) in weights {
+                    if !value.is_finite() {
+                        return Err(format!("fitted_state.weights[{name:?}]={value:?}: expected a finite coefficient"));
+                    }
                 }
             }
             Self::Series { points } => {
-                for point in points {
-                    if point.symbol.is_empty()
-                        || point.interval.is_empty()
-                        || point.event_time_ns > point.available_at_ns
-                    {
-                        return Err("series requires identity and causal availability".into());
+                for (index, point) in points.iter().enumerate() {
+                    if point.symbol.is_empty() || point.interval.is_empty() {
+                        return Err(format!("series.points[{index}]: symbol={:?}, interval={:?}; both must be nonempty", point.symbol, point.interval));
+                    }
+                    if point.event_time_ns > point.available_at_ns {
+                        return Err(format!(
+                            "series.points[{index}]: event_time_ns={} exceeds available_at_ns={}",
+                            point.event_time_ns, point.available_at_ns
+                        ));
                     }
                     match (point.value, point.undefined_reason.as_deref()) {
                         (Some(value), None) if value.is_finite() => {}
                         (None, Some(reason)) if !reason.trim().is_empty() => {}
-                        _ => {
-                            return Err(
-                                "series requires finite values or explicit undefined reasons"
-                                    .into(),
-                            )
-                        }
+                        _ => return Err(format!("series.points[{index}]: value={:?}, undefined_reason={:?}; supply either a finite value without a reason, or null with a nonempty reason", point.value, point.undefined_reason)),
                     }
                 }
             }
             Self::Events { events } => {
-                if events.iter().any(|event| {
-                    event.symbol.is_empty() || event.event_time_ns > event.available_at_ns
-                }) {
-                    return Err("events require identity and causal confirmation".into());
+                for (index, event) in events.iter().enumerate() {
+                    if event.symbol.is_empty() || event.event_time_ns > event.available_at_ns {
+                        return Err(format!("events[{index}]: symbol={:?}, event_time_ns={}, available_at_ns={}; require a nonempty symbol and event_time_ns <= available_at_ns", event.symbol, event.event_time_ns, event.available_at_ns));
+                    }
                 }
             }
             Self::Table { columns, rows } => {
-                let unique: BTreeSet<_> = columns.iter().collect();
-                if columns.is_empty()
-                    || unique.len() != columns.len()
-                    || columns.iter().any(|name| name.trim().is_empty())
-                    || rows.iter().any(|row| {
-                        row.len() != columns.len()
-                            || row.iter().any(|cell| cell.is_array() || cell.is_object())
-                    })
-                {
-                    return Err("table requires unique columns and rectangular scalar rows".into());
+                if columns.is_empty() {
+                    return Err("table.columns must be nonempty".into());
+                }
+                let mut unique = BTreeSet::new();
+                for (index, column) in columns.iter().enumerate() {
+                    if column.trim().is_empty() || !unique.insert(column) {
+                        return Err(format!("table.columns[{index}]={column:?}: columns must have nonempty unique names"));
+                    }
+                }
+                for (index, row) in rows.iter().enumerate() {
+                    if row.len() != columns.len() {
+                        return Err(format!("table.rows[{index}]: received {} cells; expected {} to match columns {:?}", row.len(), columns.len(), columns));
+                    }
+                    for (column, cell) in columns.iter().zip(row) {
+                        if cell.is_array() || cell.is_object() {
+                            return Err(format!("table.rows[{index}][{column:?}]: expected a JSON scalar or null, received a nested collection"));
+                        }
+                    }
                 }
             }
         }

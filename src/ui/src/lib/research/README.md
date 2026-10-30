@@ -5,7 +5,8 @@ canonical transcript types; it cannot author studies, submit jobs or send agent
 messages. Chat and the workspace explorer use the same component.
 
 - `contracts.ts`: strict versioned descriptor decoding, scalar evidence and
-  explicit identity/type/causal-time validation. Nulls remain missing.
+  explicit identity/type/causal-time validation, including host-sealed observation
+  tables. Nulls remain missing and nanosecond strings remain exact.
 - `semantics.ts`: pure publisher-supplied output interpretation, recommendations,
   field candidates, explicit filtering, and ordered display projections.
 - `policies.ts`: per-grammar field-role and coordinate policies; duplicate cells
@@ -16,6 +17,7 @@ messages. Chat and the workspace explorer use the same component.
   searchable paginated tables, and explicit loaded-data coverage.
 - `resources.ts`: shared immutable page cache, artifact identity checks,
   cancellation and bounded paging (5,000 rows or approximately 2 MB per dataset).
+  Sealed observations concatenate their nested rows across bounded pages.
 - `registry.ts`: local component registration and required field mappings for
   visual primitives; evidence never supplies executable components.
 - `ResearchExplorer.svelte`: compact tabs, lazily loaded output evidence,

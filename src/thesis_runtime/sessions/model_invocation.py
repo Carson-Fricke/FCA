@@ -11,6 +11,7 @@ from threading import Condition, Thread
 from time import monotonic
 from typing import Literal, Protocol
 
+from thesis_runtime.contracts.completion import CompletionOptions
 from thesis_runtime.contracts.errors import (
     ProviderRejectedError,
     ProviderUnreachableError,
@@ -38,6 +39,7 @@ class CompletionProvider(Protocol):
         role: Literal["primary", "coding", "critique", "research"],
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
+        options: CompletionOptions | None = None,
     ) -> Mapping[str, object]: ...
 
     def stream(
@@ -48,6 +50,7 @@ class CompletionProvider(Protocol):
         role: Literal["primary", "coding", "critique", "research"],
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
+        options: CompletionOptions | None = None,
     ) -> Generator[OutputDelta | SessionMessage, None, None]: ...
 
 
@@ -125,6 +128,8 @@ class ModelInvocation:
         role: Literal["primary", "coding", "critique", "research"],
         tools: Sequence[Mapping[str, object]] | None,
         store: InvocationPersistence | None,
+        *,
+        options: CompletionOptions | None = None,
     ) -> SessionMessage:
         """Audit the exact request before execution; retain it in every terminal update."""
         self._provider = provider
@@ -138,7 +143,10 @@ class ModelInvocation:
             for message in working
         )
         provider_request = self._provider.request_snapshot(
-            messages=working, role=role, tools=tools
+            messages=working,
+            role=role,
+            tools=tools,
+            **({"options": options} if options is not None else {}),
         )
         if not isinstance(provider_request, Mapping):
             raise TypeError("provider request snapshot must be a mapping")
@@ -161,7 +169,11 @@ class ModelInvocation:
         try:
             return self.run(
                 self._provider.stream(
-                    messages=working, message_id=self.message_id, role=role, tools=tools
+                    messages=working,
+                    message_id=self.message_id,
+                    role=role,
+                    tools=tools,
+                    **({"options": options} if options is not None else {}),
                 )
             )
         except (OwnershipLost, ModelSteered):

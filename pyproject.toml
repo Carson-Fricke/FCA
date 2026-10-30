@@ -26,6 +26,7 @@ dependencies = [
     "pydantic-settings>=2.5",
     "pyjwt[crypto]>=2.9",
     "referencing>=0.37",
+    "tiktoken>=0.14.0",
     "tokenizers>=0.21",
     "typer>=0.16",
     "uvicorn>=0.30",
@@ -34,6 +35,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.8",
     "ty>=0.0.77",
 ]
@@ -54,13 +56,13 @@ exclude = ["*.target*", "*.tests*", "*.src", "*.src.*"]
 
 [tool.setuptools.package-data]
 "thesis.knowledge" = ["library/**/*.md", "library/*.md"]
-"harness.strategy-sdk" = ["Cargo.toml", "src/*.rs", "src/research/*.rs"]
+"harness.strategy-sdk" = ["Cargo.toml", "reference-topics.json", "src/*.rs", "src/research/*.rs"]
 "harness.contracts" = ["Cargo.toml", "src/*.rs"]
 "harness.num" = ["Cargo.toml", "src/*.rs"]
 "lake.contracts" = ["Cargo.toml", "src/*.rs"]
 
 [tool.pytest.ini_options]
-addopts = ["--strict-config", "--strict-markers", "--import-mode=importlib", "-ra"]
+addopts = ["--strict-config", "--strict-markers", "--import-mode=importlib", "-ra", "-n", "2", "--dist=loadfile"]
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = [

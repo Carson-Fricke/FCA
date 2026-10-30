@@ -7,13 +7,15 @@ from typing import cast
 
 from thesis.knowledge.service import (
     DATA_ONLY,
-    MAX_READ_CHARS,
-    KnowledgeCollectionError,
+    MAX_READ_TOKENS,
+    KnowledgeRequestError,
     KnowledgeScope,
     KnowledgeService,
     validate_scope,
 )
 from thesis_runtime.contracts.context import ToolContext
+from thesis_runtime.contracts.failures import failure_from_exception
+from thesis_runtime.tools.reading import DEFAULT_READ_TOKENS
 from thesis_runtime.tools.registry import RegisteredTool, ToolExecution
 from thesis_runtime.tools.schema import render_violations, validate_arguments
 
@@ -65,11 +67,12 @@ def knowledge_registered_tools(
         "required": ["reference"],
         "properties": {
             "reference": {"type": "string", "minLength": 1, "maxLength": 512},
-            "max_chars": {
+            "token_offset": {"type": "integer", "minimum": 0},
+            "max_tokens": {
                 "type": "integer",
-                "minimum": 1,
-                "maximum": MAX_READ_CHARS,
-                "default": 6000,
+                "minimum": 32,
+                "maximum": MAX_READ_TOKENS,
+                "default": DEFAULT_READ_TOKENS,
             },
         },
     }
@@ -86,9 +89,11 @@ def knowledge_registered_tools(
                     "message": render_violations(misses),
                 },
             )
-        parameter = "limit" if name == "search_knowledge" else "max_chars"
-        maximum = MAX_SEARCH_RESULTS if name == "search_knowledge" else MAX_READ_CHARS
-        bound = arguments.get(parameter, 3 if name == "search_knowledge" else 6000)
+        parameter = "limit" if name == "search_knowledge" else "max_tokens"
+        maximum = MAX_SEARCH_RESULTS if name == "search_knowledge" else MAX_READ_TOKENS
+        bound = arguments.get(
+            parameter, 3 if name == "search_knowledge" else DEFAULT_READ_TOKENS
+        )
         if (
             isinstance(bound, bool)
             or not isinstance(bound, int)
@@ -159,19 +164,23 @@ def knowledge_registered_tools(
                     context.workspace_id,
                     cast(str, arguments["reference"]),
                     allowed_scope=allowed,
-                    max_chars=bound,
+                    max_tokens=bound,
+                    token_offset=cast(int, arguments.get("token_offset", 0)),
                     allowed_collections=allowed_collections,
                 )
-        except KnowledgeCollectionError as error:
+        except KnowledgeRequestError as error:
             # The reference is real but this phase's allowlist excludes it; the
             # reason is actionable and contains no filesystem paths.
             return ToolExecution(
                 ok=False,
                 structured={"data_only": True, "content_notice": DATA_ONLY},
-                failure={
-                    "kind": "knowledge",
-                    "message": str(error),
-                },
+                failure=failure_from_exception(
+                    error,
+                    **{
+                        "kind": "knowledge",
+                        "message": str(error),
+                    },
+                ),
             )
         except (ValueError, OSError, RuntimeError):
             # Loader/provider errors may contain filesystem paths; do not expose them.
@@ -180,7 +189,7 @@ def knowledge_registered_tools(
                 structured={"data_only": True, "content_notice": DATA_ONLY},
                 failure={
                     "kind": "knowledge",
-                    "message": "Knowledge request rejected: invalid scope, source, or stale reference.",
+                    "message": "Knowledge source could not be loaded. The request may be valid; repeated argument changes will not repair a corpus or provider failure.",
                 },
             )
         return ToolExecution(ok=True, structured=result)
@@ -203,7 +212,8 @@ def knowledge_registered_tools(
                 "name": "read_knowledge",
                 "description": "Read a current reference returned by search_knowledge; "
                 "never pass a filesystem path. Returns full reference metadata "
-                "and content bounded by max_chars (default 6000). " + DATA_ONLY,
+                "and content bounded by cl100k_base tokens; whole documents are returned when they fit. "
+                + DATA_ONLY,
                 "parameters": read_schema,
             },
             handler=lambda arguments, context: execute("read_knowledge", arguments),

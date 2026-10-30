@@ -20,6 +20,7 @@ from thesis_runtime.adapters.providers.invocations import (
     messages_payload,
     parse_chat_completion,
 )
+from thesis_runtime.contracts.completion import CompletionOptions
 
 CapabilityReason = Literal[
     "ready",
@@ -374,16 +375,21 @@ class FoundryDeploymentInvoker:
         role: Role = "primary",
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
+        options: CompletionOptions | None = None,
     ) -> Generator[ModelCompletion, None, None]:
         """This deployment port provides a single completed frame."""
         if tools or response_format:
             raise ProviderRejectedError(
                 "deployment does not support tool or format options"
             )
-        yield self.complete(messages=messages, role=role)
+        yield self.complete(messages=messages, role=role, options=options)
 
     def complete(
-        self, *, messages: Sequence[ProviderMessage], role: Role = "primary"
+        self,
+        *,
+        messages: Sequence[ProviderMessage],
+        role: Role = "primary",
+        options: CompletionOptions | None = None,
     ) -> ModelCompletion:
         """Run one deployment-bound chat completion, failing closed."""
         token = self._resolve_token()
@@ -395,6 +401,10 @@ class FoundryDeploymentInvoker:
             "model": self._profile.model_deployment,
             "messages": list(messages_payload(messages)),
         }
+        if options:
+            payload["max_tokens"] = options.max_output_tokens
+            if not options.allow_tool_calls:
+                payload["tool_choice"] = "none"
         status, body = self._post(self._invocation_url(), headers, payload)
         if not 200 <= status < 300:
             raise _rejected(status, body)

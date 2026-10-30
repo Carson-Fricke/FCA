@@ -253,8 +253,7 @@ class PostgresChatPersistence:
         conversation_id: str,
         *,
         after_position: int | None,
-        consumed_position: int,
-        limit: int,
+        after_message_id: str | None,
     ) -> tuple[ChatMessage, ...]:
         if after_position is not None:
             head = self.store.read(
@@ -264,25 +263,23 @@ class PostgresChatPersistence:
                 return ()
         where = "workspace_id=%s AND root_conversation_id=%s AND conversation_id=%s AND record_type='ChatMessage'"
         args: list[object] = [workspace_id, chat_id, conversation_id]
-        rows = (
-            self.store.query(where, args, order="seq DESC", limit=limit)
-            if after_position is None
-            else []
-        )
-        pending = self.store.query(
-            where + " AND input_position>%s",
-            [*args, consumed_position if after_position is None else after_position],
-            order="seq",
-        )
-        unique = {row["id"]: row for row in [*rows, *pending]}
+        if after_position is not None:
+            where += " AND input_position>%s"
+            args.append(after_position)
+        elif after_message_id is not None:
+            boundary = self.get(ChatMessage, workspace_id, after_message_id)
+            if boundary is None or (boundary.chat_id, boundary.conversation_id) != (
+                chat_id,
+                conversation_id,
+            ):
+                raise ChatContractError(
+                    "context checkpoint boundary was not found in this conversation"
+                )
+            where += " AND seq>%s"
+            args.append(message_order_key(boundary)[0])
         return tuple(
-            sorted(
-                (
-                    cast(ChatMessage, record_from_payload(ChatMessage, row["payload"]))
-                    for row in unique.values()
-                ),
-                key=message_order_key,
-            )
+            cast(ChatMessage, record_from_payload(ChatMessage, row["payload"]))
+            for row in self.store.query(where, args, order="seq")
         )
 
     def require_active_conversation(self, workspace_id: str, chat_id: str) -> None:

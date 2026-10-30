@@ -45,12 +45,7 @@ pub fn validate_subscription_coverage(
                 || {
                     fixture.events.iter().any(|event| {
                         event.symbol() == symbol
-                            && matches!(
-                                (input.data_type.as_str(), event),
-                                ("quote", super::fixture::MarketEvent::Quote { .. })
-                                    | ("trade", super::fixture::MarketEvent::Trade { .. })
-                                    | ("bars", super::fixture::MarketEvent::Bar { .. })
-                            )
+                            && input.data_type == ["quote", "trade", "bars"][event.kind()]
                     })
                 },
                 |stream| stream.covers(&input.data_type, symbol),
@@ -149,17 +144,17 @@ pub fn preflight_data(
     let quote_count = fixture
         .events
         .iter()
-        .filter(|event| matches!(event, super::fixture::MarketEvent::Quote { .. }))
+        .filter(|event| event.kind() == 0)
         .count();
     let trade_count = fixture
         .events
         .iter()
-        .filter(|event| matches!(event, super::fixture::MarketEvent::Trade { .. }))
+        .filter(|event| event.kind() == 1)
         .count();
     let bar_count = fixture
         .events
         .iter()
-        .filter(|event| matches!(event, super::fixture::MarketEvent::Bar { .. }))
+        .filter(|event| event.kind() == 2)
         .count();
     Ok(DataPreflight {
         source_id: fixture.source_id.clone(),

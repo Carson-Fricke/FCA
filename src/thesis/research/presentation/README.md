@@ -8,6 +8,7 @@ are explicitly distinguished from published scientific meaning.
 - `__init__.py` exposes `PresentationService`.
 - `profiles.py` computes full-output ranges, cardinality, missingness, quantiles,
   value frequencies and histograms, retaining the originating dataset binding.
+  Host-sealed observations use their nested canonical table and exact clock strings.
 - `candidates.py` registers deterministic grammar generators and checks complete
   output coordinates before proposing plans. Extend this registry alongside the
   UI's renderer registry for a new visual grammar.

@@ -51,6 +51,7 @@ from thesis.http.dashboards import create_dashboard_router
 from thesis.http.deployments import create_deployment_router
 from thesis.http.errors import ErrorResponse
 from thesis.http.harness import HarnessDataService, create_harness_router
+from thesis.http.job_returns import create_job_return_router
 from thesis.http.knowledge import create_knowledge_router
 from thesis.http.screeners import create_screener_router
 from thesis.http.state import create_workspace_state_router
@@ -753,6 +754,21 @@ def create_app(
     for router in routers:
         application.include_router(router, dependencies=auth_dependency)
         application.include_router(router, prefix="/api", dependencies=auth_dependency)
+
+    # Worker-to-service delivery uses a bearer credential, never an operator
+    # cookie, CSRF token, or workspace invitation. Models cannot choose a target.
+    application.include_router(
+        create_job_return_router(),
+        dependencies=[
+            Depends(
+                CombinedAuthenticator(
+                    os.environ.get("HARNESS_COMPLETION_TOKEN")
+                    or os.environ.get("HARNESS_API_BEARER_TOKEN")
+                    or _configured_token(bearer_token)
+                )
+            )
+        ],
+    )
 
     # The auth router establishes its own credential (OIDC) and its session
     # endpoints carry their own cookie/CSRF dependencies, so it is registered

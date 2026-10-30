@@ -215,10 +215,9 @@ class CosmosChatPersistence:
         conversation_id: str,
         *,
         after_position: int | None,
-        consumed_position: int,
-        limit: int,
+        after_message_id: str | None,
     ) -> tuple[ChatMessage, ...]:
-        """Indexed bounded history; unchanged input heads need only a point read."""
+        """Read every row after the durable checkpoint, with indexed inbound pulls."""
         if after_position is not None:
             head = self._read_document(
                 workspace_id, inbox_head_id(chat_id, conversation_id)
@@ -232,39 +231,28 @@ class CosmosChatPersistence:
             {"name": "@conversation", "value": conversation_id},
         ]
         scope = "FROM c WHERE c.workspaceId = @ws AND c.recordType = @type AND c.rootConversationId = @root AND c.conversationId = @conversation "
-        documents: dict[str, dict[str, Any]] = {}
-        if after_position is None:
-            for row in self._container.query_items(
-                query="SELECT TOP @limit * " + scope + "ORDER BY c.seq DESC",
-                parameters=[*parameters, {"name": "@limit", "value": limit}],
-                partition_key=workspace_id,
-                max_item_count=limit,
+        if after_position is not None:
+            scope += "AND c.inputPosition > @position "
+            parameters.append({"name": "@position", "value": after_position})
+        elif after_message_id is not None:
+            boundary = self.get(ChatMessage, workspace_id, after_message_id)
+            if boundary is None or (boundary.chat_id, boundary.conversation_id) != (
+                chat_id,
+                conversation_id,
             ):
-                documents[row["id"]] = row
-        for row in self._container.query_items(
-            query="SELECT * "
-            + scope
-            + "AND c.inputPosition > @position ORDER BY c.seq ASC",
-            parameters=[
-                *parameters,
-                {
-                    "name": "@position",
-                    "value": consumed_position
-                    if after_position is None
-                    else after_position,
-                },
-            ],
-            partition_key=workspace_id,
-        ):
-            documents[row["id"]] = row
-        messages = [
-            cast(ChatMessage, self._decode(ChatMessage, row))
-            for row in documents.values()
-        ]
+                raise ChatContractError(
+                    "context checkpoint boundary was not found in this conversation"
+                )
+            scope += "AND c.seq > @after "
+            parameters.append(
+                {"name": "@after", "value": message_order_key(boundary)[0]}
+            )
         return tuple(
-            sorted(
-                messages,
-                key=message_order_key,
+            cast(ChatMessage, self._decode(ChatMessage, row))
+            for row in self._container.query_items(
+                query="SELECT * " + scope + "ORDER BY c.seq ASC",
+                parameters=parameters,
+                partition_key=workspace_id,
             )
         )
 

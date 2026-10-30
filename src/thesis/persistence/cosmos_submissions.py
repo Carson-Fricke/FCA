@@ -68,6 +68,22 @@ class CosmosSubmissionStore:
         )
         return tuple(self._payload(document, workspace_id) for document in documents)
 
+    def find(self, job_id: str) -> dict[str, object] | None:
+        documents = list(
+            self._container.query_items(
+                query="SELECT * FROM c WHERE c.id = @id AND c.recordType = 'JobSubmission'",
+                parameters=[{"name": "@id", "value": f"JobSubmission:{job_id}"}],
+                enable_cross_partition_query=True,
+            )
+        )
+        if len(documents) > 1:
+            raise ValueError("ambiguous retained execution identity")
+        return (
+            None
+            if not documents
+            else self._payload(documents[0], documents[0]["workspaceId"])
+        )
+
 
 def open_submission_store() -> CosmosSubmissionStore:
     """Open the FCA-owned submission container separately from runtime state."""

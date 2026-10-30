@@ -63,7 +63,9 @@ impl IndicatorSequence {
     /// Configure tick output fidelity in epoch-aligned nanosecond windows.
     pub fn ticks(interval_ns: i64) -> Result<Self, String> {
         if interval_ns <= 0 {
-            return Err("indicator output interval must be positive".into());
+            return Err(format!(
+                "IndicatorSequence::ticks interval_ns={interval_ns}: expected positive nanoseconds"
+            ));
         }
         Ok(Self {
             tick_interval_ns: Some(interval_ns),
@@ -86,7 +88,7 @@ impl IndicatorSequence {
     /// windows whose end has passed and leaves the final partial window open.
     pub fn advance(&mut self, available_at_ns: i64) -> Result<(), String> {
         if self.clock_ns.is_some_and(|clock| available_at_ns < clock) {
-            return Err("indicator observation time regressed".into());
+            return Err(format!("indicator available_at_ns={available_at_ns} regressed below {:?}; observations must be in causal time order", self.clock_ns));
         }
         self.clock_ns = Some(available_at_ns);
         let ready: Vec<_> = self
@@ -127,10 +129,10 @@ impl IndicatorSequence {
         );
         let missing_input = frame.missing_symbols.contains(&symbol);
         if !missing_input && !frame.bars_by_symbol.contains_key(symbol) {
-            return Err("indicator output symbol is not present in source frame".into());
+            return Err(format!("indicator symbol {symbol:?} is neither present nor explicitly missing in frame {interval:?} at {available_at_ns}"));
         }
         if start_ns >= end_ns || available_at_ns < end_ns {
-            return Err("invalid indicator bar boundaries".into());
+            return Err(format!("indicator {symbol:?}/{interval}: require start_ns < end_ns <= available_at_ns; received {start_ns}, {end_ns}, {available_at_ns}"));
         }
         self.advance(available_at_ns)?;
         let bars = self
@@ -138,7 +140,7 @@ impl IndicatorSequence {
             .entry((symbol.into(), interval.into()))
             .or_default();
         if bars.last().is_some_and(|bar| start_ns < bar.end_ns) {
-            return Err("indicator bar overlaps completed output".into());
+            return Err(format!("indicator {symbol:?}/{interval}: start_ns={start_ns} overlaps the previous completed output ending at {}", bars.last().expect("checked nonempty").end_ns));
         }
         let value = if missing_input { None } else { value };
         bars.push(IndicatorBar {

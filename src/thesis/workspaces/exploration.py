@@ -4,6 +4,18 @@ import hashlib
 import json
 from collections.abc import Mapping
 
+from thesis_runtime.contracts.failures import ToolFailureError
+
+
+def _records_output(output: Mapping) -> Mapping:
+    """Host-sealed observations page their canonical nested table unchanged."""
+    if output.get("kind") == "causal_observations":
+        dataset = output.get("dataset")
+        if not isinstance(dataset, Mapping):
+            raise ValueError("causal observations require a dataset")
+        return dataset
+    return output
+
 
 def _browser_value(value: object) -> object:
     """Keep exact integral evidence when JSON crosses JavaScript's safe range."""
@@ -58,9 +70,9 @@ def output_page(
                     raise ValueError("exploratory output must be an object")
                 values = next(
                     (
-                        output[key]
+                        _records_output(output)[key]
                         for key in ("points", "events", "rows")
-                        if key in output
+                        if key in _records_output(output)
                     ),
                     None,
                 )
@@ -69,6 +81,9 @@ def output_page(
                         "instanceId": instance,
                         "name": name,
                         "kind": output.get("kind"),
+                        "authority": "harness_replay"
+                        if output.get("kind") == "causal_observations"
+                        else "authored",
                         "count": len(values) if isinstance(values, list) else None,
                     }
                 )
@@ -82,11 +97,31 @@ def output_page(
         raise ValueError("instance_id is required when selecting an output")
     outputs = programs.get(instance_id)
     if not isinstance(outputs, dict) or output_name not in outputs:
-        raise KeyError(output_name)
+        choices = [
+            {"instance_id": instance, "output_name": name}
+            for instance, entries in programs.items()
+            if isinstance(entries, dict)
+            for name in entries
+        ]
+        raise ToolFailureError(
+            {
+                "kind": "missing_selection",
+                "statusCode": 404,
+                "message": f"Output {output_name!r} does not exist in instance {instance_id!r}.",
+                "certainty": "not_started",
+                "retry_safe": True,
+                "availableSelections": choices,
+                "nextArguments": {"job_id": job_id},
+                "retryGuidance": "Select an available instance_id/output_name pair, or list the job outputs with nextArguments.",
+            }
+        )
     output = outputs[output_name]
     if not isinstance(output, Mapping):
         raise ValueError("exploratory output must be an object")
-    row_key = next((key for key in ("points", "events", "rows") if key in output), None)
+    records = _records_output(output)
+    row_key = next(
+        (key for key in ("points", "events", "rows") if key in records), None
+    )
     if row_key is None:
         if len(json.dumps(dict(output), allow_nan=False)) > 32_000:
             raise ValueError(
@@ -97,10 +132,11 @@ def output_page(
             "instanceId": instance_id,
             "name": output_name,
             "output": _browser_value(dict(output)),
+            "authority": "authored",
             "total": 0,
             "nextOffset": None,
         }
-    rows = output[row_key]
+    rows = records[row_key]
     if not isinstance(rows, list):
         raise ValueError("exploratory output records must be an array")
     page = dict(output)
@@ -116,13 +152,19 @@ def output_page(
         raise ValueError(
             "one output record exceeds inspection size; use the complete artifact export"
         )
-    page[row_key] = selected
+    if output.get("kind") == "causal_observations":
+        page["dataset"] = {**records, row_key: selected}
+    else:
+        page[row_key] = selected
     next_offset = offset + len(selected)
     return {
         **identity,
         "instanceId": instance_id,
         "name": output_name,
         "output": page,
+        "authority": "harness_replay"
+        if output.get("kind") == "causal_observations"
+        else "authored",
         "total": len(rows),
         "nextOffset": next_offset if next_offset < len(rows) else None,
     }

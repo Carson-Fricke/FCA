@@ -3,9 +3,11 @@
 from collections.abc import Mapping
 from typing import cast
 
+from thesis.experiments.mandate import DataWindowResolver, MandateError
 from thesis.integrations.mcp import HarnessMcpError
 from thesis.workspaces.programs import WorkspacePrograms
 from thesis_runtime.contracts.context import ToolContext
+from thesis_runtime.contracts.failures import failure_from_exception
 from thesis_runtime.tools.registry import RegisteredTool, ToolExecution
 from thesis_runtime.tools.schema import render_violations, validate_arguments
 
@@ -14,6 +16,8 @@ EXPLORATION_TOOL_NAMES = ("read_study_output",)
 
 def exploration_registered_tools(
     service: WorkspacePrograms,
+    *,
+    resolve_data_window: DataWindowResolver | None = None,
 ) -> tuple[RegisteredTool, ...]:
     """Advertise paged sequences, events and tables; jobs remain evidence authority."""
     schema: dict[str, object] = {
@@ -31,6 +35,19 @@ def exploration_registered_tools(
     }
 
     def execute(arguments: Mapping[str, object], context: ToolContext) -> ToolExecution:
+        if resolve_data_window is not None:
+            try:
+                resolve_data_window()
+            except MandateError as error:
+                return ToolExecution(
+                    ok=False,
+                    failure={
+                        "kind": "research_window",
+                        "message": str(error),
+                        "certainty": "not_started",
+                        "retry_safe": True,
+                    },
+                )
         misses = validate_arguments(schema, arguments)
         if misses:
             return ToolExecution(
@@ -50,7 +67,7 @@ def exploration_registered_tools(
             )
         except (ValueError, KeyError, HarnessMcpError) as error:
             return ToolExecution(
-                ok=False, failure={"kind": "exploration", "message": str(error)}
+                ok=False, failure=failure_from_exception(error, kind="exploration")
             )
         return ToolExecution(ok=True, structured=result)
 

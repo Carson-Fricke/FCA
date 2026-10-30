@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, ExecutionEvent, SubAgentNode, TimelineItem, WorkflowExecutionRecord } from '$lib/types';
-import { eventFixture, timelineFixture } from './timeline-fixture';
+import { eventFixture, timelineFixture, transcriptFixture } from './timeline-fixture';
+import type { TimelinePage } from '$lib/api';
 
 const fixture = vi.hoisted(() => ({ terminal: false, cancelled: false, backfill: [] as TimelineItem[] }));
 vi.mock('$lib/api', async (importOriginal) => {
@@ -14,7 +15,7 @@ vi.mock('$lib/api', async (importOriginal) => {
 			status: fixture.cancelled ? 'cancelled' : fixture.terminal ? 'completed' : 'running',
 			acceptsInput: !fixture.terminal, workflowExecutionId: 'exec-1',
 			context: { isolated: true, knowledge_cutoff: null, mcp: { enabled: true, tools: ['validate_study'] } } }]),
-		listTimelinePage: vi.fn(async (_ws, _chat, thread) => ({ items: thread === 'subagent-a' ? fixture.backfill : [], nextBefore: null,
+		listTimelinePage: vi.fn(async (_ws, _chat, thread) => ({ items: thread === 'subagent-a' ? transcriptFixture(fixture.backfill) : [], nextBefore: null,
 			after: Math.max(0, ...fixture.backfill.map((item) => item.seq)) })),
 		postNodeMessage: vi.fn(async () => { throw new actual.ThesisApiError(409, '/messages'); }) };
 });
@@ -240,7 +241,7 @@ describe('node input and canonical history', () => {
 		expect(listTimelinePage).toHaveBeenCalledWith('ws-1', 'chat-1', 'subagent-a', null, expect.any(AbortSignal));
 	}, 20_000);
 	it('cancels scope history and ignores late replies, including same-chat reattachment', async () => {
-		let finish!: (page: { items: TimelineItem[]; nextBefore: null; after: number }) => void;
+		let finish!: (page: TimelinePage) => void;
 		const timeline = new TimelineController();
 		timeline.start('ws-1', 'chat-1');
 		await timeline.loadHistory();
@@ -254,13 +255,13 @@ describe('node input and canonical history', () => {
 		expect(signal.aborted).toBe(true);
 		controller.attachChat('chat-1', options);
 		await controller.ensureLoaded();
-		finish({ items: timelineFixture([message('stale')]).items, nextBefore: null, after: 1 });
+		finish({ items: transcriptFixture(timelineFixture([message('stale')]).items), nextBefore: null, after: 1 });
 		await Promise.resolve();
 		expect(timeline.messagesFor('subagent-a')).toEqual([]);
 		controller.detach(); timeline.stop();
 	});
 	it('retains a partial page on timeout and retries through the canonical history owner', async () => {
-		const first = timelineFixture([message('first page visible', 'assistant')]).items[0];
+		const first = transcriptFixture(timelineFixture([message('first page visible', 'assistant')]).items)[0];
 		const { timeline } = surface();
 		await screen.findByTestId('sub-agent-composer-input');
 		await waitFor(() => expect(timeline.history['subagent-a']?.complete).toBe(true));
@@ -269,7 +270,7 @@ describe('node input and canonical history', () => {
 			.mockRejectedValueOnce(new Error('Scoped history page timed out after 30 seconds.'));
 		await timeline.loadHistory('subagent-a', true);
 		await screen.findByText('first page visible');
-		await fireEvent.click(screen.getByTestId('history-older'));
+		// A short viewport requests the next page automatically; failures retain retry.
 		await screen.findByText(/timed out after 30 seconds/);
 		vi.mocked(listTimelinePage).mockResolvedValueOnce({ items: [first], nextBefore: null, after: first.seq });
 		await fireEvent.click(screen.getByTestId('history-retry'));
@@ -277,7 +278,7 @@ describe('node input and canonical history', () => {
 		expect(screen.getAllByTestId('chat-message')).toHaveLength(1);
 	});
 	it('cancels old-node history on sibling navigation while keeping received pages in the canonical timeline', async () => {
-		let finish!: (page: { items: TimelineItem[]; nextBefore: null; after: number }) => void;
+		let finish!: (page: TimelinePage) => void;
 		const timeline = new TimelineController(); timeline.start('ws-1', 'chat-1');
 		await vi.waitFor(() => expect(timeline.history.root?.complete).toBe(true));
 		vi.mocked(listTimelinePage).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
@@ -291,7 +292,7 @@ describe('node input and canonical history', () => {
 		controller.enterSubAgent(sibling);
 		expect(signal.aborted).toBe(true);
 		expect(controller.activeSegment?.id).toBe('subagent-b');
-		finish({ items: timelineFixture([message('late')]).items, nextBefore: null, after: 1 });
+		finish({ items: transcriptFixture(timelineFixture([message('late')]).items), nextBefore: null, after: 1 });
 		await Promise.resolve();
 		expect(timeline.messagesFor('subagent-a').map((message) => message.body)).toEqual(['partial']);
 		controller.detach(); timeline.stop();

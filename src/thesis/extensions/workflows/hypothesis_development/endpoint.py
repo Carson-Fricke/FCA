@@ -155,7 +155,10 @@ class HypothesisExtension:
             )
             return {
                 "text": start
-                or (None if seed is None else seed(activities, request, state, handoff))
+                or (
+                    None if seed is None else seed(activities, request, state, handoff)
+                ),
+                "contextMessageIds": [request.trigger_message_id],
             }
         if operation == "execute" and isinstance(phase, DeterministicPhase):
             return {"completion": phase.contract(activities, request, state, handoff)}

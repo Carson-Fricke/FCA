@@ -1,8 +1,6 @@
 //! Owns fill-to-trade reconstruction and exact valuation/report projections.
 //! It consumes replay outcomes; it does not execute strategies or publish files.
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::collections::VecDeque;
 
 use harness_contracts::progress::ProgressReporter;
 use num::Decimal18;
@@ -48,6 +46,11 @@ pub(super) struct JobLedger {
     pub(super) net_pnl: Decimal18,
     pub(super) gross_pnl: Decimal18,
     pub(super) execution: ExecutionStats,
+    pub(super) initial_cash: Decimal18,
+    pub(super) final_cash: Decimal18,
+    pub(super) final_equity: Decimal18,
+    pub(super) peak_gross_exposure: Decimal18,
+    pub(super) peak_gross_exposure_fraction: Outcome<Decimal18>,
 }
 
 /// One normalized fill shared by the injected and native engine paths.
@@ -69,6 +72,7 @@ pub(super) struct LedgerOrder {
     pub(super) symbol: String,
     pub(super) side: String,
     pub(super) quantity: String,
+    pub(super) status: String,
 }
 
 /// Parse one configuration decimal. A malformed value fails the job; it never
@@ -128,19 +132,6 @@ pub(super) fn fill_is_buy(fill: &LedgerFill) -> Result<bool, BacktestJobError> {
     }
 }
 
-/// `amount * part / whole`, taking the whole amount when `part` is all of
-/// `whole` so that allocated shares sum to the amount exactly.
-pub(super) fn fee_share(
-    amount: Decimal18,
-    part: Decimal18,
-    whole: Decimal18,
-) -> Result<Decimal18, BacktestJobError> {
-    if part == whole {
-        return Ok(amount);
-    }
-    overflow_ledger(amount.checked_mul_div(part, whole), "fee allocation")
-}
-
 pub(super) fn ledger_fills_from_outcome(outcome: &BacktestOutcome) -> Vec<LedgerFill> {
     outcome
         .fills
@@ -160,29 +151,21 @@ pub(super) fn ledger_fills_from_outcome(outcome: &BacktestOutcome) -> Vec<Ledger
 }
 
 pub(super) fn ledger_orders_from_outcome(outcome: &BacktestOutcome) -> Vec<LedgerOrder> {
-    let mut seen = BTreeSet::new();
     outcome
-        .fills
+        .orders
         .iter()
-        .filter(|fill| seen.insert(fill.order_id.clone()))
-        .map(|fill| LedgerOrder {
-            order_id: fill.order_id.clone(),
-            symbol: fill.symbol.clone(),
-            side: fill.side.clone(),
-            quantity: fill.quantity.to_string(),
+        .map(|order| LedgerOrder {
+            order_id: order.order_id.clone(),
+            symbol: order.symbol.clone(),
+            side: order.side.clone(),
+            quantity: order.quantity.to_string(),
+            status: if order.status == "canceled" {
+                "cancelled".into()
+            } else {
+                order.status.clone()
+            },
         })
         .collect()
-}
-
-/// One open FIFO lot: the unmatched quantity of one opening fill and the fee
-/// still attached to it.
-pub(super) struct OpenLot {
-    pub(super) long: bool,
-    pub(super) sequence: u64,
-    pub(super) timestamp_ns: i64,
-    pub(super) price: Decimal18,
-    pub(super) quantity: Decimal18,
-    pub(super) fee: Decimal18,
 }
 
 /// Closed trade slices plus the fees still attached to open lots at run end.
@@ -199,105 +182,45 @@ pub(super) struct ClosedTrades {
 /// share of both fees by fill quantity (`fill_quantity_share.v1`), so the
 /// closed-slice fees plus `open_fees` equal the total fees exactly.
 pub(super) fn closed_trades(fills: &[LedgerFill]) -> Result<ClosedTrades, BacktestJobError> {
-    let mut ordered: Vec<&LedgerFill> = fills.iter().collect();
-    ordered.sort_by_key(|fill| (fill.sequence, fill.timestamp_ns / 1_000_000));
-    let mut lots: BTreeMap<String, VecDeque<OpenLot>> = BTreeMap::new();
-    let mut rows: Vec<TradeRow> = Vec::new();
+    use harness_trading::fills::trades::{TradeFill, TradeLedger};
+    let mut ordered: Vec<_> = fills.iter().collect();
+    ordered.sort_by_key(|fill| (fill.sequence, fill.timestamp_ns));
+    let mut ledger = TradeLedger::default();
     for fill in ordered {
-        let is_buy = fill_is_buy(fill)?;
         let quantity = fill_decimal(fill, "quantity", &fill.quantity)?;
         let fee = fill_decimal(fill, "fee", &fill.fee)?;
+        if quantity.is_zero() && fee.is_zero() {
+            continue;
+        }
+        if quantity <= Decimal18::ZERO {
+            return Err(malformed_fill(fill, "quantity must be positive"));
+        }
         let price = fill_decimal(fill, "price", &fill.price)?;
-        if quantity.is_zero() {
-            if fee.is_zero() {
-                continue;
-            }
-            return Err(malformed_fill(fill, "fee is non-zero but quantity is zero"));
+        if price <= Decimal18::ZERO {
+            return Err(malformed_fill(fill, "price must be positive"));
         }
-        if quantity.is_negative() {
-            return Err(malformed_fill(fill, "quantity is negative"));
-        }
-        let queue = lots.entry(fill.symbol.clone()).or_default();
-        let mut remaining = quantity;
-        let mut remaining_fee = fee;
-        while remaining.is_positive() {
-            let Some(head) = queue.front() else {
-                break;
-            };
-            if head.long == is_buy {
-                break;
-            }
-            let (long, lot_sequence, lot_timestamp, lot_price, lot_quantity, lot_fee) = (
-                head.long,
-                head.sequence,
-                head.timestamp_ns,
-                head.price,
-                head.quantity,
-                head.fee,
-            );
-            let matched = lot_quantity.min(remaining);
-            let entry_fee = fee_share(lot_fee, matched, lot_quantity)?;
-            let exit_fee = fee_share(remaining_fee, matched, remaining)?;
-            let difference = if long {
-                overflow_ledger(price.checked_sub(lot_price), "trade price difference")?
-            } else {
-                overflow_ledger(lot_price.checked_sub(price), "trade price difference")?
-            };
-            let gross_pnl = overflow_ledger(difference.checked_mul(matched), "trade gross pnl")?;
-            let fees = overflow_ledger(entry_fee.checked_add(exit_fee), "trade fees")?;
-            let net_pnl = overflow_ledger(gross_pnl.checked_sub(fees), "trade net pnl")?;
-            rows.push(TradeRow {
-                trade_id: rows.len() as u64 + 1,
+        ledger
+            .apply(&TradeFill {
+                fill_id: fill.fill_id.clone(),
                 symbol: fill.symbol.clone(),
-                side: if long { "long" } else { "short" }.to_string(),
-                quantity: matched,
-                entry_sequence: lot_sequence,
-                exit_sequence: fill.sequence,
-                entry_timestamp_ns: lot_timestamp,
-                exit_timestamp_ns: fill.timestamp_ns,
-                entry_price: lot_price,
-                exit_price: price,
-                gross_pnl,
-                entry_fee,
-                exit_fee,
-                fees,
-                net_pnl,
-            });
-            let head_done = {
-                let Some(head) = queue.front_mut() else {
-                    return Err(BacktestJobError::Engine(
-                        "open lot queue lost its head while matching".to_string(),
-                    ));
-                };
-                head.quantity =
-                    overflow_ledger(head.quantity.checked_sub(matched), "open lot quantity")?;
-                head.fee = overflow_ledger(head.fee.checked_sub(entry_fee), "open lot fee")?;
-                head.quantity.is_zero()
-            };
-            if head_done {
-                queue.pop_front();
-            }
-            remaining = overflow_ledger(remaining.checked_sub(matched), "fill quantity")?;
-            remaining_fee = overflow_ledger(remaining_fee.checked_sub(exit_fee), "fill fee")?;
-        }
-        if remaining.is_positive() {
-            queue.push_back(OpenLot {
-                long: is_buy,
-                sequence: fill.sequence,
-                timestamp_ns: fill.timestamp_ns,
+                buy: fill_is_buy(fill)?,
+                quantity,
                 price,
-                quantity: remaining,
-                fee: remaining_fee,
-            });
-        }
+                fee,
+                timestamp_ns: fill.timestamp_ns,
+                sequence: fill.sequence,
+            })
+            .map_err(|_| {
+                BacktestJobError::Overflow(
+                    "closed-trade arithmetic exceeds decimal128(38,18)".into(),
+                )
+            })?;
     }
-    let mut open_fees = Decimal18::ZERO;
-    for queue in lots.values() {
-        for lot in queue {
-            open_fees = overflow_ledger(open_fees.checked_add(lot.fee), "open fees")?;
-        }
-    }
-    Ok(ClosedTrades { rows, open_fees })
+    let open_fees = overflow_ledger(ledger.open_fees(), "open fees")?;
+    Ok(ClosedTrades {
+        rows: ledger.rows.as_ref().clone(),
+        open_fees,
+    })
 }
 
 pub(super) fn build_ledger(
@@ -329,7 +252,7 @@ pub(super) fn build_ledger(
         .map(|order| OrderRow {
             order_id: order.order_id.clone(),
             strategy_id: String::new(),
-            outcome: "filled".to_string(),
+            outcome: order.status.clone(),
         })
         .collect();
     let trades = closed_trades(fills)?;
@@ -358,7 +281,21 @@ pub(super) fn build_ledger(
             chart.push(row.point());
         }
     }
+    let last = rows.last().expect("opening capital sample");
+    let initial_cash = ledger_decimal(&configuration.initial_cash, "initial_cash")?;
     Ok(JobLedger {
+        initial_cash,
+        final_cash: last.cash,
+        final_equity: last.equity,
+        peak_gross_exposure: valuations.peak_gross_exposure(),
+        peak_gross_exposure_fraction: if initial_cash.is_positive() {
+            valuations
+                .peak_gross_exposure()
+                .checked_div(initial_cash)
+                .map_err(|_| "arithmetic_overflow")
+        } else {
+            Err("nonpositive_initial_capital")
+        },
         rows,
         sample_count: valuations.sample_count(),
         trades,
@@ -434,6 +371,14 @@ pub(super) fn trade_row_json(row: &TradeRow) -> JsonValue {
         ("exit_fee", decimal_text(row.exit_fee)),
         ("fees", decimal_text(row.fees)),
         ("net_pnl", decimal_text(row.net_pnl)),
+        (
+            "gross_return_bps",
+            decimal_opt(row.return_bps(false).expect("validated trade return")),
+        ),
+        (
+            "net_return_bps",
+            decimal_opt(row.return_bps(true).expect("validated trade return")),
+        ),
     ])
 }
 
@@ -462,6 +407,26 @@ pub(super) fn metrics_json(
     JsonValue::object([
         ("job_id", JsonValue::String(job_id.to_string())),
         ("status", JsonValue::string(status)),
+        (
+            "capital",
+            JsonValue::object([
+                ("initial_cash", decimal_text(ledger.initial_cash)),
+                ("final_cash", decimal_text(ledger.final_cash)),
+                ("final_equity", decimal_text(ledger.final_equity)),
+                (
+                    "peak_gross_exposure",
+                    decimal_text(ledger.peak_gross_exposure),
+                ),
+                (
+                    "peak_gross_exposure_fraction",
+                    decimal_outcome(ledger.peak_gross_exposure_fraction),
+                ),
+                (
+                    "peak_gross_exposure_fraction_reason",
+                    reason_outcome(ledger.peak_gross_exposure_fraction),
+                ),
+            ]),
+        ),
         ("counts", JsonValue::Object(count_values)),
         (
             "equity",

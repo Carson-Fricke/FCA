@@ -23,6 +23,7 @@ from thesis_runtime.contracts.records import (
     ChatMessage,
     ChatState,
     ChatThread,
+    ContextCheckpoint,
     ConversationRecord,
     CrossWorkspaceLinkError,
     InvalidLifecycleTransition,
@@ -62,6 +63,7 @@ Record = (
     | ToolJob
     | SubAgentRecord
     | AgentInvocation
+    | ContextCheckpoint
 )
 RecordType = type[Record]
 RecordT = TypeVar("RecordT", bound=Record)
@@ -115,8 +117,7 @@ class ChatPersistence(Protocol):
         conversation_id: str,
         *,
         after_position: int | None,
-        consumed_position: int,
-        limit: int,
+        after_message_id: str | None,
     ) -> tuple[ChatMessage, ...]: ...
 
     def get(
@@ -164,6 +165,7 @@ class InMemoryChatPersistence:
         ToolJob,
         SubAgentRecord,
         AgentInvocation,
+        ContextCheckpoint,
     )
 
     def __init__(self, records: Iterable[Record] = ()) -> None:
@@ -242,8 +244,7 @@ class InMemoryChatPersistence:
         conversation_id: str,
         *,
         after_position: int | None,
-        consumed_position: int,
-        limit: int,
+        after_message_id: str | None,
     ) -> tuple[ChatMessage, ...]:
         from thesis_runtime.conversations.admission import select_message_window
 
@@ -253,8 +254,7 @@ class InMemoryChatPersistence:
                     ChatMessage, workspace_id, chat_id, conversation_id=conversation_id
                 ),
                 after_position=after_position,
-                consumed_position=consumed_position,
-                limit=limit,
+                after_message_id=after_message_id,
             )
 
     def _save(self, record: RecordT) -> RecordT:
@@ -352,6 +352,7 @@ def _record_id(record: Record) -> str:
         ToolJob: "job_id",
         SubAgentRecord: "sub_agent_id",
         AgentInvocation: "invocation_id",
+        ContextCheckpoint: "checkpoint_id",
     }.get(type(record))
     if id_name is not None:
         value = getattr(record, id_name)
@@ -973,19 +974,51 @@ class ChatService:
         conversation_id: str,
         *,
         after_position: int | None = None,
-        consumed_position: int = 0,
-        limit: int = 40,
+        after_message_id: str | None = None,
     ) -> tuple[ChatMessage, ...]:
-        """Load bounded history plus pending inputs, or inputs after a cursor."""
+        """Load complete scoped history after a checkpoint, or incoming cursor."""
         self.get_chat(workspace_id, chat_id)
         return self._persistence.read_message_window(
             workspace_id,
             chat_id,
             conversation_id,
             after_position=after_position,
-            consumed_position=consumed_position,
-            limit=limit,
+            after_message_id=after_message_id,
         )
+
+    def read_context_checkpoint(
+        self, workspace_id: str, chat_id: str, conversation_id: str
+    ) -> ContextCheckpoint | None:
+        self.get_chat(workspace_id, chat_id)
+        checkpoint = self._persistence.get(
+            ContextCheckpoint, workspace_id, conversation_id
+        )
+        if checkpoint is not None and (
+            checkpoint.chat_id,
+            checkpoint.conversation_id,
+        ) != (chat_id, conversation_id):
+            raise ChatContractError(
+                "context checkpoint belongs to another conversation"
+            )
+        return checkpoint
+
+    def save_context_checkpoint(self, checkpoint: ContextCheckpoint) -> None:
+        """Advance one selector only after its canonical summary is durable."""
+        self.get_chat(checkpoint.workspace_id, checkpoint.chat_id)
+        for identity in (
+            checkpoint.summary_message_id,
+            checkpoint.through_message_id,
+            *checkpoint.retained_message_ids,
+        ):
+            row = self._persistence.get(ChatMessage, checkpoint.workspace_id, identity)
+            if row is None or (row.chat_id, row.conversation_id) != (
+                checkpoint.chat_id,
+                checkpoint.conversation_id,
+            ):
+                raise ChatContractError(
+                    "context checkpoint references a missing or foreign message"
+                )
+        self._save(checkpoint)
 
     def list_attachments(
         self, workspace_id: str, chat_id: str

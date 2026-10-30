@@ -145,6 +145,7 @@ pub struct ValuationTracker {
     rows: History<ValuationRow>,
     samples: u64,
     consumed_fills: usize,
+    peak_gross_exposure: Decimal18,
 }
 
 impl ValuationTracker {
@@ -171,6 +172,7 @@ impl ValuationTracker {
             rows: History::new(resources),
             samples: 1,
             consumed_fills: 0,
+            peak_gross_exposure: Decimal18::ZERO,
         })
     }
 
@@ -245,11 +247,16 @@ impl ValuationTracker {
             return Ok(());
         }
         let mut market_value = Decimal18::ZERO;
+        let mut gross_exposure = Decimal18::ZERO;
         for holding in self.holdings.values() {
             market_value = market_value
                 .checked_add(holding.value)
                 .map_err(arithmetic)?;
+            gross_exposure = gross_exposure
+                .checked_add(holding.value.abs())
+                .map_err(arithmetic)?;
         }
+        self.peak_gross_exposure = self.peak_gross_exposure.max(gross_exposure);
         let next = ValuationRow {
             timestamp_ns,
             end_timestamp_ns: timestamp_ns,
@@ -284,6 +291,7 @@ impl ValuationTracker {
         Ok(ValuationHistory {
             rows: self.rows,
             samples: self.samples,
+            peak_gross_exposure: self.peak_gross_exposure,
         })
     }
 }
@@ -293,6 +301,7 @@ impl ValuationTracker {
 pub struct ValuationHistory {
     rows: History<ValuationRow>,
     samples: u64,
+    peak_gross_exposure: Decimal18,
 }
 
 /// Execution scratch for rounded returns, including exact zero-return weights.
@@ -323,6 +332,10 @@ impl Record for ReturnRun {
 }
 
 impl ValuationHistory {
+    /// Maximum sum of absolute marked holdings across every causal state.
+    pub fn peak_gross_exposure(&self) -> Decimal18 {
+        self.peak_gross_exposure
+    }
     pub fn sample_count(&self) -> u64 {
         self.samples
     }
@@ -355,7 +368,11 @@ impl ValuationHistory {
             }
             // One return record per valuation record keeps the spill threshold
             // and caller-supplied scratch requirement aligned with the source.
-            returns.push(ReturnRun { value, samples, flat })?;
+            returns.push(ReturnRun {
+                value,
+                samples,
+                flat,
+            })?;
             summary.extend_flat(row.end_timestamp_ns, row.samples as usize - 1);
             sampler.push(row.first())?;
             if row.samples > 1 {

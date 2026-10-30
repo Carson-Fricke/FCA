@@ -469,7 +469,11 @@ def test_reasoning_is_durable_and_streamed_before_provider_finishes(
                 assert 4 <= len(outputs) <= (4 if scope == "root" else 8)
                 assert outputs[0]["payload"]["message_id"] == output_id
                 for output in outputs:
-                    canonical = output["payload"]["data"]["sessionMessage"]
+                    detail = client.get(
+                        base + f"/timeline/items/{output['seq']}", headers=headers
+                    )
+                    assert detail.status_code == 200
+                    canonical = detail.json()["payload"]["data"]["sessionMessage"]
                     assert canonical["content"]["result"]["interrupted"] is True
                     assert (
                         canonical["content"]["result"]["reasoning"]

@@ -369,3 +369,16 @@ stage passed.
   this runbook, the UI, or any repository file.
 
 The local API script embeds the durable worker against the same Cosmos catalog. Deployed `thesis serve` does not start workers: deploy/run `thesis worker` separately. API replicas may scale independently; always retain worker capacity. Drain active workflow executions before the catalog-partition deployment cutover.
+
+### Asynchronous agent job completion
+
+`scripts/local/start-stack.ps1` wires `HARNESS_COMPLETION_URL` to the local Thesis
+`/v1/internal/harness/completions` endpoint and uses the stable harness bearer as
+`HARNESS_COMPLETION_TOKEN`. Rebuild/restart both Harness and Thesis together after
+changing this delivery contract. Worker configuration carries the credential;
+accepted job documents contain no callback credentials or model-chosen URL.
+A queued job returns immediately. Terminal evidence arrives at its retained
+conversation recipient; ending a response while awaiting that evidence releases
+the turn worker. Inspect retained IDs for exceptional reconciliation, not polling.
+Failed notification POSTs leave their durable event for control recovery; they
+never cause an execution to be submitted again.

@@ -193,11 +193,13 @@ pub fn build_catalog(context: HarnessToolsContext) -> Result<ToolCatalog, Contex
             "Read the serving harness compiler's SDK identity/version/ABI and source hashes. \
              Omit topic for metadata only; topic reads bounded current SDK source, not a local \
              package or stale template. Compare sdkIdentity before using local SDK guidance. \
-             Refresh initialize/serverInfo to compare current validationIdentity before running.",
+             Refresh initialize/serverInfo to compare current validationIdentity before running. \
+             Ordinary topics are returned whole; large sources use cl100k_base token budgets. Follow nextArguments exactly until null.",
             json!({"type": "object", "additionalProperties": false, "properties": {
-                "topic": {"type": "string", "enum": ["consumer", "program", "indicator_api", "wavelet", "events", "exports", "decimal", "building_blocks", "outputs", "research_views", "research_publishing", "research_recipes"]},
+                "topic": {"type": "string", "description": "SDK alias or source path from sourceHashes; omit topic to discover topics."},
                 "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1},
-                "max_chars": {"type": "integer", "minimum": 1, "maximum": 16000}
+                "token_offset": {"type": "integer", "minimum": 0},
+                "max_tokens": {"type": "integer", "minimum": 32, "maximum": 65536}
             }}), "sdk", move |arguments| handler.validation.read_sdk_reference(arguments),
         ).read_only());
     }

@@ -9,7 +9,9 @@ deterministic phase runs as code and owns no sub-agent.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import cast
 
 from thesis_runtime.contracts.records import ChatContractError, SubAgentKind
 
@@ -20,6 +22,41 @@ DEFAULT_MAX_CHILDREN = 8
 #: Construction repair budget: three attempts per agent turn, two repair turns.
 DEFAULT_CONSTRUCTION_ATTEMPTS = 3
 DEFAULT_REPAIR_TURNS = 2
+
+
+@dataclass(frozen=True, slots=True)
+class InitialContext:
+    """Explicit source text copied into a child's own neutral inbox once."""
+
+    text: str
+    source_message_id: str
+    source_conversation_id: str
+
+    def __post_init__(self) -> None:
+        for value in (self.text, self.source_message_id, self.source_conversation_id):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(
+                    "initial context requires text and explicit source identities"
+                )
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "text": self.text,
+            "sourceMessageId": self.source_message_id,
+            "sourceConversationId": self.source_conversation_id,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, object]) -> InitialContext:
+        if set(value) != {"text", "sourceMessageId", "sourceConversationId"}:
+            raise ValueError(
+                "initial context requires text and explicit source identities"
+            )
+        return cls(
+            cast(str, value["text"]),
+            cast(str, value["sourceMessageId"]),
+            cast(str, value["sourceConversationId"]),
+        )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -47,6 +47,15 @@
 	const visibleChats = $derived(host.visibleChats);
 	const selectedChat = $derived(host.selectedChat);
 	const anyActiveWorkflow = $derived(timeline.anyActiveWorkflow);
+	let viewportWidth = $state(1280);
+	let listOpen = $state(true);
+	let mobileListOpen = $state(false);
+	const narrow = $derived(viewportWidth <= 760);
+	const pickerShown = $derived(narrow ? mobileListOpen : listOpen);
+	function togglePicker(): void {
+		if (narrow) mobileListOpen = !mobileListOpen;
+		else listOpen = !listOpen;
+	}
 
 	$effect(() => {
 		const id = workspaceId;
@@ -69,6 +78,7 @@
 	function newConversation(): void {
 		host.newConversation();
 		deleteTarget = null;
+		mobileListOpen = false;
 	}
 
 	async function confirmDelete(): Promise<void> {
@@ -99,21 +109,24 @@
 	function switchChat(id: string): void {
 		host.select(id);
 		deleteTarget = null;
+		mobileListOpen = false;
 	}
 </script>
 
 <svelte:head><title>Conversations — Thesis</title></svelte:head>
+<svelte:window bind:innerWidth={viewportWidth} onkeydown={(event) => { if (event.key === 'Escape') mobileListOpen = false; }} />
 
-<div class="flex h-full min-h-0 gap-4">
-	<section class="flex w-72 shrink-0 flex-col rounded-xl border border-surface-700 bg-surface-900">
-		<div class="flex items-center gap-2 border-b border-surface-700 px-4 py-3">
-			<h2 class="text-sm font-semibold text-slate-800">Conversations</h2>
-			<span class="rounded-full bg-surface-800 px-1.5 font-mono text-[10px] text-slate-500">
+<div class="conversation-workspace" data-testid="conversation-workspace">
+	{#if narrow && pickerShown}<button type="button" class="picker-scrim" aria-label="Close conversation list" onclick={() => mobileListOpen = false}></button>{/if}
+	<section class="conversation-picker" class:picker-hidden={!pickerShown} aria-label="Conversation selection" id="conversation-picker" data-testid="conversation-picker">
+		<div class="picker-header">
+			<h2>Conversations</h2>
+			<span class="conversation-count">
 				{chats.length}
 			</span>
 			<button
 				type="button"
-				class="ml-auto rounded-md border border-transparent p-1 text-slate-600 transition hover:border-surface-600 hover:text-accent"
+				class="picker-action new-conversation"
 				onclick={newConversation}
 				title="New conversation"
 				aria-label="New conversation"
@@ -121,33 +134,33 @@
 			>
 				<span aria-hidden="true">＋</span>
 			</button>
+			<button type="button" class="picker-action" onclick={togglePicker} aria-label="Hide conversation list" title="Hide conversation list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16m7-11-3 3 3 3"/></svg></button>
 		</div>
-		<ul class="min-h-0 flex-1 space-y-1 overflow-y-auto p-2" data-testid="conversation-list">
+		<ul class="conversation-list" data-testid="conversation-list">
 			{#each visibleChats as chat (chat.chat_id)}
 				<li class="group relative">
 					<button
 						type="button"
-						class="w-full rounded-lg px-3 py-2 pr-9 text-left transition
-							{((drafting && chat.chat_id === DRAFT_CHAT_ID) ||
-							chat.chat_id === chatId)
-							? 'border border-accent/40 bg-accent/10'
-							: 'border border-transparent hover:bg-surface-800/60'}"
+						class="conversation-choice"
+						class:selected={(drafting && chat.chat_id === DRAFT_CHAT_ID) || chat.chat_id === chatId}
 						onclick={() =>
 							chat.chat_id === DRAFT_CHAT_ID ? newConversation() : switchChat(chat.chat_id)}
 						data-testid="conversation-item"
 						data-chat={chat.chat_id}
+						aria-current={chat.chat_id === chatId ? 'page' : undefined}
+						title={chat.title}
 					>
-						<p class="truncate text-sm {chat.chat_id === chatId ? 'text-accent' : 'text-slate-700'}">
+						<p class="conversation-name">
 							{chat.title}
 						</p>
-						<p class="text-[11px] text-slate-500">
+						<p class="conversation-date">
 							{chat.kind === 'investigation' ? 'investigation' : 'chat'} · {chat.updated_at?.slice(0, 10) ?? chat.created_at.slice(0, 10)}
 						</p>
 					</button>
 					{#if chat.chat_id !== DRAFT_CHAT_ID}
 					<button
 						type="button"
-						class="absolute top-2 right-2 hidden rounded p-1 text-slate-500 transition group-hover:block hover:text-loss"
+						class="conversation-delete"
 						title="Delete conversation"
 						aria-label="Delete conversation"
 						onclick={() => (deleteTarget = chat)}
@@ -178,16 +191,16 @@
 				</li>
 			{/each}
 		</ul>
-		<div class="border-t border-surface-700 px-4 py-2 font-mono text-[10px] text-slate-500">
-			Scoped to workspace {workspaceId}
+		<div class="picker-footer">
+			Workspace {workspaceId}
 		</div>
 	</section>
 
-	<section class="flex min-w-0 flex-1 flex-col rounded-xl border border-surface-700 bg-surface-900">
-		{#if selectedChat}
-			<header class="flex items-center gap-2 border-b border-surface-700 px-4 py-3">
-				<h1 class="truncate text-sm font-semibold text-slate-800">{selectedChat.title}</h1>
-				{#if selectedChat.kind === 'investigation'}
+	<section class="conversation-canvas" aria-label="Conversation">
+			<header class="conversation-titlebar">
+				<button type="button" class="picker-toggle" onclick={togglePicker} aria-label={pickerShown ? 'Hide conversation list' : 'Show conversation list'} title={pickerShown ? 'Hide conversation list' : 'Show conversation list'} aria-expanded={pickerShown} aria-controls="conversation-picker" data-testid="conversation-picker-toggle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+				<h1>{selectedChat?.title ?? 'New conversation'}</h1>
+				{#if selectedChat?.kind === 'investigation'}
 					<span class="rounded-full border border-accent/40 px-2 py-0.5 font-mono text-[10px] text-accent">
 						investigation
 					</span>
@@ -199,7 +212,6 @@
 					</span>
 				{/if}
 			</header>
-		{/if}
 
 		{#if host.error}
 			<p class="px-3 py-2 text-xs text-warn" role="status" data-testid="chat-host-error">{host.error}</p>
@@ -207,6 +219,7 @@
 		{#key `${workspaceId}:conversation`}
 		{#if host.workspaceId === workspaceId}
 		<ChatSurface
+			showOutline={true}
 			{timeline}
 			{workspaceId}
 			{chatId}
@@ -240,3 +253,14 @@
 		onClose={() => (deleteTarget = null)}
 	/>
 {/if}
+
+<style>
+	.conversation-workspace{position:relative;display:flex;height:100%;min-height:0;min-width:0;background:var(--color-surface-900)}
+	.conversation-picker{display:flex;flex-direction:column;width:192px;flex-shrink:0;min-height:0;border-right:1px solid var(--color-surface-700);background:var(--color-surface-900)}.conversation-picker.picker-hidden{display:none}
+	.picker-header{display:flex;align-items:center;gap:6px;min-height:64px;padding:12px 9px 10px 13px}.picker-header h2{font-size:12px;font-weight:500;color:var(--color-slate-800)}.conversation-count{font-size:10px;color:var(--color-slate-500)}.picker-action,.picker-toggle{display:flex;align-items:center;justify-content:center;width:26px;height:28px;flex-shrink:0;border-radius:4px;color:var(--color-slate-400);cursor:pointer}.picker-action:hover,.picker-toggle:hover{background:var(--color-surface-800);color:var(--color-accent)}.new-conversation{margin-left:auto}.picker-action svg,.picker-toggle svg{width:14px;height:14px}
+	.conversation-list{overflow-y:auto;min-height:0;flex:1;padding:0 9px;margin:0;list-style:none}.conversation-list>li{margin-bottom:4px}.conversation-choice{display:block;width:100%;padding:9px 25px 9px 9px;border-radius:5px;text-align:left;color:var(--color-slate-700);cursor:pointer}.conversation-choice:hover{background:var(--color-surface-800)}.conversation-choice.selected{background:color-mix(in srgb,var(--color-accent) 9%,var(--color-surface-900));color:var(--color-accent)}.conversation-name{font-size:12px;line-height:1.5;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere}.conversation-date{margin-top:4px;font-size:10px;color:var(--color-slate-400)}
+	.conversation-delete{position:absolute;top:9px;right:4px;display:flex;align-items:center;justify-content:center;width:24px;height:26px;border-radius:4px;color:var(--color-slate-400);opacity:0;cursor:pointer}.conversation-list>li:hover .conversation-delete,.conversation-delete:focus-visible{opacity:1}.conversation-delete:hover{color:var(--color-loss);background:var(--color-surface-800)}.picker-footer{padding:12px 13px;font-size:10px;color:var(--color-slate-400);overflow-wrap:anywhere}
+	.conversation-canvas{display:flex;flex:1;flex-direction:column;min-width:0;min-height:0}.conversation-titlebar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:16px 18px 12px;min-height:64px}.conversation-titlebar h1{font-size:18px;line-height:1.45;font-weight:500;color:var(--color-slate-800);margin:0;flex:1;min-width:140px;overflow-wrap:anywhere}.picker-toggle{width:28px;height:30px}.picker-scrim{display:none}
+	@media(max-width:760px){.conversation-picker{position:absolute;inset:0 auto 0 0;z-index:35;width:240px;max-width:calc(100% - 28px);box-shadow:5px 0 16px rgb(0 0 0 / .07)}.picker-scrim{display:block;position:absolute;inset:0;z-index:34;background:rgb(0 0 0 / .1)}.conversation-titlebar{padding:12px 10px;gap:7px}.conversation-titlebar h1{font-size:16px;min-width:100px}}
+	@media(pointer:coarse){.picker-action,.picker-toggle{min-height:44px;min-width:36px}.conversation-delete{opacity:1;min-height:44px;top:5px}.conversation-choice{min-height:64px}}
+</style>

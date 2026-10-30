@@ -21,20 +21,34 @@ from fastapi.responses import StreamingResponse
 from pydantic import TypeAdapter
 
 from thesis.http.chat import _service_error, get_chat_service
+from thesis.http.conversation_outline import (
+    OUTLINE_METADATA_ARRAYS,
+    OUTLINE_METADATA_FIELDS,
+    OUTLINE_RESULT_TYPES,
+    project_outline_item,
+)
 from thesis.http.streaming import (
     TEXT_EVENT_STREAM_MEDIA_TYPE,
     StreamSleeper,
     _resume_cursor,
 )
-from thesis.http.wire import TimelineItemWire, TimelinePageWire, WorkflowMetadataWire
+from thesis.http.transcript import bound_page, project_activity, project_message
+from thesis.http.wire import (
+    ConversationOutlinePageWire,
+    TimelineItemWire,
+    TranscriptItemWire,
+    TranscriptPageWire,
+    WorkflowMetadataWire,
+)
 from thesis_runtime.contracts.codec import record_from_payload
 from thesis_runtime.contracts.records import ChatMessage, WorkflowExecution
 from thesis_runtime.conversations import ChatService, RecordNotFound
 from thesis_runtime.conversations.timeline import TimelineOutputPrefixes, TimelineReader
 
 DEFAULT_RECOVERY_INTERVAL_SECONDS = 15.0
-DEFAULT_LIMIT = 200
+DEFAULT_LIMIT = 40
 TIMELINE_ITEM_ADAPTER = TypeAdapter(TimelineItemWire)
+TRANSCRIPT_ITEM_ADAPTER = TypeAdapter(TranscriptItemWire)
 
 
 def _timeline(request: Request) -> TimelineReader:
@@ -78,7 +92,7 @@ def _timestamp_text(item: Mapping[str, object]) -> str:
     return ""
 
 
-def _clean(item: dict[str, object]) -> dict[str, object]:
+def _clean(item: dict[str, object], *, preview: bool = False) -> dict[str, object]:
     """Project one stored item onto the timeline wire contract.
 
     Storage documents carry routing and record fields beyond the wire shape
@@ -97,11 +111,15 @@ def _clean(item: dict[str, object]) -> dict[str, object]:
     )
     payload = document.get("payload")
     if record_type is not None and isinstance(payload, dict):
-        document["payload"] = record_from_payload(record_type, payload).as_dict()
-    wire = TIMELINE_ITEM_ADAPTER.validate_python(document)
-    return TIMELINE_ITEM_ADAPTER.dump_python(
-        wire, mode="json", by_alias=True, exclude_unset=True
-    )
+        record = record_from_payload(record_type, payload)
+        document["payload"] = (
+            project_message(record)
+            if preview and isinstance(record, ChatMessage)
+            else record.as_dict()
+        )
+    adapter = TRANSCRIPT_ITEM_ADAPTER if preview else TIMELINE_ITEM_ADAPTER
+    wire = adapter.validate_python(document)
+    return adapter.dump_python(wire, mode="json", by_alias=True, exclude_unset=True)
 
 
 def _seq(item: dict[str, object]) -> int:
@@ -204,6 +222,46 @@ def create_timeline_router(
     router = APIRouter(prefix="/v1/workspaces/{workspace_id}", tags=["timeline"])
     wait = sleeper
 
+    @router.get("/chats/{chat_id}/outline", response_model=ConversationOutlinePageWire)
+    async def conversation_outline(
+        workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
+        chat_id: Annotated[str, Path(min_length=1, max_length=128)],
+        request: Request,
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
+        after: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict[str, object]:
+        """Page lightweight metadata across all scopes without transcript prefetch."""
+        try:
+            await asyncio.to_thread(chat_service.get_chat, workspace_id, chat_id)
+        except Exception as error:
+            raise _service_error(error) from error
+        timeline = _timeline(request)
+        watermark = await asyncio.to_thread(
+            timeline.latest_sequence, workspace_id=workspace_id, chat_id=chat_id
+        )
+        records = await asyncio.to_thread(
+            timeline.read_receipts,
+            workspace_id=workspace_id,
+            chat_id=chat_id,
+            after_seq=after,
+            through_seq=watermark,
+            limit=500,
+            result_types=OUTLINE_RESULT_TYPES,
+            structured_kinds=("study",),
+            metadata_fields=OUTLINE_METADATA_FIELDS,
+            metadata_arrays=OUTLINE_METADATA_ARRAYS,
+        )
+        records = [item for item in records if _seq(item) <= watermark]
+        cursor = max((_seq(item) for item in records), default=watermark)
+        more = len(records) == 500 and cursor < watermark
+        return {
+            "items": [
+                entry for item in records for entry in project_outline_item(item)
+            ],
+            "after": cursor if more else watermark,
+            "nextAfter": cursor if more else None,
+        }
+
     @router.get("/chats/{chat_id}/executions", response_model=WorkflowMetadataWire)
     async def workflow_metadata(
         workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
@@ -228,7 +286,7 @@ def create_timeline_router(
 
     @router.get(
         "/chats/{chat_id}/timeline",
-        response_model=TimelinePageWire,
+        response_model=TranscriptPageWire,
         response_model_exclude_unset=True,
     )
     async def read_timeline(
@@ -303,8 +361,12 @@ def create_timeline_router(
                 limit=limit,
                 thread_id=thread,
             )
+        views = [project_activity(_clean(item, preview=True)) for item in items]
+        views = bound_page(views, newest=after is None or after == 0)
+        selected = {item["id"] for item in views}
+        items = [item for item in items if item["id"] in selected]
         result: dict[str, object] = {
-            "items": [_clean(item) for item in items],
+            "items": views,
             "nextBefore": min(_seq(item) for item in items) if items else None,
             "after": watermark,
         }
@@ -318,6 +380,35 @@ def create_timeline_router(
             if prefixes:
                 result["outputPrefixes"] = [_clean(item) for item in prefixes]
         return result
+
+    @router.get(
+        "/chats/{chat_id}/timeline/items/{sequence}",
+        response_model=TimelineItemWire,
+        response_model_exclude_unset=True,
+    )
+    async def timeline_detail(
+        workspace_id: Annotated[str, Path(min_length=1, max_length=128)],
+        chat_id: Annotated[str, Path(min_length=1, max_length=128)],
+        sequence: Annotated[int, Path(ge=1)],
+        request: Request,
+        chat_service: Annotated[ChatService, Depends(get_chat_service)],
+    ) -> dict[str, object]:
+        """Load one canonical receipt/activity explicitly; never advance a cursor."""
+        try:
+            await asyncio.to_thread(chat_service.get_chat, workspace_id, chat_id)
+        except Exception as error:
+            raise _service_error(error) from error
+        records = await asyncio.to_thread(
+            _timeline(request).read_after,
+            workspace_id=workspace_id,
+            chat_id=chat_id,
+            after_seq=sequence - 1,
+            limit=1,
+            thread_id=None,
+        )
+        if not records or _seq(records[0]) != sequence:
+            raise HTTPException(status_code=404, detail="Timeline item was not found")
+        return _clean(records[0])
 
     @router.get("/chats/{chat_id}/timeline/stream")
     async def stream_timeline(

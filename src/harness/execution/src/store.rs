@@ -23,6 +23,33 @@ pub struct Document {
     #[serde(deserialize_with = "serde::Deserialize::deserialize")]
     pub owner: Option<Owner>,
     pub artifacts: BTreeMap<String, ArtifactInfo>,
+    /// Optional outbox event, committed atomically with a terminal result.
+    pub completion: Option<JobCompletion>,
+}
+
+/// Compact terminal evidence; no accepted source, credentials or delivery target.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JobCompletion {
+    pub job_id: String,
+    pub kind: JobKind,
+    pub state: JobState,
+    pub metrics: BTreeMap<String, String>,
+    pub artifact_count: u64,
+    pub error_message: Option<String>,
+}
+
+impl From<&JobRecord> for JobCompletion {
+    fn from(record: &JobRecord) -> Self {
+        Self {
+            job_id: record.job_id.clone(),
+            kind: record.kind,
+            state: record.state,
+            metrics: record.metrics.clone(),
+            artifact_count: record.artifact_count,
+            error_message: record.error_message.clone(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -100,6 +127,7 @@ impl ExecutionStore {
             let inventory = artifacts.values().cloned().collect::<Vec<_>>();
             doc.record = commit_result(&doc.record, record, &inventory)?;
             doc.artifacts = artifacts;
+            doc.completion = Some(JobCompletion::from(&doc.record));
             Ok(())
         })
     }
@@ -205,6 +233,7 @@ impl ExecutionStore {
                 let mut progress=harness_contracts::progress::ExecutionProgress::stage(harness_contracts::progress::ExecutionStage::Interrupted);progress.completed=false;apply_progress(&mut doc.record,progress,Utc::now())?;
                 doc.record.state=JobState::Failed;doc.record.updated_at=Utc::now();doc.record.error_message=Some("execution worker disappeared or lost ownership; outcome is interrupted and will not be replayed".into());
                 for progress in &mut doc.record.progress {if progress.finished_at.is_none(){progress.finished_at=Some(doc.record.updated_at);}}
+                doc.completion=Some(JobCompletion::from(&doc.record));
             }
             encode(&doc)
         })?;
@@ -237,6 +266,34 @@ impl ExecutionStore {
         jobs.sort_by_key(|r| r.created_at);
         Ok(jobs)
     }
+
+    /// Retry committed delivery events, never running-job status queries.
+    pub fn pending_completions(&self) -> Result<Vec<JobCompletion>> {
+        let mut events = Vec::new();
+        for id in self.ids()? {
+            if let Some(event) = self.document(&id)?.and_then(|doc| doc.completion) {
+                events.push(event);
+            }
+        }
+        Ok(events)
+    }
+
+    /// Clear only the immutable event acknowledged by its consumer. No owner or
+    /// execution state is changed, and an interrupted ACK can safely be retried.
+    pub fn acknowledge_completion(&self, event: &JobCompletion) -> Result<()> {
+        self.backend.update(&path(&event.job_id)?, &mut |bytes| {
+            let mut doc: Document = decode(&bytes)?;
+            if doc
+                .completion
+                .as_ref()
+                .is_some_and(|pending| pending != event)
+            {
+                return Err(error("completion acknowledgement mismatch"));
+            }
+            doc.completion = None;
+            encode(&doc)
+        })
+    }
 }
 impl JobAdmission for ExecutionStore {
     fn admit(&self, record: JobRecord) -> Result<Admission> {
@@ -245,6 +302,7 @@ impl JobAdmission for ExecutionStore {
             record: record.clone(),
             owner: None,
             artifacts: BTreeMap::new(),
+            completion: None,
         };
         if self.backend.create(&path(&id)?, &encode(&doc)?)? {
             return Ok(Admission::Created(record));

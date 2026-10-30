@@ -7,6 +7,7 @@ use harness_strategy_sdk::Indicator;
 use harness_strategy_sdk::IndicatorMissing;
 use harness_strategy_sdk::MarketConsumer;
 use harness_strategy_sdk::ObservationContext;
+use harness_strategy_sdk::RoutingPlan;
 use harness_strategy_sdk::Subscription;
 use harness_strategy_sdk::WaveletIndicator;
 use harness_strategy_sdk::WaveletSnapshot;
@@ -73,7 +74,7 @@ fn frame(
         missing_symbols: missing,
     }
 }
-fn daily(owner: &mut Owner, index: i64, price: i128) {
+fn daily(owner: &mut Owner, index: i64, price: i128, plan: &mut RoutingPlan) {
     route_bar(
         owner,
         &frame(
@@ -84,14 +85,16 @@ fn daily(owner: &mut Owner, index: i64, price: i128) {
             vec![],
         ),
         &mut ObservationContext,
+        plan,
     )
     .unwrap();
 }
 #[test]
 fn completed_slow_bars_are_available_only_at_their_boundary_and_snapshots_do_not_relabel() {
     let mut owner = owner();
+    let mut owner_plan = RoutingPlan::new(&mut owner).unwrap();
     for (index, price) in [1, 1, 3].into_iter().enumerate() {
-        daily(&mut owner, index as i64, price);
+        daily(&mut owner, index as i64, price, &mut owner_plan);
     }
     assert!(owner.wavelet.snapshot_at("AAA", 51).is_none());
     // An intraday trigger before the last slow bar is available cannot see it.
@@ -99,14 +102,16 @@ fn completed_slow_bars_are_available_only_at_their_boundary_and_snapshots_do_not
         &mut owner,
         &frame("1min", 51, 61, &[("AAA", 2)], vec![]),
         &mut ObservationContext,
+        &mut owner_plan,
     )
     .unwrap();
     assert!(owner.decisions.last().unwrap().is_none());
-    daily(&mut owner, 3, 3);
+    daily(&mut owner, 3, 3, &mut owner_plan);
     route_bar(
         &mut owner,
         &frame("1min", 72, 82, &[("AAA", 3)], vec![]),
         &mut ObservationContext,
+        &mut owner_plan,
     )
     .unwrap();
     let frozen = owner.decisions.last().unwrap().clone().unwrap();
@@ -118,7 +123,7 @@ fn completed_slow_bars_are_available_only_at_their_boundary_and_snapshots_do_not
     assert_eq!(frozen.scales()[0].energy(), Decimal::ZERO);
     assert_eq!(frozen.scales()[1].energy(), Decimal::from(4));
     assert!(owner.wavelet.snapshot_at("BBB", 82).is_none()); // flat, independent symbol
-    daily(&mut owner, 5, 1000);
+    daily(&mut owner, 5, 1000, &mut owner_plan);
     assert_eq!(owner.wavelet.snapshot_at("AAA", 82), Some(frozen.clone()));
     assert_eq!(owner.decisions[1], Some(frozen));
     assert_ne!(
@@ -130,16 +135,18 @@ fn completed_slow_bars_are_available_only_at_their_boundary_and_snapshots_do_not
 fn prefix_and_future_perturbation_leave_every_historical_snapshot_identical() {
     let mut left = owner();
     let mut right = owner();
+    let mut left_plan = RoutingPlan::new(&mut left).unwrap();
+    let mut right_plan = RoutingPlan::new(&mut right).unwrap();
     for (i, price) in [10, 11, 13, 12, 15, 18].into_iter().enumerate() {
-        daily(&mut left, i as i64, price);
-        daily(&mut right, i as i64, price);
+        daily(&mut left, i as i64, price, &mut left_plan);
+        daily(&mut right, i as i64, price, &mut right_plan);
     }
     let prefix: Vec<_> = (0..=112)
         .map(|time| left.wavelet.snapshot_at("AAA", time))
         .collect();
     for i in 6..12 {
-        daily(&mut left, i, 20 + i as i128);
-        daily(&mut right, i, 10000 - i as i128);
+        daily(&mut left, i, 20 + i as i128, &mut left_plan);
+        daily(&mut right, i, 10000 - i as i128, &mut right_plan);
     }
     for time in 0..=112 {
         assert_eq!(left.wavelet.snapshot_at("AAA", time), prefix[time as usize]);
@@ -152,22 +159,24 @@ fn prefix_and_future_perturbation_leave_every_historical_snapshot_identical() {
 #[test]
 fn missing_input_resets_warmup_and_never_carries_previous_features() {
     let mut owner = owner();
+    let mut owner_plan = RoutingPlan::new(&mut owner).unwrap();
     for (i, p) in [1, 1, 3, 3].into_iter().enumerate() {
-        daily(&mut owner, i as i64, p);
+        daily(&mut owner, i as i64, p, &mut owner_plan);
     }
     let before = owner.wavelet.snapshot_at("AAA", 72).unwrap();
     route_bar(
         &mut owner,
         &frame("1d", 80, 92, &[("BBB", 10)], vec!["AAA"]),
         &mut ObservationContext,
+        &mut owner_plan,
     )
     .unwrap();
     assert!(owner.wavelet.snapshot_at("AAA", 92).is_none());
     for (i, p) in [(5, 2), (6, 3), (7, 4)] {
-        daily(&mut owner, i, p);
+        daily(&mut owner, i, p, &mut owner_plan);
         assert!(owner.wavelet.snapshot_at("AAA", i * 20 + 12).is_none());
     }
-    daily(&mut owner, 8, 5);
+    daily(&mut owner, 8, 5, &mut owner_plan);
     assert!(owner.wavelet.snapshot_at("AAA", 172).is_some());
     assert_eq!(owner.wavelet.snapshot_at("AAA", 72), Some(before));
     let sequence = &owner.wavelet.sequence().completed()[&("AAA".into(), "1d".into())];

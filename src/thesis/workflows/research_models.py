@@ -33,7 +33,8 @@ from thesis.workflows.backtests import (
     BacktestRunRequest,
     BacktestRunResult,
 )
-from thesis.workspaces.programs import PROGRAM_ID_PATTERN, ProgramKind
+from thesis.workspaces.program_contracts import ProgramKind
+from thesis.workspaces.programs import PROGRAM_ID_PATTERN
 from thesis_runtime.tools.schema import render_violations, violations
 
 PROGRAM_REFERENCE_SCHEMA: dict[str, object] = {

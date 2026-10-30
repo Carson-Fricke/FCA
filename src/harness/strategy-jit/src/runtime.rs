@@ -9,10 +9,15 @@
 use std::collections::BTreeMap;
 use std::os::raw::c_void;
 
+use harness_contracts::causal::CaptureRequest;
+use harness_strategy_sdk::{CDecisionSink, DecisionFn, StudyOutput};
+use harness_trading::causal::ObservationLedger;
+
 use harness_strategy_sdk::canonical_subscriptions;
 use harness_strategy_sdk::CBarEvent;
 use harness_strategy_sdk::CBarFrame;
 use harness_strategy_sdk::CDecimal;
+use harness_strategy_sdk::CExecutionSource;
 use harness_strategy_sdk::CFill;
 use harness_strategy_sdk::CMarketOrder;
 use harness_strategy_sdk::CMetricSink;
@@ -28,7 +33,6 @@ use harness_strategy_sdk::METRIC_INVALID_NAME;
 use harness_strategy_sdk::METRIC_NOT_FINITE;
 use harness_strategy_sdk::METRIC_OK;
 use harness_strategy_sdk::METRIC_RESERVED_NAME;
-use harness_strategy_sdk::RESERVED_METRIC_NAMES;
 use harness_strategy_sdk::SDK_OK;
 use harness_trading::program::EngineBar;
 use harness_trading::program::EngineBarFrame;
@@ -148,16 +152,17 @@ extern "C" fn metric_publish(ctx: *mut c_void, name: CStr, value: f64) -> i32 {
         return METRIC_INVALID_NAME;
     };
     if !valid_metric_name(name) {
-        collector.rejection =
-            Some("metric name must match ^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$".to_string());
+        collector.rejection = Some(format!(
+            "metric name {name:?} must match ^[A-Za-z0-9][A-Za-z0-9._:@/-]{{0,127}}$"
+        ));
         return METRIC_INVALID_NAME;
     }
-    if RESERVED_METRIC_NAMES.contains(&name) {
+    if harness_strategy_sdk::is_reserved_metric_name(name) {
         collector.rejection = Some(format!("metric name {name:?} is reserved by the harness"));
         return METRIC_RESERVED_NAME;
     }
     if !value.is_finite() {
-        collector.rejection = Some("metric value must be finite".to_string());
+        collector.rejection = Some(format!("metric {name:?}: value {value:?} must be finite; omit an undefined metric or publish an explicit undefined observation"));
         return METRIC_NOT_FINITE;
     }
     collector.values.insert(name.to_string(), value.to_string());
@@ -171,15 +176,27 @@ unsafe extern "C" fn output_publish(ctx: *mut c_void, name: CStr, json: CStr) ->
     let parsed = (|| -> Result<(String, serde_json::Value), String> {
         let name = unsafe { name.as_str() }.ok_or("output name must be UTF-8")?;
         if !valid_metric_name(name) {
-            return Err("invalid output name".into());
+            return Err(format!(
+                "output name {name:?} must match ^[A-Za-z0-9][A-Za-z0-9._:@/-]{{0,127}}$"
+            ));
+        }
+        if name.starts_with("causal/") {
+            return Err("causal/ is reserved for host-sealed replay observations".into());
         }
         let json = unsafe { json.as_str() }.ok_or("output JSON must be UTF-8")?;
         let document: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
-        let output: harness_strategy_sdk::StudyOutput =
-            serde_json::from_value(document).map_err(|e| e.to_string())?;
-        output.validate()?;
+        let output: harness_strategy_sdk::StudyOutput = serde_path_to_error::deserialize(document)
+            .map_err(|e| format!("output {name:?}: {e}"))?;
+        if matches!(output, StudyOutput::CausalObservations { .. }) {
+            return Err("only the host may publish causal observations".into());
+        }
+        output
+            .validate()
+            .map_err(|e| format!("output {name:?}: {e}"))?;
         if collector.outputs.contains_key(name) {
-            return Err("duplicate output name".into());
+            return Err(format!(
+                "output {name:?}: duplicate publication; publish each output name once"
+            ));
         }
         Ok((
             name.into(),
@@ -211,10 +228,147 @@ fn valid_metric_name(name: &str) -> bool {
         })
 }
 
-struct OrderCollector {
-    orders: Vec<EngineOrder>,
+struct DecisionCollector<'a> {
+    ledger: &'a mut ObservationLedger,
+    frame: &'a EngineBarFrame,
     rejection: Option<String>,
 }
+
+unsafe extern "C" fn capture_observation(ctx: *mut c_void, request: CStr) -> i32 {
+    let collector = &mut *ctx.cast::<DecisionCollector<'_>>();
+    let result = (|| {
+        let json = request.as_str().ok_or("capture JSON must be UTF-8")?;
+        let request: CaptureRequest =
+            serde_path_to_error::deserialize(&mut serde_json::Deserializer::from_str(json))
+                .map_err(|error| format!("capture request: {error}"))?;
+        let location = format!(
+            "dataset={:?}, symbol={:?}, interval={}, decision_at_ns={}",
+            request.dataset,
+            request.symbol,
+            collector.frame.interval,
+            collector.frame.available_at_ns
+        );
+        collector
+            .ledger
+            .capture(collector.frame, request)
+            .map_err(|error| format!("{location}: {error}"))
+    })();
+    match result {
+        Ok(()) => SDK_OK,
+        Err(error) => {
+            collector.rejection = Some(format!("causal capture rejected: {error}"));
+            METRIC_REJECTED
+        }
+    }
+}
+
+fn seal_decision(
+    ledger: &mut ObservationLedger,
+    frame: &EngineBarFrame,
+    state: *mut c_void,
+    callback: DecisionFn,
+) -> Result<(), BacktestError> {
+    let mut collector = DecisionCollector {
+        ledger,
+        frame,
+        rejection: None,
+    };
+    let sink = CDecisionSink {
+        ctx: (&mut collector as *mut DecisionCollector<'_>).cast(),
+        decision_at_ns: frame.available_at_ns,
+        interval: CStr::from_slice(&frame.interval),
+        capture: capture_observation,
+    };
+    let code = unsafe { callback(state, &sink) };
+    if code != SDK_OK || collector.rejection.is_some() {
+        return Err(BacktestError::StrategyExecution(
+            collector
+                .rejection
+                .unwrap_or_else(|| "causal decision callback failed".into()),
+        ));
+    }
+    Ok(())
+}
+
+fn publish_observations(
+    ledger: &ObservationLedger,
+    outputs: &mut BTreeMap<String, serde_json::Value>,
+) -> Result<(), BacktestError> {
+    for (name, dataset) in ledger.outputs() {
+        dataset
+            .validate()
+            .map_err(BacktestError::StrategyExecution)?;
+        let output = serde_json::to_value(StudyOutput::CausalObservations { dataset })
+            .map_err(|error| BacktestError::StrategyExecution(error.to_string()))?;
+        outputs.insert(name, output);
+    }
+    Ok(())
+}
+
+struct OrderCollector {
+    actions: Vec<harness_trading::program::OrderAction>,
+    rejection: Option<String>,
+    next_id: u64,
+    instance_id: String,
+    generated_id: String,
+}
+
+/// Caches serialization on first access. History caches survive callbacks while
+/// their immutable backing arrays are unchanged; account marks never go stale.
+#[derive(Default)]
+struct ExecutionViews {
+    snapshot: Option<harness_trading::program::ExecutionSnapshot>,
+    account: std::cell::OnceCell<String>,
+    orders: std::cell::OnceCell<String>,
+    trades: std::cell::OnceCell<String>,
+}
+impl ExecutionViews {
+    fn update(&mut self, snapshot: &harness_trading::program::ExecutionSnapshot) {
+        if self
+            .snapshot
+            .as_ref()
+            .is_none_or(|previous| !std::sync::Arc::ptr_eq(&previous.orders, &snapshot.orders))
+        {
+            self.orders.take();
+        }
+        if self.snapshot.as_ref().is_none_or(|previous| {
+            !std::sync::Arc::ptr_eq(&previous.closed_trades, &snapshot.closed_trades)
+        }) {
+            self.trades.take();
+        }
+        self.account.take();
+        self.snapshot = Some(snapshot.clone());
+    }
+    fn source(&self) -> CExecutionSource {
+        CExecutionSource {
+            ctx: (self as *const Self).cast(),
+            read: read_execution,
+        }
+    }
+}
+unsafe extern "C" fn read_execution(ctx: *const c_void, view: u32) -> CStr {
+    let views = &*ctx.cast::<ExecutionViews>();
+    let Some(snapshot) = &views.snapshot else {
+        return CStr::from_slice(if view == 0 { "" } else { "[]" });
+    };
+    let value = match view {
+        0 => views
+            .account
+            .get_or_init(|| snapshot.account_json().to_string()),
+        1 => views
+            .orders
+            .get_or_init(|| snapshot.orders_json().to_string()),
+        2 => views
+            .trades
+            .get_or_init(|| snapshot.closed_trades_json().to_string()),
+        _ => return CStr::from_slice(""),
+    };
+    CStr::from_slice(value)
+}
+
+#[cfg(test)]
+#[path = "../tests/unit/execution_views.rs"]
+mod execution_views_tests;
 
 extern "C" fn order_submit(ctx: *mut c_void, order: *const CMarketOrder) -> i32 {
     let Some(collector) = (unsafe { (ctx as *mut OrderCollector).as_mut() }) else {
@@ -253,24 +407,76 @@ extern "C" fn order_submit(ctx: *mut c_void, order: *const CMarketOrder) -> i32 
             return ORDER_REJECTED;
         }
     };
-    collector.orders.push(EngineOrder {
-        order_id,
-        symbol,
-        side,
-        quantity: raw.quantity.to_decimal(),
-        order_type,
-        time_in_force,
-        limit_price: raw.has_limit_price.then(|| raw.limit_price.to_decimal()),
-        stop_price: raw.has_stop_price.then(|| raw.stop_price.to_decimal()),
-        timestamp_ns: 0,
-        sequence: raw.sequence,
-        event_id,
-    });
+    collector
+        .actions
+        .push(harness_trading::program::OrderAction::Submit(EngineOrder {
+            order_id,
+            symbol,
+            side,
+            quantity: raw.quantity.to_decimal(),
+            order_type,
+            time_in_force,
+            limit_price: raw.has_limit_price.then(|| raw.limit_price.to_decimal()),
+            stop_price: raw.has_stop_price.then(|| raw.stop_price.to_decimal()),
+            timestamp_ns: 0,
+            sequence: raw.sequence,
+            event_id,
+        }));
     SDK_OK
+}
+
+unsafe extern "C" fn next_order_id(ctx: *mut c_void) -> CStr {
+    let collector = &mut *(ctx as *mut OrderCollector);
+    collector.next_id += 1;
+    collector.generated_id = format!("sdk:{}:{}", collector.instance_id, collector.next_id);
+    CStr::from_slice(&collector.generated_id)
+}
+unsafe extern "C" fn cancel_order(ctx: *mut c_void, order_id: CStr) -> i32 {
+    let collector = &mut *(ctx as *mut OrderCollector);
+    let Some(order_id) = order_id.as_str().filter(|id| !id.is_empty()) else {
+        collector.rejection =
+            Some("cancel.order_id: expected a nonempty UTF-8 owned order ID".into());
+        return ORDER_REJECTED;
+    };
+    collector
+        .actions
+        .push(harness_trading::program::OrderAction::Cancel {
+            order_id: order_id.into(),
+        });
+    SDK_OK
+}
+unsafe extern "C" fn target_position(ctx: *mut c_void, symbol: CStr, quantity: CDecimal) -> i32 {
+    let collector = &mut *(ctx as *mut OrderCollector);
+    let Some(symbol) = symbol.as_str().filter(|symbol| !symbol.is_empty()) else {
+        collector.rejection =
+            Some("target_position.symbol: expected a nonempty UTF-8 subscribed symbol".into());
+        return ORDER_REJECTED;
+    };
+    collector
+        .actions
+        .push(harness_trading::program::OrderAction::TargetPosition {
+            symbol: symbol.into(),
+            quantity: quantity.to_decimal(),
+        });
+    SDK_OK
+}
+fn order_only(
+    actions: Vec<harness_trading::program::OrderAction>,
+) -> Result<Vec<EngineOrder>, BacktestError> {
+    actions
+        .into_iter()
+        .map(|action| match action {
+            harness_trading::program::OrderAction::Submit(order) => Ok(order),
+            _ => Err(BacktestError::StrategyExecution(
+                "managed execution actions require the engine action entrypoint".into(),
+            )),
+        })
+        .collect()
 }
 
 /// A JIT-loaded study program driven through the engine seam.
 pub struct JitStudyRuntime {
+    observations: ObservationLedger,
     loaded: LoadedStudy,
     subscriptions: Vec<MarketSubscription>,
     metrics: BTreeMap<String, String>,
@@ -294,6 +500,7 @@ impl JitStudyRuntime {
         let subscriptions =
             read_subscriptions(unsafe { (loaded.vtable().subscriptions)(loaded.state()) })?;
         Ok(Self {
+            observations: ObservationLedger::default(),
             loaded,
             subscriptions,
             metrics: BTreeMap::new(),
@@ -317,6 +524,9 @@ impl JitStudyRuntime {
         let vtable = self.loaded.vtable();
         let (bars, missing) = frame_storage(frame)?;
         let view = frame_view(frame, &bars, &missing);
+        self.observations
+            .advance(frame)
+            .map_err(BacktestError::StrategyExecution)?;
         let code = unsafe { (vtable.on_bar_frame)(self.loaded.state(), &view) };
         if code != SDK_OK {
             return Err(BacktestError::StrategyExecution(study_failure(
@@ -324,7 +534,12 @@ impl JitStudyRuntime {
                 "study bar frame callback failed",
             )));
         }
-        Ok(())
+        seal_decision(
+            &mut self.observations,
+            frame,
+            self.loaded.state(),
+            self.loaded.vtable().on_decision,
+        )
     }
 }
 
@@ -341,16 +556,10 @@ impl StrategyRuntime for JitStudyRuntime {
 
     fn on_market(&mut self, event: &EngineMarket) -> Result<Vec<EngineOrder>, BacktestError> {
         let vtable = self.loaded.vtable();
-        let code = match event {
-            EngineMarket::Quote { .. } => unsafe {
-                (vtable.on_quote)(self.loaded.state(), &quote_event(event))
-            },
-            EngineMarket::Trade { .. } => unsafe {
-                (vtable.on_trade)(self.loaded.state(), &trade_event(event))
-            },
-            EngineMarket::Bar(_) => {
-                return Err(BacktestError::StrategyExecution(STUDY_BARS_ONLY.into()))
-            }
+        let code = match event.data_type() {
+            "quote" => unsafe { (vtable.on_quote)(self.loaded.state(), &quote_event(event)) },
+            "trade" => unsafe { (vtable.on_trade)(self.loaded.state(), &trade_event(event)) },
+            _ => return Err(BacktestError::StrategyExecution(STUDY_BARS_ONLY.into())),
         };
         if code != SDK_OK {
             return Err(BacktestError::StrategyExecution(study_failure(
@@ -383,10 +592,12 @@ impl StrategyRuntime for JitStudyRuntime {
             outputs: BTreeMap::new(),
             rejection: None,
         };
+        let empty_execution = ExecutionViews::default();
         let sink = CMetricSink {
             ctx: &mut collector as *mut MetricCollector as *mut c_void,
             publish: metric_publish as MetricPublishFn,
             publish_output: output_publish,
+            execution: empty_execution.source(),
         };
         let code = unsafe { (vtable.on_stop)(self.loaded.state(), &sink) };
         if code != SDK_OK || collector.rejection.is_some() {
@@ -396,6 +607,7 @@ impl StrategyRuntime for JitStudyRuntime {
                 .unwrap_or_else(|| "study stop failed".to_string());
             return Err(BacktestError::StrategyExecution(detail));
         }
+        publish_observations(&self.observations, &mut collector.outputs)?;
         self.metrics = collector.values;
         harness_strategy_sdk::research::validate_publication(&collector.outputs)
             .map_err(BacktestError::StrategyExecution)?;
@@ -413,10 +625,14 @@ impl StrategyRuntime for JitStudyRuntime {
 
 /// A JIT-loaded strategy program driven through the engine seam.
 pub struct JitStrategyRuntime {
+    observations: ObservationLedger,
     loaded: LoadedStrategy,
     subscriptions: Vec<MarketSubscription>,
     metrics: BTreeMap<String, String>,
     outputs: BTreeMap<String, serde_json::Value>,
+    execution: ExecutionViews,
+    next_order_id: u64,
+    instance_id: String,
 }
 
 impl JitStrategyRuntime {
@@ -436,6 +652,10 @@ impl JitStrategyRuntime {
         let subscriptions =
             read_subscriptions(unsafe { (loaded.vtable().subscriptions)(loaded.state()) })?;
         Ok(Self {
+            observations: ObservationLedger::default(),
+            execution: ExecutionViews::default(),
+            next_order_id: 0,
+            instance_id: String::new(),
             loaded,
             subscriptions,
             metrics: BTreeMap::new(),
@@ -451,6 +671,16 @@ impl JitStrategyRuntime {
 }
 
 impl StrategyRuntime for JitStrategyRuntime {
+    fn wants_execution_state(&self) -> bool {
+        true
+    }
+    fn update_execution_state(
+        &mut self,
+        snapshot: &harness_trading::program::ExecutionSnapshot,
+    ) -> Result<(), BacktestError> {
+        self.execution.update(snapshot);
+        Ok(())
+    }
     fn subscriptions(&self) -> Option<Vec<MarketSubscription>> {
         Some(self.subscriptions.clone())
     }
@@ -461,19 +691,29 @@ impl StrategyRuntime for JitStrategyRuntime {
         ))
     }
 
-    fn on_frame_orders(
+    fn on_frame_actions(
         &mut self,
         frame: &EngineBarFrame,
-    ) -> Result<Vec<EngineOrder>, BacktestError> {
+    ) -> Result<Vec<harness_trading::program::OrderAction>, BacktestError> {
         let (bars, missing) = frame_storage(frame)?;
         let view = frame_view(frame, &bars, &missing);
+        self.observations
+            .advance(frame)
+            .map_err(BacktestError::StrategyExecution)?;
         let mut collector = OrderCollector {
-            orders: Vec::new(),
+            actions: Vec::new(),
             rejection: None,
+            next_id: self.next_order_id,
+            instance_id: self.instance_id.clone(),
+            generated_id: String::new(),
         };
         let sink = COrderSink {
             ctx: (&mut collector as *mut OrderCollector).cast(),
             submit: order_submit,
+            execution: self.execution.source(),
+            next_order_id,
+            cancel: cancel_order,
+            target_position,
         };
         let code =
             unsafe { (self.loaded.vtable().on_bar_frame)(self.loaded.state(), &view, &sink) };
@@ -485,12 +725,28 @@ impl StrategyRuntime for JitStrategyRuntime {
                     .unwrap_or_else(|| "strategy frame callback failed".into()),
             ));
         }
-        for order in &mut collector.orders {
-            order.timestamp_ns = frame.available_at_ns;
+        seal_decision(
+            &mut self.observations,
+            frame,
+            self.loaded.state(),
+            self.loaded.vtable().on_decision,
+        )?;
+        self.next_order_id = collector.next_id;
+        for action in &mut collector.actions {
+            if let harness_trading::program::OrderAction::Submit(order) = action {
+                order.timestamp_ns = frame.available_at_ns;
+            }
         }
-        Ok(collector.orders)
+        Ok(collector.actions)
+    }
+    fn on_frame_orders(
+        &mut self,
+        frame: &EngineBarFrame,
+    ) -> Result<Vec<EngineOrder>, BacktestError> {
+        order_only(self.on_frame_actions(frame)?)
     }
     fn on_start(&mut self, start: &StrategyStart) -> Result<(), BacktestError> {
+        self.instance_id = start.instance_id.clone();
         let vtable = self.loaded.vtable();
         let symbols: Vec<CStr> = start
             .symbols
@@ -519,26 +775,39 @@ impl StrategyRuntime for JitStrategyRuntime {
     }
 
     fn on_market(&mut self, event: &EngineMarket) -> Result<Vec<EngineOrder>, BacktestError> {
+        order_only(self.on_market_actions(event)?)
+    }
+    fn on_market_actions(
+        &mut self,
+        event: &EngineMarket,
+    ) -> Result<Vec<harness_trading::program::OrderAction>, BacktestError> {
         let vtable = self.loaded.vtable();
         let mut collector = OrderCollector {
-            orders: Vec::new(),
+            actions: Vec::new(),
             rejection: None,
+            next_id: self.next_order_id,
+            instance_id: self.instance_id.clone(),
+            generated_id: String::new(),
         };
         let sink = COrderSink {
             ctx: &mut collector as *mut OrderCollector as *mut c_void,
             submit: order_submit as OrderSubmitFn,
+            execution: self.execution.source(),
+            next_order_id,
+            cancel: cancel_order,
+            target_position,
         };
         let timestamp_ns = event.timestamp_ns();
-        let code = match event {
-            EngineMarket::Quote { .. } => {
+        let code = match event.data_type() {
+            "quote" => {
                 let quote = quote_event(event);
                 unsafe { (vtable.on_quote)(self.loaded.state(), &quote, &sink) }
             }
-            EngineMarket::Trade { .. } => {
+            "trade" => {
                 let trade = trade_event(event);
                 unsafe { (vtable.on_trade)(self.loaded.state(), &trade, &sink) }
             }
-            EngineMarket::Bar(_) => {
+            _ => {
                 return Err(BacktestError::StrategyExecution(
                     "bar events are not part of the strategy contract".to_string(),
                 ))
@@ -552,10 +821,13 @@ impl StrategyRuntime for JitStrategyRuntime {
             return Err(BacktestError::StrategyExecution(detail));
         }
         // The host stamps the event time, exactly as the Python adapter does.
-        for order in &mut collector.orders {
-            order.timestamp_ns = timestamp_ns;
+        self.next_order_id = collector.next_id;
+        for action in &mut collector.actions {
+            if let harness_trading::program::OrderAction::Submit(order) = action {
+                order.timestamp_ns = timestamp_ns;
+            }
         }
-        Ok(collector.orders)
+        Ok(collector.actions)
     }
 
     fn on_fill(&mut self, fill: &EngineFill) -> Result<(), BacktestError> {
@@ -594,6 +866,7 @@ impl StrategyRuntime for JitStrategyRuntime {
             ctx: &mut collector as *mut MetricCollector as *mut c_void,
             publish: metric_publish as MetricPublishFn,
             publish_output: output_publish,
+            execution: self.execution.source(),
         };
         let code = unsafe { (vtable.on_stop)(self.loaded.state(), &sink) };
         if code != SDK_OK || collector.rejection.is_some() {
@@ -603,6 +876,7 @@ impl StrategyRuntime for JitStrategyRuntime {
                 .unwrap_or_else(|| "strategy stop failed".to_string());
             return Err(BacktestError::StrategyExecution(detail));
         }
+        publish_observations(&self.observations, &mut collector.outputs)?;
         self.metrics = collector.values;
         harness_strategy_sdk::research::validate_publication(&collector.outputs)
             .map_err(BacktestError::StrategyExecution)?;
@@ -669,7 +943,7 @@ fn strategy_failure(runtime: &JitStrategyRuntime, prefix: &str) -> String {
 }
 
 fn quote_event(event: &EngineMarket) -> CQuoteEvent {
-    let EngineMarket::Quote {
+    let harness_trading::market::MarketView::Quote {
         event_id,
         timestamp_ns,
         sequence,
@@ -679,25 +953,25 @@ fn quote_event(event: &EngineMarket) -> CQuoteEvent {
         bid_quantity,
         ask_quantity,
         venue,
-    } = event
+    } = event.view()
     else {
         unreachable!("quote_event called with a trade event");
     };
     CQuoteEvent {
         event_id: CStr::from_slice(event_id),
-        timestamp_ns: *timestamp_ns,
-        sequence: *sequence,
+        timestamp_ns,
+        sequence,
         symbol: CStr::from_slice(symbol),
-        bid: CDecimal::from_decimal(*bid),
-        ask: CDecimal::from_decimal(*ask),
-        bid_quantity: CDecimal::from_decimal(*bid_quantity),
-        ask_quantity: CDecimal::from_decimal(*ask_quantity),
+        bid: CDecimal::from_decimal(bid),
+        ask: CDecimal::from_decimal(ask),
+        bid_quantity: CDecimal::from_decimal(bid_quantity),
+        ask_quantity: CDecimal::from_decimal(ask_quantity),
         venue: CStr::from_slice(venue),
     }
 }
 
 fn trade_event(event: &EngineMarket) -> CTradeEvent {
-    let EngineMarket::Trade {
+    let harness_trading::market::MarketView::Trade {
         event_id,
         timestamp_ns,
         sequence,
@@ -706,17 +980,17 @@ fn trade_event(event: &EngineMarket) -> CTradeEvent {
         quantity,
         venue,
         trade_id,
-    } = event
+    } = event.view()
     else {
         unreachable!("trade_event called with a quote event");
     };
     CTradeEvent {
         event_id: CStr::from_slice(event_id),
-        timestamp_ns: *timestamp_ns,
-        sequence: *sequence,
+        timestamp_ns,
+        sequence,
         symbol: CStr::from_slice(symbol),
-        price: CDecimal::from_decimal(*price),
-        quantity: CDecimal::from_decimal(*quantity),
+        price: CDecimal::from_decimal(price),
+        quantity: CDecimal::from_decimal(quantity),
         venue: CStr::from_slice(venue),
         trade_id: CStr::from_slice(trade_id),
     }

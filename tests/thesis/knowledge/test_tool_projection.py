@@ -12,7 +12,7 @@ import pytest
 from thesis.extensions.tools.knowledge import knowledge_registered_tools
 from thesis.knowledge.service import (
     DATA_ONLY,
-    MAX_READ_CHARS,
+    MAX_READ_TOKENS,
     KnowledgeScope,
     KnowledgeService,
     effective_sources,
@@ -25,6 +25,7 @@ from thesis_runtime.contracts.messages import (
     ToolCorrelation,
     ToolRequest,
 )
+from thesis_runtime.tools.reading import text_page
 from thesis_runtime.tools.registry import SessionToolRegistry
 
 
@@ -110,7 +111,8 @@ class FakeKnowledge:
         reference: str,
         *,
         allowed_scope: KnowledgeScope,
-        max_chars: int,
+        max_tokens: int,
+        token_offset: int = 0,
         allowed_collections: tuple[str, ...] | None,
     ) -> dict[str, object]:
         self.read_calls.append(
@@ -118,7 +120,7 @@ class FakeKnowledge:
                 "workspace_id": workspace_id,
                 "reference": reference,
                 "allowed_scope": allowed_scope,
-                "max_chars": max_chars,
+                "max_tokens": max_tokens,
                 "allowed_collections": allowed_collections,
             }
         )
@@ -134,9 +136,11 @@ class FakeKnowledge:
         if hit is None:
             raise ValueError("invalid reference C:/private/path")
         self.read_result = hit | {
-            "content": ("full research " * 2000)[:max_chars],
-            "truncated": True,
-            "total_chars": 28000,
+            **text_page(
+                "full research " * 2000,
+                token_offset=token_offset,
+                max_tokens=max_tokens,
+            ),
         }
         return self.read_result
 
@@ -309,13 +313,13 @@ def test_search_rejects_limits_outside_model_contract(
 
 @pytest.mark.parametrize("direct", [False, True])
 @pytest.mark.parametrize(
-    "value", [0, -1, MAX_READ_CHARS + 1, True, False, 1.5, "6000", None]
+    "value", [0, -1, MAX_READ_TOKENS + 1, True, False, 1.5, "6000", None]
 )
 def test_read_rejects_invalid_content_bounds_before_service(
     value: object, direct: bool
 ) -> None:
     service = FakeKnowledge()
-    arguments = {"reference": service.hits[0]["reference"], "max_chars": value}
+    arguments = {"reference": service.hits[0]["reference"], "max_tokens": value}
     result = (
         knowledge_registered_tools(
             cast(KnowledgeService, service),
@@ -332,9 +336,9 @@ def test_read_rejects_invalid_content_bounds_before_service(
     assert service.read_calls == []
 
 
-@pytest.mark.parametrize("max_chars", [None, 1, 9500, MAX_READ_CHARS])
+@pytest.mark.parametrize("max_tokens", [None, 32, 9500, MAX_READ_TOKENS])
 def test_selected_read_retains_full_metadata_and_requested_content(
-    max_chars: int | None,
+    max_tokens: int | None,
 ) -> None:
     service = FakeKnowledge()
     tools = registry(service, "workspace", ("research",))
@@ -347,26 +351,26 @@ def test_selected_read_retains_full_metadata_and_requested_content(
         "reference"
     ]
     arguments = {"reference": reference}
-    if max_chars is not None:
-        arguments["max_chars"] = max_chars
+    if max_tokens is not None:
+        arguments["max_tokens"] = max_tokens
     execution = tools.dispatch(
         "read_knowledge",
         arguments,
         context=ToolContext("alpha", "chat", "conversation", "actor"),
     )
     assert execution.ok
-    bound = 6000 if max_chars is None else max_chars
+    bound = 16384 if max_tokens is None else max_tokens
     assert service.read_calls == [
         {
             "workspace_id": "alpha",
             "reference": reference,
             "allowed_scope": "workspace",
             "allowed_collections": ("research",),
-            "max_chars": bound,
+            "max_tokens": bound,
         }
     ]
     assert execution.structured == service.read_result
-    assert len(cast(str, execution.structured["content"])) == bound
+    assert cast(int, execution.structured["tokenCount"]) <= bound
     assert execution.structured["relationships"] == service.hits[1]["relationships"]
     assert execution.structured["provenance"] == service.hits[1]["provenance"]
     assert execution.structured["data_only"] is True
@@ -399,5 +403,5 @@ def test_advertised_defaults_match_execution() -> None:
     read = cast(Mapping[str, Mapping[str, object]], tools[1].input_schema["properties"])
     assert search["limit"]["default"] == 3
     assert search["limit"]["maximum"] == 5
-    assert read["max_chars"]["default"] == 6000
-    assert read["max_chars"]["maximum"] == MAX_READ_CHARS
+    assert read["max_tokens"]["default"] == 16384
+    assert read["max_tokens"]["maximum"] == MAX_READ_TOKENS

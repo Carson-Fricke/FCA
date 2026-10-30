@@ -21,20 +21,25 @@ it does not own agent turns, provider projection, or workflow transitions.
   rejects secret material, and loads, hashes, and writes manifest bytes.
 - `programs.py` owns committed study/strategy/indicator authoring, targeted
   updates, bounded reads, ID listing, harness validation receipts, ID-based
-  execution, pinned dependency snapshots, and matching SDK references/templates.
-  Canonical SDK crates are siblings of the Thesis package in both source and
-  wheel layouts; discovery never searches for a repository checkout.
+  execution and pinned dependency snapshots. It consumes an injected
+  `AuthoringSdk` capability for SDK agreement, references and templates;
+  application composition constructs that capability independently of execution.
   Strategies declare tunable parameters in the committed manifest; single runs
   and bounded candidate/null/variation batches validate assignments against the
   declaration, and the workflow-scoped data-window policy gates, or for the
   forward holdout rewrites, the committed window before submission.
 - `sketch_contract.py` defines closed strategy-sketch contracts and validates
   representation and assumption dependencies without depending on the runtime.
-- `sdk.py` hashes the complete SDK source inventory with CRLF normalized to LF;
-  every other byte and filename remains significant. Program-content hashes and
-  compiler provenance have separate owners.
+- `program_contracts.py` owns program kinds, artifact/publication errors, JSON
+  canonicalization and configuration value rules, shared by lifecycle and SDK
+  operations without depending on either implementation.
+- `sdk/` owns packaged/serving SDK identity, source response validation, token
+  reference reads and minimal templates. Its source port grants metadata and
+  reference reads; it has no workspace, Git, submission or workflow dependency.
+  Canonical SDK crates remain siblings of Thesis in source and wheel layouts.
 - `sketches.py` stores immutable sketch revisions in Git and CAS-fences edits.
-- `exploration.py` projects bounded pages from authoritative job output artifacts.
+- `exploration.py` projects bounded pages from authoritative job output artifacts,
+  including host-sealed nested observation tables and explicit publication authority.
 - `repository.py` defines the structural create/open/resolve/publish/locator port
   shared by local and Gitea providers, and the fenced Git port shared by programs
   and sketches.
@@ -60,6 +65,9 @@ Remote publication failures retain the local commit receipt for explicit
 reconciliation, not re-authoring or automatic execution replay.
 
 `read_sdk_reference` supplies bounded source/template ranges, including the
+`execution` topic for engine-owned account/position/order views and typed order
+requests. The basic strategy template uses execution context and requires no
+authored fill ledger. It also exposes the
 `research_views`, `research_publishing`, and `research_recipes` topics for
 saved exhibits, typed evidence and reusable compositions, alongside the
 `decimal` topic from the `num` kernel, and `template=basic`
@@ -73,7 +81,7 @@ the SDK and checked against the packaged copy; SDK identity hashes all four
 crates' manifests and source files after canonicalizing CRLF to LF. Runtime
 hashing does not depend on an editor honoring Git attributes. True source drift
 still rejects templates and execution; mismatch errors identify differing files
-when serving source hashes are available. The shared templates in `programs.py` back
+when serving source hashes are available. The shared templates in `sdk/templates.py` back
 reference reads and basic authoring. They are minimal SDK contracts, not research
 models with substantive falsifiers or fitted outputs.
 
@@ -87,3 +95,7 @@ content, dependency/SDK invalidation, templates, and wheel assets),
 `tests/thesis/extensions/workflows/hypothesis_development/test_program_references.py`
 (accepted references). Fixture helpers and fake receipts are test scaffolding,
 not a second production program or validation contract.
+`tests/thesis/workspaces/test_sdk_architecture.py` protects the SDK/lifecycle
+dependency direction that behavior tests cannot establish.
+
+Program and SDK reads default to complete source, using cl100k_base token budgets rather than line-count or character caps. Line ranges remain explicit selection; `nextArguments` resumes token pages. Committed-program cursors include a source hash, rejecting edits between pages; job-specific reads remain immutable.

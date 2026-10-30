@@ -35,7 +35,7 @@ export function createWireDecoder<Types extends object = Record<string, unknown>
 		// Event payloads are extension objects, but embedded tool outcomes have one canonical schema.
 		const events = schemaName === 'ExecutionEventWire' ? [value]
 			: schemaName === 'TimelineItemWire' ? [(value as { kind: string; payload: unknown }).kind === 'event' ? (value as { payload: unknown }).payload : null]
-			: schemaName === 'TimelinePageWire' ? (value as { items: { kind: string; payload: unknown }[] }).items.filter((item) => item.kind === 'event').map((item) => item.payload)
+			: schemaName === 'TranscriptPageWire' ? (value as { items: { kind: string; payload: unknown }[] }).items.filter((item) => item.kind === 'event').map((item) => item.payload)
 			: [];
 		for (const event of events) {
 			if (!event) continue;

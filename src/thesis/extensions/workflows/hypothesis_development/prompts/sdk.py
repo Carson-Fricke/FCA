@@ -1,69 +1,20 @@
-"""One SDK authoring and repair protocol shared by all authoring phases."""
+"""Concise program-tool usage shared only by implementation phases."""
 
-SDK_AUTHORING_GUIDANCE = (
-    "SDK authoring protocol: before writing Rust, call read_sdk_reference for "
-    "the study, strategy or indicator template and the relevant consumer, program, "
-    "events, exports or indicator_api signatures, including exact decimal types. "
-    "Use that version-matched "
-    "reference; never guess compiler APIs, callback signatures, types or trait "
-    "methods. Exact prices, quantities, fees and cash cross the SDK as Decimal; "
-    "convert once at a metric or statistic boundary with Decimal::to_f64 (or the "
-    "fail-loud Decimal::to_f64_checked), and never build a Decimal from a float. "
-    "Create with author_study/author_strategy/author_indicator using program_id, "
-    "template='basic' and configuration, or source when authoring custom code. "
-    "Source lives in the committed program.rs, not the "
-    "completion contract. Declare exact subscriptions and the operator's start/end "
-    "window in configuration; never widen inputs. Indicators are committed Rust "
-    "modules referenced by indicator_ids; expose a public Default type. "
-    "List committed IDs with list_studies/list_strategies/list_indicators, then "
-    "read a selected ID with read_study/read_strategy/read_indicator; author only "
-    "a new ID, then patch "
-    "with update_* using the latest expected_version and one exact expected/replacement "
-    "match; configuration-only updates need no source patch. Do not re-author an existing ID or rewrite an entire program to repair "
-    "one diagnostic. Validate the latest ID with validate_* {program_id: ...} "
-    "after each changed source, configuration or dependency. For strategies "
-    "only, declare meaningful tunables in parameter_declaration when authoring "
-    "or updating; assignments are validated against that declaration and "
-    "omitted names receive its declared defaults. Execution is "
-    "phase-scoped: discovery and research investigation may use run_study for "
-    "diagnostics and run_backtest/run_backtest_batch/run_null_batch for training "
-    "prototypes. Other phases use only their advertised tools; model creation "
-    "does not execute backtests. Forward data stays sealed until forward validation. "
-    "Wavelet features use SDK WaveletIndicator, owned through MarketConsumer::indicators; "
-    "read_sdk_reference(topic='wavelet') documents immutable as-of snapshots. Retain "
-    "the snapshot captured at the decision rather than reading a later value for an old setup. "
-    "Never send inline source or paths "
-    "to validation or execution. Read the relevant SDK reference before fixing a "
-    "compiler error. Infrastructure failures are not source diagnostics. After "
-    "repeated unsuccessful repairs, follow the phase recovery/approval protocol. "
-    "Discovery and its research branches change approach or return scoped blockers "
-    "to supervision without routine operator input; later phase approvals remain required. "
-    "Use building_blocks FillLedger for every partial fill and cash_return_bps for "
-    "cash P&L divided by filled entry notional. Read their exact semantics, including "
-    "instrument multipliers. Quantile ranks and absolute thresholds differ; use the "
-    "SDK empirical_quantile, log_price_slope_bps and Haar reference when appropriate. "
-    "Unknown-outcome mutations must not be replayed "
-    "automatically; inspect their durable outcome first. Publication must succeed: "
-    "if a tool reports publication failure "
-    "with a committed receipt, use publish_study/publish_strategy/publish_indicator "
-    "with program_id and that exact commit to retry publication; never re-author "
-    "or replay an unknown-outcome mutation. A basic template is only a starting "
-    "point, not evidence that the research logic or outputs are implemented. "
-    "For every chartable study output, publish DatasetSemantics alongside its "
-    "Table, Series or Events. Read research_views and research_publishing first. "
-    "Give each Field a human label, a description explaining what the dimension "
-    "varies or the measure records, its type and units; declare row_meaning, "
-    "grain, dimensions, measures and ordered coordinates. EvidenceTable.publish_described "
-    "publishes a table and its meaning together. Explain parameters, horizons, "
-    "identifiers and supporting counts accurately. Keep preferred_views empty "
-    "unless an explicit composition is needed: a separate presentation selector "
-    "chooses chart types and mappings from the data and its meaning. The study "
-    "must compute scientific statistics and publish the observations needed to "
-    "inspect them; never substitute chart instructions for evidence. "
-    "After run_study/run_backtest returns a job ID, inspect "
-    "get_job_status while queued/running, then get_job_result, list_artifacts and "
-    "read_artifact for the terminal outcome; launch acceptance alone is not success. "
-    "Completion references "
-    "carry workspaceId, kind, programId, gitCommit and the content-hash version "
-    "from the latest successful validation, never fabricated identities."
-)
+SDK_AUTHORING_GUIDANCE = """Use read_sdk_reference for relevant SDK topics/templates and exact signatures; follow
+nextArguments until null. Author or update committed program IDs, validate changes,
+then execute those IDs. Inline source belongs only in author/update. Reuse branch
+IDs for repairs and preserve successful validation references.
+
+Use declared subscriptions and frozen data bounds. Indicators are owned dependencies;
+strategies execute orders and studies publish observations. Use engine execution,
+orders and closed_trades for accounting; target_position/close_position manage inventory.
+Use SDK building_blocks when their documented semantics fit.
+
+Publish inspectable observations with DatasetSemantics: accurate labels, units,
+grain, dimensions, measures and timing. Read research_publishing/research_views as needed.
+
+Run tools return admission receipts immediately. Job completion arrives here
+automatically; continue useful work or end your response to resume on arrival.
+Do not poll. Inspect delivered terminal evidence and artifacts; never resubmit
+an unknown outcome. A committed
+publication failure can be retried with publish_* and the exact pinned commit."""

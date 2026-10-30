@@ -1,3 +1,4 @@
+import { toTranscriptMessage } from '$lib/transcript';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixtures } from '$lib/fixtures';
@@ -58,7 +59,7 @@ beforeEach(() => {
 			: new Response(null, { status: 204 });
 		if (path.endsWith('/chats')) return response(fixtures.chats['alpha-lab']);
 		if (path.includes('/timeline?')) return response({ items: [], nextBefore: null, after: 0 });
-		if (path.endsWith('/sub_agents')) return response(path.includes('/chats/chat/') ? backendTree : { chatId: 'chat-1', roots: [], items: [] });
+		if (path.endsWith('/sub_agents')) return response(path.includes('/chats/chat/') ? backendTree : { chatId: 'chat-1', items: [] });
 		if (path.endsWith('/execution') || path.includes('/activation/consent/')) return response(null, 404);
 		if (path.endsWith('/state')) return response(null, 404);
 		return response(null, 404);
@@ -80,8 +81,8 @@ describe.each(['page', 'copilot'])('actual %s host with real API transport', (ho
 		const workflowResult = { ...aggregateMessage, data: { ...aggregateMessage.data,
 			sessionMessage: { ...aggregateMessage.data.sessionMessage, content: { ...aggregateMessage.data.sessionMessage.content,
 				result: { datums } } } } };
-		const item = (payload: unknown, seq: number) => ({ id: `aggregate-${seq}`, kind: 'message', seq,
-			chatId: 'chat-1', workspaceId: 'alpha-lab', ts: aggregateMessage.created_at, threadId: 'root', payload });
+		const item = (payload: unknown, seq: number) => decodeWire('TimelineMessageWire', { id: `aggregate-${seq}`, kind: 'message', seq,
+			chatId: 'chat-1', workspaceId: 'alpha-lab', ts: aggregateMessage.created_at, threadId: 'root', payload }, 'aggregate/live');
 		const ownership = { chat_id: 'chat-1', conversation_id: 'chat-1', root_conversation_id: 'chat-1', parent_conversation_id: null };
         const workflowEvent = (eventType: 'workflow.phase' | 'tool.submitted' | 'tool.started' | 'workflow.completed', seq: number) =>
             decodeWire('TimelineItemWire', {
@@ -91,15 +92,16 @@ describe.each(['page', 'copilot'])('actual %s host with real API transport', (ho
                     executionId: 'aggregate-workflow', eventType, cursor: seq,
                     payload: { phase: 'discovery', activePhases: ['discovery'], controlSequence: seq } }
             }, 'workflow/event');
-		const page = decodeWire('TimelinePageWire', { items: [item({ ...aggregateEnvelope, ...ownership, workspace_id: 'alpha-lab' }, 1),
-			item({ ...workflowResult, ...ownership, workspace_id: 'alpha-lab' }, 2), workflowEvent('workflow.phase', 3)], nextBefore: null, after: 3 }, 'aggregate/history');
+		const historyItems = [item({ ...aggregateEnvelope, ...ownership, workspace_id: 'alpha-lab' }, 1),
+			item({ ...workflowResult, ...ownership, workspace_id: 'alpha-lab' }, 2), workflowEvent('workflow.phase', 3)];
+		const page = decodeWire('TranscriptPageWire', { items: historyItems.map(item => item.kind === 'message' ? { ...item, payload: toTranscriptMessage(item.payload) } : item), nextBefore: null, after: 3 }, 'aggregate/history');
 		vi.mocked(fetch).mockImplementation((input, init) => String(input).includes('/timeline?')
 			? Promise.resolve(new Response(JSON.stringify(page))) : original(input, init));
 		mount();
 		await waitFor(() => expect(screen.getAllByTestId('tool-result-card')).toHaveLength(2));
 		await waitFor(() => expect(live.after).toBe(page.after));
 		const { TimelineStream } = await vi.importActual<typeof import('$lib/sse')>('$lib/sse');
-		const resultItem = page.items[1];
+		const resultItem = historyItems[1];
 		const bytes = new TextEncoder().encode(`id: 2\nevent: timeline\ndata: ${JSON.stringify(resultItem)}\n\n`);
 		const stream = new TimelineStream({ baseUrl: '/api', workspaceId: 'alpha-lab', chatId: 'chat-1', after: 0,
 			fetchImpl: async () => new Response(new ReadableStream({ start(controller) { controller.enqueue(bytes); } })) });
@@ -293,12 +295,12 @@ describe.each(['page', 'copilot'])('actual %s host with real API transport', (ho
 					oldSignals.push(init!.signal!);
 					return new Promise((resolve) => { releaseHistory = () => resolve(json({ items: [{ id: 'stale', chatId: 'chat', workspaceId: ws,
 						kind: 'message', seq: 99, ts: '2026-01-01T00:00:00Z', threadId: 'node', payload: { ...message(ws, 'STALE HISTORY'),
-							conversation_id: 'node', parent_conversation_id: 'chat', data: { subAgentId: 'node' } } }], nextBefore: null, after: 99 })); });
+							conversation_id: 'node', parent_conversation_id: 'chat', data: { subAgentId: 'node' } } }].map(item => ({ ...item, payload: toTranscriptMessage(item.payload) })), nextBefore: null, after: 99 })); });
 				}
-				const payload = { ...message(ws, 'node handle'), role: 'tool', tool_result: { tool: 'spawn_sub_agent', callId: 'spawn',
+				const payload = { ...message(ws, 'node handle'), role: 'tool' as const, tool_result: { tool: 'spawn_sub_agent', callId: 'spawn',
 					ok: true, summary: 'Agent', structured: { subAgentId: 'node', role: 'researcher' }, text: '', failure: null, datumType: 'sub_agent_handle' } };
 				return json({ items: scoped ? [] : [{ id: `${ws}-handle`, chatId: 'chat', workspaceId: ws, kind: 'message', seq: 1,
-					ts: payload.created_at, threadId: 'root', payload }], nextBefore: null, after: 1 });
+					ts: payload.created_at, threadId: 'root', payload: toTranscriptMessage(payload) }], nextBefore: null, after: 1 });
 			}
 			if (path.endsWith('/node/messages')) {
 				const receipt = { ...message(ws, 'accepted'), kind: 'sub_agent', subAgentId: 'node', data: { subAgentId: 'node' },

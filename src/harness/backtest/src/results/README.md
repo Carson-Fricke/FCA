@@ -7,5 +7,7 @@ it does not acquire market data or admit jobs.
 - `metrics.rs`: computes trade and equity statistics. Point readers and bounded
   return-cache consumers share exact return arithmetic and the original ordered
   floating-point variance accumulation; all logical samples retain their weight.
+  The public TradeRow record comes from the shared trading FIFO matcher, also
+  consumed by strategy execution views.
 - `report.rs`: renders reports from supplied results; visualization points may be bounded without changing financial statistics.
 - `recorder/`: writes schema-checked Parquet batches and artifact manifests.

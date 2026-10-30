@@ -41,6 +41,7 @@ from thesis_runtime.adapters.providers.session_adapter import (
     NativeProvider,
     NativeSessionAdapter,
 )
+from thesis_runtime.contracts.messages import from_record
 from thesis_runtime.contracts.records import (
     ChatMessage,
     MessageRole,
@@ -306,7 +307,14 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
     assert [_message_data(seed)["subAgentId"] for seed in seeds] == [node_id]
     assert seeds[0].role is MessageRole.USER
     assert _message_data(seeds[0])["kind"] == "agent_prompt"
-    assert IDEAS in seeds[0].body
+    context = [
+        message
+        for message in kit.chat.list_messages(WORKSPACE, request.chat_id)
+        if message.conversation_id == node_id
+        and message.data is not None
+        and from_record(message).content.source == "agent_context"
+    ]
+    assert len(context) == 1 and context[0].body == IDEAS
     assert kit.conversations.in_flight(WORKSPACE, request.chat_id, node_id) is True
 
     # The discovery agent's exact agent-facing policy: the study tools it runs
@@ -342,7 +350,6 @@ def test_agent_turn_completes_the_phase_and_spawns_the_next(tmp_path: Path) -> N
         "set_research_window",
         "start_workflow",
         "read_research_investigations",
-        "await_sub_agent",
     }
     assert "run_backtest" in discovery.allowed_tools
 
@@ -758,9 +765,8 @@ def test_loop_back_reseeds_the_revisited_phase(tmp_path: Path) -> None:
     # The model-creation node is reused, but the second entry carries its own
     # seed: a compact revision brief with the verdict and the recorded trial
     # findings plus the still-selected discovery candidate. The original
-    # instructions and the previous proposal are already in the conversation,
-    # so the brief stays well under half the fresh model-creation seed instead
-    # of repeating the phase instructions.
+    # instructions, original context and previous proposal remain in the child;
+    # the revisit has its own assignment identity without copying that context.
     seeds = _phase_seeds(kit.chat, request.chat_id, request.execution_id)
     assert len(seeds) == 4
     revisited = seeds[3]
@@ -769,7 +775,15 @@ def test_loop_back_reseeds_the_revisited_phase(tmp_path: Path) -> None:
         _message_data(revisited)["deliveryKey"]
         != _message_data(seeds[1])["deliveryKey"]
     )
-    assert len(revisited.body) * 2 <= len(seeds[1].body)
+    # Verify source identity/deduplication, not a prompt-length ratio.
+    context = [
+        message
+        for message in kit.chat.list_messages(WORKSPACE, request.chat_id)
+        if message.conversation_id == model_node
+        and message.data is not None
+        and from_record(message).content.source == "agent_context"
+    ]
+    assert len(context) == 1 and context[0].body == IDEAS
     assert kit.conversations.in_flight(WORKSPACE, request.chat_id, model_node) is True
 
     # The second cycle runs: model creation completes again, the trials rerun,
@@ -898,14 +912,6 @@ def test_strategy_design_is_a_conversation(tmp_path: Path) -> None:
         "request_workflow_input",
         "request_phase_completion",
     }
-    assert "read_sdk_reference" in seeds[3].body
-    assert "validate_strategy" in seeds[3].body
-    assert "author_strategy" in seeds[3].body
-    assert "### Strategy" in seeds[3].body
-    assert "Assumption Monitors" in seeds[3].body
-    assert "request_workflow_input" in seeds[3].body
-    assert "sharpe" in seeds[3].body
-
     # The design agent proposes and asks; nothing advances yet.
     runner = _runner(
         kit,

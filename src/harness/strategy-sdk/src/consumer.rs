@@ -10,7 +10,7 @@
 //! quotes; it does not roll the contract or supply a chain/Greek subscription.
 
 pub use harness_contracts::{canonical_subscriptions, Subscription};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::BarFrame;
 use crate::Indicator;
@@ -57,33 +57,79 @@ pub trait MarketConsumer {
     fn on_trade(&mut self, _event: &TradeEvent, _context: &mut Self::Context) {}
     /// Observe one atomic frame, restricted to requested symbols and interval.
     fn on_bar(&mut self, _frame: &BarFrame, _context: &mut Self::Context) {}
+
+    /// Seal features after the root program and dependencies consume a replay
+    /// frame. Called once per effective frame, only on the program root.
+    /// This borrowed capability cannot be retained or used from `on_stop`.
+    fn on_decision(&mut self, _context: &mut crate::DecisionContext<'_>) {}
 }
 
 type Identity = (usize, &'static str);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct RoutingSignature {
+struct RoutingSignature {
     identity: Identity,
+    slot: usize,
+    declared: Vec<Subscription>,
     own: Vec<Subscription>,
     tick_interval_ns: Option<i64>,
     dependencies: Vec<RoutingSignature>,
 }
 
+/// A reusable, consumer-bound routing plan with execution-local traversal storage.
+/// Construct after the consumer reaches its final address. Declarations, dependency
+/// identity/order and output cadence remain checked before and after callbacks;
+/// dispatch never rebuilds this plan or retains borrowed indicator pointers.
+pub struct RoutingPlan {
+    root: RoutingSignature,
+    visited: Vec<bool>,
+}
+
+impl RoutingPlan {
+    /// Capture stable declarations and dependency order at the final consumer
+    /// address. Reject invalid subscriptions, cycles, zero-sized dependencies
+    /// and tick indicators without a positive `IndicatorSequence::ticks` cadence.
+    pub fn new<C: MarketConsumer + ?Sized>(consumer: &mut C) -> Result<Self, String> {
+        let mut slots = BTreeMap::new();
+        let root = collect(consumer, &mut BTreeSet::new(), &mut slots)?;
+        Ok(Self {
+            root,
+            visited: vec![false; slots.len()],
+        })
+    }
+
+    pub(crate) fn subscriptions(&self) -> Result<Vec<Subscription>, String> {
+        fn inputs(signature: &RoutingSignature, output: &mut Vec<Subscription>) {
+            output.extend(signature.own.iter().cloned());
+            for dependency in &signature.dependencies {
+                inputs(dependency, output);
+            }
+        }
+        let mut output = Vec::new();
+        inputs(&self.root, &mut output);
+        canonical_subscriptions(output)
+    }
+}
+
 fn collect<C: MarketConsumer + ?Sized>(
     consumer: &mut C,
     visiting: &mut BTreeSet<Identity>,
+    slots: &mut BTreeMap<Identity, usize>,
 ) -> Result<RoutingSignature, String> {
     let identity = consumer.consumer_identity();
     if !visiting.insert(identity) {
-        return Err("indicator dependency cycle".into());
+        return Err(format!("indicator dependency cycle at consumer type {:?}; dependencies must form a stable acyclic graph", identity.1));
     }
-    let own = canonical_subscriptions(consumer.subscriptions())?;
+    let next_slot = slots.len();
+    let slot = *slots.entry(identity).or_insert(next_slot);
+    let declared = consumer.subscriptions();
+    let own = canonical_subscriptions(declared.clone())?;
     let mut dependencies = Vec::new();
     for dependency in consumer.indicators() {
         if std::mem::size_of_val(dependency) == 0 {
-            return Err("zero-sized indicator dependencies are not supported".into());
+            return Err(format!("consumer {:?}: zero-sized indicator dependency {:?}; own nonzero-sized stable indicator state", identity.1, dependency.consumer_identity().1));
         }
-        let mut signature = collect(dependency, visiting)?;
+        let mut signature = collect(dependency, visiting, slots)?;
         signature.tick_interval_ns = dependency.sequence().tick_interval_ns();
         fn needs_ticks(signature: &RoutingSignature) -> bool {
             signature
@@ -102,29 +148,50 @@ fn collect<C: MarketConsumer + ?Sized>(
     visiting.remove(&identity);
     Ok(RoutingSignature {
         identity,
+        slot,
+        declared,
         own,
         tick_interval_ns: None,
         dependencies,
     })
 }
 
-pub(crate) fn routing_signature<C: MarketConsumer + ?Sized>(
+pub(crate) fn validate_routing<C: MarketConsumer + ?Sized>(
     consumer: &mut C,
-) -> Result<RoutingSignature, String> {
-    collect(consumer, &mut BTreeSet::new())
+    expected: &RoutingPlan,
+) -> Result<(), String> {
+    validate_node(consumer, &expected.root)
 }
 
-pub(crate) fn validate_routing<C: MarketConsumer + ?Sized>(
+fn changed() -> String {
+    "market consumer subscriptions or dependency topology changed after construction".into()
+}
+
+fn validate_node<C: MarketConsumer + ?Sized>(
     consumer: &mut C,
     expected: &RoutingSignature,
 ) -> Result<(), String> {
-    let mut actual = routing_signature(consumer)?;
-    actual.tick_interval_ns = expected.tick_interval_ns;
-    if actual != *expected {
-        return Err(
-            "market consumer subscriptions or dependency topology changed after construction"
-                .into(),
-        );
+    if consumer.consumer_identity() != expected.identity {
+        return Err(changed());
+    }
+    let declared = consumer.subscriptions();
+    // Stable declarations take the comparison-only path. A semantically equal
+    // permutation remains valid, without changing the captured plan.
+    if declared != expected.declared && canonical_subscriptions(declared)? != expected.own {
+        return Err(changed());
+    }
+    let dependencies = consumer.indicators();
+    if dependencies.len() != expected.dependencies.len() {
+        return Err(changed());
+    }
+    for (dependency, signature) in dependencies.into_iter().zip(&expected.dependencies) {
+        if std::mem::size_of_val(dependency) == 0
+            || dependency.consumer_identity() != signature.identity
+            || dependency.sequence().tick_interval_ns() != signature.tick_interval_ns
+        {
+            return Err(changed());
+        }
+        validate_node(dependency, signature)?;
     }
     Ok(())
 }
@@ -133,15 +200,7 @@ pub(crate) fn validate_routing<C: MarketConsumer + ?Sized>(
 pub fn effective_subscriptions<C: MarketConsumer + ?Sized>(
     consumer: &mut C,
 ) -> Result<Vec<Subscription>, String> {
-    fn inputs(signature: RoutingSignature, output: &mut Vec<Subscription>) {
-        output.extend(signature.own);
-        for dependency in signature.dependencies {
-            inputs(dependency, output);
-        }
-    }
-    let mut output = Vec::new();
-    inputs(routing_signature(consumer)?, &mut output);
-    canonical_subscriptions(output)
+    RoutingPlan::new(consumer)?.subscriptions()
 }
 
 enum Input<'a, 'b> {
@@ -224,26 +283,27 @@ fn route<C: MarketConsumer + ?Sized>(
     consumer: &mut C,
     input: &Input<'_, '_>,
     context: &mut C::Context,
-    seen: &mut BTreeSet<(usize, &'static str)>,
+    seen: &mut [bool],
     expected: &RoutingSignature,
 ) -> Result<(), String> {
-    validate_routing(consumer, expected)?;
-    if !seen.insert(consumer.consumer_identity()) {
+    validate_node(consumer, expected)?;
+    if seen[expected.slot] {
         return Ok(());
     }
+    seen[expected.slot] = true;
     for (dependency, signature) in consumer
         .indicators()
         .into_iter()
         .zip(&expected.dependencies)
     {
-        let first_visit = !seen.contains(&dependency.consumer_identity());
+        let first_visit = !seen[signature.slot];
         dependency.sequence_mut().advance(input_time(input))?;
         route(dependency, input, &mut ObservationContext, seen, signature)?;
         if first_visit {
             capture(dependency, input, signature)?;
         }
     }
-    validate_routing(consumer, expected)?;
+    validate_node(consumer, expected)?;
     let subscriptions = &expected.own;
     match input {
         Input::Quote(event) => {
@@ -269,7 +329,7 @@ fn route<C: MarketConsumer + ?Sized>(
             }
         }
     }
-    validate_routing(consumer, expected)
+    validate_node(consumer, expected)
 }
 
 /// Route a quote dependency-first, never broadcasting unrequested inputs.
@@ -277,23 +337,15 @@ pub fn route_quote<C: MarketConsumer + ?Sized>(
     consumer: &mut C,
     event: &QuoteEvent,
     context: &mut C::Context,
+    plan: &mut RoutingPlan,
 ) -> Result<(), String> {
-    let signature = routing_signature(consumer)?;
-    route_quote_with_signature(consumer, event, context, &signature)
-}
-
-pub(crate) fn route_quote_with_signature<C: MarketConsumer + ?Sized>(
-    consumer: &mut C,
-    event: &QuoteEvent,
-    context: &mut C::Context,
-    signature: &RoutingSignature,
-) -> Result<(), String> {
+    plan.visited.fill(false);
     route(
         consumer,
         &Input::Quote(event),
         context,
-        &mut BTreeSet::new(),
-        signature,
+        &mut plan.visited,
+        &plan.root,
     )
 }
 /// Route a trade dependency-first, never broadcasting unrequested inputs.
@@ -301,23 +353,15 @@ pub fn route_trade<C: MarketConsumer + ?Sized>(
     consumer: &mut C,
     event: &TradeEvent,
     context: &mut C::Context,
+    plan: &mut RoutingPlan,
 ) -> Result<(), String> {
-    let signature = routing_signature(consumer)?;
-    route_trade_with_signature(consumer, event, context, &signature)
-}
-
-pub(crate) fn route_trade_with_signature<C: MarketConsumer + ?Sized>(
-    consumer: &mut C,
-    event: &TradeEvent,
-    context: &mut C::Context,
-    signature: &RoutingSignature,
-) -> Result<(), String> {
+    plan.visited.fill(false);
     route(
         consumer,
         &Input::Trade(event),
         context,
-        &mut BTreeSet::new(),
-        signature,
+        &mut plan.visited,
+        &plan.root,
     )
 }
 /// Route an atomic frame dependency-first, filtering interval and symbols.
@@ -325,22 +369,14 @@ pub fn route_bar<C: MarketConsumer + ?Sized>(
     consumer: &mut C,
     frame: &BarFrame,
     context: &mut C::Context,
+    plan: &mut RoutingPlan,
 ) -> Result<(), String> {
-    let signature = routing_signature(consumer)?;
-    route_bar_with_signature(consumer, frame, context, &signature)
-}
-
-pub(crate) fn route_bar_with_signature<C: MarketConsumer + ?Sized>(
-    consumer: &mut C,
-    frame: &BarFrame,
-    context: &mut C::Context,
-    signature: &RoutingSignature,
-) -> Result<(), String> {
+    plan.visited.fill(false);
     route(
         consumer,
         &Input::Bar(frame),
         context,
-        &mut BTreeSet::new(),
-        signature,
+        &mut plan.visited,
+        &plan.root,
     )
 }

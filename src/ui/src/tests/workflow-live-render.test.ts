@@ -117,7 +117,7 @@ describe('durable tool activity', () => {
 		expect(entries.filter((entry) => entry.kind === 'tool')).toHaveLength(0);
 		expect(entries.map((entry) => entry.id)).toEqual(['aggregate-envelope', 'aggregate-result:datum:0', 'aggregate-result:datum:1']);
 	});
-	it.each(['root', 'scoped'])('projects two cards from one aggregate durable result in %s', (scope) => {
+	it.each(['root', 'scoped'])('projects two cards from one aggregate durable result in %s', async (scope) => {
 		const messages = [aggregateEnvelope, aggregateMessage, aggregateMessage] as ChatMessage[];
 		const before = JSON.stringify(messages);
 		const entries = buildNodeEntries({ messages, events: [] });
@@ -127,7 +127,8 @@ describe('durable tool activity', () => {
 		expect(screen.getAllByTestId('tool-result-card')).toHaveLength(2);
 		expect(screen.getAllByTestId('tool-result-card').map((card) => card.dataset.datumType)).toEqual(['study_evidence', 'validation_report']);
 		expect(screen.getAllByTestId('tool-result-status').map((card) => card.textContent?.trim())).toEqual(['completed', 'failed']);
-		expect(screen.getByText('Retained measurements')).toBeInTheDocument();
+		for (const summary of document.querySelectorAll('.activity-receipt:not([open]) > summary')) await fireEvent.click(summary);
+		await waitFor(() => expect(screen.getByText('Retained measurements')).toBeInTheDocument());
 		expect(screen.getByText('Retained compiler diagnostics')).toBeInTheDocument();
 		expect(screen.getAllByText('duration: 42 ms')).toHaveLength(2);
 		expect(screen.getAllByText(/aggregate-study/)).toHaveLength(2);
@@ -252,7 +253,7 @@ describe('durable tool activity', () => {
 		expect(screen.getAllByTestId('chat-message').some((entry) => entry.dataset.role === 'system')).toBe(true);
 	});
 
-	it.each(['root', 'scoped'])('preserves distinct datums of one call and deduplicates only message copies in %s', (scope) => {
+	it.each(['root', 'scoped'])('preserves distinct datums of one call and deduplicates only message copies in %s', async (scope) => {
 		const second = { ...result, message_id: 'second-datum', tool_result: { ...result.tool_result!,
 			datumType: 'study_evidence', summary: 'Second datum evidence', text: 'Additional measurements' } };
 		const messages = [envelope, result, second, { ...result }, { ...second }];
@@ -261,7 +262,8 @@ describe('durable tool activity', () => {
 		expect(screen.getAllByTestId('tool-result-card')).toHaveLength(3);
 		expect(screen.getByText('validated')).toBeInTheDocument();
 		expect(screen.getByText('Second datum evidence')).toBeInTheDocument();
-		expect(screen.getByText('Additional measurements')).toBeInTheDocument();
+		for (const summary of document.querySelectorAll('.activity-receipt:not([open]) > summary')) await fireEvent.click(summary);
+		await waitFor(() => expect(screen.getByText('Additional measurements')).toBeInTheDocument());
 		expect(screen.getAllByTestId('tool-result-status').map((card) => card.textContent?.trim())).toEqual(['pending', 'completed', 'completed']);
 	});
 

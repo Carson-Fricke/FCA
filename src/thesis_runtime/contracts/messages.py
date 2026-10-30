@@ -189,6 +189,40 @@ class SessionMessage:
 SESSION_MESSAGE_ADAPTER = TypeAdapter(SessionMessage)
 
 
+def unreturned_requests(
+    messages: Sequence[SessionMessage],
+) -> tuple[ToolCorrelation, ...]:
+    """Derive unfinished calls from exact durable request/result joins."""
+    pending: dict[ToolCorrelation, None] = {}
+    for message in messages:
+        for request in message.content.requests:
+            pending[ToolCorrelation(message.message_id, request.id, request.name)] = (
+                None
+            )
+        if message.direction == "incoming" and message.content.correlation is not None:
+            pending.pop(message.content.correlation, None)
+    return tuple(pending)
+
+
+def pending_job_returns(messages: Sequence[SessionMessage]) -> frozenset[str]:
+    """Join trusted asynchronous receipts and completion deliveries by job ID.
+
+    A fast completion may precede its admission receipt. Compute both sets over
+    the whole scoped transcript so arrival order and compaction cannot strand it.
+    """
+    pending: set[str] = set()
+    completed: set[str] = set()
+    for message in messages:
+        if message.direction != "incoming":
+            continue
+        result = message.content.result or {}
+        for field, target in (("pendingJobs", pending), ("completedJobs", completed)):
+            values = result.get(field, ())
+            if isinstance(values, (list, tuple)):
+                target.update(value for value in values if isinstance(value, str))
+    return frozenset(pending - completed)
+
+
 def from_record(record: ChatMessage) -> SessionMessage:
     """Decode one durable record through its canonical session message.
 

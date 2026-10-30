@@ -40,7 +40,6 @@ TOOL_REQUEST_SUB_AGENT_COMPLETION = "request_sub_agent_completion"
 TOOL_REQUEST_OPERATOR_INPUT = "request_operator_input"
 TOOL_REQUEST_WORKFLOW_INPUT = "request_workflow_input"
 TOOL_SPAWN_SUB_AGENT = "spawn_sub_agent"
-TOOL_AWAIT_SUB_AGENT = "await_sub_agent"
 
 #: The Thesis control tools, in the order they appear in the merged catalog.
 CONTROL_TOOL_NAMES: tuple[str, ...] = (
@@ -49,7 +48,6 @@ CONTROL_TOOL_NAMES: tuple[str, ...] = (
     TOOL_REQUEST_OPERATOR_INPUT,
     TOOL_REQUEST_WORKFLOW_INPUT,
     TOOL_SPAWN_SUB_AGENT,
-    TOOL_AWAIT_SUB_AGENT,
 )
 
 
@@ -140,23 +138,6 @@ CONTROL_TOOL_SPECS: tuple[ControlToolSpec, ...] = (
             "required": ["role", "task"],
         },
     ),
-    ControlToolSpec(
-        name=TOOL_AWAIT_SUB_AGENT,
-        description=(
-            "Wait (bounded) for a spawned child sub-agent to finish and return "
-            "its result. If it is still running when the timeout elapses, the "
-            "current state is returned: end your turn and the child's result "
-            "will be delivered here when it finishes."
-        ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "sub_agent_id": {"type": "string"},
-                "timeout_seconds": {"type": "number"},
-            },
-            "required": ["sub_agent_id"],
-        },
-    ),
 )
 
 
@@ -177,26 +158,6 @@ class SpawnResult:
             "status": self.sub_agent.status.value,
             "kind": self.sub_agent.kind.value,
             "invocation_id": self.invocation.invocation_id,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class AwaitResult:
-    """A child's current state or terminal result, returned to the caller."""
-
-    sub_agent_id: str
-    status: str
-    terminal: bool
-    result: Mapping[str, object] | None = None
-    result_ref: str | None = None
-
-    def as_dict(self) -> dict[str, object]:
-        return {
-            "sub_agent_id": self.sub_agent_id,
-            "status": self.status,
-            "terminal": self.terminal,
-            "result": None if self.result is None else dict(self.result),
-            "result_ref": self.result_ref,
         }
 
 
@@ -309,23 +270,6 @@ class ControlToolService:
         record = child.record
         assert record is not None
         return SpawnResult(sub_agent=record, invocation=invocation)
-
-    def await_sub_agent(
-        self,
-        workspace_id: str,
-        sub_agent_id: str,
-        *,
-        timeout_seconds: float | None = None,
-    ) -> AwaitResult:
-        """Wait for a child to finish, then return its terminal state.
-
-        The wait is bounded: when the child is still running at the timeout,
-        the current state is returned so the caller can end its turn — the
-        child's result is delivered to the caller's anchor when it finishes.
-        """
-        return self._child(workspace_id, sub_agent_id).await_result(
-            timeout_seconds=timeout_seconds
-        )
 
     def request_operator_input(
         self,
@@ -542,9 +486,7 @@ __all__ = [
     "ControlToolSpec",
     "OperatorInputRequest",
     "SpawnResult",
-    "AwaitResult",
     "StaleCompletionError",
-    "TOOL_AWAIT_SUB_AGENT",
     "TOOL_REQUEST_OPERATOR_INPUT",
     "TOOL_REQUEST_WORKFLOW_INPUT",
     "TOOL_REQUEST_PHASE_COMPLETION",

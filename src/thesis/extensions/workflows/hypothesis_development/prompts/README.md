@@ -8,7 +8,7 @@ Owns the prompts slice of the FCA hypothesis workflow extension. Native domain b
 - `forward.py`: Forward evidence repeats the immutable development design without tuning.
 - `model_creation.py`: Model-creation prompts and model-output helpers.
 - `nulls.py`: Supported signal-destruction experiments and truthful conditional evidence.
-- `sdk.py`: One SDK authoring and repair protocol shared by all authoring phases.
+- `sdk.py`: Concise SDK lookup, authoring and terminal job-result guidance for implementation phases; discovery retrieves documentation only when needed.
 - `strategy_design.py`: Strategy-design prompts: the operator-confirmed strategy proposal.
 - `variation.py`: Deterministic marginal and declared joint-parameter experiments.
 - `verdict.py`: Verdict-phase prompts: the recorded-trials ask-before-completing protocol.

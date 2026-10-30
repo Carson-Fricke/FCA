@@ -317,7 +317,7 @@
       },
       "ChatSubAgentTreeWire": {
         "additionalProperties": false,
-        "description": "Canonical tree response used by the projection and HTTP schema export.",
+        "description": "Flat node summaries; parent identities reconstruct the hierarchy once.",
         "properties": {
           "chatId": {
             "title": "Chatid",
@@ -325,22 +325,14 @@
           },
           "items": {
             "items": {
-              "$ref": "#/components/schemas/SubAgentNodeWire"
+              "$ref": "#/components/schemas/SubAgentSummaryWire"
             },
             "title": "Items",
-            "type": "array"
-          },
-          "roots": {
-            "items": {
-              "$ref": "#/components/schemas/SubAgentNodeWire"
-            },
-            "title": "Roots",
             "type": "array"
           }
         },
         "required": [
           "chatId",
-          "roots",
           "items"
         ],
         "title": "ChatSubAgentTreeWire",
@@ -508,6 +500,148 @@
         ],
         "title": "CompletionMode",
         "type": "string"
+      },
+      "ConversationOutlineEntryWire": {
+        "additionalProperties": false,
+        "description": "Navigation metadata; the canonical receipt remains in the timeline.",
+        "properties": {
+          "datumIndex": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datumindex"
+          },
+          "entityId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entityid"
+          },
+          "executionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executionid"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "turn",
+              "request",
+              "workflow",
+              "study",
+              "artifact"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "messageId": {
+            "title": "Messageid",
+            "type": "string"
+          },
+          "requestMessageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requestmessageid"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "threadId": {
+            "title": "Threadid",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "seq",
+          "threadId",
+          "messageId",
+          "datumIndex",
+          "entityId",
+          "executionId",
+          "requestMessageId",
+          "status"
+        ],
+        "title": "ConversationOutlineEntryWire",
+        "type": "object"
+      },
+      "ConversationOutlinePageWire": {
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "minimum": 0.0,
+            "title": "After",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationOutlineEntryWire"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextAfter": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextafter"
+          }
+        },
+        "required": [
+          "items",
+          "after",
+          "nextAfter"
+        ],
+        "title": "ConversationOutlinePageWire",
+        "type": "object"
       },
       "CreateAttachmentRequest": {
         "additionalProperties": false,
@@ -1424,6 +1558,67 @@
           "activityKind"
         ],
         "title": "ExternalInput",
+        "type": "object"
+      },
+      "JobCompletion": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_count": {
+            "minimum": 0.0,
+            "title": "Artifact Count",
+            "type": "integer"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "job_id": {
+            "pattern": "^[A-Za-z0-9_.-]{1,128}$",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "backtest",
+              "study",
+              "screen"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Metrics",
+            "type": "object"
+          },
+          "state": {
+            "enum": [
+              "succeeded",
+              "failed",
+              "cancelled"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "kind",
+          "state",
+          "metrics",
+          "artifact_count",
+          "error_message"
+        ],
+        "title": "JobCompletion",
         "type": "object"
       },
       "LaunchBacktestRequest": {
@@ -2679,6 +2874,196 @@
         "title": "SubAgentStatus",
         "type": "string"
       },
+      "SubAgentSummaryWire": {
+        "additionalProperties": false,
+        "description": "A flat hierarchy row; the node detail endpoint owns retained results.",
+        "properties": {
+          "acceptsInput": {
+            "title": "Acceptsinput",
+            "type": "boolean"
+          },
+          "allowedTools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowedtools",
+            "type": "array"
+          },
+          "chatId": {
+            "title": "Chatid",
+            "type": "string"
+          },
+          "completionContractRef": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completioncontractref"
+          },
+          "completionMode": {
+            "$ref": "#/components/schemas/CompletionMode"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          },
+          "delegatedBudget": {
+            "title": "Delegatedbudget",
+            "type": "integer"
+          },
+          "inputContractRef": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputcontractref"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SubAgentKind"
+          },
+          "parentSubAgentId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parentsubagentid"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "phaseAttemptId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phaseattemptid"
+          },
+          "phaseExecutor": {
+            "title": "Phaseexecutor",
+            "type": "boolean"
+          },
+          "resultAvailable": {
+            "default": false,
+            "title": "Resultavailable",
+            "type": "boolean"
+          },
+          "resultRef": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resultref"
+          },
+          "returnsToSubAgentId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Returnstosubagentid"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "specVersion": {
+            "title": "Specversion",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SubAgentStatus"
+          },
+          "subAgentId": {
+            "title": "Subagentid",
+            "type": "string"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          },
+          "workflowExecutionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflowexecutionid"
+          }
+        },
+        "required": [
+          "subAgentId",
+          "chatId",
+          "role",
+          "kind",
+          "status",
+          "parentSubAgentId",
+          "workflowExecutionId",
+          "phaseAttemptId",
+          "specVersion",
+          "completionMode",
+          "phaseExecutor",
+          "returnsToSubAgentId",
+          "phase",
+          "acceptsInput",
+          "allowedTools",
+          "delegatedBudget",
+          "inputContractRef",
+          "completionContractRef",
+          "resultRef",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "SubAgentSummaryWire",
+        "type": "object"
+      },
       "SubmitToolJobRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3053,49 +3438,6 @@
         "title": "TimelineOutputWire",
         "type": "object"
       },
-      "TimelinePageWire": {
-        "additionalProperties": false,
-        "properties": {
-          "after": {
-            "minimum": 0.0,
-            "title": "After",
-            "type": "integer"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/TimelineItemWire"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "nextBefore": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Nextbefore"
-          },
-          "outputPrefixes": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/TimelineOutputWire"
-            },
-            "title": "Outputprefixes",
-            "type": "array"
-          }
-        },
-        "required": [
-          "items",
-          "nextBefore",
-          "after"
-        ],
-        "title": "TimelinePageWire",
-        "type": "object"
-      },
       "ToolCorrelation": {
         "additionalProperties": false,
         "description": "The immutable, exact join to a request in a particular message.",
@@ -3314,6 +3656,364 @@
         ],
         "title": "TranscriptItemKind",
         "type": "string"
+      },
+      "TranscriptItemWire": {
+        "discriminator": {
+          "mapping": {
+            "event": "#/components/schemas/TimelineEventWire",
+            "execution": "#/components/schemas/TimelineExecutionWire",
+            "message": "#/components/schemas/TranscriptMessageItemWire",
+            "output": "#/components/schemas/TimelineOutputWire"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/TranscriptMessageItemWire"
+          },
+          {
+            "$ref": "#/components/schemas/TimelineEventWire"
+          },
+          {
+            "$ref": "#/components/schemas/TimelineExecutionWire"
+          },
+          {
+            "$ref": "#/components/schemas/TimelineOutputWire"
+          }
+        ]
+      },
+      "TranscriptMessageItemWire": {
+        "additionalProperties": false,
+        "properties": {
+          "chatId": {
+            "title": "Chatid",
+            "type": "string"
+          },
+          "executionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executionid"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "message",
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/TranscriptMessageWire"
+          },
+          "seq": {
+            "minimum": 1.0,
+            "title": "Seq",
+            "type": "integer"
+          },
+          "threadId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threadid"
+          },
+          "ts": {
+            "title": "Ts",
+            "type": "string"
+          },
+          "workspaceId": {
+            "title": "Workspaceid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "chatId",
+          "workspaceId",
+          "seq",
+          "ts",
+          "kind",
+          "payload"
+        ],
+        "title": "TranscriptMessageItemWire",
+        "type": "object"
+      },
+      "TranscriptMessageWire": {
+        "additionalProperties": false,
+        "description": "Bounded display projection, with explicit canonical detail availability.",
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "attachment_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Attachment Ids",
+            "type": "array"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "chat_id": {
+            "title": "Chat Id",
+            "type": "string"
+          },
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "detailsAvailable": {
+            "title": "Detailsavailable",
+            "type": "boolean"
+          },
+          "execution_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Id"
+          },
+          "input_position": {
+            "title": "Input Position",
+            "type": "integer"
+          },
+          "intent_epoch": {
+            "title": "Intent Epoch",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TranscriptItemKind"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "parent_conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Conversation Id"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/TranscriptReceiptWire"
+          },
+          "references": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "References",
+            "type": "object"
+          },
+          "role": {
+            "$ref": "#/components/schemas/MessageRole"
+          },
+          "root_conversation_id": {
+            "title": "Root Conversation Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/MessageState"
+          },
+          "tool_result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Result"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "workspace_id": {
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "created_at",
+          "created_by",
+          "schema_version",
+          "chat_id",
+          "conversation_id",
+          "root_conversation_id",
+          "parent_conversation_id",
+          "message_id",
+          "actor_id",
+          "role",
+          "kind",
+          "state",
+          "attachment_ids",
+          "references",
+          "execution_id",
+          "intent_epoch",
+          "input_position",
+          "updated_at",
+          "body",
+          "reasoning",
+          "data",
+          "tool_result",
+          "receipt",
+          "detailsAvailable"
+        ],
+        "title": "TranscriptMessageWire",
+        "type": "object"
+      },
+      "TranscriptPageWire": {
+        "additionalProperties": false,
+        "description": "Byte-bounded history with the same canonical sequence and resume watermark.",
+        "properties": {
+          "after": {
+            "minimum": 0.0,
+            "title": "After",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TranscriptItemWire"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextBefore": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextbefore"
+          },
+          "outputPrefixes": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/TimelineOutputWire"
+            },
+            "title": "Outputprefixes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "nextBefore",
+          "after"
+        ],
+        "title": "TranscriptPageWire",
+        "type": "object"
+      },
+      "TranscriptReceiptWire": {
+        "additionalProperties": false,
+        "description": "Presentation facts from one canonical receipt; never provider context.",
+        "properties": {
+          "correlation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolCorrelation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requests": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ToolRequest"
+            },
+            "title": "Requests",
+            "type": "array"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          }
+        },
+        "title": "TranscriptReceiptWire",
+        "type": "object"
       },
       "UploadAttachmentRequest": {
         "additionalProperties": false,
@@ -8791,6 +9491,158 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/chats/{chat_id}/outline": {
+      "get": {
+        "description": "Page lightweight metadata across all scopes without transcript prefetch.",
+        "operationId": "conversation_outline_api_v1_workspaces__workspace_id__chats__chat_id__outline_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationOutlinePageWire"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Conversation Outline",
+        "tags": [
+          "timeline"
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/chats/{chat_id}/sub_agents": {
       "get": {
         "description": "Return the chat's durable sub-agent tree.",
@@ -9815,7 +10667,7 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 200,
+              "default": 40,
               "maximum": 1000,
               "minimum": 1,
               "title": "Limit",
@@ -9845,7 +10697,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TimelinePageWire"
+                  "$ref": "#/components/schemas/TranscriptPageWire"
                 }
               }
             },
@@ -9953,6 +10805,157 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/chats/{chat_id}/timeline/items/{sequence}": {
+      "get": {
+        "description": "Load one canonical receipt/activity explicitly; never advance a cursor.",
+        "operationId": "timeline_detail_api_v1_workspaces__workspace_id__chats__chat_id__timeline_items__sequence__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sequence",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Sequence",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelineItemWire"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Timeline Detail",
+        "tags": [
+          "timeline"
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/chats/{chat_id}/timeline/stream": {
       "get": {
         "description": "Stream the chat timeline, backfilling the most recent items first.",
@@ -9996,7 +10999,7 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 200,
+              "default": 40,
               "maximum": 1000,
               "minimum": 1,
               "title": "Limit",
@@ -15301,6 +16304,122 @@
         ]
       }
     },
+    "/v1/internal/harness/completions": {
+      "post": {
+        "operationId": "completion_v1_internal_harness_completions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobCompletion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Completion"
+      }
+    },
     "/v1/jobs/{job_id}": {
       "get": {
         "operationId": "backtest_job_status_v1_jobs__job_id__get",
@@ -19997,6 +21116,158 @@
         ]
       }
     },
+    "/v1/workspaces/{workspace_id}/chats/{chat_id}/outline": {
+      "get": {
+        "description": "Page lightweight metadata across all scopes without transcript prefetch.",
+        "operationId": "conversation_outline_v1_workspaces__workspace_id__chats__chat_id__outline_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationOutlinePageWire"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Conversation Outline",
+        "tags": [
+          "timeline"
+        ]
+      }
+    },
     "/v1/workspaces/{workspace_id}/chats/{chat_id}/sub_agents": {
       "get": {
         "description": "Return the chat's durable sub-agent tree.",
@@ -21021,7 +22292,7 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 200,
+              "default": 40,
               "maximum": 1000,
               "minimum": 1,
               "title": "Limit",
@@ -21051,7 +22322,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TimelinePageWire"
+                  "$ref": "#/components/schemas/TranscriptPageWire"
                 }
               }
             },
@@ -21159,6 +22430,157 @@
         ]
       }
     },
+    "/v1/workspaces/{workspace_id}/chats/{chat_id}/timeline/items/{sequence}": {
+      "get": {
+        "description": "Load one canonical receipt/activity explicitly; never advance a cursor.",
+        "operationId": "timeline_detail_v1_workspaces__workspace_id__chats__chat_id__timeline_items__sequence__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sequence",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Sequence",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelineItemWire"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "request failed"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Timeline Detail",
+        "tags": [
+          "timeline"
+        ]
+      }
+    },
     "/v1/workspaces/{workspace_id}/chats/{chat_id}/timeline/stream": {
       "get": {
         "description": "Stream the chat timeline, backfilling the most recent items first.",
@@ -21202,7 +22624,7 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 200,
+              "default": 40,
               "maximum": 1000,
               "minimum": 1,
               "title": "Limit",

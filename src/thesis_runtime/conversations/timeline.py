@@ -42,6 +42,27 @@ class TimelineReader(Protocol):
         thread_id: str | None = None,
     ) -> list[dict[str, object]]: ...
 
+    def read_receipts(
+        self,
+        *,
+        workspace_id: str,
+        chat_id: str,
+        after_seq: int,
+        through_seq: int,
+        limit: int,
+        result_types: tuple[str, ...],
+        structured_kinds: tuple[str, ...],
+        metadata_fields: tuple[str, ...],
+        metadata_arrays: tuple[tuple[str, str], ...],
+    ) -> list[dict[str, object]]:
+        """Read headers of root turns/requests and selected result types.
+
+        Selection is scoped and ordered in storage, before paging. Callers own
+        result-type policy, selected metadata and presentation. Full text, result
+        content and reasoning are excluded; this port never writes or executes.
+        """
+        ...
+
 
 class TimelineWriter(Protocol):
     def append(

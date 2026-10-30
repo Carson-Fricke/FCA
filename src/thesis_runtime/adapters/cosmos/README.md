@@ -11,5 +11,5 @@ Cosmos implementations for conversation records, sequence commits, payload chunk
 - `ownership.py`: Cosmos leases and transactional write fences in the workspace catalog. All fenced batch operations acquire document locks in sorted identity order, including admission's root update and progress's root fence, preventing root/counter deadlocks. Each SDK attempt receives fresh conditional options so fence retries retain data CAS.
 - `records.py`: Workspace records, atomic message/cursor/chat/work admission, root ETag merge updates, and indexed history/input windows.
 - `stack.py`: Compose all runtime adapters over one workspace-partitioned Cosmos catalog.
-- `timeline.py`: Authoritative per-chat sequencing, transactional admission, identity reconciliation after uncertain responses, and post-commit timeline/work wake hints.
+- `timeline.py`: Authoritative per-chat sequencing, transactional admission, identity reconciliation after uncertain responses, post-commit timeline/work wake hints and selected receipt headers with explicit current-chunk hydration.
 - `work.py`: Durable work, compact change-feed notifications, bounded metadata-only retained-work reconciliation, and local post-commit wake hints.

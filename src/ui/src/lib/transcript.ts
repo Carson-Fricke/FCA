@@ -5,7 +5,7 @@ import { groupStudyObservations } from './research/grouping';
  */
 
 import { isWorkflowNodeRole, parseToolResult, type SubAgentTreeNode } from './subagent';
-import type { ChatMessageWire } from './generated';
+import type { ChatMessageWire, TranscriptMessageWire } from './generated';
 import type {
 	ChatMessage,
 	ExecutionEvent,
@@ -14,13 +14,31 @@ import type {
 } from './types';
 
 /** Present neutral deliveries without inventing a model-requested tool identity. */
-export function toChatMessage(message: ChatMessageWire): ChatMessage {
+export function toChatMessage(message: ChatMessageWire | TranscriptMessageWire): ChatMessage {
     const datum = message.tool_result;
-    return { ...message, tool_result: datum ? {
+    const content = 'receipt' in message ? message.receipt : message.data?.sessionMessage?.content;
+    return { ...message, receipt: {
+        requests: content?.requests ?? [], correlation: content?.correlation ?? null, result: content?.result ?? null
+    }, tool_result: datum ? {
         ...datum,
         callId: typeof datum.callId === 'string' ? datum.callId : null,
         tool: typeof datum.tool === 'string' ? datum.tool : null
-    } : null };
+    } as ToolResult : null } as ChatMessage;
+}
+
+/** Explicit current inputs: full canonical live evidence or an HTTP display receipt. */
+export function receiptFor(message: ChatMessage) {
+    return message.receipt ?? message.data?.sessionMessage?.content;
+}
+
+/** Offline seeds use the same display field inventory; their small evidence is complete. */
+export function toTranscriptMessage(message: ChatMessageWire): TranscriptMessageWire {
+    const { content_hash, data, tool_result, ...record } = message;
+    const { sessionMessage, ...metadata } = data ?? {};
+    return { ...record, data: Object.keys(metadata).length ? metadata : null,
+        tool_result: tool_result ? { ...tool_result } : null,
+        receipt: { requests: sessionMessage?.content.requests ?? [], correlation: sessionMessage?.content.correlation ?? null,
+            result: sessionMessage?.content.result ?? null }, detailsAvailable: false };
 }
 
 /** The data payload carried by a falsification report artifact. */
@@ -298,13 +316,13 @@ function compareEntries(a: ScopeEntry, b: ScopeEntry): number {
 
 /** The canonical result payload of one durable session message. */
 function canonicalResult(message: ChatMessage): Record<string, unknown> | null {
-	const result = message.data?.sessionMessage?.content.result;
+	const result = receiptFor(message)?.result;
 	return result && typeof result === 'object' && !Array.isArray(result) ? result : null;
 }
 
 /** The canonical call identity: model correlation first, runtime result second. */
 function canonicalCallId(message: ChatMessage): string | null {
-	const correlation = message.data?.sessionMessage?.content.correlation;
+	const correlation = receiptFor(message)?.correlation;
 	if (correlation?.request_id) return correlation.request_id;
 	const runtime = canonicalResult(message)?.toolCallId;
 	return typeof runtime === 'string' ? runtime : null;
@@ -333,7 +351,7 @@ export function projectToolMessages(messages: ChatMessage[], terminal = false): 
 			continue;
 		}
 		if (message.role !== 'assistant') continue;
-		for (const request of message.data?.sessionMessage?.content.requests ?? []) {
+		for (const request of receiptFor(message)?.requests ?? []) {
 			calls.set(request.id, { message, tool: request.name, arguments: request.arguments });
 		}
 	}
@@ -342,7 +360,7 @@ export function projectToolMessages(messages: ChatMessage[], terminal = false): 
 	for (const [index, message] of unique.entries()) {
 		if (message.role === 'tool' && message.data?.toolActivity === 'started') continue;
 		const canonical = canonicalResult(message);
-		const correlation = message.data?.sessionMessage?.content.correlation;
+		const correlation = receiptFor(message)?.correlation;
 		const callId = message.tool_result?.callId ?? canonicalCallId(message);
 		const datums = canonical?.datums;
 		if (Array.isArray(datums)) {
@@ -353,7 +371,7 @@ export function projectToolMessages(messages: ChatMessage[], terminal = false): 
 				const card = datum as ToolResult;
 				projected.push({ ...message, seq: order.get(message.message_id),
 					message_id: `${message.message_id}:datum:${datumIndex}`, role: 'tool',
-					tool_result: { ...card, callId,
+					tool_result: { ...card, callId, detailsSeq: card.detailsAvailable ? message.seq : undefined,
 						operation: canonical?.operation as ToolResult['operation'],
 						tool: message.tool_result?.tool ?? correlation?.tool_name ?? call?.tool ?? null,
 						arguments: canonical?.arguments ?? call?.arguments,
@@ -389,6 +407,7 @@ export function projectToolMessages(messages: ChatMessage[], terminal = false): 
 			const startedAt = callId ? calls.get(callId)?.message.data?.startedAt : undefined;
 			result = {
 				...result,
+				detailsSeq: result.detailsAvailable ? message.seq : undefined,
 				operation: (canonical?.operation ?? result.operation) as ToolResult['operation'],
 				callId: callId ?? null,
 				arguments: canonical?.arguments ?? result.arguments ?? (callId ? calls.get(callId)?.arguments : undefined),
@@ -412,6 +431,7 @@ export function projectToolMessages(messages: ChatMessage[], terminal = false): 
 		projected.push({
 			...call.message, seq: order.get(call.message.message_id), message_id: call.message.role === 'tool' ? call.message.message_id : `pending:${callId}`, role: 'tool', body: '',
 			tool_result: { datumType: 'tool_activity', tool: call.tool, callId, pending: !outcome, outcome, arguments: call.arguments,
+				detailsSeq: call.message.detailsAvailable ? call.message.seq : undefined,
 				startedAt: typeof call.message.data?.startedAt === 'string' ? call.message.data.startedAt : undefined,
 				ok: false, summary: '', structured: {}, text: '', failure: outcome ? {
 					kind: outcome,
@@ -552,11 +572,11 @@ export function threadActivity(messages: ChatMessage[], events: ExecutionEvent[]
 		(entry.kind === 'message' && (entry.message.role === 'user' ||
 			(entry.message.role === 'assistant' && (entry.message.outputState === 'interrupted' ||
 				(!entry.message.outputState && !!entry.message.body &&
-				!entry.message.data?.sessionMessage?.content.requests?.length))))));
+				!receiptFor(entry.message)?.requests?.length))))));
 	const accepted = entries.find((entry) => entry.id === acceptedId);
 	const replied = accepted && entries.some((entry) => entry.order > accepted.order &&
 		(entry.kind === 'assistant' || (entry.kind === 'message' && entry.message.role === 'assistant' && !entry.message.outputState &&
-			!!entry.message.body && !entry.message.data?.sessionMessage?.content.requests?.length)));
+			!!entry.message.body && !receiptFor(entry.message)?.requests?.length)));
 	return {
 		pending: !terminal && !messages.some((message) => message.outputState === 'streaming') && ((latest?.kind === 'message' && latest.message.role === 'user') ||
 			entries.some((entry) => entry.kind === 'message' && entry.message.tool_result?.pending)),

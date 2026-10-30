@@ -11,13 +11,13 @@ the hypothesis-development phase table stays unchanged.
 
 | Phase | Owns | Requested next phase |
 | --- | --- | --- |
-| `proposal` | Design/repair a construction, treating the supplied prototype as provisional. | `critique`, `focused_critique` |
+| `proposal` | Design, implement and execute an initial policy/study before critique; repair from evidence. | `critique`, `focused_critique` |
 | `implementation_critique` | Check source fidelity, units, boundaries, timing, fills, state and executable controls. | `collect_critiques` |
 | `experimental_critique` | Check comparisons, confounding, denominators, selection, support and feasibility. | `collect_critiques` |
 | `alignment_critique` | Compare original operator intent with branch scope, alternatives and evidence-driven adaptation. | `collect_critiques` |
 | `collect_critiques` | Pure deterministic collection of all three reports; no verdict or vote. | `adjudicate` |
 | `focused_critique` | Verify the narrow repair and specialty requested in the accepted adjudication. | `adjudicate` |
-| `adjudicate` | Resolve specific objections against evidence; choose a useful action within the budget. | `proposal`, `investigation`, `completed` |
+| `adjudicate` | Resolve objections, make bounded repairs, assign proportionate independent review or delegate substantial work. | `critique`, `focused_critique`, `proposal`, `investigation`, `completed` |
 | `investigation` | Author/validate/execute a training strategy or targeted diagnostic; inspect artifacts and interpret findings. | `critique`, `focused_critique` |
 | `completed`, `failed` | Terminal outcomes. | None |
 
@@ -34,34 +34,57 @@ Scientific sufficiency remains
 the judge's responsibility. Discovery and its branches progress autonomously;
 mandatory approval in later hypothesis phases remains unchanged.
 
-The current runtime contract is `research-investigation@4.0.0`. Older executions are rejected
-for execution rather than decoded under the new contracts. Proposals include `repairs`
+The current runtime contract is `research-investigation@6.0.0`. Older executions are rejected
+for execution rather than decoded under the new contracts. Proposals include retained execution `attempts`, artifact `evidence`, and `repairs`
 with original issue IDs and responses. Critics supply concrete `evidence` for every
 issue and each `verifiedRepairs` entry (`issueId`, `evidence`). New issue IDs have
 specialist prefixes, avoiding collisions in the merged ledger. The join preserves
 all reports and does not decide whether a claim is valid. Only the model adjudicator
 resolves findings. The accepted issue ledger carries unresolved and
 repair-required objections across revisions; adjudication can explicitly accept a
-limitation. These fields record model decisions, not engine-selected scientific rules.
+limitation. Settled issues require `reopenReason` with new contradictory evidence
+to be raised again under the original ID. `escalate` assigns a discovery-owned
+decision without keeping it in the local repair queue; the completion outcome
+returns those escalations to discovery. These fields record model decisions,
+not engine-selected scientific rules.
+
+Adjudication supplies `review` (`target`, `scope`, `issueIds`) for every continuing
+action, including repair delegated to proposal or investigation. Completed
+adjudication uses `review=null`. Narrow changes go directly to focused review;
+substantive changes fan out to all three independent critics. Repair phases are
+prompted to follow this assignment, broadening only for material changes with
+an explanation. Adjudicate owns the same branch author/validate/run capabilities
+and budget as the construction phases. It records its own `repairs`, `attempts`
+and `evidence` in an immutable handoff; `reviewHandoff` identifies the changed
+product and accepted state retains earlier adjudicator repairs. The prompt
+requires independent verification for changes to code, calculations or empirical
+claims; editorial clarification need not restart review. There is no new review
+round cap, scientific gate or completion wake policy.
 
 Seeds contain bounded original-brief and active-issue excerpts, pinned sketch and job
 references, and exact accepted handoff indices. The existing
-`read_research_investigations` tool reads full accepted products in bounded pages:
-handoff zero is the original brief; positive indices identify immutable accepted
-transitions. All four tool arguments are required: `execution_id` is a branch ID
-or null for the phase's own branch/discovery's branch list; `handoff` is null for
-state or branch inspection, zero for the brief, or a positive accepted handoff
-index; `offset` selects the first character (zero initially); `max_chars` bounds
-a page. Missing selectors fail argument validation instead of silently rereading
-page zero.
-Paged results return `nextArguments` with the same branch, handoff and page size,
-and the next offset; callers can submit it unchanged until it is null. Reads are
-stateless: identical arguments return the same page, not an implicit next page.
+`read_research_investigations` tool reads complete accepted products by default
+(up to 16,384 cl100k_base tokens). Required selectors are `execution_id` and
+`handoff`; zero selects the brief, a positive index selects an immutable handoff,
+and null selects current state or discovery branch inspection. `token_offset` and
+`max_tokens` are optional. Large reads use exact token continuation via
+`nextArguments`, preserve UTF-8 boundaries, and bind continuation to the content
+SHA-256 so changing state cannot be spliced into an earlier page. `complete`,
+`tokenCount`, `totalTokens` and `nextTokenOffset` expose read completeness. There
+are no character pages or new section selectors.
 A phase can read only its own branch. This is accepted-contract retrieval,
 not transcript reading or search. Reentered phases retain their own conversations.
 Critique compares original intent, approved construction, executed source and claims;
 it distinguishes omitted tests from adverse evidence. Job-specific `read_study` and `read_strategy`
 retrieves the immutable executed source rather than a subsequently edited program.
+
+The original operator message is selected by explicit source ID and delivered once
+as neutral initial context before each child's first runnable assignment. Revisited
+phases receive only the changed assignment. Critics review plans or exact existing
+implementations according to their specialty; candidate development belongs to the
+proposal/investigation roles. Agent program tools return retained job IDs
+immediately. Completion evidence is delivered to the owning conversation; agents
+can continue other work or end their response without polling or resubmission.
 
 The public brief contains direction, question, intended decision, constraints,
 sketchReference, prior evidence references, revisionBudget and executionBudget. Runtime
@@ -75,7 +98,7 @@ Hard constraints and their origins must be distinguished from provisional choice
 Accepted handoffs carry the original brief and phase products, never private sibling
 transcripts. Specialist attempts see identical accepted ancestors and cannot read
 the current siblings' reports before the join. Substantive changes use the full
-review fan-out; prompted narrow repairs may use `focused_critique` without restarting three
+review fan-out; assigned narrow repairs use `focused_critique` without restarting three
 reviews. No fixed strategy quota, experiment sequence, or scientific gate is added.
 Execution uses existing committed-program tools and retained job IDs.
 Every branch submission is also recorded as exposure in discovery before dispatch.
@@ -107,3 +130,13 @@ mechanics; full specialist review remains for substantive construction or findin
 SDK building blocks cover exact partial-fill accounting, entry-notional returns,
 empirical quantiles, OLS log-price slope and the defined Haar random-walk anchor.
 Diagnostics keep diagnostic scope, and execution allocation follows observed cost.
+
+Proposal, investigation and adjudicate own authoring tools and retain immutable job
+submissions before dispatch. They annotate selected retained branch jobs;
+this is attribution validation, not an execution-before-review
+gate. The prompt directs first execution and diagnostic-only branches run their
+assigned study. Async completion stays conversational and polling is prohibited.
+
+Repair rounds can cite prior immutable branch jobs or exact launch-brief evidence
+without rerunning them; reused branch evidence is checked against immutable
+submission attribution.

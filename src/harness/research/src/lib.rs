@@ -23,6 +23,7 @@ pub mod configuration;
 pub mod error;
 pub mod ledger;
 pub mod market_replay;
+pub mod prepared_replay;
 pub mod publishing;
 pub mod replay;
 

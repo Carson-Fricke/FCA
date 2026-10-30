@@ -23,6 +23,7 @@ from thesis_runtime.adapters.providers.invocations import (
     content_digest,
     messages_payload,
 )
+from thesis_runtime.contracts.completion import CompletionOptions
 from thesis_runtime.contracts.messages import (
     MessageContent,
     SessionMessage,
@@ -48,6 +49,7 @@ class NativeProvider(Protocol):
         role: Role = "primary",
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
+        options: CompletionOptions | None = None,
     ) -> Generator[OutputDelta | ModelCompletion, None, None]: ...
 
 
@@ -55,18 +57,6 @@ def _mapping_json(value: object) -> dict[str, object]:
     if isinstance(value, Mapping):
         return dict(value)
     raise TypeError("provider request must contain only JSON values")
-
-
-def _failed_output_excerpt(value: str, message_id: str) -> str:
-    """Bound failed-generation replay, retaining the full canonical evidence."""
-    if len(value) <= 4096:
-        return value
-    return (
-        value[:1024]
-        + f"\n[Interrupted-output excerpt: {len(value) - 4096} characters omitted; "
-        + f"full evidence retained in canonical message {message_id}.]\n"
-        + value[-3072:]
-    )
 
 
 def _continuation(
@@ -95,10 +85,29 @@ def _continuation(
     return cast(Mapping[str, object], value["fields"])
 
 
+def _tool_evidence(content: MessageContent, request: ToolRequest) -> dict[str, object]:
+    """Omit only arguments already present in this exact native call group."""
+    value = content.as_dict()
+    value.pop("requests")
+    try:
+        arguments = json.loads(request.arguments)
+    except (ValueError, TypeError):
+        return value
+    result = value.get("result")
+    if (
+        isinstance(arguments, dict)
+        and isinstance(result, dict)
+        and result.get("arguments") == arguments
+    ):
+        result.pop("arguments", None)
+    return value
+
+
 def project_native_messages(
     messages: Sequence[SessionMessage],
     *,
     origin: tuple[str, str] | None = None,
+    input_mode: str = "conversation",
 ) -> tuple[ProviderMessage, ...]:
     """Project an immutable, already-scoped arrival sequence into native history.
 
@@ -112,6 +121,29 @@ def project_native_messages(
     scope = tuple(messages)
     if len({message.message_id for message in scope}) != len(scope):
         raise ValueError("session message IDs must be unique within projection scope")
+    if input_mode == "transcript":
+        # Original calls, results and continuation remain data in this request.
+        # They cannot become the provider's active tool exchange.
+        instructions = tuple(
+            ProviderMessage("system", message.content.text)
+            for message in scope
+            if message.direction == "instruction"
+        )
+        transcript = json.dumps(
+            {
+                "transcript": [
+                    message.as_dict()
+                    for message in scope
+                    if message.direction != "instruction"
+                ]
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return (*instructions, ProviderMessage("user", transcript))
+    if input_mode != "conversation":
+        raise ValueError("unknown completion input mode")
     counts = Counter(
         request.id for message in scope for request in message.content.requests
     )
@@ -171,19 +203,21 @@ def project_native_messages(
                 )
             ]
             for correlation in groups[index]:
-                datums = [scope[item].content for item in results[correlation]]
-                content = datums[0].as_content()
-                if len(datums) > 1:
-                    content = json.dumps(
-                        {
-                            "datums": [
-                                json.loads(datum.as_content()) for datum in datums
-                            ]
-                        },
-                        ensure_ascii=True,
-                        separators=(",", ":"),
-                        sort_keys=True,
-                    )
+                request = next(
+                    request
+                    for request in message.content.requests
+                    if request.id == correlation.request_id
+                )
+                datums = [
+                    _tool_evidence(scope[item].content, request)
+                    for item in results[correlation]
+                ]
+                content = json.dumps(
+                    datums[0] if len(datums) == 1 else {"datums": datums},
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
                 native.append(
                     ProviderMessage(
                         role="tool",
@@ -239,11 +273,6 @@ def project_native_messages(
                 # in ordinary context for providers without a reasoning replay
                 # channel; live execution and replay share this pure projection.
                 reasoning = str(result.get("reasoning") or "")
-                if result.get("failure") is not None:
-                    # Reasoning-only failures can otherwise make the next request
-                    # exceed context limits before it can take a smaller action.
-                    reasoning = _failed_output_excerpt(reasoning, message.message_id)
-                    content = _failed_output_excerpt(content, message.message_id)
                 content = (
                     (
                         "Model output interrupted by provider failure; partial evidence only.\n"
@@ -287,7 +316,7 @@ class NativeSessionAdapter:
     continuation is opaque result data; only this boundary interprets it.
     """
 
-    __slots__ = ("_family", "_id_factory", "_provider", "_origin")
+    __slots__ = ("_family", "_id_factory", "_provider", "_origin", "_max_output_tokens")
 
     def __init__(
         self,
@@ -296,7 +325,15 @@ class NativeSessionAdapter:
         family: ModelFamilyAdapter | None = None,
         id_factory: Callable[[], str] | None = None,
         origin: tuple[str, str] | None = None,
+        max_output_tokens: int = 32768,
     ) -> None:
+        if (
+            isinstance(max_output_tokens, bool)
+            or not isinstance(max_output_tokens, int)
+            or max_output_tokens < 1
+        ):
+            raise ValueError("max_output_tokens must be positive")
+        self._max_output_tokens = max_output_tokens
         self._provider = provider
         self._origin = origin
         self._family = family if family is not None else NativeToolsAdapter()
@@ -309,6 +346,7 @@ class NativeSessionAdapter:
         role: Role = "primary",
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
+        options: CompletionOptions | None = None,
     ) -> Mapping[str, object]:
         """Prepare detached protocol audit data without invoking any effects.
 
@@ -316,9 +354,13 @@ class NativeSessionAdapter:
         The caller owns persistence before invocation starts. No IDs are created.
         """
         native_messages = self._family.prepare_messages(
-            project_native_messages(messages, origin=self._origin)
+            project_native_messages(
+                messages,
+                origin=self._origin,
+                input_mode=options.input_mode if options else "conversation",
+            )
         )
-        return self._snapshot(native_messages, role, tools, response_format)
+        return self._snapshot(native_messages, role, tools, response_format, options)
 
     def _snapshot(
         self,
@@ -326,12 +368,13 @@ class NativeSessionAdapter:
         role: Role,
         tools: Sequence[Mapping[str, object]] | None,
         response_format: Mapping[str, object] | None,
+        options: CompletionOptions | None = None,
     ) -> Mapping[str, object]:
         """Use the transport's encoder; no intermediate message reconstruction."""
         snapshot = json.loads(
             json.dumps(
                 {
-                    "projection": "native-session-v4",
+                    "projection": "native-session-v6",
                     "messages": messages_payload(messages),
                     "role": role,
                     "tools": [
@@ -342,6 +385,15 @@ class NativeSessionAdapter:
                     else None,
                     "response_format": response_format,
                     "stream": self._provider.streaming,
+                    "max_tokens": options.max_output_tokens
+                    if options
+                    else self._max_output_tokens,
+                    **(
+                        {"tool_choice": "none"}
+                        if options and not options.allow_tool_calls
+                        else {}
+                    ),
+                    **({"input_mode": options.input_mode} if options else {}),
                 },
                 default=_mapping_json,
                 allow_nan=False,
@@ -386,6 +438,7 @@ class NativeSessionAdapter:
         role: Role = "primary",
         tools: Sequence[Mapping[str, object]] | None = None,
         response_format: Mapping[str, object] | None = None,
+        options: CompletionOptions | None = None,
     ) -> Generator[OutputDelta | SessionMessage, None, None]:
         scope = tuple(messages)
         if message_id is None:
@@ -401,9 +454,15 @@ class NativeSessionAdapter:
         if any(message.message_id == message_id for message in scope):
             raise ValueError("completion message ID must be fresh within session scope")
         native_messages = self._family.prepare_messages(
-            project_native_messages(scope, origin=self._origin)
+            project_native_messages(
+                scope,
+                origin=self._origin,
+                input_mode=options.input_mode if options else "conversation",
+            )
         )
-        snapshot = self._snapshot(native_messages, role, tools, response_format)
+        snapshot = self._snapshot(
+            native_messages, role, tools, response_format, options
+        )
         events = self._provider.stream(
             messages=tuple(native_messages),
             role=cast(Role, snapshot["role"]),
@@ -411,6 +470,7 @@ class NativeSessionAdapter:
             response_format=cast(
                 Mapping[str, object] | None, snapshot["response_format"]
             ),
+            **({"options": options} if options is not None else {}),
         )
         completion: ModelCompletion | None = None
         with closing(events):
@@ -446,7 +506,14 @@ class NativeSessionAdapter:
             raise ProviderRejectedError(
                 "provider completion was truncated or contained no answer/tool requests; continue with a smaller actionable step",
                 transient=True,
-                diagnostics=diagnostics,
+                diagnostics={
+                    **diagnostics,
+                    **(
+                        {"rejected_response": completion.message.as_wire()}
+                        if options and options.input_mode == "transcript"
+                        else {}
+                    ),
+                },
             )
         message = completion.message
         reasoning = normalise_reasoning(message.reasoning)

@@ -4,9 +4,62 @@ use serde_json::Map;
 use std::collections::BTreeMap;
 
 #[test]
+fn every_discovered_sdk_source_is_addressable_without_topic_registration() {
+    let service = validation_service();
+    let inventory = service.sdk_reference(&Map::new()).unwrap();
+    for path in inventory["sourceHashes"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .filter(|path| path.ends_with(".rs"))
+    {
+        let page = service
+            .sdk_reference(json!({"topic":path, "end_line":1}).as_object().unwrap())
+            .unwrap();
+        assert!(page["content"].is_string(), "{path}");
+    }
+}
+
+#[test]
+fn sdk_continuations_preserve_partial_lines_and_exact_source() {
+    let sdk = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../strategy-sdk");
+    let text = std::fs::read_to_string(sdk.join("src/consumer.rs"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let expected = text.split_inclusive('\n').take(3).collect::<String>();
+    let mut arguments = json!({"topic":"consumer", "end_line":3, "max_tokens":32});
+    let mut reconstructed = String::new();
+    loop {
+        let page = validation_service()
+            .sdk_reference(arguments.as_object().unwrap())
+            .unwrap();
+        let content = page["content"].as_str().unwrap();
+        assert!(!content.is_empty() && page["tokenCount"].as_u64().unwrap() <= 32);
+        assert_eq!(page["tokenizer"], "cl100k_base");
+        reconstructed.push_str(content);
+        let next = page["nextArguments"].clone();
+        if next.is_null() {
+            break;
+        }
+        assert_ne!(next, arguments);
+        arguments = next;
+    }
+    assert_eq!(reconstructed, expected);
+}
+
+#[test]
 fn sdk_identity_matches_workspace_programs_relative_source_hash_contract() {
     let sdk = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../strategy-sdk");
     let mut sources = BTreeMap::new();
+    sources.insert(
+        "strategy-sdk/reference-topics.json".to_string(),
+        harness_contracts::sha256::digest_hex(
+            std::fs::read_to_string(sdk.join("reference-topics.json"))
+                .unwrap()
+                .replace("\r\n", "\n")
+                .as_bytes(),
+        ),
+    );
     for (name, root) in [
         ("strategy-sdk", sdk.clone()),
         ("contracts", sdk.join("../contracts")),
@@ -64,12 +117,12 @@ fn sdk_identity_matches_workspace_programs_relative_source_hash_contract() {
         result["validationIdentity"],
         validation_service().validation_identity().unwrap()
     );
-    let args = json!({"topic": "consumer", "start_line": 1, "end_line": 3, "max_chars": 8});
+    let args = json!({"topic": "consumer", "start_line": 1, "end_line": 3, "max_tokens": 32});
     let reference = validation_service()
         .sdk_reference(args.as_object().unwrap())
         .unwrap();
     assert_eq!(reference["sdkIdentity"], result["sdkIdentity"]);
-    assert_eq!(reference["content"].as_str().unwrap().chars().count(), 8);
+    assert!(reference["tokenCount"].as_u64().unwrap() <= 32);
     assert_eq!(reference["truncated"], true);
     let decimal = validation_service()
         .sdk_reference(
@@ -86,6 +139,8 @@ fn sdk_identity_matches_workspace_programs_relative_source_hash_contract() {
         "research_publishing",
         "research_recipes",
         "wavelet",
+        "execution",
+        "causal",
     ] {
         let reference = validation_service()
             .sdk_reference(
@@ -99,7 +154,7 @@ fn sdk_identity_matches_workspace_programs_relative_source_hash_contract() {
     }
     for invalid in [
         json!({"topic": "../../secret"}),
-        json!({"topic": "consumer", "max_chars": 16001}),
+        json!({"topic": "consumer", "max_tokens": 65537}),
         json!({"topic": "consumer", "start_line": 0}),
     ] {
         assert!(validation_service()

@@ -30,6 +30,10 @@ class SubmissionStore(Protocol):
 
     def get(self, workspace_id: str, job_id: str) -> dict[str, object] | None: ...
 
+    def find(self, job_id: str) -> dict[str, object] | None:
+        """Resolve a globally unique retained ID for authenticated completion intake."""
+        ...
+
     def list(self, workspace_id: str) -> tuple[dict[str, object], ...]: ...
 
 
@@ -109,6 +113,13 @@ class SqliteSubmissionStore:
                 (workspace_id,),
             ).fetchall()
         return tuple(json.loads(row[0]) for row in rows)
+
+    def find(self, job_id: str) -> dict[str, object] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload FROM submissions WHERE job_id = ?", (job_id,)
+            ).fetchone()
+        return None if row is None else json.loads(row[0])
 
 
 def retain_submission(

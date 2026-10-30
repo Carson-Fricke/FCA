@@ -19,9 +19,11 @@ from thesis_runtime.workflows.phase import (
 from thesis_runtime.workflows.workflow import Workflow, WorkflowDoctrine, WorkflowPorts
 
 from .contracts import (
+    CONSTRUCTION_PHASES,
     LAUNCH_SCHEMA,
     REVIEW_PHASES,
     ROUTES,
+    SETTLED_ISSUE_STATUSES,
     VERSION,
     WORKFLOW_ID,
     completion_schema,
@@ -61,14 +63,17 @@ AUTHOR_TOOLS = (
 
 
 def accepted_state(history: list[Mapping[str, Any]]) -> dict[str, Any]:
-    """Fold accepted contracts; a new proposal invalidates its prior reviews."""
+    """Fold accepted products, explicit review assignments and issue decisions."""
     state: dict[str, Any] = {
         "phase": "proposal",
         "revisions": 0,
         "executions": 0,
         "attempts": [],
         "investigations": [],
+        "adjudicatorRepairs": [],
         "reviewSubject": "proposal",
+        "reviewHandoff": None,
+        "review": None,
         "issues": {},
     }
     for transition in history:
@@ -78,17 +83,21 @@ def accepted_state(history: list[Mapping[str, Any]]) -> dict[str, Any]:
         state["phase"] = transition["route"]
         if source == "proposal":
             state["proposal"] = completion["proposal"]
+            state["attempts"].extend(completion["proposal"]["attempts"])
+            state["executions"] += len(completion["proposal"]["attempts"])
             for repair in completion["proposal"]["repairs"]:
                 if repair["issueId"] in state["issues"]:
                     state["issues"][repair["issueId"]]["response"] = repair["response"]
             state.pop("critiques", None)
             state["reviewSubject"] = "proposal"
+            state["reviewHandoff"] = handoff
         elif source == "investigation":
             state["investigations"].append(completion["investigation"])
             state["reviewSubject"] = "investigation"
             state["attempts"].extend(completion["investigation"]["attempts"])
             state["executions"] += len(completion["investigation"]["attempts"])
             state.pop("critiques", None)
+            state["reviewHandoff"] = handoff
         elif source in ("collect_critiques", "focused_critique"):
             reports = (
                 completion["critiques"]
@@ -108,7 +117,9 @@ def accepted_state(history: list[Mapping[str, Any]]) -> dict[str, Any]:
                         carried["verification"] = repair["evidence"]
                         # Preserve a current objection for adjudication regardless
                         # of specialist iteration order; collection is not a vote.
-                        if repair["issueId"] not in open_ids:
+                        if repair["issueId"] not in open_ids and carried[
+                            "status"
+                        ] not in ("accept", "escalate"):
                             carried["status"] = "verified"
                 for issue in report["issues"]:
                     state["issues"][issue["issueId"]] = {
@@ -119,8 +130,31 @@ def accepted_state(history: list[Mapping[str, Any]]) -> dict[str, Any]:
                         "handoff": handoff,
                     }
         elif source == "adjudicate":
-            state["adjudication"] = completion["adjudication"]
-            for resolution in completion["adjudication"]["resolutions"]:
+            adjudication = completion["adjudication"]
+            state["adjudication"] = adjudication
+            state["review"] = adjudication["review"]
+            if (
+                adjudication["repairs"]
+                or adjudication["attempts"]
+                or adjudication["evidence"]
+            ):
+                state["adjudicatorRepairs"].append(
+                    {
+                        "handoff": handoff,
+                        **{
+                            key: adjudication[key]
+                            for key in ("repairs", "attempts", "evidence")
+                        },
+                    }
+                )
+                state["reviewSubject"] = "adjudication"
+                state["reviewHandoff"] = handoff
+                state["attempts"].extend(adjudication["attempts"])
+                state["executions"] += len(adjudication["attempts"])
+                state.pop("critiques", None)
+                for repair in adjudication["repairs"]:
+                    state["issues"][repair["issueId"]]["response"] = repair["response"]
+            for resolution in adjudication["resolutions"]:
                 if resolution["issueId"] in state["issues"]:
                     state["issues"][resolution["issueId"]].update(
                         status=resolution["disposition"],
@@ -159,11 +193,18 @@ def phase_context(
             "repair": excerpt(issue["repair"], 240),
         }
         for issue_id, issue in state["issues"].items()
-        if issue["status"] not in ("verified", "accept")
+        if issue["status"] not in SETTLED_ISSUE_STATUSES
     ]
+    settled = {
+        issue_id: issue["status"]
+        for issue_id, issue in state["issues"].items()
+        if issue["status"] in SETTLED_ISSUE_STATUSES
+    }
     return {
         "phase": state["phase"],
         "reviewSubject": state["reviewSubject"],
+        "reviewHandoff": state["reviewHandoff"],
+        "review": state["review"],
         "revisions": state["revisions"],
         "executions": state["executions"],
         "briefExcerpt": {
@@ -181,6 +222,8 @@ def phase_context(
         "handoffs": references,
         "activeIssueExcerpts": issues[:16],
         "activeIssueCount": len(issues),
+        "settledIssues": dict(list(settled.items())[-16:]),
+        "settledIssueCount": len(settled),
         "jobs": [attempt["jobId"] for attempt in state["attempts"]],
     }
 
@@ -247,14 +290,13 @@ class ResearchExtension:
             if state["phase"] not in INSTRUCTIONS:
                 return {"text": None}
             return {
+                "contextMessageIds": [request["operatorRequest"]["messageId"]],
                 "text": "\n\n".join(
                     (
                         COMMON,
                         INSTRUCTIONS[state["phase"]],
                         mandate_section(ResearchMandate.from_dict(request["mandate"])),
                         f"Branch execution ID: {request['executionId']}",
-                        "Original operator request (runtime-preserved; branch choices may not replace it):\n"
-                        + json.dumps(request["operatorRequest"], ensure_ascii=False),
                         "Current phase context (excerpts; retrieve full accepted handoffs):\n"
                         + json.dumps(
                             phase_context(request["brief"], payload["history"], state),
@@ -262,7 +304,7 @@ class ResearchExtension:
                             separators=(",", ":"),
                         ),
                     )
-                )
+                ),
             }
         raise ValueError(f"unknown research extension operation: {operation}")
 
@@ -336,7 +378,7 @@ def build_research_investigation_workflow(
             phase_tools={
                 phase: (
                     *READ_TOOLS,
-                    *(AUTHOR_TOOLS if phase == "investigation" else ()),
+                    *(AUTHOR_TOOLS if phase in CONSTRUCTION_PHASES else ()),
                 )
                 for phase in INSTRUCTIONS
             },

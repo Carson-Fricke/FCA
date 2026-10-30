@@ -169,7 +169,11 @@ pub fn apply_null_transform(
     }
     let mut events = fixture.events.clone();
     for (index, event) in events.iter_mut().enumerate() {
+        if matches!(event, MarketEvent::Block(_)) {
+            *event = event.to_owned_event();
+        }
         match event {
+            MarketEvent::Block(_) => unreachable!("materialized above"),
             MarketEvent::Bar {
                 symbol,
                 open,
@@ -298,7 +302,11 @@ fn rescale_stream_event(
     let symbol = event.symbol().to_string();
     let timestamp = event.timestamp_ns();
     let (synthetic, original) = tick_reference(&references[&symbol], timestamp);
+    if matches!(event, MarketEvent::Block(_)) {
+        event = event.to_owned_event();
+    }
     match &mut event {
+        MarketEvent::Block(_) => unreachable!("materialized above"),
         MarketEvent::Bar {
             open,
             high,

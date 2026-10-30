@@ -110,6 +110,8 @@ RUN uv sync --locked --no-dev --no-install-project
 
 COPY --from=python-sources /wheel-inputs/src/ ./src/
 RUN uv sync --locked --no-dev --no-editable
+ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
+RUN uv run --no-sync python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 COPY scripts/ci/installed_sdk_smoke.py /tmp/installed_sdk_smoke.py
 RUN uv run --no-sync python -I /tmp/installed_sdk_smoke.py
 RUN test -x /opt/venv/bin/lake \
@@ -141,6 +143,8 @@ RUN groupadd --gid 10001 lake \
     && useradd --uid 10001 --gid lake --create-home --shell /usr/sbin/nologin lake
 
 COPY --link --from=builder /opt/venv /opt/venv
+COPY --link --from=builder /opt/tiktoken-cache /opt/tiktoken-cache
+ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
 # The harness JIT seam compiles authored programs at run time, so the runtime
 # image carries the pinned Rust toolchain and the authoring SDK crate sources
 # (with `num` as its sibling path dependency).
